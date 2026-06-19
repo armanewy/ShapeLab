@@ -1,0 +1,1 @@
+//! Shape graph outliner stub.
