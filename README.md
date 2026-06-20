@@ -90,7 +90,7 @@ cargo run -p shape-cli -- decompile source.obj target.obj --out-dir target/decom
 cargo run -p shape-cli -- verify-decompile target/decompile-package
 ```
 
-The decompiler requires identical ordered topology and writes canonical binary mesh sidecars, an editable affine stage when useful, an exact final correction, `manifest.json`, two verification reports, and `blender_reconstruct.py`. Package schema 2 specifies deterministic stepwise binary32 affine arithmetic so the Rust and Python replayers agree bit-for-bit. Package output is staged and replay-verified before replacing an existing directory. Details are in [`docs/deformation-decompiler.md`](docs/deformation-decompiler.md).
+The decompiler requires identical ordered topology and writes canonical binary mesh sidecars, an ordered reconstruction stream, cumulative baked stage sidecars, an exact final correction, `manifest.json`, two verification reports, schema-3 program-hypothesis diagnostics, and `blender_reconstruct.py`. Package schema 2 specifies deterministic stepwise binary32 affine arithmetic and manifest-declared stage files so Rust and Python replay can verify every serialized stage bit-for-bit; diagnostics are versioned separately and describe scored ordered programs rather than single operator families. Package output is staged and replay-verified before replacing an existing directory. The generated Blender script reconstructs editable shape-key stages, bakes the final object from replayed operators, and verifies exact topology and final positions. Details are in [`docs/deformation-decompiler.md`](docs/deformation-decompiler.md).
 
 ## Scope
 
