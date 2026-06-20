@@ -10,3 +10,10 @@ glam.workspace = true
 shape-core.workspace = true
 shape-field.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "mesh_generation"
+harness = false
