@@ -2213,7 +2213,7 @@ fn choose_affine_candidate(
     InferenceResult {
         selected: hypotheses[selected_index].clone(),
         diagnostics: InferenceDiagnostics {
-            diagnostics_schema_version: 1,
+            diagnostics_schema_version: 2,
             package_schema_version: SCHEMA_VERSION,
             surface_weighting: "triangle_area_derived_vertex_weights".to_owned(),
             raw_identity_error,
@@ -5094,7 +5094,7 @@ mod tests {
         let diagnostics: InferenceDiagnostics =
             serde_json::from_str(&fs::read_to_string(paths.inference_diagnostics).unwrap())
                 .unwrap();
-        assert_eq!(diagnostics.diagnostics_schema_version, 1);
+        assert_eq!(diagnostics.diagnostics_schema_version, 2);
         assert_eq!(diagnostics.package_schema_version, SCHEMA_VERSION);
         assert_eq!(diagnostics.selected_hypothesis_index, 2);
         assert_eq!(
