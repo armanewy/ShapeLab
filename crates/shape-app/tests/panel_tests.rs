@@ -158,3 +158,20 @@ fn command_emission_helpers_return_app_commands() {
         AppCommand::SwitchRevision(RevisionId(3))
     );
 }
+
+#[test]
+fn menu_file_suggestions_are_safe_and_title_based() {
+    assert_eq!(
+        menus::suggested_project_file_name("Desk Lamp / Final"),
+        "desk-lamp-final.shapelab.json"
+    );
+    assert_eq!(
+        menus::suggested_obj_file_name("Desk Lamp / Final"),
+        "desk-lamp-final.obj"
+    );
+    assert_eq!(
+        menus::suggested_project_file_name("CON"),
+        "shape-con.shapelab.json"
+    );
+    assert_eq!(menus::suggested_obj_file_name("   "), "untitled.obj");
+}
