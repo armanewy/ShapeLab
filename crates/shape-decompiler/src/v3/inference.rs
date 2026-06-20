@@ -8,14 +8,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    AffineSemanticFamily, apply_affine_to_positions, exact_residual_storage_size,
-    explained_fraction, fit_affine, fit_rigid_matrix, fit_similarity_matrix,
-    fit_translation_matrix, sum_squared_distance, weighted_centered_sum_squared_distance,
+    AffineSemanticFamily, apply_affine_to_positions, explained_fraction, fit_affine,
+    fit_rigid_matrix, fit_similarity_matrix, fit_translation_matrix, sum_squared_distance,
     weighted_sum_squared_distance,
 };
 
 use super::diagnostics::{InferenceDiagnosticsV4, ProgramOperatorDiagnostics};
 use super::program::{AffineOperator, OperatorProgram, ProgramOperator};
+
+pub mod program_search;
 
 /// Settings for fitting uniform-curvature bend candidates.
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
@@ -282,78 +283,7 @@ pub fn search_programs(
     target_positions: &[[f32; 3]],
     settings: &ProgramSearchSettings,
 ) -> Result<ProgramSearchResult, InferenceError> {
-    validate_position_pair(source_positions, target_positions)?;
-    validate_program_search_settings(settings)?;
-    let weights = uniform_weights(source_positions.len());
-    let weighted_identity_error =
-        weighted_sum_squared_distance(source_positions, target_positions, &weights);
-    let error_scale = weighted_centered_sum_squared_distance(source_positions, &weights)
-        .max(weighted_centered_sum_squared_distance(
-            target_positions,
-            &weights,
-        ))
-        .max(f64::EPSILON);
-    let literal_size = source_positions.len().saturating_mul(12).max(1) as f64;
-    let baseline_exact_bytes = exact_residual_storage_size(source_positions, target_positions);
-    let mut hypotheses = vec![ProgramHypothesis {
-        program: OperatorProgram {
-            operators: Vec::new(),
-        },
-        candidates: Vec::new(),
-        weighted_explained_fraction: 0.0,
-        raw_explained_fraction: 0.0,
-        total_score: weighted_identity_error / error_scale
-            + baseline_exact_bytes as f64 / literal_size * 1.0e-3,
-    }];
-
-    if settings.maximum_explanatory_depth > 0 {
-        for candidate in generate_affine_candidates(source_positions, target_positions, settings)?
-            .into_iter()
-            .filter(|candidate| {
-                candidate.weighted_explained_fraction
-                    >= settings.minimum_weighted_explained_fraction
-            })
-        {
-            let evaluated = apply_candidate_program(source_positions, &candidate);
-            let exact_bytes = exact_residual_storage_size(&evaluated, target_positions);
-            let semantic_parameter_cost =
-                candidate.diagnostics.semantic_parameter_count() as f64 * 2.0e-3;
-            let semantic_metadata_cost =
-                candidate.diagnostics.semantic_metadata_bytes() as f64 / literal_size * 5.0e-4;
-            let total_score = candidate.weighted_error_after / error_scale
-                + semantic_parameter_cost
-                + semantic_metadata_cost
-                + exact_bytes as f64 / literal_size * 1.0e-3;
-            let weighted_explained_fraction = candidate.weighted_explained_fraction;
-            let raw_explained_fraction = candidate.raw_explained_fraction;
-            hypotheses.push(ProgramHypothesis {
-                program: OperatorProgram {
-                    operators: vec![candidate.operator],
-                },
-                candidates: vec![candidate],
-                weighted_explained_fraction,
-                raw_explained_fraction,
-                total_score,
-            });
-        }
-    }
-    hypotheses.sort_by(|left, right| {
-        left.total_score
-            .total_cmp(&right.total_score)
-            .then_with(|| {
-                left.program
-                    .operators
-                    .len()
-                    .cmp(&right.program.operators.len())
-            })
-    });
-    hypotheses.truncate(settings.maximum_total_programs);
-
-    Ok(ProgramSearchResult {
-        selected_hypothesis_index: (!hypotheses.is_empty()).then_some(0),
-        hypotheses,
-        diagnostics: None,
-    })
+    program_search::search_programs(source_positions, target_positions, settings)
 }
 
 /// Validates bend fit settings.
@@ -425,18 +355,6 @@ fn affine_candidate(
             weighted_error_after,
         ),
         raw_explained_fraction: explained_fraction(raw_error_before, raw_error_after),
-    }
-}
-
-fn apply_candidate_program(
-    source_positions: &[[f32; 3]],
-    candidate: &FittedOperatorCandidate,
-) -> Vec<[f32; 3]> {
-    match candidate.operator {
-        ProgramOperator::Affine(affine) => {
-            apply_affine_to_positions(source_positions, affine.matrix_row_major_4x4)
-        }
-        ProgramOperator::Bend(_) => source_positions.to_vec(),
     }
 }
 
