@@ -5,6 +5,9 @@
 //! The renderer writes row-major RGBA8 pixels with `(0, 0)` at the top-left
 //! of the image. Triangle depth and normals are perspective-correctly
 //! interpolated from screen-space barycentric coordinates before shading.
+//! `RenderWorkspace` and `RenderCache` allow callers that render repeatedly
+//! to reuse allocation-heavy buffers while keeping the default `render_mesh`
+//! convenience function.
 
 use glam::{Mat4, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
@@ -25,7 +28,10 @@ const MIN_AREA: f32 = 1.0e-5;
 const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
 const EDGE_EPSILON: f32 = 1.0e-4;
 const WIRE_DISTANCE_PIXELS: f32 = 0.85;
-const MATERIAL_COLOR: Vec3 = Vec3::new(184.0, 190.0, 182.0);
+const FRAME_PADDING: f32 = 1.18;
+const CACHE_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
+const CACHE_HASH_PRIME: u64 = 1_099_511_628_211;
+const MATERIAL_COLOR: Vec3 = Vec3::new(196.0, 202.0, 193.0);
 const WIREFRAME_MIX: Vec3 = Vec3::new(34.0, 36.0, 38.0);
 
 /// Orbit camera.
@@ -246,6 +252,221 @@ impl RenderedImage {
     }
 }
 
+/// Stable key for the effective render inputs used by `RenderCache`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct RenderCacheKey {
+    /// Hash of render-relevant mesh positions, normals, and indices.
+    pub mesh_hash: u64,
+    /// Hash of the clamped camera values used for rendering.
+    pub camera_hash: u64,
+    /// Hash of render settings after applying render-equivalent normalization.
+    pub settings_hash: u64,
+}
+
+impl RenderCacheKey {
+    /// Build a cache key for render inputs.
+    ///
+    /// The key uses the same validation and camera clamping as rendering. It is
+    /// intended for in-process cache reuse, not as a persisted file format.
+    pub fn new(
+        mesh: &TriangleMesh,
+        camera: &OrbitCamera,
+        settings: &RenderSettings,
+    ) -> Result<Self, RenderError> {
+        validate_settings(settings)?;
+        let camera = validate_camera(camera)?;
+        validate_mesh(mesh)?;
+
+        Ok(Self {
+            mesh_hash: hash_mesh(mesh),
+            camera_hash: hash_camera(&camera),
+            settings_hash: hash_settings(settings),
+        })
+    }
+}
+
+/// Reusable scratch buffers for repeated CPU renders.
+#[derive(Debug, Default)]
+pub struct RenderWorkspace {
+    depth: Vec<f32>,
+}
+
+impl RenderWorkspace {
+    /// Render a mesh, reusing workspace scratch buffers where possible.
+    pub fn render_mesh(
+        &mut self,
+        mesh: &TriangleMesh,
+        camera: &OrbitCamera,
+        settings: &RenderSettings,
+    ) -> Result<RenderedImage, RenderError> {
+        let mut image = RenderedImage {
+            width: 0,
+            height: 0,
+            rgba8: Vec::new(),
+        };
+        self.render_mesh_into(&mut image, mesh, camera, settings)?;
+        Ok(image)
+    }
+
+    /// Render into an existing image allocation.
+    ///
+    /// The image dimensions and byte length are rewritten to match `settings`.
+    /// Existing capacity is retained when it is large enough.
+    pub fn render_mesh_into(
+        &mut self,
+        image: &mut RenderedImage,
+        mesh: &TriangleMesh,
+        camera: &OrbitCamera,
+        settings: &RenderSettings,
+    ) -> Result<(), RenderError> {
+        let pixel_count = validate_settings(settings)?;
+        let camera = validate_camera(camera)?;
+        validate_mesh(mesh)?;
+
+        let mut target = RenderTarget::prepare(settings, pixel_count, image, self)?;
+        if mesh.indices.is_empty() {
+            return Ok(());
+        }
+
+        let light_direction = settings.light_direction.normalize();
+        let view = camera.view_matrix();
+        let projection = ProjectionParams::new(settings, &camera);
+
+        for triangle in mesh.indices.chunks_exact(3) {
+            let i0 = index_to_usize(triangle[0])?;
+            let i1 = index_to_usize(triangle[1])?;
+            let i2 = index_to_usize(triangle[2])?;
+            let p0 = vec3_from_array(mesh.positions[i0]);
+            let p1 = vec3_from_array(mesh.positions[i1]);
+            let p2 = vec3_from_array(mesh.positions[i2]);
+            let Some(face_normal) = face_normal(p0, p1, p2) else {
+                continue;
+            };
+
+            let vertices = [
+                RenderVertex {
+                    view: view.transform_point3(p0),
+                    normal: render_normal(mesh, i0, face_normal),
+                },
+                RenderVertex {
+                    view: view.transform_point3(p1),
+                    normal: render_normal(mesh, i1, face_normal),
+                },
+                RenderVertex {
+                    view: view.transform_point3(p2),
+                    normal: render_normal(mesh, i2, face_normal),
+                },
+            ];
+
+            if is_fully_outside_depth(vertices) {
+                continue;
+            }
+
+            let clipped = clip_triangle_to_near(vertices);
+            if clipped.len() < 3 || is_outside_frustum(clipped.as_slice(), &projection) {
+                continue;
+            }
+
+            for fan_index in 1..(clipped.len() - 1) {
+                rasterize_triangle(
+                    [
+                        clipped.vertex(0),
+                        clipped.vertex(fan_index),
+                        clipped.vertex(fan_index + 1),
+                    ],
+                    &projection,
+                    settings,
+                    light_direction,
+                    &mut target,
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Result of a cached render request.
+#[derive(Debug)]
+pub struct CachedRender<'a> {
+    /// Cache key used for this request.
+    pub key: RenderCacheKey,
+    /// Rendered image, either reused from the previous request or freshly rendered.
+    pub image: &'a RenderedImage,
+    /// True when the image was reused without rerasterizing.
+    pub reused: bool,
+}
+
+/// Single-entry render cache for camera/mesh/settings rerenders.
+#[derive(Debug, Default)]
+pub struct RenderCache {
+    workspace: RenderWorkspace,
+    last: Option<CachedImage>,
+}
+
+impl RenderCache {
+    /// Render the mesh unless the previous image has the same cache key.
+    pub fn render_mesh(
+        &mut self,
+        mesh: &TriangleMesh,
+        camera: &OrbitCamera,
+        settings: &RenderSettings,
+    ) -> Result<CachedRender<'_>, RenderError> {
+        let key = RenderCacheKey::new(mesh, camera, settings)?;
+        if self.last.as_ref().is_some_and(|cached| cached.key == key) {
+            let image = &self
+                .last
+                .as_ref()
+                .expect("cache hit should retain an image")
+                .image;
+            return Ok(CachedRender {
+                key,
+                image,
+                reused: true,
+            });
+        }
+
+        let mut image = self.last.take().map_or_else(
+            || RenderedImage {
+                width: 0,
+                height: 0,
+                rgba8: Vec::new(),
+            },
+            |cached| cached.image,
+        );
+        self.workspace
+            .render_mesh_into(&mut image, mesh, camera, settings)?;
+        self.last = Some(CachedImage { key, image });
+        let image = &self
+            .last
+            .as_ref()
+            .expect("cache miss should store the rendered image")
+            .image;
+        Ok(CachedRender {
+            key,
+            image,
+            reused: false,
+        })
+    }
+
+    /// Return the key for the cached image, if any.
+    #[must_use]
+    pub fn last_key(&self) -> Option<RenderCacheKey> {
+        self.last.as_ref().map(|cached| cached.key)
+    }
+
+    /// Clear the cached image while retaining reusable workspace allocations.
+    pub fn clear(&mut self) {
+        self.last = None;
+    }
+}
+
+#[derive(Debug)]
+struct CachedImage {
+    key: RenderCacheKey,
+    image: RenderedImage,
+}
+
 /// Render errors.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum RenderError {
@@ -285,32 +506,76 @@ struct ProjectionParams {
     height: u32,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct ClippedTriangle {
+    vertices: [RenderVertex; 4],
+    len: usize,
+}
+
+impl ClippedTriangle {
+    fn new(seed: RenderVertex) -> Self {
+        Self {
+            vertices: [seed; 4],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, vertex: RenderVertex) {
+        if self.len < self.vertices.len() {
+            self.vertices[self.len] = vertex;
+            self.len += 1;
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn vertex(&self, index: usize) -> RenderVertex {
+        self.vertices[index]
+    }
+
+    fn as_slice(&self) -> &[RenderVertex] {
+        &self.vertices[..self.len]
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PixelBounds {
+    min_x: usize,
+    max_x: usize,
+    min_y: usize,
+    max_y: usize,
+}
+
 #[derive(Debug)]
-struct RenderTarget {
+struct RenderTarget<'a> {
     width: usize,
-    rgba8: Vec<u8>,
-    depth: Vec<f32>,
+    rgba8: &'a mut [u8],
+    depth: &'a mut [f32],
 }
 
 /// Fit an orbit camera to bounds.
 #[must_use]
 pub fn fit_camera_to_bounds(bounds: Aabb) -> OrbitCamera {
+    fit_camera_to_bounds_with_aspect(bounds, 1.0)
+}
+
+/// Fit an orbit camera to bounds for a known viewport aspect ratio.
+#[must_use]
+pub fn fit_camera_to_bounds_with_aspect(bounds: Aabb, aspect_ratio: f32) -> OrbitCamera {
     let mut camera = OrbitCamera::default();
     if bounds.is_empty() || !is_finite_vec3(bounds.min) || !is_finite_vec3(bounds.max) {
         return camera;
     }
 
-    let extent = bounds.extent();
     let center = bounds.center();
-    if !is_finite_vec3(extent) || !is_finite_vec3(center) {
+    if !is_finite_vec3(center) {
         return camera;
     }
 
-    let radius = (extent.length() * 0.5).max(MIN_DISTANCE);
-    let padded_radius = radius * 1.35;
-    let half_fov = (camera.vertical_fov_degrees * 0.5).to_radians();
     camera.target = center;
-    camera.distance = (padded_radius / half_fov.sin()).clamp(MIN_DISTANCE, MAX_DISTANCE);
+    camera.distance = fit_distance_for_bounds(bounds, &camera, aspect_ratio);
     camera.clamped()
 }
 
@@ -320,62 +585,7 @@ pub fn render_mesh(
     camera: &OrbitCamera,
     settings: &RenderSettings,
 ) -> Result<RenderedImage, RenderError> {
-    let pixel_count = validate_settings(settings)?;
-    let camera = validate_camera(camera)?;
-    validate_mesh(mesh)?;
-
-    let mut target = RenderTarget::new(settings, pixel_count)?;
-    if mesh.indices.is_empty() {
-        return Ok(target.into_image(settings));
-    }
-
-    let light_direction = settings.light_direction.normalize();
-    let view = camera.view_matrix();
-    let projection = ProjectionParams::new(settings, &camera);
-
-    for triangle in mesh.indices.chunks_exact(3) {
-        let i0 = index_to_usize(triangle[0])?;
-        let i1 = index_to_usize(triangle[1])?;
-        let i2 = index_to_usize(triangle[2])?;
-        let p0 = vec3_from_array(mesh.positions[i0]);
-        let p1 = vec3_from_array(mesh.positions[i1]);
-        let p2 = vec3_from_array(mesh.positions[i2]);
-        let Some(face_normal) = face_normal(p0, p1, p2) else {
-            continue;
-        };
-
-        let vertices = [
-            RenderVertex {
-                view: view.transform_point3(p0),
-                normal: vertex_normal(mesh, i0).unwrap_or(face_normal),
-            },
-            RenderVertex {
-                view: view.transform_point3(p1),
-                normal: vertex_normal(mesh, i1).unwrap_or(face_normal),
-            },
-            RenderVertex {
-                view: view.transform_point3(p2),
-                normal: vertex_normal(mesh, i2).unwrap_or(face_normal),
-            },
-        ];
-
-        let clipped = clip_triangle_to_near(vertices);
-        if clipped.len() < 3 {
-            continue;
-        }
-
-        for fan_index in 1..(clipped.len() - 1) {
-            rasterize_triangle(
-                [clipped[0], clipped[fan_index], clipped[fan_index + 1]],
-                &projection,
-                settings,
-                light_direction,
-                &mut target,
-            );
-        }
-    }
-
-    Ok(target.into_image(settings))
+    RenderWorkspace::default().render_mesh(mesh, camera, settings)
 }
 
 impl ProjectionParams {
@@ -391,32 +601,121 @@ impl ProjectionParams {
     }
 }
 
-impl RenderTarget {
-    fn new(settings: &RenderSettings, pixel_count: usize) -> Result<Self, RenderError> {
+impl<'a> RenderTarget<'a> {
+    fn prepare(
+        settings: &RenderSettings,
+        pixel_count: usize,
+        image: &'a mut RenderedImage,
+        workspace: &'a mut RenderWorkspace,
+    ) -> Result<Self, RenderError> {
         let width = usize::try_from(settings.width)
             .map_err(|_| RenderError::InvalidSettings("width is too large"))?;
         let byte_len = pixel_count
             .checked_mul(4)
             .ok_or(RenderError::InvalidSettings("image byte length overflows"))?;
-        let mut rgba8 = Vec::with_capacity(byte_len);
-        for _ in 0..pixel_count {
-            rgba8.extend_from_slice(&settings.background);
-        }
+        image.width = settings.width;
+        image.height = settings.height;
+        image.rgba8.resize(byte_len, 0);
+        fill_background(&mut image.rgba8, settings.background);
+        workspace.depth.resize(pixel_count, f32::INFINITY);
+        workspace.depth.fill(f32::INFINITY);
 
         Ok(Self {
             width,
-            rgba8,
-            depth: vec![f32::INFINITY; pixel_count],
+            rgba8: image.rgba8.as_mut_slice(),
+            depth: workspace.depth.as_mut_slice(),
         })
     }
+}
 
-    fn into_image(self, settings: &RenderSettings) -> RenderedImage {
-        RenderedImage {
-            width: settings.width,
-            height: settings.height,
-            rgba8: self.rgba8,
+impl PixelBounds {
+    fn for_triangle(
+        projected: [ProjectedVertex; 3],
+        projection: &ProjectionParams,
+    ) -> Option<Self> {
+        let min_x = projected
+            .iter()
+            .map(|vertex| vertex.screen.x)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(0.0);
+        let max_x = projected
+            .iter()
+            .map(|vertex| vertex.screen.x)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .min((projection.width - 1) as f32);
+        let min_y = projected
+            .iter()
+            .map(|vertex| vertex.screen.y)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(0.0);
+        let max_y = projected
+            .iter()
+            .map(|vertex| vertex.screen.y)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .min((projection.height - 1) as f32);
+
+        if min_x > max_x || min_y > max_y {
+            return None;
         }
+
+        Some(Self {
+            min_x: min_x as usize,
+            max_x: max_x as usize,
+            min_y: min_y as usize,
+            max_y: max_y as usize,
+        })
     }
+}
+
+fn fill_background(rgba8: &mut [u8], background: [u8; 4]) {
+    for pixel in rgba8.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&background);
+    }
+}
+
+fn fit_distance_for_bounds(bounds: Aabb, camera: &OrbitCamera, aspect_ratio: f32) -> f32 {
+    let camera = camera.clamped();
+    let aspect_ratio = if aspect_ratio.is_finite() && aspect_ratio > 0.0 {
+        aspect_ratio
+    } else {
+        1.0
+    };
+    let half_fov = (camera.vertical_fov_degrees * 0.5).to_radians();
+    let tan_y = half_fov.tan().max(f32::EPSILON);
+    let tan_x = (tan_y * aspect_ratio).max(f32::EPSILON);
+    let eye = camera.eye();
+    let forward = normalize_or(camera.target - eye, Vec3::NEG_Z);
+    let right = normalize_or(forward.cross(Vec3::Y), Vec3::X);
+    let up = normalize_or(right.cross(forward), Vec3::Y);
+    let mut required = MIN_DISTANCE;
+
+    for corner in bounds_corners(bounds) {
+        let delta = corner - camera.target;
+        let along_forward = delta.dot(forward);
+        let horizontal = delta.dot(right).abs() / tan_x - along_forward;
+        let vertical = delta.dot(up).abs() / tan_y - along_forward;
+        let near = NEAR_PLANE - along_forward;
+        required = required.max(horizontal).max(vertical).max(near);
+    }
+
+    (required * FRAME_PADDING).clamp(MIN_DISTANCE, MAX_DISTANCE)
+}
+
+fn bounds_corners(bounds: Aabb) -> [Vec3; 8] {
+    [
+        Vec3::new(bounds.min.x, bounds.min.y, bounds.min.z),
+        Vec3::new(bounds.min.x, bounds.min.y, bounds.max.z),
+        Vec3::new(bounds.min.x, bounds.max.y, bounds.min.z),
+        Vec3::new(bounds.min.x, bounds.max.y, bounds.max.z),
+        Vec3::new(bounds.max.x, bounds.min.y, bounds.min.z),
+        Vec3::new(bounds.max.x, bounds.min.y, bounds.max.z),
+        Vec3::new(bounds.max.x, bounds.max.y, bounds.min.z),
+        Vec3::new(bounds.max.x, bounds.max.y, bounds.max.z),
+    ]
 }
 
 fn validate_settings(settings: &RenderSettings) -> Result<usize, RenderError> {
@@ -485,7 +784,7 @@ fn rasterize_triangle(
     projection: &ProjectionParams,
     settings: &RenderSettings,
     light_direction: Vec3,
-    target: &mut RenderTarget,
+    target: &mut RenderTarget<'_>,
 ) {
     if should_cull_backface(vertices) {
         return;
@@ -507,39 +806,9 @@ fn rasterize_triangle(
         return;
     }
 
-    let min_x = projected
-        .iter()
-        .map(|vertex| vertex.screen.x)
-        .fold(f32::INFINITY, f32::min)
-        .floor()
-        .max(0.0);
-    let max_x = projected
-        .iter()
-        .map(|vertex| vertex.screen.x)
-        .fold(f32::NEG_INFINITY, f32::max)
-        .ceil()
-        .min((projection.width - 1) as f32);
-    let min_y = projected
-        .iter()
-        .map(|vertex| vertex.screen.y)
-        .fold(f32::INFINITY, f32::min)
-        .floor()
-        .max(0.0);
-    let max_y = projected
-        .iter()
-        .map(|vertex| vertex.screen.y)
-        .fold(f32::NEG_INFINITY, f32::max)
-        .ceil()
-        .min((projection.height - 1) as f32);
-
-    if min_x > max_x || min_y > max_y {
+    let Some(bounds) = PixelBounds::for_triangle(projected, projection) else {
         return;
-    }
-
-    let min_x = min_x as usize;
-    let max_x = max_x as usize;
-    let min_y = min_y as usize;
-    let max_y = max_y as usize;
+    };
     let edge_lengths = [
         (projected[2].screen - projected[1].screen)
             .length()
@@ -552,8 +821,8 @@ fn rasterize_triangle(
             .max(1.0),
     ];
 
-    for y in min_y..=max_y {
-        for x in min_x..=max_x {
+    for y in bounds.min_y..=bounds.max_y {
+        for x in bounds.min_x..=bounds.max_x {
             let sample = Vec2::new(x as f32, y as f32);
             let edges = [
                 edge(projected[1].screen, projected[2].screen, sample),
@@ -597,6 +866,39 @@ fn should_cull_backface(vertices: [RenderVertex; 3]) -> bool {
     !is_finite_vec3(normal) || normal.z <= MIN_AREA
 }
 
+fn is_fully_outside_depth(vertices: [RenderVertex; 3]) -> bool {
+    vertices
+        .iter()
+        .all(|vertex| !is_finite_vec3(vertex.view) || vertex.view.z > -NEAR_PLANE)
+        || vertices
+            .iter()
+            .all(|vertex| !is_finite_vec3(vertex.view) || -vertex.view.z > FAR_PLANE)
+}
+
+fn is_outside_frustum(vertices: &[RenderVertex], projection: &ProjectionParams) -> bool {
+    if vertices.is_empty() || vertices.iter().any(|vertex| !is_finite_vec3(vertex.view)) {
+        return true;
+    }
+
+    vertices.iter().all(|vertex| -vertex.view.z > FAR_PLANE)
+        || vertices.iter().all(|vertex| {
+            let depth = -vertex.view.z;
+            vertex.view.x * projection.focal_x < -depth
+        })
+        || vertices.iter().all(|vertex| {
+            let depth = -vertex.view.z;
+            vertex.view.x * projection.focal_x > depth
+        })
+        || vertices.iter().all(|vertex| {
+            let depth = -vertex.view.z;
+            vertex.view.y * projection.focal_y < -depth
+        })
+        || vertices.iter().all(|vertex| {
+            let depth = -vertex.view.z;
+            vertex.view.y * projection.focal_y > depth
+        })
+}
+
 fn project_triangle(
     vertices: [RenderVertex; 3],
     projection: &ProjectionParams,
@@ -610,9 +912,10 @@ fn project_triangle(
 
 fn project_vertex(vertex: RenderVertex, projection: &ProjectionParams) -> Option<ProjectedVertex> {
     let depth = -vertex.view.z;
-    if !depth.is_finite() || depth <= NEAR_PLANE {
+    if !depth.is_finite() || depth < NEAR_PLANE {
         return None;
     }
+    let depth = depth.max(NEAR_PLANE);
     let ndc = Vec2::new(
         vertex.view.x * projection.focal_x / depth,
         vertex.view.y * projection.focal_y / depth,
@@ -690,8 +993,8 @@ fn color_channel(value: f32) -> u8 {
     }
 }
 
-fn clip_triangle_to_near(vertices: [RenderVertex; 3]) -> Vec<RenderVertex> {
-    let mut output = Vec::with_capacity(4);
+fn clip_triangle_to_near(vertices: [RenderVertex; 3]) -> ClippedTriangle {
+    let mut output = ClippedTriangle::new(vertices[0]);
     let mut previous = vertices[2];
     let mut previous_inside = is_inside_near(previous);
 
@@ -721,11 +1024,10 @@ fn intersect_near(a: RenderVertex, b: RenderVertex) -> RenderVertex {
     } else {
         0.0
     };
+    let mut view = a.view.lerp(b.view, t);
+    view.z = -NEAR_PLANE;
     let normal = normalize_or(a.normal.lerp(b.normal, t), a.normal);
-    RenderVertex {
-        view: a.view.lerp(b.view, t),
-        normal,
-    }
+    RenderVertex { view, normal }
 }
 
 fn face_normal(p0: Vec3, p1: Vec3, p2: Vec3) -> Option<Vec3> {
@@ -746,6 +1048,15 @@ fn vertex_normal(mesh: &TriangleMesh, index: usize) -> Option<Vec3> {
         Some(normal.normalize())
     } else {
         None
+    }
+}
+
+fn render_normal(mesh: &TriangleMesh, index: usize, face_normal: Vec3) -> Vec3 {
+    let normal = vertex_normal(mesh, index).unwrap_or(face_normal);
+    if normal.dot(face_normal) < 0.0 {
+        -normal
+    } else {
+        normal
     }
 }
 
@@ -780,6 +1091,113 @@ fn vec3_from_array(value: [f32; 3]) -> Vec3 {
 
 fn index_to_usize(index: u32) -> Result<usize, RenderError> {
     usize::try_from(index).map_err(|_| RenderError::InvalidMesh("triangle index is too large"))
+}
+
+fn hash_mesh(mesh: &TriangleMesh) -> u64 {
+    let mut hasher = StableHasher::new(b"shape-render-mesh-v1");
+    hasher.write_u64(mesh.positions.len() as u64);
+    for position in &mesh.positions {
+        hasher.write_f32(position[0]);
+        hasher.write_f32(position[1]);
+        hasher.write_f32(position[2]);
+    }
+
+    hasher.write_u64(mesh.normals.len() as u64);
+    for normal in &mesh.normals {
+        hasher.write_f32(normal[0]);
+        hasher.write_f32(normal[1]);
+        hasher.write_f32(normal[2]);
+    }
+
+    hasher.write_u64(mesh.indices.len() as u64);
+    for index in &mesh.indices {
+        hasher.write_u32(*index);
+    }
+    hasher.finish()
+}
+
+fn hash_camera(camera: &OrbitCamera) -> u64 {
+    let camera = camera.clamped();
+    let mut hasher = StableHasher::new(b"shape-render-camera-v1");
+    hasher.write_vec3(camera.target);
+    hasher.write_f32(camera.yaw_degrees);
+    hasher.write_f32(camera.pitch_degrees);
+    hasher.write_f32(camera.distance);
+    hasher.write_f32(camera.vertical_fov_degrees);
+    hasher.finish()
+}
+
+fn hash_settings(settings: &RenderSettings) -> u64 {
+    let mut hasher = StableHasher::new(b"shape-render-settings-v1");
+    hasher.write_u32(settings.width);
+    hasher.write_u32(settings.height);
+    hasher.write_bytes(&settings.background);
+    hasher.write_f32(settings.ambient.clamp(0.0, 1.0));
+    hasher.write_vec3(settings.light_direction.normalize());
+    hasher.write_bool(settings.wireframe);
+    hasher.finish()
+}
+
+#[derive(Debug, Copy, Clone)]
+struct StableHasher {
+    value: u64,
+}
+
+impl StableHasher {
+    fn new(domain: &[u8]) -> Self {
+        let mut hasher = Self {
+            value: CACHE_HASH_OFFSET,
+        };
+        hasher.write_bytes(domain);
+        hasher
+    }
+
+    fn write_bool(&mut self, value: bool) {
+        self.write_u8(u8::from(value));
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_bytes(&[value]);
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_f32(&mut self, value: f32) {
+        self.write_u32(canonical_f32_bits(value));
+    }
+
+    fn write_vec3(&mut self, value: Vec3) {
+        self.write_f32(value.x);
+        self.write_f32(value.y);
+        self.write_f32(value.z);
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.value ^= u64::from(*byte);
+            self.value = self.value.wrapping_mul(CACHE_HASH_PRIME);
+        }
+    }
+
+    fn finish(self) -> u64 {
+        self.value
+    }
+}
+
+fn canonical_f32_bits(value: f32) -> u32 {
+    if value == 0.0 {
+        0.0f32.to_bits()
+    } else if value.is_nan() {
+        f32::NAN.to_bits()
+    } else {
+        value.to_bits()
+    }
 }
 
 #[cfg(test)]
@@ -978,6 +1396,89 @@ mod tests {
         let second = render_mesh(&mesh, &camera, &settings).expect("second render should succeed");
 
         assert_eq!(first.rgba8, second.rgba8);
+    }
+
+    #[test]
+    fn render_cache_key_is_stable_for_equivalent_inputs() {
+        let mesh = triangle_mesh();
+        let camera = camera();
+        let settings = settings(64, 64);
+        let first = RenderCacheKey::new(&mesh, &camera, &settings).expect("cache key should build");
+        let second =
+            RenderCacheKey::new(&mesh, &camera, &settings).expect("cache key should repeat");
+
+        assert_eq!(first, second);
+
+        let mut equivalent_camera = camera.clone();
+        equivalent_camera.yaw_degrees += 360.0;
+        let mut equivalent_settings = settings.clone();
+        equivalent_settings.light_direction *= 2.0;
+
+        assert_eq!(
+            first.camera_hash,
+            RenderCacheKey::new(&mesh, &equivalent_camera, &settings)
+                .expect("equivalent camera should key")
+                .camera_hash
+        );
+        assert_eq!(
+            first.settings_hash,
+            RenderCacheKey::new(&mesh, &camera, &equivalent_settings)
+                .expect("equivalent settings should key")
+                .settings_hash
+        );
+    }
+
+    #[test]
+    fn render_cache_key_changes_for_mesh_camera_and_settings() {
+        let mesh = triangle_mesh();
+        let camera = camera();
+        let settings = settings(64, 64);
+        let base = RenderCacheKey::new(&mesh, &camera, &settings).expect("base key should build");
+
+        let mut changed_mesh = mesh.clone();
+        changed_mesh.positions[0][0] -= 0.125;
+        let mesh_key = RenderCacheKey::new(&changed_mesh, &camera, &settings)
+            .expect("changed mesh should key");
+        assert_ne!(base.mesh_hash, mesh_key.mesh_hash);
+
+        let mut changed_camera = camera.clone();
+        changed_camera.pitch_degrees += 5.0;
+        let camera_key = RenderCacheKey::new(&mesh, &changed_camera, &settings)
+            .expect("changed camera should key");
+        assert_ne!(base.camera_hash, camera_key.camera_hash);
+
+        let mut changed_settings = settings.clone();
+        changed_settings.wireframe = true;
+        let settings_key = RenderCacheKey::new(&mesh, &camera, &changed_settings)
+            .expect("changed settings should key");
+        assert_ne!(base.settings_hash, settings_key.settings_hash);
+    }
+
+    #[test]
+    fn render_cache_reuses_matching_image_and_rerenders_after_key_change() {
+        let mesh = triangle_mesh();
+        let camera = camera();
+        let mut settings = settings(64, 64);
+        let mut cache = RenderCache::default();
+
+        let first_reused = cache
+            .render_mesh(&mesh, &camera, &settings)
+            .expect("first cached render should succeed")
+            .reused;
+        assert!(!first_reused);
+
+        let second_reused = cache
+            .render_mesh(&mesh, &camera, &settings)
+            .expect("second cached render should succeed")
+            .reused;
+        assert!(second_reused);
+
+        settings.width = 65;
+        let changed = cache
+            .render_mesh(&mesh, &camera, &settings)
+            .expect("changed settings render should succeed");
+        assert!(!changed.reused);
+        assert_eq!(changed.image.width, 65);
     }
 
     #[test]

@@ -16,7 +16,7 @@ const MIN_ZOOM_FACTOR: f32 = 0.2;
 const MAX_ZOOM_FACTOR: f32 = 5.0;
 const MIN_RENDER_SIDE: u32 = 32;
 const MAX_FULL_RENDER_SIDE: u32 = 2048;
-const MAX_INTERACTIVE_RENDER_SIDE: u32 = 512;
+const MAX_INTERACTIVE_RENDER_SIDE: u32 = 384;
 const DEFAULT_INTERACTIVE_INTERVAL: Duration = Duration::from_millis(90);
 const DEFAULT_RESIZE_DEBOUNCE: Duration = Duration::from_millis(180);
 
@@ -472,6 +472,7 @@ fn paint_viewport(
         paint_checker_placeholder(&painter, rect);
         paint_center_label(&painter, rect, "No preview yet");
     }
+    paint_reference_grid(&painter, rect);
 
     if overlay.rendering {
         paint_badge(
@@ -497,6 +498,46 @@ fn paint_viewport(
         0.0,
         Stroke::new(1.0, stroke_color),
         StrokeKind::Inside,
+    );
+}
+
+fn paint_reference_grid(painter: &egui::Painter, rect: Rect) {
+    let spacing = 48.0;
+    let grid = Stroke::new(1.0, Color32::from_rgba_unmultiplied(190, 204, 210, 24));
+    let axis = Stroke::new(1.0, Color32::from_rgba_unmultiplied(210, 224, 232, 42));
+    let center = rect.center();
+
+    let mut x = center.x - ((center.x - rect.left()) / spacing).floor() * spacing;
+    while x <= rect.right() {
+        painter.line_segment(
+            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+            grid,
+        );
+        x += spacing;
+    }
+
+    let mut y = center.y - ((center.y - rect.top()) / spacing).floor() * spacing;
+    while y <= rect.bottom() {
+        painter.line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            grid,
+        );
+        y += spacing;
+    }
+
+    painter.line_segment(
+        [
+            Pos2::new(center.x, rect.top()),
+            Pos2::new(center.x, rect.bottom()),
+        ],
+        axis,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(rect.left(), center.y),
+            Pos2::new(rect.right(), center.y),
+        ],
+        axis,
     );
 }
 
