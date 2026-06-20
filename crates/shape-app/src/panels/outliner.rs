@@ -25,11 +25,11 @@ pub(crate) struct OutlinerRow {
 /// Render the shape graph outliner and return commands requested by the user.
 pub(crate) fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<AppCommand> {
     let mut commands = Vec::new();
-    ui.heading("Shape");
-    ui.label("Pick the whole model or one part to adjust.");
+    ui.heading("Parts");
+    ui.label("Pick the whole model or a named part before generating options.");
 
     let Ok(document) = state.project.current_document() else {
-        ui.weak("The current project revision is unavailable.");
+        ui.weak("The current history step is unavailable.");
         return commands;
     };
 
@@ -47,7 +47,7 @@ pub(crate) fn build_outliner_rows(document: &ShapeDocument) -> Vec<OutlinerRow> 
         node: None,
         depth: 0,
         name: "Whole Model".to_owned(),
-        kind: document.title.clone(),
+        kind: format!("{} starting point", document.title),
         tags: Vec::new(),
         enabled: true,
         shared_reference: false,
@@ -156,7 +156,7 @@ fn render_row(
             commands.push(AppCommand::SelectNode(row.node));
         }
 
-        let mut kind = RichText::new(row.kind.clone()).small();
+        let mut kind = RichText::new(display_kind_label(&row.kind)).small();
         if !row.enabled {
             kind = kind.color(ui.visuals().weak_text_color());
         }
@@ -188,10 +188,11 @@ fn render_row(
 
 fn row_hover_text(row: &OutlinerRow) -> String {
     if row.node.is_none() {
-        return "Select the whole model as the search target.".to_owned();
+        return "Select this when the next options should be allowed to change the whole model."
+            .to_owned();
     }
 
-    let mut parts = vec![row.kind.clone()];
+    let mut parts = vec![display_kind_label(&row.kind).to_owned()];
     if row.shared_reference {
         parts.push("shared reference".to_owned());
     }
@@ -211,5 +212,18 @@ fn primitive_kind_label(kind: &PrimitiveKind) -> &'static str {
         PrimitiveKind::Capsule { .. } => "Capsule",
         PrimitiveKind::Cylinder { .. } => "Cylinder",
         PrimitiveKind::Torus { .. } => "Ring",
+    }
+}
+
+fn display_kind_label(kind: &str) -> &str {
+    match kind {
+        "Sphere" => "Round part",
+        "Rounded box" => "Rounded block",
+        "Capsule" => "Long rounded part",
+        "Cylinder" => "Round column",
+        "Group" => "Part group",
+        "Soft group" => "Blended group",
+        "Cut group" => "Hollowed group",
+        other => other,
     }
 }

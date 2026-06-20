@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use egui::{RichText, Slider};
+use egui::{Color32, RichText, Slider};
 use shape_core::{
     NodeId, NodeKind, ParamDescriptor, ParamGroup, ParamPath, ShapeDocument, ShapeNode,
     enumerate_parameters, get_scalar,
@@ -63,14 +63,14 @@ pub(crate) fn show(
 
     let Ok(document) = state.project.current_document() else {
         ui.heading("Inspector");
-        ui.weak("The current project revision is unavailable.");
+        ui.weak("The current history step is unavailable.");
         return commands;
     };
 
     ui.heading("Inspector");
     commands.extend(render_selected_node(ui, document, state.selected_node));
     ui.separator();
-    commands.extend(render_search_controls(ui, state, panel_state));
+    commands.extend(render_search_controls(ui, state, document, panel_state));
     commands
 }
 
@@ -168,6 +168,12 @@ pub(crate) fn seed_command(current: u64, proposed: u64) -> Option<AppCommand> {
     (current != proposed).then_some(AppCommand::SetSeed(proposed))
 }
 
+/// Build the reset command when there is an active built-in preset.
+#[must_use]
+pub(crate) fn reset_current_preset_command(active_preset: bool) -> Option<AppCommand> {
+    active_preset.then_some(AppCommand::ResetCurrentPreset)
+}
+
 /// Keep local search counts within safe display bounds.
 pub(crate) fn sanitize_search_counts(panel_state: &mut InspectorPanelState) {
     panel_state.proposal_count = panel_state
@@ -188,7 +194,7 @@ fn render_selected_node(
     let mut commands = Vec::new();
     let Some(node_id) = selected_node else {
         ui.label(RichText::new("Whole Model").strong());
-        ui.label("Choose a part in the shape list to edit its values.");
+        ui.label("No single part is selected. Options can still change the whole model.");
         ui.small(format!("{} parts in this model", document.nodes.len()));
         return commands;
     };
@@ -196,7 +202,10 @@ fn render_selected_node(
     let Some(node) = document.nodes.get(&node_id) else {
         ui.colored_label(
             ui.visuals().error_fg_color,
-            format!("Selected part {} is missing.", node_id.0),
+            format!(
+                "The selected part {} is no longer in this version.",
+                node_id.0
+            ),
         );
         return commands;
     };
@@ -204,10 +213,11 @@ fn render_selected_node(
     render_node_summary(ui, node);
     let sections = grouped_parameter_sections(document, node_id);
     if sections.is_empty() {
-        ui.weak("This part has no editable values.");
+        ui.weak("This part is a container, so it has no direct values to edit.");
         return commands;
     }
 
+    ui.small("Use Keep beside a value to lock it so generated options leave it unchanged.");
     for section in sections {
         ui.collapsing(group_label(section.group), |ui| {
             ui.label(group_help(section.group));
@@ -222,7 +232,7 @@ fn render_selected_node(
 fn render_node_summary(ui: &mut egui::Ui, node: &ShapeNode) {
     ui.label(RichText::new(&node.name).strong());
     ui.small(format!(
-        "ID {} | {}",
+        "Part {} | {}",
         node.id.0,
         node_kind_label(&node.kind)
     ));
@@ -254,10 +264,11 @@ fn render_parameter_row(
     let mut value_changed = false;
 
     ui.horizontal(|ui| {
-        ui.label(&descriptor.label)
+        ui.label(display_parameter_label(descriptor))
             .on_hover_text(parameter_help(descriptor));
         ui.add_space(4.0);
-        ui.monospace(format!("{current:.3}"));
+        ui.monospace(format!("{current:.3}"))
+            .on_hover_text("Current value before any new option is chosen.");
         ui.add_space(4.0);
 
         ui.add_enabled_ui(!was_locked, |ui| {
@@ -278,8 +289,8 @@ fn render_parameter_row(
         });
 
         let lock_response = ui
-            .checkbox(&mut locked, "Lock")
-            .on_hover_text("Keep this value fixed while new directions are generated.");
+            .checkbox(&mut locked, "Keep")
+            .on_hover_text("Checked values stay exactly as they are during generation.");
         if lock_response.changed() {
             commands.extend(lock_command(&descriptor.path, was_locked, locked));
         }
@@ -295,16 +306,22 @@ fn render_parameter_row(
 fn render_search_controls(
     ui: &mut egui::Ui,
     state: &AppState,
+    document: &ShapeDocument,
     panel_state: &mut InspectorPanelState,
 ) -> Vec<AppCommand> {
     let mut commands = Vec::new();
     sanitize_search_counts(panel_state);
 
-    ui.heading("Directions");
-    ui.label("Choose what may change, then generate options.");
+    ui.heading("Options");
+    ui.label("Choose what can change, then ask for new options.");
 
     commands.extend(render_target_scope_controls(
         ui,
+        state.selected_target_scope,
+    ));
+    ui.small(change_target_summary(
+        document,
+        state.selected_node,
         state.selected_target_scope,
     ));
     commands.extend(render_parameter_group_controls(
@@ -313,9 +330,19 @@ fn render_search_controls(
     ));
     commands.extend(render_mode_controls(ui, state.exploration_mode));
     commands.extend(render_seed_control(ui, state.seed));
-    render_count_controls(ui, panel_state);
+    commands.extend(render_count_controls(
+        ui,
+        panel_state,
+        state.proposal_count,
+        state.result_count,
+    ));
     commands.extend(render_generation_buttons(
         ui,
+        state.active_generation.is_some(),
+    ));
+    commands.extend(render_preset_reset(
+        ui,
+        state.active_preset.is_some(),
         state.active_generation.is_some(),
     ));
 
@@ -324,14 +351,14 @@ fn render_search_controls(
 
 fn render_target_scope_controls(ui: &mut egui::Ui, current_scope: TargetScope) -> Vec<AppCommand> {
     let mut commands = Vec::new();
-    ui.label("Change target");
+    ui.label("What can change next");
     ui.horizontal(|ui| {
         let mut scope = current_scope;
-        ui.radio_value(&mut scope, TargetScope::Selected, "Selected")
+        ui.radio_value(&mut scope, TargetScope::Selected, "This part")
             .on_hover_text("Only the selected part may change.");
-        ui.radio_value(&mut scope, TargetScope::Subtree, "Selected group")
-            .on_hover_text("The selected part and its child parts may change.");
-        ui.radio_value(&mut scope, TargetScope::WholeModel, "Whole Model")
+        ui.radio_value(&mut scope, TargetScope::Subtree, "This part and contents")
+            .on_hover_text("The selected part and the parts inside it may change.");
+        ui.radio_value(&mut scope, TargetScope::WholeModel, "Everything")
             .on_hover_text("Any unlocked value in the model may change.");
         commands.extend(target_scope_command(current_scope, scope));
     });
@@ -343,7 +370,7 @@ fn render_parameter_group_controls(
     enabled_groups: &BTreeSet<ParamGroup>,
 ) -> Vec<AppCommand> {
     let mut commands = Vec::new();
-    ui.label("Values allowed to change");
+    ui.label("Kinds of values allowed to change");
     ui.horizontal_wrapped(|ui| {
         for group in PARAMETER_GROUP_ORDER {
             let mut enabled = enabled_groups.contains(&group);
@@ -360,15 +387,26 @@ fn render_parameter_group_controls(
 
 fn render_mode_controls(ui: &mut egui::Ui, current_mode: ExplorationMode) -> Vec<AppCommand> {
     let mut commands = Vec::new();
-    ui.label("Style");
+    ui.label("Change style");
     ui.horizontal(|ui| {
         let mut mode = current_mode;
-        ui.radio_value(&mut mode, ExplorationMode::Refine, "Refine")
-            .on_hover_text("Small, careful changes near the current model.");
-        ui.radio_value(&mut mode, ExplorationMode::Explore, "Explore")
-            .on_hover_text("Broader changes that look for different directions.");
+        let refine_text = mode_label(
+            "Refine",
+            current_mode == ExplorationMode::Refine,
+            Color32::from_rgb(73, 132, 211),
+        );
+        let explore_text = mode_label(
+            "Explore",
+            current_mode == ExplorationMode::Explore,
+            Color32::from_rgb(176, 117, 41),
+        );
+        ui.radio_value(&mut mode, ExplorationMode::Refine, refine_text)
+            .on_hover_text("Small nudges that stay close to the current model.");
+        ui.radio_value(&mut mode, ExplorationMode::Explore, explore_text)
+            .on_hover_text("Bigger jumps that look for a noticeably different option.");
         commands.extend(exploration_mode_command(current_mode, mode));
     });
+    ui.small("Refine is for careful nudges. Explore is for bolder alternatives.");
     commands
 }
 
@@ -377,7 +415,7 @@ fn render_seed_control(ui: &mut egui::Ui, current_seed: u64) -> Vec<AppCommand> 
     let mut seed = current_seed;
     ui.horizontal(|ui| {
         ui.label("Seed")
-            .on_hover_text("Use the same seed to repeat the same generated directions.");
+            .on_hover_text("Use the same seed to repeat the same generated options.");
         let response = ui.add(egui::DragValue::new(&mut seed).speed(1.0));
         if response.changed() {
             commands.extend(seed_command(current_seed, seed));
@@ -386,10 +424,24 @@ fn render_seed_control(ui: &mut egui::Ui, current_seed: u64) -> Vec<AppCommand> 
     commands
 }
 
-fn render_count_controls(ui: &mut egui::Ui, panel_state: &mut InspectorPanelState) {
+fn render_count_controls(
+    ui: &mut egui::Ui,
+    panel_state: &mut InspectorPanelState,
+    current_proposal_count: usize,
+    current_result_count: usize,
+) -> Vec<AppCommand> {
+    if panel_state.proposal_count != current_proposal_count
+        || panel_state.result_count != current_result_count
+    {
+        panel_state.proposal_count = current_proposal_count;
+        panel_state.result_count = current_result_count;
+        sanitize_search_counts(panel_state);
+    }
+
+    let before = panel_state.clone();
     ui.horizontal(|ui| {
-        ui.label("Proposals")
-            .on_hover_text("More proposals can find broader options but take longer.");
+        ui.label("Options tried")
+            .on_hover_text("Trying more options can find broader results but takes longer.");
         let mut proposals = panel_state.proposal_count;
         if ui
             .add(
@@ -401,8 +453,8 @@ fn render_count_controls(ui: &mut egui::Ui, panel_state: &mut InspectorPanelStat
             sanitize_search_counts(panel_state);
         }
 
-        ui.label("Results")
-            .on_hover_text("How many final direction cards should be shown.");
+        ui.label("Cards shown")
+            .on_hover_text("How many final option cards should appear in the gallery.");
         let mut results = panel_state.result_count;
         if ui
             .add(egui::DragValue::new(&mut results).range(MIN_RESULT_COUNT..=MAX_RESULT_COUNT))
@@ -412,14 +464,23 @@ fn render_count_controls(ui: &mut egui::Ui, panel_state: &mut InspectorPanelStat
             sanitize_search_counts(panel_state);
         }
     });
+
+    if before != *panel_state {
+        vec![AppCommand::SetSearchBudget {
+            proposal_count: panel_state.proposal_count,
+            result_count: panel_state.result_count,
+        }]
+    } else {
+        Vec::new()
+    }
 }
 
 fn render_generation_buttons(ui: &mut egui::Ui, generation_active: bool) -> Vec<AppCommand> {
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(!generation_active, egui::Button::new("Generate Directions"))
-            .on_hover_text("Create new model directions using the enabled values.")
+            .add_enabled(!generation_active, egui::Button::new("Generate Options"))
+            .on_hover_text("Create option cards using only the allowed values.")
             .clicked()
         {
             commands.push(AppCommand::GenerateDirections);
@@ -429,6 +490,25 @@ fn render_generation_buttons(ui: &mut egui::Ui, generation_active: bool) -> Vec<
             commands.push(AppCommand::CancelActiveGeneration);
         }
     });
+    commands
+}
+
+fn render_preset_reset(
+    ui: &mut egui::Ui,
+    active_preset: bool,
+    generation_active: bool,
+) -> Vec<AppCommand> {
+    let mut commands = Vec::new();
+    let enabled = active_preset && !generation_active;
+    if ui
+        .add_enabled(enabled, egui::Button::new("Reset to Preset"))
+        .on_hover_text(
+            "Start over from the original built-in preset. This clears generated options.",
+        )
+        .clicked()
+    {
+        commands.extend(reset_current_preset_command(active_preset));
+    }
     commands
 }
 
@@ -444,61 +524,113 @@ fn should_use_slider(descriptor: &ParamDescriptor) -> bool {
 
 fn group_label(group: ParamGroup) -> &'static str {
     match group {
-        ParamGroup::Form => "Shape",
+        ParamGroup::Form => "Outline",
         ParamGroup::Placement => "Position",
-        ParamGroup::Rotation => "Rotation",
-        ParamGroup::Scale => "Size",
-        ParamGroup::Blend => "Soft joining",
+        ParamGroup::Rotation => "Turning",
+        ParamGroup::Scale => "Stretch",
+        ParamGroup::Blend => "Blending",
     }
 }
 
 fn group_help(group: ParamGroup) -> &'static str {
     match group {
-        ParamGroup::Form => "Dimensions that change the part's outline.",
+        ParamGroup::Form => "Values that change the part's outline.",
         ParamGroup::Placement => "Where the part sits in the model.",
-        ParamGroup::Rotation => "How the part is turned.",
-        ParamGroup::Scale => "Stretching applied to the part.",
-        ParamGroup::Blend => "How softly grouped parts merge together.",
+        ParamGroup::Rotation => "How the part is tilted or turned.",
+        ParamGroup::Scale => "How much the part is stretched.",
+        ParamGroup::Blend => "How softly nearby parts flow into each other.",
     }
 }
 
 fn node_kind_label(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Primitive(primitive) => match primitive {
-            shape_core::PrimitiveKind::Sphere { .. } => "Sphere",
-            shape_core::PrimitiveKind::RoundedBox { .. } => "Rounded box",
-            shape_core::PrimitiveKind::Capsule { .. } => "Capsule",
-            shape_core::PrimitiveKind::Cylinder { .. } => "Cylinder",
+            shape_core::PrimitiveKind::Sphere { .. } => "Round part",
+            shape_core::PrimitiveKind::RoundedBox { .. } => "Rounded block",
+            shape_core::PrimitiveKind::Capsule { .. } => "Long rounded part",
+            shape_core::PrimitiveKind::Cylinder { .. } => "Round column",
             shape_core::PrimitiveKind::Torus { .. } => "Ring",
         },
-        NodeKind::Union { .. } => "Group",
-        NodeKind::SmoothUnion { .. } => "Soft group",
-        NodeKind::Difference { .. } => "Cut group",
+        NodeKind::Union { .. } => "Part group",
+        NodeKind::SmoothUnion { .. } => "Blended group",
+        NodeKind::Difference { .. } => "Hollowed group",
         NodeKind::Intersection { .. } => "Overlap group",
     }
 }
 
 fn parameter_help(descriptor: &ParamDescriptor) -> &'static str {
     match descriptor.path.key.as_str() {
-        "transform.translation.x" | "transform.translation.y" | "transform.translation.z" => {
-            "Move this part along one axis."
-        }
-        "transform.rotation_degrees.x"
-        | "transform.rotation_degrees.y"
-        | "transform.rotation_degrees.z" => "Turn this part around one axis.",
-        "transform.scale.x" | "transform.scale.y" | "transform.scale.z" => {
-            "Stretch or shrink this part along one axis."
-        }
-        "primitive.radius" => "Change the part's radius.",
+        "transform.translation.x" => "Move this part left or right.",
+        "transform.translation.y" => "Move this part up or down.",
+        "transform.translation.z" => "Move this part forward or back.",
+        "transform.rotation_degrees.x" => "Tilt this part forward or back.",
+        "transform.rotation_degrees.y" => "Turn this part left or right.",
+        "transform.rotation_degrees.z" => "Spin this part clockwise or counterclockwise.",
+        "transform.scale.x" => "Stretch or shrink this part's width.",
+        "transform.scale.y" => "Stretch or shrink this part's height.",
+        "transform.scale.z" => "Stretch or shrink this part's depth.",
+        "primitive.radius" => "Make this rounded part larger or smaller.",
         "primitive.half_extents.x" | "primitive.half_extents.y" | "primitive.half_extents.z" => {
-            "Change half of this part's size along one axis."
+            "Change this block's width, height, or depth."
         }
         "primitive.roundness" => "Round or sharpen this part's edges.",
-        "primitive.half_length" | "primitive.half_height" => "Change half of this part's length.",
+        "primitive.half_length" => "Make this long part longer or shorter.",
+        "primitive.half_height" => "Make this column taller or shorter.",
         "primitive.major_radius" | "primitive.minor_radius" => {
-            "Change one radius of the ring shape."
+            "Change the size or thickness of the ring."
         }
-        "csg.smoothness" => "Change how softly grouped parts blend.",
+        "csg.smoothness" => "Change how softly grouped parts blend together.",
         _ => "Editable model value.",
+    }
+}
+
+fn mode_label(text: &'static str, selected: bool, color: Color32) -> RichText {
+    let label = RichText::new(text).color(color);
+    if selected { label.strong() } else { label }
+}
+
+fn change_target_summary(
+    document: &ShapeDocument,
+    selected_node: Option<NodeId>,
+    scope: TargetScope,
+) -> String {
+    let selected_name = selected_node
+        .and_then(|node| document.nodes.get(&node))
+        .map(|node| node.name.as_str())
+        .unwrap_or("the whole model");
+
+    match scope {
+        TargetScope::Selected => format!("Next options may change only {selected_name}."),
+        TargetScope::Subtree => {
+            format!("Next options may change {selected_name} and the parts inside it.")
+        }
+        TargetScope::WholeModel => {
+            "Next options may change any unlocked value in the model.".to_owned()
+        }
+    }
+}
+
+fn display_parameter_label(descriptor: &ParamDescriptor) -> &str {
+    match descriptor.path.key.as_str() {
+        "transform.translation.x" => "Left / Right",
+        "transform.translation.y" => "Up / Down",
+        "transform.translation.z" => "Forward / Back",
+        "transform.rotation_degrees.x" => "Tilt",
+        "transform.rotation_degrees.y" => "Turn",
+        "transform.rotation_degrees.z" => "Spin",
+        "transform.scale.x" => "Width stretch",
+        "transform.scale.y" => "Height stretch",
+        "transform.scale.z" => "Depth stretch",
+        "primitive.radius" => "Overall size",
+        "primitive.half_extents.x" => "Width",
+        "primitive.half_extents.y" => "Height",
+        "primitive.half_extents.z" => "Depth",
+        "primitive.roundness" => "Edge softness",
+        "primitive.half_length" => "Length",
+        "primitive.half_height" => "Height",
+        "primitive.major_radius" => "Ring size",
+        "primitive.minor_radius" => "Ring thickness",
+        "csg.smoothness" => "Blend amount",
+        _ => descriptor.label.as_str(),
     }
 }
