@@ -35,7 +35,7 @@ pub(crate) fn show(
             ui.add(
                 egui::ProgressBar::new(progress)
                     .desired_width(220.0)
-                    .text(format!("Preparing directions: {:.0}%", progress * 100.0)),
+                    .text(format!("Finding usable options: {:.0}%", progress * 100.0)),
             );
             if ui.button("Cancel").clicked() {
                 commands.push(AppCommand::CancelActiveGeneration);
@@ -81,9 +81,12 @@ pub(crate) fn dismiss_candidate_command(candidate: CandidateId) -> AppCommand {
 pub(crate) fn stable_candidate_label(slot: usize, candidate: &Candidate) -> String {
     let trimmed = candidate.edit.label.trim();
     if trimmed.is_empty() {
-        format!("Direction {}", slot + 1)
+        format!("Option {}", slot + 1)
     } else {
-        format!("Direction {}: {trimmed}", slot + 1)
+        let beginner_label = trimmed
+            .replace("direction", "option")
+            .replace("Direction", "Option");
+        format!("Option {}: {beginner_label}", slot + 1)
     }
 }
 
@@ -99,6 +102,17 @@ pub(crate) fn distance_label(distance: f32) -> &'static str {
         "Strong change"
     } else {
         "Large change"
+    }
+}
+
+fn beginner_distance_label(distance: f32) -> &'static str {
+    match distance_label(distance) {
+        "Change size unknown" => "Change amount unknown",
+        "Subtle change" => "Tiny change",
+        "Clear change" => "Noticeable change",
+        "Strong change" => "Bold change",
+        "Large change" => "Very different",
+        other => other,
     }
 }
 
@@ -120,7 +134,7 @@ pub(crate) fn candidate_difference_lines(
                 .get(&operation.path.node)
                 .or_else(|| candidate.document.nodes.get(&operation.path.node))
                 .map(|node| node.name.as_str())
-                .unwrap_or("Shape part");
+                .unwrap_or("Model part");
             let parameter = descriptor_labels
                 .get(&operation.path)
                 .cloned()
@@ -139,12 +153,56 @@ pub(crate) fn candidate_difference_lines(
     lines
 }
 
+fn beginner_candidate_difference_lines(
+    parent: &ShapeDocument,
+    candidate: &Candidate,
+    limit: usize,
+) -> Vec<String> {
+    let descriptor_labels = descriptor_labels(parent);
+    let mut lines = candidate
+        .edit
+        .operations
+        .iter()
+        .take(limit)
+        .map(|operation| {
+            let node_name = parent
+                .nodes
+                .get(&operation.path.node)
+                .or_else(|| candidate.document.nodes.get(&operation.path.node))
+                .map(|node| node.name.as_str())
+                .unwrap_or("Model part");
+            let parameter = descriptor_labels
+                .get(&operation.path)
+                .cloned()
+                .unwrap_or_else(|| friendly_parameter_label(&operation.path.key));
+            change_line(
+                node_name,
+                &operation.path.key,
+                &parameter,
+                operation.before,
+                operation.after,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if candidate.edit.operations.len() > lines.len() {
+        lines.push(format!(
+            "{} more value change(s)",
+            candidate.edit.operations.len() - lines.len()
+        ));
+    }
+    if lines.is_empty() {
+        lines.push("No listed value changes".to_owned());
+    }
+    lines
+}
+
 fn show_parent_card(ui: &mut egui::Ui, state: &AppState, current_texture: Option<&TextureHandle>) {
     let response = egui::Frame::group(ui.style())
         .show(ui, |ui| {
             ui.set_min_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT));
-            ui.heading("Current shape");
-            ui.label("Control card");
+            ui.heading("Current model");
+            ui.label("Unchanged control");
             draw_thumbnail_frame(
                 ui,
                 current_texture,
@@ -152,9 +210,9 @@ fn show_parent_card(ui: &mut egui::Ui, state: &AppState, current_texture: Option
                     .current_preview
                     .as_ref()
                     .map(|preview| (preview.image.width, preview.image.height)),
-                "Unchanged",
+                "Current model\nunchanged",
             );
-            ui.label("Use this to compare every direction against the shape you have now.");
+            ui.label("This is not a result. Use it to compare options against what you have now.");
             if let Some(preview) = &state.current_preview {
                 ui.label(format!("{} triangles", preview.mesh.indices.len() / 3));
             } else {
@@ -178,23 +236,25 @@ fn show_candidate_card(
         .show(ui, |ui| {
             ui.set_min_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT));
             ui.heading(label);
-            ui.label(distance_label(preview.candidate.distance_from_parent));
+            ui.label(beginner_distance_label(
+                preview.candidate.distance_from_parent,
+            ));
             draw_thumbnail_frame(
                 ui,
                 texture,
                 Some((preview.image.width, preview.image.height)),
                 "Thumbnail ready",
             );
-            ui.label("Top changes");
+            ui.label("What changes");
             if let Some(parent) = parent_document {
-                for line in candidate_difference_lines(parent, &preview.candidate, 3) {
+                for line in beginner_candidate_difference_lines(parent, &preview.candidate, 3) {
                     ui.small(line);
                 }
             } else {
-                ui.small("Current project unavailable");
+                ui.small("Current model unavailable");
             }
             ui.add_space(4.0);
-            if ui.button("Choose This Direction").clicked() {
+            if ui.button("Choose This Option").clicked() {
                 commands.push(accept_candidate_command(preview.candidate.id));
             }
             if ui.small_button("Dismiss").clicked() {
@@ -211,14 +271,14 @@ fn show_loading_slot(ui: &mut egui::Ui, slot: usize, state: &AppState) {
     let response = egui::Frame::group(ui.style())
         .show(ui, |ui| {
             ui.set_min_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT));
-            ui.heading(format!("Direction {}", slot + 1));
+            ui.heading(format!("Option {}", slot + 1));
             let text = if state.active_generation.is_some() {
-                "Generating"
+                "Searching"
             } else {
-                "Empty slot"
+                "No option yet"
             };
             draw_thumbnail_frame(ui, None, None, text);
-            ui.label("A generated direction will appear here.");
+            ui.label("Generated options will appear here after you press Generate Options.");
         })
         .response;
 
@@ -370,6 +430,64 @@ fn friendly_parameter_label(key: &str) -> String {
             .map(title_case_token)
             .unwrap_or_else(|| "Parameter".to_owned()),
     }
+}
+
+fn change_line(node_name: &str, key: &str, parameter: &str, before: f32, after: f32) -> String {
+    let trend = value_trend(before, after);
+    let rounder = if after > before { "rounder" } else { "sharper" };
+    let blend = if after > before { "softer" } else { "crisper" };
+    let before = format_scalar(before);
+    let after_text = format_scalar(after);
+    match key {
+        "transform.translation.x" => {
+            format!("{node_name} left/right position changes: {before} to {after_text}")
+        }
+        "transform.translation.y" => {
+            format!("{node_name} height position changes: {before} to {after_text}")
+        }
+        "transform.translation.z" => {
+            format!("{node_name} front/back position changes: {before} to {after_text}")
+        }
+        "transform.rotation_degrees.x" => {
+            format!("{node_name} tilt changes: {before} to {after_text}")
+        }
+        "transform.rotation_degrees.y" => {
+            format!("{node_name} turn changes: {before} to {after_text}")
+        }
+        "transform.rotation_degrees.z" => {
+            format!("{node_name} spin changes: {before} to {after_text}")
+        }
+        "transform.scale.x" | "primitive.half_extents.x" => {
+            format!("{node_name} width {trend}: {before} to {after_text}")
+        }
+        "transform.scale.y" | "primitive.half_extents.y" | "primitive.half_height" => {
+            format!("{node_name} height {trend}: {before} to {after_text}")
+        }
+        "transform.scale.z" | "primitive.half_extents.z" => {
+            format!("{node_name} depth {trend}: {before} to {after_text}")
+        }
+        "primitive.radius" => {
+            format!("{node_name} overall size {trend}: {before} to {after_text}")
+        }
+        "primitive.half_length" => {
+            format!("{node_name} length {trend}: {before} to {after_text}")
+        }
+        "primitive.roundness" => {
+            format!("{node_name} edges get {rounder}: {before} to {after_text}")
+        }
+        "primitive.major_radius" => {
+            format!("{node_name} ring width {trend}: {before} to {after_text}")
+        }
+        "primitive.minor_radius" => {
+            format!("{node_name} ring thickness {trend}: {before} to {after_text}")
+        }
+        "csg.smoothness" => format!("{node_name} blend gets {blend}: {before} to {after_text}"),
+        _ => format!("{node_name} {parameter}: {before} to {after_text}"),
+    }
+}
+
+fn value_trend(before: f32, after: f32) -> &'static str {
+    if after > before { "grows" } else { "shrinks" }
 }
 
 fn title_case_token(value: &str) -> String {
