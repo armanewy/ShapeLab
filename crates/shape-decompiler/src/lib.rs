@@ -33,7 +33,9 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const JACOBI_MAX_ITERATIONS: usize = 96;
 const PSEUDOINVERSE_RELATIVE_EPSILON: f64 = 1.0e-11;
-const SIMPLE_OPERATOR_ERROR_SLACK: f64 = 1.0e-3;
+const OPERATOR_PARAMETER_SCORE_WEIGHT: f64 = 2.0e-3;
+const OPERATOR_ENCODED_SIZE_SCORE_WEIGHT: f64 = 5.0e-4;
+const RESIDUAL_SIZE_SCORE_WEIGHT: f64 = 1.0;
 const ROTATION_ORTHONORMAL_TOLERANCE: f64 = 1.0e-3;
 const PACKAGE_TEMP_MARKER: &str = ".shapelab-package-tmp-";
 const PACKAGE_BACKUP_MARKER: &str = ".shapelab-package-backup-";
@@ -357,13 +359,13 @@ pub fn decompile_pair(
     ensure_identical_topology(source, target)?;
 
     let identity_error = sum_squared_distance(&source.positions, &target.positions);
-    let affine_candidate = choose_affine_candidate(source, target, settings, identity_error);
+    let affine_hypothesis = choose_affine_candidate(source, target, settings, identity_error);
     let emit_affine = identity_error > 0.0
-        && affine_candidate.error < identity_error
-        && affine_candidate.explained >= f64::from(settings.affine_min_explained);
+        && affine_hypothesis.geometric_error < identity_error
+        && affine_hypothesis.explained >= f64::from(settings.affine_min_explained);
 
     let current_positions = if emit_affine {
-        affine_candidate.positions.clone()
+        affine_hypothesis.reconstructed_positions.clone()
     } else {
         source.positions.clone()
     };
@@ -404,7 +406,11 @@ pub fn decompile_pair(
 
     let mut operators = Vec::new();
     if emit_affine {
-        let (id, label) = match affine_candidate.semantic_family {
+        let operator = affine_hypothesis.operator;
+        let semantic_family = operator.semantic_family();
+        let parameters = operator.parameters();
+        let matrix = operator.matrix();
+        let (id, label) = match semantic_family {
             AffineSemanticFamily::Translation => ("op-0000-translation", "Translation"),
             AffineSemanticFamily::RigidTransform => ("op-0000-rigid-transform", "Rigid transform"),
             AffineSemanticFamily::SimilarityTransform => {
@@ -415,14 +421,14 @@ pub fn decompile_pair(
         operators.push(OperatorManifest::GlobalAffine {
             id: id.to_owned(),
             label: label.to_owned(),
-            matrix_row_major_4x4: affine_candidate.matrix,
-            semantic_family: affine_candidate.semantic_family,
-            translation: affine_candidate.parameters.translation,
-            rotation_row_major_3x3: affine_candidate.parameters.rotation,
-            uniform_scale: affine_candidate.parameters.uniform_scale,
-            explained_displacement_fraction: affine_candidate.explained as f32,
+            matrix_row_major_4x4: matrix,
+            semantic_family,
+            translation: parameters.translation,
+            rotation_row_major_3x3: parameters.rotation,
+            uniform_scale: parameters.uniform_scale,
+            explained_displacement_fraction: affine_hypothesis.explained as f32,
             max_remaining_error: max_euclidean_distance(
-                &affine_candidate.positions,
+                &affine_hypothesis.reconstructed_positions,
                 &target.positions,
             ),
             baked_positions_file: AFFINE_POSITIONS_FILE.to_owned(),
@@ -460,7 +466,7 @@ pub fn decompile_pair(
     Ok(DecompileResult {
         manifest,
         verification,
-        affine_positions: emit_affine.then_some(affine_candidate.positions),
+        affine_positions: emit_affine.then_some(affine_hypothesis.reconstructed_positions),
         residual_indices,
         residual_positions,
         reconstructed_positions,
@@ -1730,13 +1736,15 @@ fn ensure_strictly_increasing_indices(
 }
 
 #[derive(Debug, Clone)]
-struct AffineOperatorCandidate {
-    semantic_family: AffineSemanticFamily,
-    matrix: [f32; 16],
-    parameters: AffineSemanticParameters,
-    positions: Vec<[f32; 3]>,
-    error: f64,
+struct OperatorHypothesis {
+    operator: InferredOperator,
+    reconstructed_positions: Vec<[f32; 3]>,
+    geometric_error: f64,
     explained: f64,
+    parameter_count: usize,
+    encoded_size: usize,
+    residual_size: usize,
+    score: f64,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -1752,106 +1760,403 @@ struct SemanticAffineMatrix {
     parameters: AffineSemanticParameters,
 }
 
+#[derive(Debug, Copy, Clone)]
+enum InferredOperator {
+    NoOp,
+    Translation {
+        matrix: [f32; 16],
+        translation: [f32; 3],
+    },
+    RigidTransform {
+        matrix: [f32; 16],
+        translation: [f32; 3],
+        rotation: [f32; 9],
+    },
+    SimilarityTransform {
+        matrix: [f32; 16],
+        translation: [f32; 3],
+        rotation: [f32; 9],
+        uniform_scale: f32,
+    },
+    GeneralAffine {
+        matrix: [f32; 16],
+    },
+}
+
+impl InferredOperator {
+    fn semantic_family(self) -> AffineSemanticFamily {
+        match self {
+            Self::NoOp => AffineSemanticFamily::GeneralAffine,
+            Self::Translation { .. } => AffineSemanticFamily::Translation,
+            Self::RigidTransform { .. } => AffineSemanticFamily::RigidTransform,
+            Self::SimilarityTransform { .. } => AffineSemanticFamily::SimilarityTransform,
+            Self::GeneralAffine { .. } => AffineSemanticFamily::GeneralAffine,
+        }
+    }
+
+    fn matrix(self) -> [f32; 16] {
+        match self {
+            Self::NoOp => identity(),
+            Self::Translation { matrix, .. }
+            | Self::RigidTransform { matrix, .. }
+            | Self::SimilarityTransform { matrix, .. }
+            | Self::GeneralAffine { matrix } => matrix,
+        }
+    }
+
+    fn parameters(self) -> AffineSemanticParameters {
+        match self {
+            Self::NoOp => AffineSemanticParameters::default(),
+            Self::Translation { translation, .. } => AffineSemanticParameters {
+                translation: Some(translation),
+                ..AffineSemanticParameters::default()
+            },
+            Self::RigidTransform {
+                translation,
+                rotation,
+                ..
+            } => AffineSemanticParameters {
+                translation: Some(translation),
+                rotation: Some(rotation),
+                uniform_scale: None,
+            },
+            Self::SimilarityTransform {
+                translation,
+                rotation,
+                uniform_scale,
+                ..
+            } => AffineSemanticParameters {
+                translation: Some(translation),
+                rotation: Some(rotation),
+                uniform_scale: Some(uniform_scale),
+            },
+            Self::GeneralAffine { .. } => AffineSemanticParameters::default(),
+        }
+    }
+
+    fn parameter_count(self) -> usize {
+        match self {
+            Self::NoOp => 0,
+            Self::Translation { .. } => 3,
+            Self::RigidTransform { .. } => 6,
+            Self::SimilarityTransform { .. } => 7,
+            Self::GeneralAffine { .. } => 12,
+        }
+    }
+
+    fn encoded_size(self) -> usize {
+        match self {
+            Self::NoOp => 0,
+            Self::Translation { .. } => 3 * 4,
+            Self::RigidTransform { .. } => (3 + 9) * 4,
+            Self::SimilarityTransform { .. } => (3 + 9 + 1) * 4,
+            Self::GeneralAffine { .. } => 0,
+        }
+    }
+
+    fn instability_penalty(self) -> f64 {
+        match self {
+            Self::NoOp => 0.0,
+            Self::Translation { .. } => 0.0,
+            Self::RigidTransform { .. } => 1.0e-3,
+            Self::SimilarityTransform { .. } => 2.0e-3,
+            Self::GeneralAffine { .. } => 1.0e-2,
+        }
+    }
+
+    fn preference_order(self) -> usize {
+        match self {
+            Self::NoOp => 0,
+            Self::Translation { .. } => 0,
+            Self::RigidTransform { .. } => 1,
+            Self::SimilarityTransform { .. } => 2,
+            Self::GeneralAffine { .. } => 3,
+        }
+    }
+
+    fn is_no_op(self) -> bool {
+        matches!(self, Self::NoOp)
+    }
+}
+
 fn choose_affine_candidate(
     source: &TriangleMesh,
     target: &TriangleMesh,
     settings: DecompileSettings,
     identity_error: f64,
-) -> AffineOperatorCandidate {
-    let general_matrix = fit_affine(&source.positions, &target.positions).unwrap_or(identity());
-    let general = affine_candidate(
-        AffineSemanticFamily::GeneralAffine,
-        general_matrix,
-        AffineSemanticParameters::default(),
+) -> OperatorHypothesis {
+    let weights = vertex_area_weights(source);
+    let mut hypotheses = Vec::new();
+    hypotheses.push(operator_hypothesis(
+        InferredOperator::NoOp,
         &source.positions,
         &target.positions,
+        &weights,
         identity_error,
-    );
+    ));
+    let general_matrix =
+        fit_affine(&source.positions, &target.positions, &weights).unwrap_or(identity());
+    hypotheses.push(operator_hypothesis(
+        InferredOperator::GeneralAffine {
+            matrix: general_matrix,
+        },
+        &source.positions,
+        &target.positions,
+        &weights,
+        identity_error,
+    ));
 
-    let mut simple_candidates = Vec::new();
-    if let Some(translation_matrix) = fit_translation_matrix(&source.positions, &target.positions) {
+    if let Some(translation_matrix) =
+        fit_translation_matrix(&source.positions, &target.positions, &weights)
+    {
         let translation_delta = [
             translation_matrix[3],
             translation_matrix[7],
             translation_matrix[11],
         ];
-        let translation = affine_candidate(
-            AffineSemanticFamily::Translation,
-            translation_matrix,
-            AffineSemanticParameters {
-                translation: Some(translation_delta),
-                ..AffineSemanticParameters::default()
+        hypotheses.push(operator_hypothesis(
+            InferredOperator::Translation {
+                matrix: translation_matrix,
+                translation: translation_delta,
             },
             &source.positions,
             &target.positions,
-            identity_error,
-        );
-        simple_candidates.push(translation);
-    }
-
-    if let Some(rigid) = fit_rigid_matrix(&source.positions, &target.positions) {
-        simple_candidates.push(affine_candidate(
-            AffineSemanticFamily::RigidTransform,
-            rigid.matrix,
-            rigid.parameters,
-            &source.positions,
-            &target.positions,
-            identity_error,
-        ));
-    }
-    if let Some(similarity) = fit_similarity_matrix(&source.positions, &target.positions) {
-        simple_candidates.push(affine_candidate(
-            AffineSemanticFamily::SimilarityTransform,
-            similarity.matrix,
-            similarity.parameters,
-            &source.positions,
-            &target.positions,
+            &weights,
             identity_error,
         ));
     }
 
-    let simple_error_slack =
-        semantic_candidate_error_slack(&source.positions, &target.positions, identity_error);
-    for candidate in simple_candidates {
-        if candidate.explained >= f64::from(settings.affine_min_explained)
-            && candidate.error <= general.error + simple_error_slack
-        {
-            return candidate;
-        }
+    if let Some(rigid) = fit_rigid_matrix(&source.positions, &target.positions, &weights)
+        && let AffineSemanticParameters {
+            translation: Some(translation),
+            rotation: Some(rotation),
+            uniform_scale: None,
+        } = rigid.parameters
+    {
+        hypotheses.push(operator_hypothesis(
+            InferredOperator::RigidTransform {
+                matrix: rigid.matrix,
+                translation,
+                rotation,
+            },
+            &source.positions,
+            &target.positions,
+            &weights,
+            identity_error,
+        ));
     }
-    general
+    if let Some(similarity) = fit_similarity_matrix(&source.positions, &target.positions, &weights)
+        && let AffineSemanticParameters {
+            translation: Some(translation),
+            rotation: Some(rotation),
+            uniform_scale: Some(uniform_scale),
+        } = similarity.parameters
+    {
+        hypotheses.push(operator_hypothesis(
+            InferredOperator::SimilarityTransform {
+                matrix: similarity.matrix,
+                translation,
+                rotation,
+                uniform_scale,
+            },
+            &source.positions,
+            &target.positions,
+            &weights,
+            identity_error,
+        ));
+    }
+
+    let mut viable = hypotheses
+        .into_iter()
+        .filter(|hypothesis| {
+            hypothesis.operator.is_no_op()
+                || (identity_error > 0.0
+                    && hypothesis.geometric_error < identity_error
+                    && hypothesis.explained >= f64::from(settings.affine_min_explained))
+        })
+        .collect::<Vec<_>>();
+    viable.sort_by(compare_hypotheses);
+    viable.remove(0)
 }
 
-fn affine_candidate(
-    semantic_family: AffineSemanticFamily,
-    matrix: [f32; 16],
-    parameters: AffineSemanticParameters,
+fn operator_hypothesis(
+    operator: InferredOperator,
     source: &[[f32; 3]],
     target: &[[f32; 3]],
+    weights: &[f64],
     identity_error: f64,
-) -> AffineOperatorCandidate {
-    let positions = apply_affine_to_positions(source, matrix);
-    let error = sum_squared_distance(&positions, target);
-    let explained = explained_fraction(identity_error, error);
-    AffineOperatorCandidate {
-        semantic_family,
-        matrix,
-        parameters,
-        positions,
-        error,
+) -> OperatorHypothesis {
+    let reconstructed_positions = apply_affine_to_positions(source, operator.matrix());
+    let geometric_error = sum_squared_distance(&reconstructed_positions, target);
+    let weighted_geometric_error =
+        weighted_sum_squared_distance(&reconstructed_positions, target, weights);
+    let explained = explained_fraction(identity_error, geometric_error);
+    let parameter_count = operator.parameter_count();
+    let encoded_size = operator.encoded_size();
+    let residual_size = residual_storage_size(&reconstructed_positions, target);
+    let score = hypothesis_score(HypothesisScoreInputs {
+        operator,
+        weighted_geometric_error,
+        parameter_count,
+        encoded_size,
+        residual_size,
+        source,
+        target,
+        weights,
+    });
+    OperatorHypothesis {
+        operator,
+        reconstructed_positions,
+        geometric_error,
         explained,
+        parameter_count,
+        encoded_size,
+        residual_size,
+        score,
     }
 }
 
-fn fit_translation_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
+fn compare_hypotheses(left: &OperatorHypothesis, right: &OperatorHypothesis) -> std::cmp::Ordering {
+    left.score
+        .total_cmp(&right.score)
+        .then_with(|| left.residual_size.cmp(&right.residual_size))
+        .then_with(|| left.parameter_count.cmp(&right.parameter_count))
+        .then_with(|| left.encoded_size.cmp(&right.encoded_size))
+        .then_with(|| {
+            left.operator
+                .preference_order()
+                .cmp(&right.operator.preference_order())
+        })
+}
+
+struct HypothesisScoreInputs<'a> {
+    operator: InferredOperator,
+    weighted_geometric_error: f64,
+    parameter_count: usize,
+    encoded_size: usize,
+    residual_size: usize,
+    source: &'a [[f32; 3]],
+    target: &'a [[f32; 3]],
+    weights: &'a [f64],
+}
+
+fn hypothesis_score(inputs: HypothesisScoreInputs<'_>) -> f64 {
+    let error_scale = weighted_centered_sum_squared_distance(inputs.source, inputs.weights)
+        .max(weighted_centered_sum_squared_distance(
+            inputs.target,
+            inputs.weights,
+        ))
+        .max(f64::EPSILON);
+    let literal_size = inputs.source.len().saturating_mul(12).max(1) as f64;
+    let normalized_geometric_error = inputs.weighted_geometric_error / error_scale;
+    let complexity_cost = inputs.parameter_count as f64 * OPERATOR_PARAMETER_SCORE_WEIGHT;
+    let encoded_cost =
+        inputs.encoded_size as f64 / literal_size * OPERATOR_ENCODED_SIZE_SCORE_WEIGHT;
+    let residual_cost = inputs.residual_size as f64 / literal_size * RESIDUAL_SIZE_SCORE_WEIGHT;
+    normalized_geometric_error
+        + complexity_cost
+        + encoded_cost
+        + residual_cost
+        + inputs.operator.instability_penalty()
+}
+
+fn residual_storage_size(reconstructed: &[[f32; 3]], target: &[[f32; 3]]) -> usize {
+    reconstructed
+        .iter()
+        .zip(target)
+        .filter(|(left, right)| !positions_bit_equal(**left, **right))
+        .count()
+        * (std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>())
+}
+
+fn vertex_area_weights(mesh: &TriangleMesh) -> Vec<f64> {
+    let mut weights = vec![0.0_f64; mesh.positions.len()];
+    for triangle in mesh.indices.chunks_exact(3) {
+        let [a, b, c] = [
+            triangle[0] as usize,
+            triangle[1] as usize,
+            triangle[2] as usize,
+        ];
+        if a >= mesh.positions.len() || b >= mesh.positions.len() || c >= mesh.positions.len() {
+            continue;
+        }
+        let area = triangle_area(mesh.positions[a], mesh.positions[b], mesh.positions[c]);
+        if area.is_finite() && area > 0.0 {
+            let share = area / 3.0;
+            weights[a] += share;
+            weights[b] += share;
+            weights[c] += share;
+        }
+    }
+    let total = weights.iter().sum::<f64>();
+    if !total.is_finite() || total <= f64::EPSILON {
+        return vec![1.0; mesh.positions.len()];
+    }
+    let average = total / mesh.positions.len().max(1) as f64;
+    for weight in &mut weights {
+        if !weight.is_finite() || *weight <= 0.0 {
+            *weight = average;
+        }
+        *weight /= average;
+    }
+    weights
+}
+
+fn triangle_area(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f64 {
+    let ab = [
+        f64::from(b[0]) - f64::from(a[0]),
+        f64::from(b[1]) - f64::from(a[1]),
+        f64::from(b[2]) - f64::from(a[2]),
+    ];
+    let ac = [
+        f64::from(c[0]) - f64::from(a[0]),
+        f64::from(c[1]) - f64::from(a[1]),
+        f64::from(c[2]) - f64::from(a[2]),
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    0.5 * dot_f64(cross, cross).sqrt()
+}
+
+fn weighted_centroid_f64(positions: &[[f32; 3]], weights: &[f64]) -> [f64; 3] {
+    let mut total = [0.0_f64; 3];
+    let mut total_weight = 0.0_f64;
+    for (index, position) in positions.iter().enumerate() {
+        let weight = weights.get(index).copied().unwrap_or(1.0);
+        if !weight.is_finite() || weight <= 0.0 {
+            continue;
+        }
+        total[0] += f64::from(position[0]) * weight;
+        total[1] += f64::from(position[1]) * weight;
+        total[2] += f64::from(position[2]) * weight;
+        total_weight += weight;
+    }
+    if !total_weight.is_finite() || total_weight <= f64::EPSILON {
+        return centroid_f64(positions);
+    }
+    [
+        total[0] / total_weight,
+        total[1] / total_weight,
+        total[2] / total_weight,
+    ]
+}
+
+fn fit_translation_matrix(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    weights: &[f64],
+) -> Option<[f32; 16]> {
     if source.is_empty() || source.len() != target.len() {
         return None;
     }
     if let Some(matrix) = exact_translation_matrix(source, target) {
         return Some(matrix);
     }
-    let source_center = centroid_f64(source);
-    let target_center = centroid_f64(target);
+    let source_center = weighted_centroid_f64(source, weights);
+    let target_center = weighted_centroid_f64(target, weights);
     let translation = [
         (target_center[0] - source_center[0]) as f32,
         (target_center[1] - source_center[1]) as f32,
@@ -1881,11 +2186,16 @@ fn translation_matrix(translation: [f32; 3]) -> [f32; 16] {
     ]
 }
 
-fn fit_rigid_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<SemanticAffineMatrix> {
-    let rotation = fit_rotation(source, target)?;
-    let source_center = centroid_f64(source);
-    let target_center = centroid_f64(target);
-    let translation = transform_translation(rotation, 1.0, source_center, target_center)?;
+fn fit_rigid_matrix(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    weights: &[f64],
+) -> Option<SemanticAffineMatrix> {
+    let rotation = fit_rotation(source, target, weights)?;
+    let source_center = weighted_centroid_f64(source, weights);
+    let target_center = weighted_centroid_f64(target, weights);
+    let translation = exact_translation_for_linear(source, target, rotation)
+        .or_else(|| transform_translation(rotation, 1.0, source_center, target_center))?;
     let candidate = rigid_matrix(rotation, translation);
     candidate
         .iter()
@@ -1900,13 +2210,19 @@ fn fit_rigid_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<Semantic
         })
 }
 
-fn fit_similarity_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<SemanticAffineMatrix> {
-    let rotation = fit_rotation(source, target)?;
-    let scale = fit_uniform_scale(source, target, rotation)?;
-    let source_center = centroid_f64(source);
-    let target_center = centroid_f64(target);
-    let translation =
-        transform_translation(rotation, f64::from(scale), source_center, target_center)?;
+fn fit_similarity_matrix(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    weights: &[f64],
+) -> Option<SemanticAffineMatrix> {
+    let rotation = fit_rotation(source, target, weights)?;
+    let scale = fit_uniform_scale(source, target, weights, rotation)?;
+    let source_center = weighted_centroid_f64(source, weights);
+    let target_center = weighted_centroid_f64(target, weights);
+    let linear = scaled_rotation_row_major_3x3(rotation, scale);
+    let translation = exact_translation_for_linear(source, target, linear).or_else(|| {
+        transform_translation(rotation, f64::from(scale), source_center, target_center)
+    })?;
     let candidate = similarity_matrix(rotation, scale, translation);
     candidate
         .iter()
@@ -1921,42 +2237,49 @@ fn fit_similarity_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<Sem
         })
 }
 
-fn semantic_candidate_error_slack(
-    source: &[[f32; 3]],
-    target: &[[f32; 3]],
-    identity_error: f64,
-) -> f64 {
-    let shape_scale = centered_sum_squared_distance(source)
-        .max(centered_sum_squared_distance(target))
-        .max(f64::EPSILON);
-    shape_scale
-        .mul_add(SIMPLE_OPERATOR_ERROR_SLACK, identity_error * f64::EPSILON)
-        .max(f64::EPSILON)
-}
-
-fn centered_sum_squared_distance(positions: &[[f32; 3]]) -> f64 {
-    let center = centroid_f64(positions);
-    positions
-        .iter()
-        .map(|position| {
-            let dx = f64::from(position[0]) - center[0];
-            let dy = f64::from(position[1]) - center[1];
-            let dz = f64::from(position[2]) - center[2];
-            dx * dx + dy * dy + dz * dz
+fn weighted_sum_squared_distance(left: &[[f32; 3]], right: &[[f32; 3]], weights: &[f64]) -> f64 {
+    left.iter()
+        .zip(right)
+        .enumerate()
+        .map(|(index, (a, b))| {
+            let weight = weights.get(index).copied().unwrap_or(1.0);
+            let dx = f64::from(a[0]) - f64::from(b[0]);
+            let dy = f64::from(a[1]) - f64::from(b[1]);
+            let dz = f64::from(a[2]) - f64::from(b[2]);
+            weight * (dx * dx + dy * dy + dz * dz)
         })
         .sum()
 }
 
-fn fit_rotation(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 9]> {
+fn weighted_centered_sum_squared_distance(positions: &[[f32; 3]], weights: &[f64]) -> f64 {
+    let center = weighted_centroid_f64(positions, weights);
+    positions
+        .iter()
+        .enumerate()
+        .map(|(index, position)| {
+            let weight = weights.get(index).copied().unwrap_or(1.0);
+            let dx = f64::from(position[0]) - center[0];
+            let dy = f64::from(position[1]) - center[1];
+            let dz = f64::from(position[2]) - center[2];
+            weight * (dx * dx + dy * dy + dz * dz)
+        })
+        .sum()
+}
+
+fn fit_rotation(source: &[[f32; 3]], target: &[[f32; 3]], weights: &[f64]) -> Option<[f32; 9]> {
     if source.is_empty() || source.len() != target.len() {
         return None;
     }
-    let source_center = centroid_f64(source);
-    let target_center = centroid_f64(target);
+    let source_center = weighted_centroid_f64(source, weights);
+    let target_center = weighted_centroid_f64(target, weights);
     let mut covariance = [[0.0_f64; 3]; 3];
     let mut source_variance = 0.0_f64;
     let mut target_variance = 0.0_f64;
-    for (source_position, target_position) in source.iter().zip(target) {
+    for (index, (source_position, target_position)) in source.iter().zip(target).enumerate() {
+        let weight = weights.get(index).copied().unwrap_or(1.0);
+        if !weight.is_finite() || weight <= 0.0 {
+            continue;
+        }
         let source_centered = [
             f64::from(source_position[0]) - source_center[0],
             f64::from(source_position[1]) - source_center[1],
@@ -1967,11 +2290,11 @@ fn fit_rotation(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 9]> {
             f64::from(target_position[1]) - target_center[1],
             f64::from(target_position[2]) - target_center[2],
         ];
-        source_variance += dot_f64(source_centered, source_centered);
-        target_variance += dot_f64(target_centered, target_centered);
+        source_variance += weight * dot_f64(source_centered, source_centered);
+        target_variance += weight * dot_f64(target_centered, target_centered);
         for row in 0..3 {
             for col in 0..3 {
-                covariance[row][col] += source_centered[row] * target_centered[col];
+                covariance[row][col] += weight * source_centered[row] * target_centered[col];
             }
         }
     }
@@ -2053,12 +2376,21 @@ fn snap_rotation(mut rotation: [f32; 9]) -> [f32; 9] {
     rotation
 }
 
-fn fit_uniform_scale(source: &[[f32; 3]], target: &[[f32; 3]], rotation: [f32; 9]) -> Option<f32> {
-    let source_center = centroid_f64(source);
-    let target_center = centroid_f64(target);
+fn fit_uniform_scale(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    weights: &[f64],
+    rotation: [f32; 9],
+) -> Option<f32> {
+    let source_center = weighted_centroid_f64(source, weights);
+    let target_center = weighted_centroid_f64(target, weights);
     let mut numerator = 0.0_f64;
     let mut denominator = 0.0_f64;
-    for (source_position, target_position) in source.iter().zip(target) {
+    for (index, (source_position, target_position)) in source.iter().zip(target).enumerate() {
+        let weight = weights.get(index).copied().unwrap_or(1.0);
+        if !weight.is_finite() || weight <= 0.0 {
+            continue;
+        }
         let source_centered = [
             f64::from(source_position[0]) - source_center[0],
             f64::from(source_position[1]) - source_center[1],
@@ -2070,8 +2402,8 @@ fn fit_uniform_scale(source: &[[f32; 3]], target: &[[f32; 3]], rotation: [f32; 9
             f64::from(target_position[2]) - target_center[2],
         ];
         let rotated = apply_rotation_f64(rotation, source_centered);
-        numerator += dot_f64(target_centered, rotated);
-        denominator += dot_f64(source_centered, source_centered);
+        numerator += weight * dot_f64(target_centered, rotated);
+        denominator += weight * dot_f64(source_centered, source_centered);
     }
     if !numerator.is_finite() || !denominator.is_finite() || denominator <= f64::EPSILON {
         return None;
@@ -2106,6 +2438,61 @@ fn apply_rotation_f64(rotation: [f32; 9], position: [f64; 3]) -> [f64; 3] {
         f64::from(rotation[6]) * position[0]
             + f64::from(rotation[7]) * position[1]
             + f64::from(rotation[8]) * position[2],
+    ]
+}
+
+fn exact_translation_for_linear(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    linear: [f32; 9],
+) -> Option<[f32; 3]> {
+    if source.is_empty() || source.len() != target.len() {
+        return None;
+    }
+    let first = apply_linear(source[0], linear);
+    let translation = [
+        target[0][0] - first[0],
+        target[0][1] - first[1],
+        target[0][2] - first[2],
+    ];
+    if !array_is_finite(translation) {
+        return None;
+    }
+    let exact = source.iter().zip(target).all(|(source, target)| {
+        let linear_position = apply_linear(*source, linear);
+        (0..3).all(|axis| {
+            canonical_f32_add(linear_position[axis], translation[axis]).to_bits()
+                == target[axis].to_bits()
+        })
+    });
+    exact.then_some(translation)
+}
+
+fn apply_linear(position: [f32; 3], linear: [f32; 9]) -> [f32; 3] {
+    [
+        apply_linear_row(position, &linear[0..3]),
+        apply_linear_row(position, &linear[3..6]),
+        apply_linear_row(position, &linear[6..9]),
+    ]
+}
+
+fn apply_linear_row(position: [f32; 3], row: &[f32]) -> f32 {
+    let mut value = canonical_f32_mul(row[0], position[0]);
+    value = canonical_f32_add(value, canonical_f32_mul(row[1], position[1]));
+    canonical_f32_add(value, canonical_f32_mul(row[2], position[2]))
+}
+
+fn scaled_rotation_row_major_3x3(rotation: [f32; 9], scale: f32) -> [f32; 9] {
+    [
+        canonical_f32_mul(scale, rotation[0]),
+        canonical_f32_mul(scale, rotation[1]),
+        canonical_f32_mul(scale, rotation[2]),
+        canonical_f32_mul(scale, rotation[3]),
+        canonical_f32_mul(scale, rotation[4]),
+        canonical_f32_mul(scale, rotation[5]),
+        canonical_f32_mul(scale, rotation[6]),
+        canonical_f32_mul(scale, rotation[7]),
+        canonical_f32_mul(scale, rotation[8]),
     ]
 }
 
@@ -2200,7 +2587,7 @@ fn determinant_3x3(matrix: [f32; 9]) -> f64 {
     a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
 }
 
-fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
+fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]], weights: &[f64]) -> Option<[f32; 16]> {
     if source.is_empty() || source.len() != target.len() {
         return None;
     }
@@ -2208,7 +2595,7 @@ fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
         return Some(matrix);
     }
 
-    let source_center = centroid_f64(source);
+    let source_center = weighted_centroid_f64(source, weights);
     let mut source_scale = 0.0_f64;
     for position in source {
         for axis in 0..3 {
@@ -2217,7 +2604,7 @@ fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
         }
     }
     if !source_scale.is_finite() || source_scale <= f64::EPSILON {
-        let target_center = centroid_f64(target);
+        let target_center = weighted_centroid_f64(target, weights);
         let translation = [
             target_center[0] - source_center[0],
             target_center[1] - source_center[1],
@@ -2249,7 +2636,11 @@ fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
 
     let mut normal = [[0.0_f64; 4]; 4];
     let mut rhs = [[0.0_f64; 4]; 3];
-    for (source_position, target_position) in source.iter().zip(target) {
+    for (index, (source_position, target_position)) in source.iter().zip(target).enumerate() {
+        let weight = weights.get(index).copied().unwrap_or(1.0);
+        if !weight.is_finite() || weight <= 0.0 {
+            continue;
+        }
         let p = [
             (f64::from(source_position[0]) - source_center[0]) / source_scale,
             (f64::from(source_position[1]) - source_center[1]) / source_scale,
@@ -2258,11 +2649,11 @@ fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
         ];
         for row in 0..4 {
             for col in 0..4 {
-                normal[row][col] += p[row] * p[col];
+                normal[row][col] += weight * p[row] * p[col];
             }
-            rhs[0][row] += p[row] * f64::from(target_position[0]);
-            rhs[1][row] += p[row] * f64::from(target_position[1]);
-            rhs[2][row] += p[row] * f64::from(target_position[2]);
+            rhs[0][row] += weight * p[row] * f64::from(target_position[0]);
+            rhs[1][row] += weight * p[row] * f64::from(target_position[1]);
+            rhs[2][row] += weight * p[row] * f64::from(target_position[2]);
         }
     }
 
@@ -3556,6 +3947,7 @@ if __name__ == "__main__":
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::io::Cursor;
 
     use shape_mesh::read_obj;
@@ -3739,6 +4131,31 @@ mod tests {
             &result.reconstructed_positions,
             &target.positions
         ));
+    }
+
+    #[test]
+    fn area_weighted_translation_fit_resists_dense_small_patch_bias() {
+        let source = uneven_area_mesh();
+        let mut target = source.clone();
+        for (index, position) in target.positions.iter_mut().enumerate() {
+            if index < 4 {
+                position[0] += 10.0;
+            } else {
+                position[0] -= 10.0;
+            }
+        }
+        let weights = vertex_area_weights(&source);
+
+        let matrix = fit_translation_matrix(&source.positions, &target.positions, &weights)
+            .expect("translation fit");
+
+        assert!(
+            matrix[3] > 9.0,
+            "large sparse surface should dominate x translation, got {}",
+            matrix[3]
+        );
+        assert_eq!(matrix[7], 0.0);
+        assert_eq!(matrix[11], 0.0);
     }
 
     #[test]
@@ -4330,6 +4747,40 @@ f 1 3 4
 ",
         ))
         .unwrap()
+    }
+
+    fn uneven_area_mesh() -> TriangleMesh {
+        let grid = 5_usize;
+        let mut obj = String::from(
+            "\
+v -50 -50 0
+v 50 -50 0
+v 50 50 0
+v -50 50 0
+f 1 2 3
+f 1 3 4
+",
+        );
+        for y in 0..=grid {
+            for x in 0..=grid {
+                let px = 200.0 + x as f32 / grid as f32;
+                let py = 200.0 + y as f32 / grid as f32;
+                writeln!(&mut obj, "v {px} {py} 0").unwrap();
+            }
+        }
+        let start = 5_usize;
+        let row = grid + 1;
+        for y in 0..grid {
+            for x in 0..grid {
+                let a = start + y * row + x;
+                let b = a + 1;
+                let c = a + row;
+                let d = c + 1;
+                writeln!(&mut obj, "f {a} {b} {d}").unwrap();
+                writeln!(&mut obj, "f {a} {d} {c}").unwrap();
+            }
+        }
+        read_obj(Cursor::new(obj)).unwrap()
     }
 
     fn cube_mesh() -> TriangleMesh {

@@ -34,7 +34,9 @@ Useful creation options:
 --residual-epsilon 0.0
 ```
 
-`--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler prefers simpler semantic families when they explain the target nearly as well as the general affine fit, in this order: translation, rigid transform, similarity transform, then general affine. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
+`--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler now scores affine-family hypotheses instead of returning the first simple family that is close enough. The internal score combines normalized geometric error, operator parameter complexity, encoded semantic metadata size, exact residual storage size, and a small instability penalty. This lets rigid or similarity win over translation when the simpler model would force a large exact correction, while still letting lossless-only reconstruction win for isolated local edits. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
+
+Affine fitting uses deterministic triangle-area-derived vertex weights so densely tessellated regions do not automatically dominate the inferred geometric explanation. Exact package verification still compares every original vertex and ordered triangle index directly.
 
 The package writer builds and verifies a sibling staging directory before replacing the requested output directory. A failed write therefore does not partially overwrite an existing valid package, and stale files from an older package are removed on successful replacement.
 

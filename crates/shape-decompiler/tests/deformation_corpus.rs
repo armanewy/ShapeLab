@@ -56,6 +56,16 @@ fn transformed_mesh(
     target
 }
 
+fn scaled_mesh(source: &TriangleMesh, scale: f32) -> TriangleMesh {
+    transformed_mesh(source, |position| {
+        [
+            position[0] * scale,
+            position[1] * scale,
+            position[2] * scale,
+        ]
+    })
+}
+
 #[test]
 fn corpus_translation_prefers_translation_metadata() {
     let source = cube_mesh();
@@ -136,6 +146,29 @@ fn corpus_large_translation_does_not_hide_rigid_transform() {
 }
 
 #[test]
+fn corpus_scoring_keeps_coherent_rotation_despite_large_translation() {
+    let source = cube_mesh();
+    let target = transformed_mesh(&source, |position| {
+        [
+            0.6 * position[0] - 0.8 * position[1] + 1000.0,
+            0.8 * position[0] + 0.6 * position[1] - 1000.0,
+            position[2] + 500.0,
+        ]
+    });
+
+    let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+    let Some(OperatorManifest::GlobalAffine {
+        semantic_family, ..
+    }) = result.manifest.operators.first()
+    else {
+        panic!("expected affine operator");
+    };
+    assert_eq!(*semantic_family, AffineSemanticFamily::RigidTransform);
+    assert_eq!(result.reconstructed_positions, target.positions);
+}
+
+#[test]
 fn corpus_planar_rigid_transform_prefers_rigid_metadata() {
     let source = square_mesh();
     let target = transformed_mesh(&source, |position| {
@@ -155,6 +188,59 @@ fn corpus_planar_rigid_transform_prefers_rigid_metadata() {
     assert_eq!(*semantic_family, AffineSemanticFamily::RigidTransform);
     assert_eq!(*translation, Some([0.25, -0.5, 0.0]));
     assert!(result.residual_indices.is_empty());
+    assert_eq!(result.reconstructed_positions, target.positions);
+}
+
+#[test]
+fn corpus_generated_coordinate_scales_keep_family_stable() {
+    let base = cube_mesh();
+    for scale in [1.0e-3_f32, 1.0, 1.0e3] {
+        let source = scaled_mesh(&base, scale);
+        let target = transformed_mesh(&source, |position| {
+            [
+                -position[1] + 0.25 * scale,
+                position[0] - 0.5 * scale,
+                position[2] + 1.5 * scale,
+            ]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family, ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected affine operator at scale {scale}");
+        };
+        assert_eq!(
+            *semantic_family,
+            AffineSemanticFamily::RigidTransform,
+            "unexpected family at scale {scale}"
+        );
+        assert_eq!(result.reconstructed_positions, target.positions);
+    }
+}
+
+#[test]
+fn corpus_near_unit_scale_uses_similarity_when_it_saves_residuals() {
+    let source = cube_mesh();
+    let target = transformed_mesh(&source, |position| {
+        [
+            -1.01 * position[1] + 0.25,
+            1.01 * position[0] - 0.5,
+            1.01 * position[2] + 1.5,
+        ]
+    });
+
+    let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+    let Some(OperatorManifest::GlobalAffine {
+        semantic_family, ..
+    }) = result.manifest.operators.first()
+    else {
+        panic!("expected affine operator");
+    };
+    assert_eq!(*semantic_family, AffineSemanticFamily::SimilarityTransform);
     assert_eq!(result.reconstructed_positions, target.positions);
 }
 
@@ -228,6 +314,23 @@ fn corpus_residual_fallback_is_lossless_when_affine_is_rejected() {
     };
 
     let result = decompile_pair(&source, &target, settings).unwrap();
+
+    assert!(matches!(
+        result.manifest.operators.first(),
+        Some(OperatorManifest::LosslessCorrection { .. })
+    ));
+    assert_eq!(result.residual_indices, vec![6]);
+    assert_eq!(result.residual_positions, vec![target.positions[6]]);
+    assert_eq!(result.reconstructed_positions, target.positions);
+}
+
+#[test]
+fn corpus_local_edit_prefers_lossless_only_over_affine_overfit() {
+    let source = cube_mesh();
+    let mut target = source.clone();
+    target.positions[6] = [1.25, 0.75, 1.5];
+
+    let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
 
     assert!(matches!(
         result.manifest.operators.first(),
