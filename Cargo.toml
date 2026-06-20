@@ -3,6 +3,7 @@ members = [
     "crates/shape-app",
     "crates/shape-cli",
     "crates/shape-core",
+    "crates/shape-decompiler",
     "crates/shape-field",
     "crates/shape-mesh",
     "crates/shape-presets",
@@ -16,7 +17,7 @@ resolver = "3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://example.invalid/shape-lab"
-rust-version = "1.88"
+rust-version = "1.92"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
@@ -41,6 +42,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 
 shape-core = { path = "crates/shape-core" }
+shape-decompiler = { path = "crates/shape-decompiler" }
 shape-field = { path = "crates/shape-field" }
 shape-mesh = { path = "crates/shape-mesh" }
 shape-presets = { path = "crates/shape-presets" }

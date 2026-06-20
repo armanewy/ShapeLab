@@ -9,8 +9,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
+use shape_decompiler::{
+    DecompileSettings, OperatorManifest, decompile_pair, verify_decompile_package,
+    write_decompile_package,
+};
 use shape_field::compile_document;
-use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, write_obj_to_path};
+use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::{RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
@@ -44,6 +48,10 @@ enum Command {
     Validate(ValidateArgs),
     /// Export the current revision from a project JSON file.
     Export(ExportArgs),
+    /// Decompile a same-topology source/target OBJ pair into deformation IR.
+    Decompile(DecompileArgs),
+    /// Replay-verify a serialized decompile package.
+    VerifyDecompile(VerifyDecompileArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -96,6 +104,29 @@ struct ExportArgs {
     /// Uniform mesh resolution.
     #[arg(long, default_value_t = DEFAULT_MESH_RESOLUTION)]
     mesh_resolution: usize,
+}
+
+#[derive(Debug, clap::Args)]
+struct DecompileArgs {
+    /// Source OBJ mesh.
+    source: PathBuf,
+    /// Target OBJ mesh with identical ordered topology.
+    target: PathBuf,
+    /// Output package directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+    /// Minimum displacement fraction required to emit an affine operator.
+    #[arg(long, default_value_t = 0.01)]
+    affine_min_explained: f32,
+    /// Verification tolerance; the final residual remains lossless.
+    #[arg(long, default_value_t = 0.0)]
+    residual_epsilon: f32,
+}
+
+#[derive(Debug, clap::Args)]
+struct VerifyDecompileArgs {
+    /// Decompile package directory.
+    package: PathBuf,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -165,6 +196,8 @@ fn main() -> anyhow::Result<()> {
         Command::Demo(args) => run_demo(args),
         Command::Validate(args) => run_validate(args),
         Command::Export(args) => run_export(args),
+        Command::Decompile(args) => run_decompile(args),
+        Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
 }
 
@@ -310,6 +343,71 @@ fn run_export(args: ExportArgs) -> anyhow::Result<()> {
     if let Some(path) = args.png {
         save_png(&preview.image, path)?;
     }
+    Ok(())
+}
+
+fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
+    let source = read_obj_from_path(&args.source)
+        .with_context(|| format!("loading source OBJ {}", args.source.display()))?;
+    let target = read_obj_from_path(&args.target)
+        .with_context(|| format!("loading target OBJ {}", args.target.display()))?;
+    let settings = DecompileSettings {
+        affine_min_explained: args.affine_min_explained,
+        residual_epsilon: args.residual_epsilon,
+    };
+    let result = decompile_pair(&source, &target, settings)
+        .context("decompiling same-topology mesh pair")?;
+    let paths = write_decompile_package(&result, &source, &target, &args.out_dir)
+        .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
+
+    let affine_explained = result
+        .manifest
+        .operators
+        .iter()
+        .find_map(|operator| match operator {
+            OperatorManifest::GlobalAffine {
+                explained_displacement_fraction,
+                ..
+            } => Some(*explained_displacement_fraction),
+            OperatorManifest::LosslessCorrection { .. } => None,
+        })
+        .unwrap_or(0.0);
+    println!("Decompiled same-topology mesh pair");
+    println!("  vertices: {}", result.manifest.topology.vertex_count);
+    println!("  triangles: {}", result.manifest.topology.triangle_count);
+    println!("  topology hash: {}", result.manifest.topology.hash);
+    println!("  operators: {}", result.manifest.operators.len());
+    println!("  affine explained: {:.3}%", affine_explained * 100.0);
+    println!("  residual vertices: {}", result.residual_indices.len());
+    println!(
+        "  final max error: {:.9}",
+        result.verification.max_euclidean_error
+    );
+    println!("  manifest: {}", paths.manifest.display());
+    println!(
+        "  package verification: {}",
+        paths.package_verification.display()
+    );
+    println!("  blender script: {}", paths.blender_script.display());
+    Ok(())
+}
+
+fn run_verify_decompile(args: VerifyDecompileArgs) -> anyhow::Result<()> {
+    let report = verify_decompile_package(&args.package)
+        .with_context(|| format!("verifying decompile package {}", args.package.display()))?;
+    println!("Verified decompile package");
+    println!("  schema: {}", report.schema_version);
+    println!("  vertices: {}", report.vertex_count);
+    println!("  triangles: {}", report.triangle_count);
+    println!("  operators: {}", report.operator_count);
+    println!("  topology exact: {}", report.topology_exact);
+    println!(
+        "  topology hash matches: {}",
+        report.topology_hash_matches_manifest
+    );
+    println!("  positions bit-exact: {}", report.positions_bit_exact);
+    println!("  residual vertices: {}", report.residual_vertex_count);
+    println!("  final max error: {:.9}", report.max_euclidean_error);
     Ok(())
 }
 

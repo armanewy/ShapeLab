@@ -5,7 +5,7 @@ This pass focused on release-blocking issues that prevented the native MVP from 
 ## Fixed
 
 - Verified and preserved the `shape-app` integration against the pinned `eframe`/`egui` versions in this repository. `eframe 0.34.3` requires the `ui(...)` app hook here, and the app uses the non-deprecated `egui::Panel::*().show_inside(...)` APIs for native layout.
-- Lowered the workspace `rust-version` from the future/unavailable `1.95` to `1.88`, which is compatible with the 2024 edition baseline and avoids blocking stable toolchains before Rust 1.95 exists.
+- Corrected the workspace `rust-version` to `1.92`, matching the pinned `eframe`/`egui` 0.34.3 dependency family's declared minimum supported Rust version.
 - Confirmed the duplicate `#[derive(...)]` issue on `GridSamples` is not present in the integrated tree.
 - Moved OBJ export onto the existing background job path from the state layer, so export no longer requires the UI coordinator to perform synchronous mesh file I/O.
 - Removed the stale synchronous export app effect so exports have one application path: `AppCommand::ExportCurrentObj` schedules `JobRequest::ExportCurrent`.

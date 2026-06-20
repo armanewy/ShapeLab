@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! Uniform-grid mesh generation and OBJ export.
+//! Uniform-grid mesh generation and OBJ import/export.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -108,7 +108,7 @@ pub enum MeshError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     /// I/O failed for a specific path.
-    #[error("io error while writing {path}: {source}")]
+    #[error("io error for {path}: {source}")]
     PathIo {
         /// Output path.
         path: PathBuf,
@@ -242,6 +242,244 @@ pub fn write_obj_to_string(mesh: &TriangleMesh) -> Result<String, MeshError> {
     let mut bytes = Vec::new();
     write_obj(mesh, &mut bytes)?;
     String::from_utf8(bytes).map_err(|error| MeshError::InvalidMesh(error.to_string()))
+}
+
+/// Read a triangle OBJ mesh from a path.
+pub fn read_obj_from_path(path: impl AsRef<Path>) -> Result<TriangleMesh, MeshError> {
+    let path = path.as_ref();
+    let file = File::open(path).map_err(|source| path_io(path, source))?;
+    read_obj(BufReader::new(file))
+}
+
+/// Read a triangle OBJ mesh from any buffered reader.
+///
+/// The parser accepts vertex records (`v`) and triangular faces (`f`) using
+/// `v`, `v/vt`, `v//vn`, or `v/vt/vn` face elements. Normals are recomputed
+/// into the mesh's one-normal-per-position representation.
+pub fn read_obj(reader: impl BufRead) -> Result<TriangleMesh, MeshError> {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+
+    for (line_index, line_result) in reader.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = line_result?;
+        let Some(trimmed) = line.split('#').next().map(str::trim) else {
+            continue;
+        };
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let Some(kind) = parts.next() else {
+            continue;
+        };
+
+        match kind {
+            "v" => {
+                let x = parse_obj_f32(parts.next(), line_number, "x")?;
+                let y = parse_obj_f32(parts.next(), line_number, "y")?;
+                let z = parse_obj_f32(parts.next(), line_number, "z")?;
+                if parts.next().is_some() {
+                    return Err(obj_parse_error(
+                        line_number,
+                        "vertex records must contain exactly three coordinates",
+                    ));
+                }
+                positions.push([x, y, z]);
+            }
+            "f" => {
+                let face = parts.collect::<Vec<_>>();
+                if face.len() != 3 {
+                    return Err(obj_parse_error(
+                        line_number,
+                        "only triangular faces are supported",
+                    ));
+                }
+                for element in face {
+                    indices.push(parse_obj_vertex_index(
+                        element,
+                        positions.len(),
+                        line_number,
+                    )?);
+                }
+            }
+            "vn" | "vt" | "o" | "g" | "s" | "mtllib" | "usemtl" => {}
+            _ => {}
+        }
+    }
+
+    mesh_from_obj_data(positions, indices)
+}
+
+fn parse_obj_f32(
+    token: Option<&str>,
+    line_number: usize,
+    field: &'static str,
+) -> Result<f32, MeshError> {
+    let token = token.ok_or_else(|| obj_parse_error(line_number, format!("missing {field}")))?;
+    let value = token.parse::<f32>().map_err(|_| {
+        obj_parse_error(
+            line_number,
+            format!("invalid floating-point {field} coordinate"),
+        )
+    })?;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(obj_parse_error(
+            line_number,
+            format!("{field} coordinate must be finite"),
+        ))
+    }
+}
+
+fn parse_obj_vertex_index(
+    element: &str,
+    position_count: usize,
+    line_number: usize,
+) -> Result<u32, MeshError> {
+    let components = element.split('/').collect::<Vec<_>>();
+    let raw_index = match components.as_slice() {
+        [position] if !position.is_empty() => *position,
+        [position, texture] if !position.is_empty() && !texture.is_empty() => {
+            parse_obj_aux_index(texture, line_number, "texture")?;
+            *position
+        }
+        [position, "", normal] if !position.is_empty() && !normal.is_empty() => {
+            parse_obj_aux_index(normal, line_number, "normal")?;
+            *position
+        }
+        [position, texture, normal]
+            if !position.is_empty() && !texture.is_empty() && !normal.is_empty() =>
+        {
+            parse_obj_aux_index(texture, line_number, "texture")?;
+            parse_obj_aux_index(normal, line_number, "normal")?;
+            *position
+        }
+        _ => {
+            return Err(obj_parse_error(
+                line_number,
+                "face vertex must use v, v/vt, v//vn, or v/vt/vn",
+            ));
+        }
+    };
+    let parsed = raw_index
+        .parse::<i64>()
+        .map_err(|_| obj_parse_error(line_number, "invalid face vertex position index"))?;
+    if parsed == 0 {
+        return Err(obj_parse_error(
+            line_number,
+            "OBJ position indices are one-based; zero is invalid",
+        ));
+    }
+
+    let zero_based = if parsed > 0 {
+        parsed - 1
+    } else {
+        i64::try_from(position_count).map_err(|_| MeshError::IndexOverflow)? + parsed
+    };
+    if zero_based < 0 || zero_based >= i64::try_from(position_count).unwrap_or(i64::MAX) {
+        return Err(obj_parse_error(
+            line_number,
+            "face vertex position index is out of range",
+        ));
+    }
+    u32::try_from(zero_based).map_err(|_| MeshError::IndexOverflow)
+}
+
+fn parse_obj_aux_index(
+    raw_index: &str,
+    line_number: usize,
+    label: &'static str,
+) -> Result<(), MeshError> {
+    let parsed = raw_index
+        .parse::<i64>()
+        .map_err(|_| obj_parse_error(line_number, format!("invalid face vertex {label} index")))?;
+    if parsed == 0 {
+        Err(obj_parse_error(
+            line_number,
+            format!("OBJ {label} indices are one-based; zero is invalid"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn mesh_from_obj_data(
+    positions: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+) -> Result<TriangleMesh, MeshError> {
+    if positions.is_empty() {
+        return Err(MeshError::InvalidMesh(
+            "OBJ must contain at least one vertex".to_owned(),
+        ));
+    }
+    if !indices.len().is_multiple_of(3) {
+        return Err(MeshError::InvalidMesh(
+            "OBJ index count must be divisible by three".to_owned(),
+        ));
+    }
+    let normals = computed_vertex_normals(&positions, &indices)?;
+    let bounds = bounds_from_positions(&positions)?;
+    let mesh = TriangleMesh {
+        positions,
+        normals,
+        indices,
+        bounds,
+    };
+    validate_mesh(&mesh)?;
+    Ok(mesh)
+}
+
+fn computed_vertex_normals(
+    positions: &[[f32; 3]],
+    indices: &[u32],
+) -> Result<Vec<[f32; 3]>, MeshError> {
+    let mut normals = vec![Vec3::ZERO; positions.len()];
+    for triangle in indices.chunks_exact(3) {
+        let a = vertex_position(positions, triangle[0])?;
+        let b = vertex_position(positions, triangle[1])?;
+        let c = vertex_position(positions, triangle[2])?;
+        if let Some(face_normal) = normalize_or_none((b - a).cross(c - a)) {
+            normals[triangle[0] as usize] += face_normal;
+            normals[triangle[1] as usize] += face_normal;
+            normals[triangle[2] as usize] += face_normal;
+        }
+    }
+    Ok(normals
+        .into_iter()
+        .map(|normal| normalize_or_none(normal).unwrap_or(Vec3::Y).to_array())
+        .collect())
+}
+
+fn vertex_position(positions: &[[f32; 3]], index: u32) -> Result<Vec3, MeshError> {
+    positions
+        .get(index as usize)
+        .copied()
+        .map(Vec3::from_array)
+        .ok_or_else(|| MeshError::InvalidMesh("face index is out of range".to_owned()))
+}
+
+fn bounds_from_positions(positions: &[[f32; 3]]) -> Result<Aabb, MeshError> {
+    let mut bounds = Aabb::empty();
+    for position in positions {
+        if !array_is_finite(*position) {
+            return Err(MeshError::InvalidMesh(
+                "all OBJ positions must be finite".to_owned(),
+            ));
+        }
+        let point = Vec3::from_array(*position);
+        bounds = bounds.union(&Aabb {
+            min: point,
+            max: point,
+        });
+    }
+    Ok(bounds)
+}
+
+fn obj_parse_error(line_number: usize, message: impl Into<String>) -> MeshError {
+    MeshError::InvalidMesh(format!("OBJ line {line_number}: {}", message.into()))
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -762,7 +1000,7 @@ fn array_is_finite(array: [f32; 3]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::{self, Write};
+    use std::io::{self, Cursor, Write};
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1003,6 +1241,69 @@ mod tests {
     }
 
     #[test]
+    fn obj_round_trips_exported_triangle_mesh() {
+        let mesh = triangle_mesh();
+        let obj = obj_string(&mesh);
+
+        let imported = read_obj(Cursor::new(obj)).unwrap();
+
+        assert_eq!(imported.positions, mesh.positions);
+        assert_eq!(imported.indices, mesh.indices);
+        assert_eq!(imported.bounds, mesh.bounds);
+        assert_eq!(imported.normals.len(), imported.positions.len());
+    }
+
+    #[test]
+    fn obj_reader_accepts_common_face_index_forms() {
+        let obj = "\
+v 0 0 0
+v 1 0 0
+v 0 1 0
+vn 0 0 1
+f 1/1/1 2//1 -1
+";
+
+        let imported = read_obj(Cursor::new(obj)).unwrap();
+
+        assert_eq!(imported.positions.len(), 3);
+        assert_eq!(imported.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn obj_reader_rejects_non_triangular_faces() {
+        let obj = "\
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+f 1 2 3 4
+";
+
+        let error = read_obj(Cursor::new(obj)).unwrap_err();
+
+        assert!(matches!(error, MeshError::InvalidMesh(_)));
+        assert!(error.to_string().contains("triangular"));
+    }
+
+    #[test]
+    fn obj_reader_rejects_malformed_face_vertex_tokens() {
+        for token in ["1/", "1/2/", "1//", "/1/2", "1/0/2"] {
+            let obj = format!(
+                "\
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f {token} 2 3
+"
+            );
+
+            let error = read_obj(Cursor::new(obj)).unwrap_err();
+
+            assert!(matches!(error, MeshError::InvalidMesh(_)));
+        }
+    }
+
+    #[test]
     fn obj_export_atomically_replaces_existing_file() {
         let temp_dir = tempdir();
         let path = temp_dir.path().join("mesh.obj");
@@ -1074,6 +1375,18 @@ mod tests {
             },
         )
         .expect("sphere mesh should be generated")
+    }
+
+    fn triangle_mesh() -> TriangleMesh {
+        TriangleMesh {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+            bounds: Aabb {
+                min: Vec3::ZERO,
+                max: Vec3::new(1.0, 1.0, 0.0),
+            },
+        }
     }
 
     fn obj_string(mesh: &TriangleMesh) -> String {

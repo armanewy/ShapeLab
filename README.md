@@ -83,18 +83,27 @@ cargo run -p shape-cli -- validate target/demo-lamp/project-after.json
 cargo run -p shape-cli -- export target/demo-lamp/project-after.json --obj target/demo-lamp/export.obj --png target/demo-lamp/export.png
 ```
 
+Decompile a same-topology mesh pair into deformation IR and a Blender reconstruction script, then independently replay-verify the serialized package:
+
+```bash
+cargo run -p shape-cli -- decompile source.obj target.obj --out-dir target/decompile-package
+cargo run -p shape-cli -- verify-decompile target/decompile-package
+```
+
+The decompiler requires identical ordered topology and writes canonical binary mesh sidecars, an editable affine stage when useful, an exact final correction, `manifest.json`, two verification reports, and `blender_reconstruct.py`. Package schema 2 specifies deterministic stepwise binary32 affine arithmetic so the Rust and Python replayers agree bit-for-bit. Package output is staged and replay-verified before replacing an existing directory. Details are in [`docs/deformation-decompiler.md`](docs/deformation-decompiler.md).
+
 ## Scope
 
 The MVP is category-general because it contains no humanoid-specific engine concepts. Presets include a lamp, submarine, alien plant, and sky shrine, and the core vocabulary is nodes, primitives, transforms, tags, constraints, edits, candidates, and revisions.
 
-The MVP is still representation-specific: it edits implicit shape graphs. Arbitrary imported triangle meshes are not semantically editable yet.
+The MVP is still representation-specific: the main editor works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
 
 ## Non-Goals Before MVP Gate
 
 - Natural-language modeling
 - LLM integration
-- Blender integration
-- Imported mesh editing
+- General Blender integration beyond the decompiler reconstruction script
+- General imported mesh editing without known vertex correspondence
 - Rigging, animation, UVs, or texturing
 - GPU compute or a custom GPU viewport
 - Cloud or collaborative features

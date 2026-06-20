@@ -14,6 +14,7 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shape-core.workspace = true
+shape-decompiler.workspace = true
 shape-field.workspace = true
 shape-mesh.workspace = true
 shape-presets.workspace = true
