@@ -1,6 +1,6 @@
 param(
     [string]$OutDir = "target/demo-assets",
-    [string[]]$Preset = @("desk-lamp", "toy-submarine", "alien-plant"),
+    [string[]]$Preset = @("desk-lamp", "toy-submarine", "alien-plant", "sky-shrine"),
     [UInt64]$Seed = 42,
     [ValidateSet("explore", "refine")]
     [string]$Mode = "explore",

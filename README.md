@@ -22,7 +22,7 @@ Detailed local and CI build instructions, including Linux native packages and th
 The native app opens a local `egui` desktop workspace with:
 
 - a rendered current-shape viewport with orbit, pan, zoom, fit, and resize-triggered rerenders
-- preset loading for Desk Lamp, Toy Submarine, and Alien Plant
+- preset loading for Desk Lamp, Toy Submarine, Alien Plant, and Sky Shrine
 - an outliner, inspector, revision history, status bar, and candidate gallery
 - background preview, render, and candidate generation jobs that keep the UI responsive
 - JSON project save/open and OBJ export
@@ -66,6 +66,7 @@ Generate deterministic demo artifacts:
 cargo run -p shape-cli -- demo --preset desk-lamp --seed 42 --out-dir target/demo-lamp
 cargo run -p shape-cli -- demo --preset toy-submarine --seed 42 --out-dir target/demo-submarine
 cargo run -p shape-cli -- demo --preset alien-plant --seed 42 --out-dir target/demo-plant
+cargo run -p shape-cli -- demo --preset sky-shrine --seed 42 --out-dir target/demo-shrine
 pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets
 ```
 
@@ -82,7 +83,7 @@ cargo run -p shape-cli -- export target/demo-lamp/project-after.json --obj targe
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Presets include a lamp, submarine, and alien plant, and the core vocabulary is nodes, primitives, transforms, tags, constraints, edits, candidates, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine concepts. Presets include a lamp, submarine, alien plant, and sky shrine, and the core vocabulary is nodes, primitives, transforms, tags, constraints, edits, candidates, and revisions.
 
 The MVP is still representation-specific: it edits implicit shape graphs. Arbitrary imported triangle meshes are not semantically editable yet.
 
