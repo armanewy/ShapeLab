@@ -236,9 +236,6 @@ pub enum FieldCompileError {
     /// Compiled field data was non-finite.
     #[error("compiled field contains non-finite data")]
     NonFiniteCompiledData,
-    /// The requested operation belongs to a later wave.
-    #[error("not implemented: {0}")]
-    NotImplemented(&'static str),
     /// Grid settings are invalid.
     #[error("invalid grid: {0}")]
     InvalidGrid(String),

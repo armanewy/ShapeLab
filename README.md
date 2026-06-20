@@ -19,6 +19,8 @@ cargo run -p shape-app --release
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
+Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+
 The native app opens a local `egui` desktop workspace with:
 
 - a rendered current-shape viewport with orbit, pan, zoom, fit, and resize-triggered rerenders

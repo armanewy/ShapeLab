@@ -479,9 +479,6 @@ pub enum RenderError {
     /// Mesh data is invalid.
     #[error("invalid mesh: {0}")]
     InvalidMesh(&'static str),
-    /// The requested operation belongs to a later wave.
-    #[error("not implemented: {0}")]
-    NotImplemented(&'static str),
 }
 
 #[derive(Debug, Copy, Clone)]

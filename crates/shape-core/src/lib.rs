@@ -437,9 +437,6 @@ pub enum CoreError {
     /// The edited document failed validation.
     #[error("document validation failed")]
     ValidationFailed(ValidationReport),
-    /// Algorithm is intentionally left for a later wave.
-    #[error("not implemented: {0}")]
-    NotImplemented(&'static str),
 }
 
 /// Validate document invariants and collect every discoverable issue.
