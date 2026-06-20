@@ -1,8 +1,7 @@
 //! Future schema-3 candidate generation and ordered program search contracts.
 //!
-//! This module intentionally does not infer bend operators yet. The stubs
-//! validate settings and return deterministic empty/baseline results so later
-//! waves can implement candidate generation behind stable contracts.
+//! This module exposes stable contracts for deterministic candidate generation
+//! and ordered search.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -65,6 +64,29 @@ impl Default for ProgramSearchSettings {
     }
 }
 
+/// Deterministic fitting trace attached to one operator candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct FittingDiagnostics {
+    /// Generator implementation that produced this candidate.
+    #[serde(default)]
+    pub generator: String,
+    /// Rank in the coarse search before refinement, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coarse_rank: Option<usize>,
+    /// Number of deterministic refinement rounds applied to this candidate.
+    #[serde(default)]
+    pub refinement_rounds: usize,
+    /// Number of candidate evaluations spent during coordinate descent.
+    #[serde(default)]
+    pub coordinate_descent_evaluations: usize,
+    /// Parameter duplicates rejected while building this candidate set.
+    #[serde(default)]
+    pub duplicate_parameter_rejections: usize,
+    /// Output-geometry duplicates rejected while building this candidate set.
+    #[serde(default)]
+    pub duplicate_geometry_rejections: usize,
+}
+
 /// One fitted semantic operator candidate available to program search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FittedOperatorCandidate {
@@ -72,6 +94,9 @@ pub struct FittedOperatorCandidate {
     pub operator: ProgramOperator,
     /// Diagnostics-ready semantic parameter record.
     pub diagnostics: ProgramOperatorDiagnostics,
+    /// Cumulative positions after applying this candidate to its source.
+    #[serde(default)]
+    pub cumulative_positions: Vec<[f32; 3]>,
     /// Weighted error before applying this candidate.
     pub weighted_error_before: f64,
     /// Weighted error after applying this candidate.
@@ -84,6 +109,18 @@ pub struct FittedOperatorCandidate {
     pub weighted_explained_fraction: f64,
     /// Raw unweighted explained fraction contributed by this candidate.
     pub raw_explained_fraction: f64,
+    /// Semantic degrees of freedom represented by this candidate.
+    #[serde(default)]
+    pub semantic_parameter_count: usize,
+    /// Serialized semantic scalar payload size in bytes.
+    #[serde(default)]
+    pub semantic_metadata_bytes: usize,
+    /// Deterministic candidate identifier derived from semantic parameters.
+    #[serde(default)]
+    pub stable_candidate_id: String,
+    /// Deterministic fitting trace.
+    #[serde(default)]
+    pub fitting_diagnostics: FittingDiagnostics,
 }
 
 /// One ordered explanatory program hypothesis.
@@ -256,20 +293,24 @@ pub fn generate_affine_candidates(
     Ok(candidates)
 }
 
-/// Generates bend candidates.
-///
-/// This stub validates settings and returns no candidates until bend inference
-/// is implemented. It does not use randomness; the deterministic seed is
-/// reserved for future implementations.
+/// Generates deterministic bend candidates using uniform vertex weights.
 pub fn generate_bend_candidates(
-    _source_positions: &[[f32; 3]],
-    _target_positions: &[[f32; 3]],
+    source_positions: &[[f32; 3]],
+    target_positions: &[[f32; 3]],
     fit_settings: &BendFitSettings,
     search_settings: &ProgramSearchSettings,
 ) -> Result<Vec<FittedOperatorCandidate>, InferenceError> {
     validate_bend_fit_settings(fit_settings)?;
     validate_program_search_settings(search_settings)?;
-    Ok(Vec::new())
+    let mut candidates = super::bend_fit::generate_bend_candidates(
+        source_positions,
+        target_positions,
+        &[],
+        &[],
+        *fit_settings,
+    )?;
+    candidates.truncate(search_settings.maximum_bend_candidates);
+    Ok(candidates)
 }
 
 /// Searches ordered explanatory operator programs.
@@ -413,9 +454,14 @@ fn affine_candidate(
     let weighted_error_after =
         weighted_sum_squared_distance(&reconstructed, target_positions, weights);
     let raw_error_after = sum_squared_distance(&reconstructed, target_positions);
+    let semantic_parameter_count = diagnostics.semantic_parameter_count();
+    let semantic_metadata_bytes = diagnostics.semantic_metadata_bytes();
+    let operator = ProgramOperator::Affine(affine);
+    let stable_candidate_id = stable_candidate_id(&operator);
     FittedOperatorCandidate {
-        operator: ProgramOperator::Affine(affine),
+        operator,
         diagnostics,
+        cumulative_positions: reconstructed,
         weighted_error_before,
         weighted_error_after,
         raw_error_before,
@@ -425,6 +471,13 @@ fn affine_candidate(
             weighted_error_after,
         ),
         raw_explained_fraction: explained_fraction(raw_error_before, raw_error_after),
+        semantic_parameter_count,
+        semantic_metadata_bytes,
+        stable_candidate_id,
+        fitting_diagnostics: FittingDiagnostics {
+            generator: "deterministic_affine_fit".to_owned(),
+            ..FittingDiagnostics::default()
+        },
     }
 }
 
@@ -432,12 +485,69 @@ fn apply_candidate_program(
     source_positions: &[[f32; 3]],
     candidate: &FittedOperatorCandidate,
 ) -> Vec<[f32; 3]> {
+    if candidate.cumulative_positions.len() == source_positions.len() {
+        return candidate.cumulative_positions.clone();
+    }
     match candidate.operator {
         ProgramOperator::Affine(affine) => {
             apply_affine_to_positions(source_positions, affine.matrix_row_major_4x4)
         }
-        ProgramOperator::Bend(_) => source_positions.to_vec(),
+        ProgramOperator::Bend(parameters) => {
+            super::bend::evaluate_bend(&parameters, source_positions)
+                .unwrap_or_else(|_| source_positions.to_vec())
+        }
     }
+}
+
+fn stable_candidate_id(operator: &ProgramOperator) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    fn update(hash: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *hash ^= u64::from(*byte);
+            *hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    fn update_f32(hash: &mut u64, value: f32) {
+        update(hash, &value.to_bits().to_le_bytes());
+    }
+
+    let mut hash = FNV_OFFSET;
+    match operator {
+        ProgramOperator::Affine(affine) => {
+            update(&mut hash, b"affine");
+            update(
+                &mut hash,
+                match affine.semantic_family {
+                    AffineSemanticFamily::GeneralAffine => b"general_affine",
+                    AffineSemanticFamily::Translation => b"translation",
+                    AffineSemanticFamily::RigidTransform => b"rigid_transform",
+                    AffineSemanticFamily::SimilarityTransform => b"similarity_transform",
+                },
+            );
+            for value in affine.matrix_row_major_4x4 {
+                update_f32(&mut hash, value);
+            }
+        }
+        ProgramOperator::Bend(parameters) => {
+            update(&mut hash, b"bend");
+            for value in parameters.origin {
+                update_f32(&mut hash, value);
+            }
+            for value in parameters.longitudinal_axis {
+                update_f32(&mut hash, value);
+            }
+            for value in parameters.bend_direction {
+                update_f32(&mut hash, value);
+            }
+            update_f32(&mut hash, parameters.angle_radians);
+            update_f32(&mut hash, parameters.interval_start);
+            update_f32(&mut hash, parameters.interval_end);
+        }
+    }
+    format!("candidate-{hash:016x}")
 }
 
 /// Validates ordered program search settings.
@@ -488,8 +598,8 @@ mod tests {
     }
 
     #[test]
-    fn bend_candidate_stub_is_deterministic_and_empty() {
-        let candidates = generate_bend_candidates(
+    fn bend_candidate_generation_is_deterministic() {
+        let first = generate_bend_candidates(
             &[[0.0, 0.0, 0.0]],
             &[[1.0, 0.0, 0.0]],
             &BendFitSettings::default(),
@@ -499,8 +609,18 @@ mod tests {
             },
         )
         .unwrap();
+        let second = generate_bend_candidates(
+            &[[0.0, 0.0, 0.0]],
+            &[[1.0, 0.0, 0.0]],
+            &BendFitSettings::default(),
+            &ProgramSearchSettings {
+                deterministic_seed: 999,
+                ..ProgramSearchSettings::default()
+            },
+        )
+        .unwrap();
 
-        assert!(candidates.is_empty());
+        assert_eq!(first, second);
     }
 
     #[test]

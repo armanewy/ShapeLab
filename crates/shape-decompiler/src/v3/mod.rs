@@ -6,6 +6,7 @@
 //! Blender adapter behavior.
 
 pub mod bend;
+pub mod bend_fit;
 pub mod blender;
 pub mod diagnostics;
 pub mod inference;
