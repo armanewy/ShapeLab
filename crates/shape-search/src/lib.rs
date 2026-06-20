@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use shape_core::{
     Aabb, CandidateId, CoreError, EditProgram, NodeId, NodeKind, ParamDescriptor, ParamGroup,
-    PrimitiveKind, Scalar, SetScalarEdit, ShapeDocument, ShapeNode, Transform3,
+    ParamPath, PrimitiveKind, Scalar, SetScalarEdit, ShapeDocument, ShapeNode, Transform3,
 };
 use thiserror::Error;
 
@@ -21,9 +21,13 @@ const DOMAIN_PADDING_FRACTION: Scalar = 0.35;
 const DOMAIN_ESCAPE_FRACTION: Scalar = 0.15;
 const MIN_OCCUPANCY_FRACTION: Scalar = 0.001;
 const MAX_OCCUPANCY_FRACTION: Scalar = 0.999;
-const MIN_EFFECTIVE_NORMALIZED_CHANGE: Scalar = 0.002;
+const FALLBACK_PASS_COUNT: usize = 2;
+const FALLBACK_PROPOSALS_PER_RESULT: usize = 16;
+const MAX_FALLBACK_PROPOSALS: usize = 512;
 const SCALE_EPSILON: Scalar = 1.0e-4;
 const VALUE_EPSILON: Scalar = 1.0e-5;
+const LOCK_NEIGHBOR_PENALTY: Scalar = 0.18;
+const BOUNDARY_PENALTY_ZONE: Scalar = 0.045;
 
 type Point3 = [Scalar; 3];
 
@@ -112,6 +116,138 @@ pub struct Candidate {
     pub distance_from_parent: f32,
 }
 
+/// Candidate generation result with diagnostics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchOutput {
+    /// Final candidate documents in stable slot order.
+    pub candidates: Vec<Candidate>,
+    /// Quality gates, rejection counts, and accepted edit summaries.
+    pub diagnostics: SearchDiagnostics,
+}
+
+/// Search quality diagnostics for one generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchDiagnostics {
+    /// Requested raw proposals from the user request.
+    pub requested_proposals: usize,
+    /// Requested final candidates from the user request.
+    pub requested_candidates: usize,
+    /// Total proposal attempts, including fallback passes.
+    pub attempted_proposals: usize,
+    /// Proposals that passed edit, validation, descriptor, and distance gates.
+    pub valid_proposals: usize,
+    /// Final candidates returned to the caller.
+    pub candidates_returned: usize,
+    /// Number of fallback passes that were actually run.
+    pub fallback_passes: usize,
+    /// Mutable parameters available after scope, group, and lock filters.
+    pub mutable_parameter_count: usize,
+    /// Combined rejection counters across all passes.
+    pub rejections: BTreeMap<SearchRejectionReason, usize>,
+    /// Per-pass quality thresholds and rejection counters.
+    pub passes: Vec<SearchPassDiagnostics>,
+    /// Aggregate accepted-candidate parameter changes.
+    pub parameter_changes: Vec<ParameterChangeSummary>,
+    /// Smallest returned parent distance.
+    pub minimum_parent_distance: Scalar,
+    /// Mean returned parent distance.
+    pub mean_parent_distance: Scalar,
+    /// Smallest returned changed-parameter distance.
+    pub minimum_parameter_distance: Scalar,
+    /// Smallest returned visual descriptor distance.
+    pub minimum_visual_distance: Scalar,
+    /// Smallest returned occupancy-bit distance.
+    pub minimum_occupancy_distance: Scalar,
+    /// Mean preservation penalty applied to returned candidates.
+    pub mean_preservation_penalty: Scalar,
+}
+
+/// Diagnostics for one deterministic proposal pass.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchPassDiagnostics {
+    /// Zero-based pass index. Pass zero is the requested proposal batch.
+    pub pass_index: usize,
+    /// Deterministic global proposal index offset for this pass.
+    pub proposal_offset: usize,
+    /// Proposals requested in this pass.
+    pub proposal_count: usize,
+    /// Proposals attempted in this pass.
+    pub attempted_proposals: usize,
+    /// Proposals accepted into the candidate pool by this pass.
+    pub accepted_proposals: usize,
+    /// Quality thresholds used by this pass.
+    pub thresholds: SearchThresholds,
+    /// Rejection counters for this pass.
+    pub rejections: BTreeMap<SearchRejectionReason, usize>,
+}
+
+/// Distance thresholds used by proposal gates and duplicate suppression.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchThresholds {
+    /// Minimum normalized changed-parameter distance from the parent.
+    pub minimum_parameter_distance: Scalar,
+    /// Minimum visual descriptor distance from the parent.
+    pub minimum_visual_distance: Scalar,
+    /// Minimum occupancy-bit distance from the parent.
+    pub minimum_occupancy_distance: Scalar,
+    /// Minimum full parameter-vector distance between kept proposals.
+    pub duplicate_parameter_distance: Scalar,
+    /// Minimum occupancy-bit distance between kept proposals.
+    pub duplicate_occupancy_distance: Scalar,
+}
+
+/// Why a proposal was rejected before final selection.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum SearchRejectionReason {
+    /// Mutating selected parameters produced no scalar operation after snapping.
+    EmptyEdit,
+    /// The edit could not be built from current scalar values.
+    EditBuildFailed,
+    /// Core rejected the edit application.
+    CoreEditRejected,
+    /// Core or search validation rejected the edited document.
+    ValidationRejected,
+    /// Candidate bounds escaped the comparison domain.
+    BoundsEscaped,
+    /// Candidate descriptor could not be produced.
+    DescriptorRejected,
+    /// Parameter-vector extraction failed.
+    ParameterVectorUnavailable,
+    /// Changed-parameter distance was too small.
+    ParameterDistanceTooSmall,
+    /// Visual descriptor distance was too small.
+    VisualDistanceTooSmall,
+    /// Occupancy-bit distance was too small.
+    OccupancyDistanceTooSmall,
+    /// Combined parent distance was non-finite or zero.
+    NonFiniteDistance,
+    /// Exact parameter vector was already present.
+    DuplicateParameterVector,
+    /// Parameter vector was too close to an already kept proposal.
+    DuplicateParameterDistance,
+    /// Occupancy bits were too close to an already kept proposal.
+    DuplicateOccupancyDistance,
+}
+
+/// Aggregate change summary for one parameter across returned candidates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterChangeSummary {
+    /// Edited parameter path.
+    pub path: ParamPath,
+    /// Parameter group.
+    pub group: ParamGroup,
+    /// Returned candidates that changed this parameter.
+    pub changed_candidates: usize,
+    /// Mean signed scalar delta.
+    pub mean_delta: Scalar,
+    /// Largest absolute scalar delta.
+    pub max_abs_delta: Scalar,
+    /// Mean absolute normalized delta.
+    pub mean_abs_normalized_delta: Scalar,
+    /// Largest absolute normalized delta.
+    pub max_abs_normalized_delta: Scalar,
+}
+
 /// Search errors.
 #[derive(Debug, Error)]
 pub enum SearchError {
@@ -137,6 +273,14 @@ pub fn generate_candidates(
     document: &ShapeDocument,
     request: &SearchRequest,
 ) -> Result<Vec<Candidate>, SearchError> {
+    Ok(generate_candidates_with_diagnostics(document, request)?.candidates)
+}
+
+/// Generate diverse candidate documents and return search diagnostics.
+pub fn generate_candidates_with_diagnostics(
+    document: &ShapeDocument,
+    request: &SearchRequest,
+) -> Result<SearchOutput, SearchError> {
     validate_request(request)?;
     validate_document_for_search(document)?;
 
@@ -156,37 +300,234 @@ pub fn generate_candidates(
         return Err(SearchError::NoMutableParameters);
     }
 
-    let proposal_seeds: Vec<u64> = (0..request.proposal_count)
-        .map(|index| proposal_seed(request.seed, index as u64))
-        .collect();
-    let parent_vector = normalized_parameter_vector(document, &mutable_params)?;
+    let mut diagnostics = SearchDiagnostics::new(
+        request.proposal_count,
+        request.result_count,
+        mutable_params.len(),
+    );
+    let mut proposal_pool = Vec::new();
+    let passes = search_passes(request);
 
-    let mut proposals: Vec<Proposal> = proposal_seeds
-        .par_iter()
-        .enumerate()
-        .filter_map(|(proposal_index, seed)| {
-            build_proposal(
-                document,
-                request,
-                &mutable_params,
-                &parent_vector,
-                &parent_descriptor,
-                comparison_domain,
-                proposal_index,
-                *seed,
-            )
-        })
-        .collect();
+    for pass in passes {
+        let attempts: Vec<ProposalAttempt> = (0..pass.proposal_count)
+            .into_par_iter()
+            .map(|local_index| {
+                let proposal_index = pass.proposal_offset + local_index;
+                build_proposal(
+                    document,
+                    request,
+                    &mutable_params,
+                    &parent_descriptor,
+                    comparison_domain,
+                    proposal_index,
+                    proposal_seed(request.seed, proposal_index as u64),
+                    &pass,
+                )
+            })
+            .collect();
 
-    proposals.sort_by(compare_proposals_for_mode(request.mode));
-    proposals = remove_duplicate_parameter_vectors(proposals);
+        let mut pass_diagnostics = SearchPassDiagnostics {
+            pass_index: pass.pass_index,
+            proposal_offset: pass.proposal_offset,
+            proposal_count: pass.proposal_count,
+            attempted_proposals: attempts.len(),
+            accepted_proposals: 0,
+            thresholds: pass.thresholds,
+            rejections: BTreeMap::new(),
+        };
 
-    Ok(
-        select_diverse(proposals, request.result_count, request.mode)
-            .into_iter()
-            .map(Proposal::into_candidate)
-            .collect(),
+        let mut proposals = Vec::new();
+        for attempt in attempts {
+            match attempt {
+                Ok(proposal) => proposals.push(proposal),
+                Err(reason) => increment_rejection(&mut pass_diagnostics.rejections, reason),
+            }
+        }
+
+        proposals.sort_by(compare_proposals_for_mode(request.mode));
+        let accepted = merge_unique_proposals(&mut proposal_pool, proposals, &pass);
+        pass_diagnostics.accepted_proposals = accepted.accepted_count;
+        merge_rejections(&mut pass_diagnostics.rejections, accepted.rejections);
+        diagnostics.add_pass(pass_diagnostics);
+
+        let selected_count =
+            select_diverse(proposal_pool.clone(), request.result_count, request.mode).len();
+        if selected_count >= request.result_count {
+            break;
+        }
+    }
+
+    proposal_pool.sort_by(compare_proposals_for_mode(request.mode));
+    let selected = select_diverse(proposal_pool, request.result_count, request.mode);
+    diagnostics.finalize(&selected, &mutable_params);
+
+    Ok(SearchOutput {
+        candidates: selected.into_iter().map(Proposal::into_candidate).collect(),
+        diagnostics,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_proposal(
+    document: &ShapeDocument,
+    request: &SearchRequest,
+    mutable_params: &[ParamDescriptor],
+    parent_descriptor: &DescriptorMetrics,
+    comparison_domain: Aabb,
+    proposal_index: usize,
+    proposal_seed: u64,
+    pass: &SearchPass,
+) -> ProposalAttempt {
+    let mut rng = ChaCha8Rng::seed_from_u64(proposal_seed);
+    let edit = build_edit(
+        document,
+        mutable_params,
+        request.mode,
+        proposal_index,
+        proposal_seed,
+        pass.mutation_scale,
+        &mut rng,
     )
+    .map_err(|_| SearchRejectionReason::EditBuildFailed)?;
+    if edit.operations.is_empty() {
+        return Err(SearchRejectionReason::EmptyEdit);
+    }
+
+    let candidate_document = shape_core::apply_edit(document, &edit)
+        .map_err(|_| SearchRejectionReason::CoreEditRejected)?;
+    validate_document_for_search(&candidate_document)
+        .map_err(|_| SearchRejectionReason::ValidationRejected)?;
+
+    let candidate_field = SearchField::compile(&candidate_document)
+        .map_err(|_| SearchRejectionReason::ValidationRejected)?;
+    let escape_domain = comparison_domain.expanded(
+        comparison_domain.extent().max_element() * DOMAIN_ESCAPE_FRACTION + VALUE_EPSILON,
+    );
+    if !escape_domain.contains_aabb(&candidate_field.bounds()) {
+        return Err(SearchRejectionReason::BoundsEscaped);
+    }
+
+    let descriptor = describe_field(
+        &candidate_field,
+        comparison_domain,
+        request.descriptor_resolution,
+    )
+    .map_err(|_| SearchRejectionReason::DescriptorRejected)?;
+    let candidate_vector = normalized_parameter_vector(&candidate_document, mutable_params)
+        .map_err(|_| SearchRejectionReason::ParameterVectorUnavailable)?;
+    let parameter_distance = edit_parameter_distance(&edit, mutable_params);
+    if parameter_distance < pass.thresholds.minimum_parameter_distance {
+        return Err(SearchRejectionReason::ParameterDistanceTooSmall);
+    }
+    let visual_distance = descriptor_distance_without_params(parent_descriptor, &descriptor);
+    if visual_distance < pass.thresholds.minimum_visual_distance {
+        return Err(SearchRejectionReason::VisualDistanceTooSmall);
+    }
+    let occupancy_distance = occupancy_hamming_distance(parent_descriptor, &descriptor);
+    if occupancy_distance < pass.thresholds.minimum_occupancy_distance {
+        return Err(SearchRejectionReason::OccupancyDistanceTooSmall);
+    }
+    let distance_from_parent =
+        descriptor_distance(parent_descriptor, &descriptor, parameter_distance);
+    if !distance_from_parent.is_finite() || distance_from_parent <= 0.0 {
+        return Err(SearchRejectionReason::NonFiniteDistance);
+    }
+
+    let param_vector_key = exact_parameter_vector(&candidate_document, mutable_params)
+        .map_err(|_| SearchRejectionReason::ParameterVectorUnavailable)?;
+    let preservation_penalty = preservation_penalty(document, &edit, mutable_params);
+
+    Ok(Proposal {
+        proposal_index,
+        candidate: Candidate {
+            id: CandidateId(stable_candidate_id(proposal_seed, proposal_index as u64)),
+            document: candidate_document,
+            edit,
+            descriptor: descriptor.to_public(),
+            distance_from_parent,
+        },
+        metrics: descriptor,
+        param_vector_key,
+        param_vector: candidate_vector,
+        parameter_distance,
+        visual_distance,
+        occupancy_distance,
+        preservation_penalty,
+    })
+}
+
+type ProposalAttempt = Result<Proposal, SearchRejectionReason>;
+
+impl SearchDiagnostics {
+    fn new(
+        requested_proposals: usize,
+        requested_candidates: usize,
+        mutable_parameter_count: usize,
+    ) -> Self {
+        Self {
+            requested_proposals,
+            requested_candidates,
+            attempted_proposals: 0,
+            valid_proposals: 0,
+            candidates_returned: 0,
+            fallback_passes: 0,
+            mutable_parameter_count,
+            rejections: BTreeMap::new(),
+            passes: Vec::new(),
+            parameter_changes: Vec::new(),
+            minimum_parent_distance: 0.0,
+            mean_parent_distance: 0.0,
+            minimum_parameter_distance: 0.0,
+            minimum_visual_distance: 0.0,
+            minimum_occupancy_distance: 0.0,
+            mean_preservation_penalty: 0.0,
+        }
+    }
+
+    fn add_pass(&mut self, pass: SearchPassDiagnostics) {
+        self.attempted_proposals += pass.attempted_proposals;
+        self.valid_proposals += pass.accepted_proposals;
+        if pass.pass_index > 0 {
+            self.fallback_passes += 1;
+        }
+        merge_rejections(&mut self.rejections, pass.rejections.clone());
+        self.passes.push(pass);
+    }
+
+    fn finalize(&mut self, selected: &[Proposal], mutable_params: &[ParamDescriptor]) {
+        self.candidates_returned = selected.len();
+        self.parameter_changes = parameter_change_summaries(selected, mutable_params);
+        if selected.is_empty() {
+            return;
+        }
+
+        self.minimum_parent_distance = selected
+            .iter()
+            .map(|proposal| proposal.candidate.distance_from_parent)
+            .fold(Scalar::INFINITY, Scalar::min);
+        self.mean_parent_distance = selected
+            .iter()
+            .map(|proposal| proposal.candidate.distance_from_parent)
+            .sum::<Scalar>()
+            / selected.len() as Scalar;
+        self.minimum_parameter_distance = selected
+            .iter()
+            .map(|proposal| proposal.parameter_distance)
+            .fold(Scalar::INFINITY, Scalar::min);
+        self.minimum_visual_distance = selected
+            .iter()
+            .map(|proposal| proposal.visual_distance)
+            .fold(Scalar::INFINITY, Scalar::min);
+        self.minimum_occupancy_distance = selected
+            .iter()
+            .map(|proposal| proposal.occupancy_distance)
+            .fold(Scalar::INFINITY, Scalar::min);
+        self.mean_preservation_penalty = selected
+            .iter()
+            .map(|proposal| proposal.preservation_penalty)
+            .sum::<Scalar>()
+            / selected.len() as Scalar;
+    }
 }
 
 fn validate_request(request: &SearchRequest) -> Result<(), SearchError> {
@@ -289,87 +630,21 @@ fn descriptor_has_valid_range(descriptor: &ParamDescriptor) -> bool {
         && descriptor.mutation_sigma > 0.0
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_proposal(
-    document: &ShapeDocument,
-    request: &SearchRequest,
-    mutable_params: &[ParamDescriptor],
-    parent_vector: &[Scalar],
-    parent_descriptor: &DescriptorMetrics,
-    comparison_domain: Aabb,
-    proposal_index: usize,
-    proposal_seed: u64,
-) -> Option<Proposal> {
-    let mut rng = ChaCha8Rng::seed_from_u64(proposal_seed);
-    let edit = build_edit(
-        document,
-        mutable_params,
-        request.mode,
-        proposal_index,
-        proposal_seed,
-        &mut rng,
-    )
-    .ok()?;
-    if edit.operations.is_empty() {
-        return None;
-    }
-
-    let candidate_document = shape_core::apply_edit(document, &edit).ok()?;
-    validate_document_for_search(&candidate_document).ok()?;
-
-    let candidate_field = SearchField::compile(&candidate_document).ok()?;
-    let escape_domain = comparison_domain.expanded(
-        comparison_domain.extent().max_element() * DOMAIN_ESCAPE_FRACTION + VALUE_EPSILON,
-    );
-    if !escape_domain.contains_aabb(&candidate_field.bounds()) {
-        return None;
-    }
-
-    let descriptor = describe_field(
-        &candidate_field,
-        comparison_domain,
-        request.descriptor_resolution,
-    )
-    .ok()?;
-    let candidate_vector = normalized_parameter_vector(&candidate_document, mutable_params).ok()?;
-    let parameter_distance = vector_distance(parent_vector, &candidate_vector);
-    if parameter_distance < MIN_EFFECTIVE_NORMALIZED_CHANGE {
-        return None;
-    }
-    let distance_from_parent =
-        descriptor_distance(parent_descriptor, &descriptor, parameter_distance);
-    if !distance_from_parent.is_finite() || distance_from_parent <= 0.0 {
-        return None;
-    }
-
-    Some(Proposal {
-        proposal_index,
-        candidate: Candidate {
-            id: CandidateId(stable_candidate_id(proposal_seed, proposal_index as u64)),
-            document: candidate_document.clone(),
-            edit,
-            descriptor: descriptor.to_public(),
-            distance_from_parent,
-        },
-        metrics: descriptor,
-        param_vector_key: exact_parameter_vector(&candidate_document, mutable_params).ok()?,
-    })
-}
-
 fn build_edit(
     document: &ShapeDocument,
     mutable_params: &[ParamDescriptor],
     mode: ExplorationMode,
     proposal_index: usize,
     proposal_seed: u64,
+    mutation_scale: Scalar,
     rng: &mut ChaCha8Rng,
 ) -> Result<EditProgram, SearchError> {
-    let selected_indices = choose_parameter_indices(mutable_params.len(), mode, rng);
+    let selected_indices = choose_parameter_indices(mutable_params, mode, proposal_index, rng);
     let mut operations = Vec::new();
     for param_index in selected_indices {
         let descriptor = &mutable_params[param_index];
         let before = shape_core::get_scalar(document, &descriptor.path)?;
-        let after = mutate_value(before, descriptor, mode, rng);
+        let after = mutate_value(before, descriptor, mode, mutation_scale, rng);
         if (after - before).abs() > VALUE_EPSILON {
             operations.push(SetScalarEdit {
                 path: descriptor.path.clone(),
@@ -394,10 +669,12 @@ fn build_edit(
 }
 
 fn choose_parameter_indices(
-    parameter_count: usize,
+    mutable_params: &[ParamDescriptor],
     mode: ExplorationMode,
+    proposal_index: usize,
     rng: &mut ChaCha8Rng,
 ) -> Vec<usize> {
+    let parameter_count = mutable_params.len();
     let target_count = match mode {
         ExplorationMode::Refine => {
             if parameter_count == 1 || rng.random_bool(0.70) {
@@ -416,39 +693,70 @@ fn choose_parameter_indices(
         }
     };
     let target_count = target_count.min(parameter_count);
-    let mut indices: Vec<usize> = (0..parameter_count).collect();
-    for index in 0..target_count {
-        let swap_with = rng.random_range(index..parameter_count);
-        indices.swap(index, swap_with);
+
+    let grouped = grouped_parameter_indices(mutable_params);
+    let groups: Vec<Vec<usize>> = grouped.into_values().collect();
+    if groups.is_empty() {
+        return Vec::new();
     }
-    indices.truncate(target_count);
+    let start_group = proposal_index % groups.len();
+    let mut indices = Vec::new();
+    for offset in 0..groups.len() {
+        if indices.len() == target_count {
+            break;
+        }
+        let group_index = (start_group + offset) % groups.len();
+        let group = &groups[group_index];
+        let selected = group[rng.random_range(0..group.len())];
+        if !indices.contains(&selected) {
+            indices.push(selected);
+        }
+    }
+
+    while indices.len() < target_count {
+        let selected = rng.random_range(0..parameter_count);
+        if !indices.contains(&selected) {
+            indices.push(selected);
+        }
+    }
+
     indices.sort_unstable();
     indices
+}
+
+fn grouped_parameter_indices(
+    mutable_params: &[ParamDescriptor],
+) -> BTreeMap<ParamGroup, Vec<usize>> {
+    let mut grouped: BTreeMap<ParamGroup, Vec<usize>> = BTreeMap::new();
+    for (index, descriptor) in mutable_params.iter().enumerate() {
+        grouped.entry(descriptor.group).or_default().push(index);
+    }
+    grouped
 }
 
 fn mutate_value(
     before: Scalar,
     descriptor: &ParamDescriptor,
     mode: ExplorationMode,
+    mutation_scale: Scalar,
     rng: &mut ChaCha8Rng,
 ) -> Scalar {
     let normalized_before = normalize(before, descriptor);
     let range = descriptor.maximum - descriptor.minimum;
-    let base_sigma = (descriptor.mutation_sigma / range).clamp(0.01, 0.35);
+    let base_sigma = (descriptor.mutation_sigma / range).clamp(0.006, 0.09);
     let mode_scale = match mode {
-        ExplorationMode::Refine => 0.75,
-        ExplorationMode::Explore => 2.35,
+        ExplorationMode::Refine => 0.70,
+        ExplorationMode::Explore => 1.65,
     };
     let normal_delta: Scalar = StandardNormal.sample(rng);
-    let mut delta = normal_delta * base_sigma * mode_scale;
-    let min_delta = match mode {
-        ExplorationMode::Refine => 0.01,
-        ExplorationMode::Explore => 0.035,
-    };
+    let mut delta = normal_delta * base_sigma * mode_scale * mutation_scale;
+    let limits = mutation_limits(descriptor.group, mode, mutation_scale);
+    let min_delta = limits.minimum;
     if delta.abs() < min_delta {
         let sign = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
         delta = sign * min_delta;
     }
+    delta = delta.clamp(-limits.maximum, limits.maximum);
     let normalized_after = (normalized_before + delta).clamp(0.0, 1.0);
     snap_to_step(
         descriptor.minimum + normalized_after * range,
@@ -456,6 +764,35 @@ fn mutate_value(
         descriptor.maximum,
         descriptor.step,
     )
+}
+
+#[derive(Debug, Copy, Clone)]
+struct MutationLimits {
+    minimum: Scalar,
+    maximum: Scalar,
+}
+
+fn mutation_limits(
+    group: ParamGroup,
+    mode: ExplorationMode,
+    mutation_scale: Scalar,
+) -> MutationLimits {
+    let (minimum, maximum) = match (group, mode) {
+        (ParamGroup::Form, ExplorationMode::Refine) => (0.008, 0.060),
+        (ParamGroup::Form, ExplorationMode::Explore) => (0.024, 0.180),
+        (ParamGroup::Placement, ExplorationMode::Refine) => (0.006, 0.050),
+        (ParamGroup::Placement, ExplorationMode::Explore) => (0.018, 0.140),
+        (ParamGroup::Rotation, ExplorationMode::Refine) => (0.004, 0.025),
+        (ParamGroup::Rotation, ExplorationMode::Explore) => (0.010, 0.075),
+        (ParamGroup::Scale, ExplorationMode::Refine) => (0.005, 0.040),
+        (ParamGroup::Scale, ExplorationMode::Explore) => (0.012, 0.100),
+        (ParamGroup::Blend, ExplorationMode::Refine) => (0.006, 0.040),
+        (ParamGroup::Blend, ExplorationMode::Explore) => (0.015, 0.120),
+    };
+    MutationLimits {
+        minimum: minimum * mutation_scale,
+        maximum: maximum * (0.75 + mutation_scale * 0.25),
+    }
 }
 
 fn snap_to_step(value: Scalar, minimum: Scalar, maximum: Scalar, step: Scalar) -> Scalar {
@@ -518,32 +855,315 @@ fn vector_distance(left: &[Scalar], right: &[Scalar]) -> Scalar {
     (sum / left.len() as Scalar).sqrt()
 }
 
-fn remove_duplicate_parameter_vectors(proposals: Vec<Proposal>) -> Vec<Proposal> {
-    let mut seen = BTreeSet::new();
-    let mut unique = Vec::new();
-    for proposal in proposals {
-        if seen.insert(proposal.param_vector_key.clone()) {
-            unique.push(proposal);
+fn vector_euclidean_distance(left: &[Scalar], right: &[Scalar]) -> Scalar {
+    if left.is_empty() || left.len() != right.len() {
+        return 0.0;
+    }
+    left.iter()
+        .zip(right.iter())
+        .map(|(left, right)| {
+            let delta = left - right;
+            delta * delta
+        })
+        .sum::<Scalar>()
+        .sqrt()
+}
+
+fn edit_parameter_distance(edit: &EditProgram, descriptors: &[ParamDescriptor]) -> Scalar {
+    let mut sum = 0.0;
+    let mut count = 0_usize;
+    for operation in &edit.operations {
+        if let Some(descriptor) = descriptor_for_path(descriptors, &operation.path) {
+            let delta = normalized_delta(operation.before, operation.after, descriptor).abs();
+            sum += delta * delta;
+            count += 1;
         }
     }
-    unique
+    if count == 0 {
+        0.0
+    } else {
+        (sum / count as Scalar).sqrt()
+    }
+}
+
+fn normalized_delta(before: Scalar, after: Scalar, descriptor: &ParamDescriptor) -> Scalar {
+    (after - before) / (descriptor.maximum - descriptor.minimum)
+}
+
+fn descriptor_for_path<'a>(
+    descriptors: &'a [ParamDescriptor],
+    path: &ParamPath,
+) -> Option<&'a ParamDescriptor> {
+    descriptors
+        .iter()
+        .find(|descriptor| descriptor.path.eq(path))
+}
+
+fn preservation_penalty(
+    document: &ShapeDocument,
+    edit: &EditProgram,
+    descriptors: &[ParamDescriptor],
+) -> Scalar {
+    if edit.operations.is_empty() {
+        return 0.0;
+    }
+
+    let mut penalty = 0.0;
+    for operation in &edit.operations {
+        if document
+            .locks
+            .iter()
+            .any(|locked| locked.node == operation.path.node)
+        {
+            penalty += LOCK_NEIGHBOR_PENALTY;
+        }
+        if let Some(descriptor) = descriptor_for_path(descriptors, &operation.path) {
+            let normalized_after = normalize(operation.after, descriptor);
+            let boundary_distance = normalized_after.min(1.0 - normalized_after);
+            if boundary_distance < BOUNDARY_PENALTY_ZONE {
+                penalty += (BOUNDARY_PENALTY_ZONE - boundary_distance) / BOUNDARY_PENALTY_ZONE;
+            }
+        }
+    }
+    (penalty / edit.operations.len() as Scalar).clamp(0.0, 1.0)
+}
+
+#[derive(Debug, Clone)]
+struct ParameterChangeAccumulator {
+    group: ParamGroup,
+    count: usize,
+    delta_sum: Scalar,
+    max_abs_delta: Scalar,
+    abs_normalized_sum: Scalar,
+    max_abs_normalized_delta: Scalar,
+}
+
+fn parameter_change_summaries(
+    selected: &[Proposal],
+    descriptors: &[ParamDescriptor],
+) -> Vec<ParameterChangeSummary> {
+    let mut accumulators: BTreeMap<ParamPath, ParameterChangeAccumulator> = BTreeMap::new();
+    for proposal in selected {
+        for operation in &proposal.candidate.edit.operations {
+            if let Some(descriptor) = descriptor_for_path(descriptors, &operation.path) {
+                let delta = operation.after - operation.before;
+                let abs_normalized_delta =
+                    normalized_delta(operation.before, operation.after, descriptor).abs();
+                let accumulator = accumulators.entry(operation.path.clone()).or_insert(
+                    ParameterChangeAccumulator {
+                        group: descriptor.group,
+                        count: 0,
+                        delta_sum: 0.0,
+                        max_abs_delta: 0.0,
+                        abs_normalized_sum: 0.0,
+                        max_abs_normalized_delta: 0.0,
+                    },
+                );
+                accumulator.count += 1;
+                accumulator.delta_sum += delta;
+                accumulator.max_abs_delta = accumulator.max_abs_delta.max(delta.abs());
+                accumulator.abs_normalized_sum += abs_normalized_delta;
+                accumulator.max_abs_normalized_delta = accumulator
+                    .max_abs_normalized_delta
+                    .max(abs_normalized_delta);
+            }
+        }
+    }
+
+    accumulators
+        .into_iter()
+        .map(|(path, accumulator)| ParameterChangeSummary {
+            path,
+            group: accumulator.group,
+            changed_candidates: accumulator.count,
+            mean_delta: accumulator.delta_sum / accumulator.count as Scalar,
+            max_abs_delta: accumulator.max_abs_delta,
+            mean_abs_normalized_delta: accumulator.abs_normalized_sum / accumulator.count as Scalar,
+            max_abs_normalized_delta: accumulator.max_abs_normalized_delta,
+        })
+        .collect()
+}
+
+#[derive(Debug, Copy, Clone)]
+struct SearchPass {
+    pass_index: usize,
+    proposal_offset: usize,
+    proposal_count: usize,
+    thresholds: SearchThresholds,
+    mutation_scale: Scalar,
+}
+
+fn search_passes(request: &SearchRequest) -> Vec<SearchPass> {
+    let base_thresholds = thresholds_for_mode(request.mode, request.descriptor_resolution);
+    let fallback_proposal_count = request
+        .proposal_count
+        .max(
+            request
+                .result_count
+                .saturating_mul(FALLBACK_PROPOSALS_PER_RESULT),
+        )
+        .min(MAX_FALLBACK_PROPOSALS);
+    let mut passes = Vec::with_capacity(FALLBACK_PASS_COUNT + 1);
+    let mut proposal_offset = 0;
+    passes.push(SearchPass {
+        pass_index: 0,
+        proposal_offset,
+        proposal_count: request.proposal_count,
+        thresholds: base_thresholds,
+        mutation_scale: 1.0,
+    });
+    proposal_offset += request.proposal_count;
+
+    let fallback_profiles = [
+        (relaxed_thresholds(base_thresholds, 0.55), 0.78),
+        (final_fallback_thresholds(base_thresholds), 0.58),
+    ];
+    for (fallback_index, (thresholds, mutation_scale)) in fallback_profiles
+        .into_iter()
+        .take(FALLBACK_PASS_COUNT)
+        .enumerate()
+    {
+        passes.push(SearchPass {
+            pass_index: fallback_index + 1,
+            proposal_offset,
+            proposal_count: fallback_proposal_count,
+            thresholds,
+            mutation_scale,
+        });
+        proposal_offset += fallback_proposal_count;
+    }
+    passes
+}
+
+fn thresholds_for_mode(mode: ExplorationMode, descriptor_resolution: usize) -> SearchThresholds {
+    let occupancy_unit = occupancy_unit_distance(descriptor_resolution);
+    match mode {
+        ExplorationMode::Refine => SearchThresholds {
+            minimum_parameter_distance: 0.006,
+            minimum_visual_distance: occupancy_unit * 0.35,
+            minimum_occupancy_distance: occupancy_unit * 0.75,
+            duplicate_parameter_distance: 0.010,
+            duplicate_occupancy_distance: occupancy_unit * 0.75,
+        },
+        ExplorationMode::Explore => SearchThresholds {
+            minimum_parameter_distance: 0.018,
+            minimum_visual_distance: occupancy_unit * 0.75,
+            minimum_occupancy_distance: occupancy_unit * 1.50,
+            duplicate_parameter_distance: 0.024,
+            duplicate_occupancy_distance: occupancy_unit * 1.25,
+        },
+    }
+}
+
+fn relaxed_thresholds(thresholds: SearchThresholds, scale: Scalar) -> SearchThresholds {
+    SearchThresholds {
+        minimum_parameter_distance: thresholds.minimum_parameter_distance * scale,
+        minimum_visual_distance: thresholds.minimum_visual_distance * scale,
+        minimum_occupancy_distance: thresholds.minimum_occupancy_distance * scale,
+        duplicate_parameter_distance: thresholds.duplicate_parameter_distance * scale,
+        duplicate_occupancy_distance: thresholds.duplicate_occupancy_distance * scale,
+    }
+}
+
+fn final_fallback_thresholds(thresholds: SearchThresholds) -> SearchThresholds {
+    SearchThresholds {
+        minimum_parameter_distance: thresholds.minimum_parameter_distance * 0.25,
+        minimum_visual_distance: 0.0,
+        minimum_occupancy_distance: 0.0,
+        duplicate_parameter_distance: thresholds.duplicate_parameter_distance * 0.25,
+        duplicate_occupancy_distance: 0.0,
+    }
+}
+
+fn occupancy_unit_distance(descriptor_resolution: usize) -> Scalar {
+    let sample_count = descriptor_resolution
+        .saturating_mul(descriptor_resolution)
+        .saturating_mul(descriptor_resolution);
+    let word_count = sample_count.div_ceil(16).max(1);
+    1.0 / (word_count * 16) as Scalar
+}
+
+#[derive(Debug, Default)]
+struct MergeResult {
+    accepted_count: usize,
+    rejections: BTreeMap<SearchRejectionReason, usize>,
+}
+
+fn merge_unique_proposals(
+    proposal_pool: &mut Vec<Proposal>,
+    proposals: Vec<Proposal>,
+    pass: &SearchPass,
+) -> MergeResult {
+    let mut result = MergeResult::default();
+    for proposal in proposals {
+        if let Some(reason) = duplicate_reason(&proposal, proposal_pool, pass.thresholds) {
+            increment_rejection(&mut result.rejections, reason);
+        } else {
+            result.accepted_count += 1;
+            proposal_pool.push(proposal);
+        }
+    }
+    result
+}
+
+fn duplicate_reason(
+    proposal: &Proposal,
+    existing: &[Proposal],
+    thresholds: SearchThresholds,
+) -> Option<SearchRejectionReason> {
+    for other in existing {
+        if proposal.param_vector_key == other.param_vector_key {
+            return Some(SearchRejectionReason::DuplicateParameterVector);
+        }
+        if vector_euclidean_distance(&proposal.param_vector, &other.param_vector)
+            < thresholds.duplicate_parameter_distance
+        {
+            return Some(SearchRejectionReason::DuplicateParameterDistance);
+        }
+        if occupancy_hamming_distance(&proposal.metrics, &other.metrics)
+            < thresholds.duplicate_occupancy_distance
+        {
+            return Some(SearchRejectionReason::DuplicateOccupancyDistance);
+        }
+    }
+    None
+}
+
+fn increment_rejection(
+    rejections: &mut BTreeMap<SearchRejectionReason, usize>,
+    reason: SearchRejectionReason,
+) {
+    *rejections.entry(reason).or_insert(0) += 1;
+}
+
+fn merge_rejections(
+    target: &mut BTreeMap<SearchRejectionReason, usize>,
+    source: BTreeMap<SearchRejectionReason, usize>,
+) {
+    for (reason, count) in source {
+        *target.entry(reason).or_insert(0) += count;
+    }
 }
 
 fn compare_proposals_for_mode(
     mode: ExplorationMode,
 ) -> impl Fn(&Proposal, &Proposal) -> std::cmp::Ordering {
     move |left, right| {
+        let left_score = proposal_rank_score(left, mode);
+        let right_score = proposal_rank_score(right, mode);
         let distance_order = match mode {
-            ExplorationMode::Refine => left
-                .candidate
-                .distance_from_parent
-                .total_cmp(&right.candidate.distance_from_parent),
-            ExplorationMode::Explore => right
-                .candidate
-                .distance_from_parent
-                .total_cmp(&left.candidate.distance_from_parent),
+            ExplorationMode::Refine => left_score.total_cmp(&right_score),
+            ExplorationMode::Explore => right_score.total_cmp(&left_score),
         };
         distance_order.then_with(|| left.proposal_index.cmp(&right.proposal_index))
+    }
+}
+
+fn proposal_rank_score(proposal: &Proposal, mode: ExplorationMode) -> Scalar {
+    let penalty = proposal.preservation_penalty;
+    match mode {
+        ExplorationMode::Refine => proposal.candidate.distance_from_parent + penalty * 0.25,
+        ExplorationMode::Explore => proposal.candidate.distance_from_parent - penalty * 0.25,
     }
 }
 
@@ -563,16 +1183,17 @@ fn select_diverse(
         for (index, proposal) in proposals.iter().enumerate() {
             let nearest_selected = selected
                 .iter()
-                .map(|selected| {
-                    descriptor_distance_without_params(&proposal.metrics, &selected.metrics)
-                })
+                .map(|selected| proposal_diversity_distance(proposal, selected))
                 .fold(Scalar::INFINITY, Scalar::min);
             let score = match mode {
                 ExplorationMode::Refine => {
-                    nearest_selected - proposal.candidate.distance_from_parent * 0.20
+                    nearest_selected
+                        - proposal.candidate.distance_from_parent * 0.20
+                        - proposal.preservation_penalty * 0.25
                 }
                 ExplorationMode::Explore => {
                     nearest_selected + proposal.candidate.distance_from_parent * 0.30
+                        - proposal.preservation_penalty * 0.25
                 }
             };
             if score.total_cmp(&best_score).is_gt()
@@ -588,12 +1209,46 @@ fn select_diverse(
     selected
 }
 
+fn proposal_diversity_distance(left: &Proposal, right: &Proposal) -> Scalar {
+    descriptor_distance_without_params(&left.metrics, &right.metrics) * 0.62
+        + vector_distance(&left.param_vector, &right.param_vector) * 0.18
+        + occupancy_hamming_distance(&left.metrics, &right.metrics) * 0.10
+        + edit_path_distance(&left.candidate.edit, &right.candidate.edit) * 0.10
+}
+
+fn edit_path_distance(left: &EditProgram, right: &EditProgram) -> Scalar {
+    let mut union_count = 0_usize;
+    let mut shared_count = 0_usize;
+    let mut right_paths: BTreeSet<ParamPath> = right
+        .operations
+        .iter()
+        .map(|operation| operation.path.clone())
+        .collect();
+    for operation in &left.operations {
+        union_count += 1;
+        if right_paths.remove(&operation.path) {
+            shared_count += 1;
+        }
+    }
+    union_count += right_paths.len();
+    if union_count == 0 {
+        0.0
+    } else {
+        1.0 - shared_count as Scalar / union_count as Scalar
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Proposal {
     proposal_index: usize,
     candidate: Candidate,
     metrics: DescriptorMetrics,
     param_vector_key: Vec<u32>,
+    param_vector: Vec<Scalar>,
+    parameter_distance: Scalar,
+    visual_distance: Scalar,
+    occupancy_distance: Scalar,
+    preservation_penalty: Scalar,
 }
 
 impl Proposal {
@@ -1277,7 +1932,7 @@ fn length2(x: Scalar, y: Scalar) -> Scalar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shape_core::{ParamPath, ShapeNode, Transform3};
+    use shape_core::{ParamPath, ShapeNode, Transform3, validate_document};
 
     fn all_groups() -> BTreeSet<ParamGroup> {
         [
@@ -1376,6 +2031,74 @@ mod tests {
         document
     }
 
+    fn difference_fixture_document() -> ShapeDocument {
+        let root = ShapeNode {
+            id: NodeId(1),
+            name: "Mixed preset".to_owned(),
+            tags: BTreeSet::new(),
+            enabled: true,
+            transform: Transform3::default(),
+            kind: NodeKind::SmoothUnion {
+                children: vec![NodeId(2), NodeId(5)],
+                smoothness: 0.1,
+            },
+        };
+        let difference = ShapeNode {
+            id: NodeId(2),
+            name: "Cut block".to_owned(),
+            tags: BTreeSet::new(),
+            enabled: true,
+            transform: Transform3::default(),
+            kind: NodeKind::Difference {
+                base: NodeId(3),
+                subtractors: vec![NodeId(4)],
+            },
+        };
+        let mut block = primitive_node(
+            3,
+            "Block",
+            PrimitiveKind::RoundedBox {
+                half_extents: vec3_value!(0.8, 0.45, 0.55),
+                roundness: 0.08,
+            },
+        );
+        block.transform.translation = vec3_value!(0.0, 0.1, 0.0);
+        let mut cutter = primitive_node(
+            4,
+            "Cutter",
+            PrimitiveKind::Cylinder {
+                half_height: 0.8,
+                radius: 0.2,
+                roundness: 0.03,
+            },
+        );
+        cutter.transform.rotation_degrees = vec3_value!(90.0, 0.0, 0.0);
+        let mut torus = primitive_node(
+            5,
+            "Offset torus",
+            PrimitiveKind::Torus {
+                major_radius: 0.42,
+                minor_radius: 0.07,
+            },
+        );
+        torus.transform.translation = vec3_value!(0.95, 0.25, 0.0);
+        let mut document = ShapeDocument::new("mixed preset", root);
+        document.nodes.insert(NodeId(2), difference);
+        document.nodes.insert(NodeId(3), block);
+        document.nodes.insert(NodeId(4), cutter);
+        document.nodes.insert(NodeId(5), torus);
+        document.next_node_id = 6;
+        document
+    }
+
+    fn preset_fixture_documents() -> Vec<(String, ShapeDocument)> {
+        vec![
+            ("representative".to_owned(), representative_document()),
+            ("scope".to_owned(), scope_document()),
+            ("difference".to_owned(), difference_fixture_document()),
+        ]
+    }
+
     fn request(seed: u64, mode: ExplorationMode) -> SearchRequest {
         SearchRequest {
             seed,
@@ -1391,6 +2114,11 @@ mod tests {
 
     fn candidates(seed: u64, mode: ExplorationMode) -> Vec<Candidate> {
         generate_candidates(&representative_document(), &request(seed, mode))
+            .unwrap_or_else(|error| panic!("candidate generation failed: {error}"))
+    }
+
+    fn output(seed: u64, mode: ExplorationMode) -> SearchOutput {
+        generate_candidates_with_diagnostics(&representative_document(), &request(seed, mode))
             .unwrap_or_else(|error| panic!("candidate generation failed: {error}"))
     }
 
@@ -1548,6 +2276,154 @@ mod tests {
             let vector = exact_parameter_vector(&candidate.document, &params)
                 .unwrap_or_else(|error| panic!("parameter vector failed: {error}"));
             assert!(seen.insert(vector));
+        }
+    }
+
+    #[test]
+    fn diagnostics_report_rejections_and_parameter_changes() {
+        let mut search_request = request(61, ExplorationMode::Explore);
+        search_request.proposal_count = 160;
+        let result =
+            generate_candidates_with_diagnostics(&representative_document(), &search_request)
+                .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+        assert_eq!(
+            result.candidates.len(),
+            result.diagnostics.candidates_returned
+        );
+        assert!(result.diagnostics.attempted_proposals >= search_request.proposal_count);
+        assert!(result.diagnostics.valid_proposals >= result.candidates.len());
+        assert!(!result.diagnostics.passes.is_empty());
+        assert!(!result.diagnostics.parameter_changes.is_empty());
+        assert!(result.diagnostics.rejections.values().sum::<usize>() > 0);
+        assert!(result.diagnostics.minimum_parent_distance > 0.0);
+        assert!(result.diagnostics.minimum_visual_distance > 0.0);
+        assert!(result.diagnostics.minimum_occupancy_distance > 0.0);
+    }
+
+    #[test]
+    fn fallback_runs_when_initial_pass_has_too_few_survivors() {
+        let mut search_request = request(62, ExplorationMode::Explore);
+        search_request.proposal_count = 1;
+        search_request.result_count = 4;
+        let result =
+            generate_candidates_with_diagnostics(&representative_document(), &search_request)
+                .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+        assert!(result.diagnostics.fallback_passes > 0);
+        assert!(result.diagnostics.attempted_proposals > search_request.proposal_count);
+        assert!(!result.candidates.is_empty());
+    }
+
+    #[test]
+    fn duplicate_suppression_reports_parameter_or_occupancy_matches() {
+        let mut search_request = request(63, ExplorationMode::Refine);
+        search_request.proposal_count = 256;
+        search_request.result_count = 5;
+        search_request.descriptor_resolution = 7;
+        let result =
+            generate_candidates_with_diagnostics(&representative_document(), &search_request)
+                .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+        let duplicate_rejections = [
+            SearchRejectionReason::DuplicateParameterVector,
+            SearchRejectionReason::DuplicateParameterDistance,
+            SearchRejectionReason::DuplicateOccupancyDistance,
+        ]
+        .into_iter()
+        .map(|reason| {
+            result
+                .diagnostics
+                .rejections
+                .get(&reason)
+                .copied()
+                .unwrap_or(0)
+        })
+        .sum::<usize>();
+        assert!(duplicate_rejections > 0);
+    }
+
+    #[test]
+    fn preset_results_are_stable_diverse_and_valid() {
+        for (name, document) in preset_fixture_documents() {
+            for mode in [ExplorationMode::Refine, ExplorationMode::Explore] {
+                let search_request = SearchRequest {
+                    seed: 200,
+                    proposal_count: 144,
+                    result_count: 5,
+                    descriptor_resolution: 9,
+                    selected_node: None,
+                    target_scope: TargetScope::WholeModel,
+                    enabled_groups: all_groups(),
+                    mode,
+                };
+                let first = generate_candidates_with_diagnostics(&document, &search_request)
+                    .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+                let second = generate_candidates_with_diagnostics(&document, &search_request)
+                    .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+                assert_eq!(first.candidates, second.candidates, "{name}");
+                assert_eq!(
+                    first.candidates.len(),
+                    search_request.result_count,
+                    "{name}"
+                );
+                assert!(
+                    first.diagnostics.parameter_changes.len() > 1,
+                    "{name} should change more than one parameter across results"
+                );
+                for candidate in first.candidates {
+                    assert!(
+                        validate_document(&candidate.document).is_valid(),
+                        "{name} produced an invalid result"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explore_stays_broader_than_refine_across_presets() {
+        for (name, document) in preset_fixture_documents() {
+            let base_request = SearchRequest {
+                seed: 210,
+                proposal_count: 128,
+                result_count: 5,
+                descriptor_resolution: 9,
+                selected_node: None,
+                target_scope: TargetScope::WholeModel,
+                enabled_groups: all_groups(),
+                mode: ExplorationMode::Refine,
+            };
+            let refine = generate_candidates(&document, &base_request)
+                .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+            let mut explore_request = base_request;
+            explore_request.mode = ExplorationMode::Explore;
+            let explore = generate_candidates(&document, &explore_request)
+                .unwrap_or_else(|error| panic!("candidate generation failed: {error}"));
+            assert!(
+                mean_distance(&explore) > mean_distance(&refine),
+                "{name} explore should stay broader than refine"
+            );
+        }
+    }
+
+    #[test]
+    fn transform_and_blend_changes_stay_in_safe_ranges() {
+        let result = output(64, ExplorationMode::Explore);
+        for candidate in result.candidates {
+            for operation in candidate.edit.operations {
+                let delta = (operation.after - operation.before).abs();
+                if operation.path.key.starts_with("transform.translation.") {
+                    assert!(delta <= 1.42, "translation delta {delta}");
+                } else if operation
+                    .path
+                    .key
+                    .starts_with("transform.rotation_degrees.")
+                {
+                    assert!(delta <= 55.0, "rotation delta {delta}");
+                } else if operation.path.key.starts_with("transform.scale.") {
+                    assert!(delta <= 1.02, "scale delta {delta}");
+                } else if operation.path.key == "csg.smoothness" {
+                    assert!(delta <= 0.25, "blend delta {delta}");
+                }
+            }
         }
     }
 
