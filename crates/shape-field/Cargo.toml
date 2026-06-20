@@ -10,3 +10,10 @@ glam.workspace = true
 rayon.workspace = true
 shape-core.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "field_sampling"
+harness = false
