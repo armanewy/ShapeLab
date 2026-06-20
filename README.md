@@ -17,6 +17,8 @@ cargo check --workspace
 cargo run -p shape-app --release
 ```
 
+Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
+
 The native app opens a local `egui` desktop workspace with:
 
 - a rendered current-shape viewport with orbit, pan, zoom, fit, and resize-triggered rerenders
@@ -26,8 +28,6 @@ The native app opens a local `egui` desktop workspace with:
 - JSON project save/open and OBJ export
 
 Startup loads the Desk Lamp preset and builds the first preview in the background.
-
-On Linux, native GUI builds may require the platform packages expected by `eframe`/`wgpu`/`winit` and file-dialog backends, such as X11/Wayland development libraries.
 
 ## Architecture
 
@@ -66,9 +66,12 @@ Generate deterministic demo artifacts:
 cargo run -p shape-cli -- demo --preset desk-lamp --seed 42 --out-dir target/demo-lamp
 cargo run -p shape-cli -- demo --preset toy-submarine --seed 42 --out-dir target/demo-submarine
 cargo run -p shape-cli -- demo --preset alien-plant --seed 42 --out-dir target/demo-plant
+pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets
 ```
 
 Each run writes project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON file.
+
+Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 
 Validate and export:
 

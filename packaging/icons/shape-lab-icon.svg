@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Shape Lab icon placeholder</title>
+  <desc id="desc">Original geometric placeholder icon with layered procedural shapes.</desc>
+  <rect width="256" height="256" rx="48" fill="#1f2933"/>
+  <path d="M48 166c18-40 44-68 78-83 35-15 64-8 82 22 18 29 7 63-31 91-37 28-86 30-129-30z" fill="#7dd3fc"/>
+  <path d="M73 151c12-27 30-45 53-55 23-9 42-5 54 14 12 20 5 42-20 61-25 18-57 20-87-20z" fill="#0f172a"/>
+  <circle cx="91" cy="89" r="25" fill="#fbbf24"/>
+  <circle cx="172" cy="154" r="34" fill="#34d399"/>
+  <path d="M66 190h124" stroke="#f8fafc" stroke-width="12" stroke-linecap="round"/>
+</svg>
