@@ -270,11 +270,11 @@ pub struct GridSamples {
 
 /// Compile a shape document into a scalar field.
 pub fn compile_document(document: &ShapeDocument) -> Result<CompiledField, FieldCompileError> {
+    validate_field_document(document)?;
     let report = shape_core::validate_document(document);
     if !report.is_valid() {
         return Err(FieldCompileError::InvalidDocument);
     }
-    validate_field_document(document)?;
 
     let mut compiler = FieldCompiler::new(document);
     let root = compiler.compile_node(document.root)?;

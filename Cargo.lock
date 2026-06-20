@@ -3537,6 +3537,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3554,6 +3555,7 @@ dependencies = [
 name = "shape-mesh"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "shape-core",
  "shape-field",
  "thiserror 2.0.18",
