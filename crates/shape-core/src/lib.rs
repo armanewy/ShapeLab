@@ -23,6 +23,12 @@ use thiserror::Error;
 /// Scalar type used by MVP geometry code.
 pub type Scalar = f32;
 
+const SCHEMA_VERSION: u32 = 1;
+const MIN_PARAMETER_DIMENSION: Scalar = 0.01;
+const MAX_PARAMETER_DIMENSION: Scalar = 5.0;
+const MIN_SCALE_COMPONENT: Scalar = 1.0e-5;
+const EDIT_PRECONDITION_TOLERANCE: Scalar = 1.0e-4;
+
 /// Stable identifier for a shape node.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -58,6 +64,7 @@ impl Default for Transform3 {
 
 impl Transform3 {
     /// Build a transform matrix from the document convention.
+    #[must_use]
     pub fn matrix(&self) -> Mat4 {
         let rotation = Quat::from_euler(
             EulerRot::XYZ,
@@ -317,13 +324,38 @@ impl ShapeDocument {
         let mut nodes = BTreeMap::new();
         nodes.insert(root_id, root);
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             title: title.into(),
             root: root_id,
             nodes,
             next_node_id,
             locks: BTreeSet::new(),
         }
+    }
+
+    /// Allocate the next stable node ID from this document.
+    pub fn allocate_node_id(&mut self) -> NodeId {
+        allocate_node_id(self)
+    }
+
+    /// Insert an already-built node, rejecting duplicate IDs.
+    pub fn insert_node(&mut self, node: ShapeNode) -> Result<(), CoreError> {
+        insert_node(self, node)
+    }
+
+    /// Allocate and insert a default-enabled node with an identity transform.
+    pub fn insert_new_node(&mut self, name: impl Into<String>, kind: NodeKind) -> NodeId {
+        let id = self.allocate_node_id();
+        let node = ShapeNode {
+            id,
+            name: name.into(),
+            tags: BTreeSet::new(),
+            enabled: true,
+            transform: Transform3::default(),
+            kind,
+        };
+        self.nodes.insert(id, node);
+        id
     }
 }
 
@@ -383,6 +415,9 @@ pub enum CoreError {
     /// The requested node does not exist.
     #[error("unknown node {0:?}")]
     UnknownNode(NodeId),
+    /// A node with that ID is already present.
+    #[error("duplicate node {0:?}")]
+    DuplicateNode(NodeId),
     /// The requested scalar path does not exist for the node kind.
     #[error("unknown scalar path {0:?}")]
     UnknownScalar(ParamPath),
@@ -407,41 +442,454 @@ pub enum CoreError {
     NotImplemented(&'static str),
 }
 
-/// Validate basic document invariants.
+/// Validate document invariants and collect every discoverable issue.
 #[must_use]
 pub fn validate_document(document: &ShapeDocument) -> ValidationReport {
     let mut report = ValidationReport::default();
+
     if !document.nodes.contains_key(&document.root) {
-        report.issues.push(ValidationIssue {
-            node: Some(document.root),
-            path: None,
-            code: "missing_root".to_owned(),
-            message: "Document root does not exist.".to_owned(),
-        });
+        push_issue(
+            &mut report,
+            Some(document.root),
+            None,
+            "missing_root",
+            "Document root does not exist.",
+        );
     }
+
+    validate_next_node_id(document, &mut report);
+
     for (id, node) in &document.nodes {
         if node.id != *id {
-            report.issues.push(ValidationIssue {
-                node: Some(*id),
-                path: None,
-                code: "node_id_mismatch".to_owned(),
-                message: "Node map key and node ID differ.".to_owned(),
-            });
+            push_issue(
+                &mut report,
+                Some(*id),
+                None,
+                "node_id_mismatch",
+                "Node map key and node ID differ.",
+            );
         }
-        for descriptor in enumerate_node_parameters(node) {
-            match get_scalar(document, &descriptor.path) {
-                Ok(value) if value.is_finite() => {}
-                Ok(value) => report.issues.push(ValidationIssue {
-                    node: Some(*id),
-                    path: Some(descriptor.path),
-                    code: "non_finite".to_owned(),
-                    message: format!("Parameter value is not finite: {value}."),
-                }),
-                Err(_) => {}
+        validate_transform(*id, &node.transform, &mut report);
+        validate_kind_values(*id, &node.kind, &mut report);
+        validate_references(document, *id, &node.kind, &mut report);
+        validate_parameter_descriptors(document, node, &mut report);
+    }
+
+    validate_locks(document, &mut report);
+    detect_cycles(document, &mut report);
+
+    report
+}
+
+fn validate_next_node_id(document: &ShapeDocument, report: &mut ValidationReport) {
+    let Some(max_id) = document.nodes.keys().map(|id| id.0).max() else {
+        return;
+    };
+    if document.next_node_id <= max_id {
+        push_issue(
+            report,
+            None,
+            None,
+            "next_node_id_not_fresh",
+            "Document next_node_id would reallocate an existing node ID.",
+        );
+    }
+}
+
+fn validate_transform(node: NodeId, transform: &Transform3, report: &mut ValidationReport) {
+    validate_finite_component(
+        node,
+        "transform.translation.x",
+        transform.translation.x,
+        report,
+    );
+    validate_finite_component(
+        node,
+        "transform.translation.y",
+        transform.translation.y,
+        report,
+    );
+    validate_finite_component(
+        node,
+        "transform.translation.z",
+        transform.translation.z,
+        report,
+    );
+    validate_finite_component(
+        node,
+        "transform.rotation_degrees.x",
+        transform.rotation_degrees.x,
+        report,
+    );
+    validate_finite_component(
+        node,
+        "transform.rotation_degrees.y",
+        transform.rotation_degrees.y,
+        report,
+    );
+    validate_finite_component(
+        node,
+        "transform.rotation_degrees.z",
+        transform.rotation_degrees.z,
+        report,
+    );
+    validate_finite_component(node, "transform.scale.x", transform.scale.x, report);
+    validate_finite_component(node, "transform.scale.y", transform.scale.y, report);
+    validate_finite_component(node, "transform.scale.z", transform.scale.z, report);
+
+    for (key, value) in [
+        ("transform.scale.x", transform.scale.x),
+        ("transform.scale.y", transform.scale.y),
+        ("transform.scale.z", transform.scale.z),
+    ] {
+        if value.is_finite() && value.abs() <= MIN_SCALE_COMPONENT {
+            push_issue(
+                report,
+                Some(node),
+                Some(path(node, key)),
+                "near_zero_scale",
+                "Transform scale component is zero or too close to zero.",
+            );
+        }
+    }
+}
+
+fn validate_kind_values(node: NodeId, kind: &NodeKind, report: &mut ValidationReport) {
+    match kind {
+        NodeKind::Primitive(primitive) => validate_primitive_values(node, primitive, report),
+        NodeKind::SmoothUnion { smoothness, .. } => {
+            validate_finite_component(node, "csg.smoothness", *smoothness, report);
+            if smoothness.is_finite() && *smoothness < 0.0 {
+                push_issue(
+                    report,
+                    Some(node),
+                    Some(path(node, "csg.smoothness")),
+                    "negative_smoothness",
+                    "Smooth-union smoothness cannot be negative.",
+                );
+            }
+        }
+        NodeKind::Union { .. } | NodeKind::Difference { .. } | NodeKind::Intersection { .. } => {}
+    }
+}
+
+fn validate_primitive_values(
+    node: NodeId,
+    primitive: &PrimitiveKind,
+    report: &mut ValidationReport,
+) {
+    match primitive {
+        PrimitiveKind::Sphere { radius } => {
+            validate_positive_dimension(node, "primitive.radius", *radius, report);
+        }
+        PrimitiveKind::RoundedBox {
+            half_extents,
+            roundness,
+        } => {
+            validate_positive_dimension(node, "primitive.half_extents.x", half_extents.x, report);
+            validate_positive_dimension(node, "primitive.half_extents.y", half_extents.y, report);
+            validate_positive_dimension(node, "primitive.half_extents.z", half_extents.z, report);
+            validate_finite_component(node, "primitive.roundness", *roundness, report);
+            if roundness.is_finite() && *roundness < 0.0 {
+                push_issue(
+                    report,
+                    Some(node),
+                    Some(path(node, "primitive.roundness")),
+                    "negative_roundness",
+                    "Rounded-box roundness cannot be negative.",
+                );
+            }
+            let smallest_extent = half_extents.x.min(half_extents.y).min(half_extents.z);
+            if smallest_extent.is_finite() && roundness.is_finite() && *roundness > smallest_extent
+            {
+                push_issue(
+                    report,
+                    Some(node),
+                    Some(path(node, "primitive.roundness")),
+                    "roundness_too_large",
+                    "Rounded-box roundness cannot exceed the smallest half extent.",
+                );
+            }
+        }
+        PrimitiveKind::Capsule {
+            half_length,
+            radius,
+        } => {
+            validate_positive_dimension(node, "primitive.half_length", *half_length, report);
+            validate_positive_dimension(node, "primitive.radius", *radius, report);
+        }
+        PrimitiveKind::Cylinder {
+            half_height,
+            radius,
+            roundness,
+        } => {
+            validate_positive_dimension(node, "primitive.half_height", *half_height, report);
+            validate_positive_dimension(node, "primitive.radius", *radius, report);
+            validate_finite_component(node, "primitive.roundness", *roundness, report);
+            if roundness.is_finite() && *roundness < 0.0 {
+                push_issue(
+                    report,
+                    Some(node),
+                    Some(path(node, "primitive.roundness")),
+                    "negative_roundness",
+                    "Cylinder roundness cannot be negative.",
+                );
+            }
+        }
+        PrimitiveKind::Torus {
+            major_radius,
+            minor_radius,
+        } => {
+            validate_positive_dimension(node, "primitive.major_radius", *major_radius, report);
+            validate_positive_dimension(node, "primitive.minor_radius", *minor_radius, report);
+            if major_radius.is_finite() && minor_radius.is_finite() && minor_radius >= major_radius
+            {
+                push_issue(
+                    report,
+                    Some(node),
+                    Some(path(node, "primitive.minor_radius")),
+                    "torus_minor_radius_too_large",
+                    "Torus minor radius must be smaller than the major radius.",
+                );
             }
         }
     }
-    report
+}
+
+fn validate_positive_dimension(
+    node: NodeId,
+    key: &'static str,
+    value: Scalar,
+    report: &mut ValidationReport,
+) {
+    validate_finite_component(node, key, value, report);
+    if value.is_finite() && value <= 0.0 {
+        push_issue(
+            report,
+            Some(node),
+            Some(path(node, key)),
+            "invalid_dimension",
+            "Primitive dimensions must be greater than zero.",
+        );
+    }
+}
+
+fn validate_finite_component(
+    node: NodeId,
+    key: &'static str,
+    value: Scalar,
+    report: &mut ValidationReport,
+) {
+    if !value.is_finite() {
+        push_issue(
+            report,
+            Some(node),
+            Some(path(node, key)),
+            "non_finite",
+            "Scalar value must be finite.",
+        );
+    }
+}
+
+fn validate_references(
+    document: &ShapeDocument,
+    node: NodeId,
+    kind: &NodeKind,
+    report: &mut ValidationReport,
+) {
+    match kind {
+        NodeKind::Union { children } | NodeKind::Intersection { children } => {
+            if children.is_empty() {
+                push_issue(
+                    report,
+                    Some(node),
+                    None,
+                    "empty_combiner",
+                    "Combiner nodes need at least one child.",
+                );
+            }
+        }
+        NodeKind::SmoothUnion { children, .. } => {
+            if children.is_empty() {
+                push_issue(
+                    report,
+                    Some(node),
+                    None,
+                    "empty_combiner",
+                    "Smooth-union nodes need at least one child.",
+                );
+            }
+        }
+        NodeKind::Primitive(_) | NodeKind::Difference { .. } => {}
+    }
+
+    for referenced in referenced_nodes(kind) {
+        if !document.nodes.contains_key(&referenced) {
+            push_issue(
+                report,
+                Some(node),
+                None,
+                "dangling_reference",
+                format!("Referenced node {referenced:?} does not exist."),
+            );
+        }
+    }
+}
+
+fn validate_parameter_descriptors(
+    document: &ShapeDocument,
+    node: &ShapeNode,
+    report: &mut ValidationReport,
+) {
+    for descriptor in enumerate_node_parameters(node) {
+        if !descriptor.minimum.is_finite()
+            || !descriptor.maximum.is_finite()
+            || !descriptor.step.is_finite()
+            || !descriptor.mutation_sigma.is_finite()
+            || descriptor.minimum >= descriptor.maximum
+            || descriptor.step <= 0.0
+            || descriptor.mutation_sigma < 0.0
+        {
+            push_issue(
+                report,
+                Some(node.id),
+                Some(descriptor.path.clone()),
+                "impossible_parameter_range",
+                "Parameter descriptor has an impossible range.",
+            );
+        }
+
+        match get_scalar(document, &descriptor.path) {
+            Ok(value) if value.is_finite() => {}
+            Ok(_) => push_issue(
+                report,
+                Some(node.id),
+                Some(descriptor.path.clone()),
+                "non_finite",
+                "Scalar value must be finite.",
+            ),
+            Err(_) => push_issue(
+                report,
+                Some(node.id),
+                Some(descriptor.path.clone()),
+                "impossible_parameter_range",
+                "Parameter descriptor points at an unreadable scalar.",
+            ),
+        }
+    }
+}
+
+fn validate_locks(document: &ShapeDocument, report: &mut ValidationReport) {
+    for lock in &document.locks {
+        if get_scalar(document, lock).is_err() {
+            push_issue(
+                report,
+                Some(lock.node),
+                Some(lock.clone()),
+                "unknown_lock_path",
+                "Lock points at an unknown scalar parameter.",
+            );
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum VisitState {
+    Visiting,
+    Visited,
+}
+
+fn detect_cycles(document: &ShapeDocument, report: &mut ValidationReport) {
+    let mut states = BTreeMap::<NodeId, VisitState>::new();
+    let mut stack = Vec::<NodeId>::new();
+    let mut reported_edges = BTreeSet::<(NodeId, NodeId)>::new();
+
+    for node in document.nodes.keys().copied() {
+        detect_cycles_from(
+            document,
+            node,
+            &mut states,
+            &mut stack,
+            &mut reported_edges,
+            report,
+        );
+    }
+}
+
+fn detect_cycles_from(
+    document: &ShapeDocument,
+    node: NodeId,
+    states: &mut BTreeMap<NodeId, VisitState>,
+    stack: &mut Vec<NodeId>,
+    reported_edges: &mut BTreeSet<(NodeId, NodeId)>,
+    report: &mut ValidationReport,
+) {
+    match states.get(&node) {
+        Some(VisitState::Visited) => return,
+        Some(VisitState::Visiting) => {
+            report_cycle(node, node, stack, reported_edges, report);
+            return;
+        }
+        None => {}
+    }
+
+    states.insert(node, VisitState::Visiting);
+    stack.push(node);
+
+    let Some(shape_node) = document.nodes.get(&node) else {
+        stack.pop();
+        states.insert(node, VisitState::Visited);
+        return;
+    };
+
+    for child in referenced_nodes(&shape_node.kind) {
+        if !document.nodes.contains_key(&child) {
+            continue;
+        }
+        match states.get(&child) {
+            Some(VisitState::Visiting) => {
+                report_cycle(node, child, stack, reported_edges, report);
+            }
+            Some(VisitState::Visited) => {}
+            None => detect_cycles_from(document, child, states, stack, reported_edges, report),
+        }
+    }
+
+    stack.pop();
+    states.insert(node, VisitState::Visited);
+}
+
+fn report_cycle(
+    parent: NodeId,
+    child: NodeId,
+    stack: &[NodeId],
+    reported_edges: &mut BTreeSet<(NodeId, NodeId)>,
+    report: &mut ValidationReport,
+) {
+    if !reported_edges.insert((parent, child)) {
+        return;
+    }
+
+    let cycle = stack.iter().position(|id| *id == child).map_or_else(
+        || vec![child],
+        |start| {
+            let mut ids = stack[start..].to_vec();
+            ids.push(child);
+            ids
+        },
+    );
+    let cycle_text = cycle
+        .iter()
+        .map(|id| id.0.to_string())
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    push_issue(
+        report,
+        Some(parent),
+        None,
+        "cycle",
+        format!("Graph cycle detected: {cycle_text}."),
+    );
 }
 
 /// Enumerate scalar parameters in stable node/key order.
@@ -457,10 +905,9 @@ pub fn enumerate_parameters(document: &ShapeDocument) -> Vec<ParamDescriptor> {
 
 fn enumerate_node_parameters(node: &ShapeNode) -> Vec<ParamDescriptor> {
     let placement = ParamLimits::new(-5.0, 5.0, 0.01, 0.15);
-    let rotation = ParamLimits::new(-180.0, 180.0, 1.0, 8.0);
+    let rotation = ParamLimits::new(-360.0, 360.0, 1.0, 8.0);
     let scale = ParamLimits::new(0.05, 10.0, 0.01, 0.1);
-    let medium_form = ParamLimits::new(0.01, 5.0, 0.01, 0.12);
-    let roundness = ParamLimits::new(0.0, 2.0, 0.01, 0.05);
+    let form = ParamLimits::new(MIN_PARAMETER_DIMENSION, MAX_PARAMETER_DIMENSION, 0.01, 0.12);
     let mut result = vec![
         descriptor(
             node.id,
@@ -534,37 +981,48 @@ fn enumerate_node_parameters(node: &ShapeNode) -> Vec<ParamDescriptor> {
                 "primitive.radius",
                 "Radius",
                 ParamGroup::Form,
-                medium_form,
+                form,
             ));
         }
-        NodeKind::Primitive(PrimitiveKind::RoundedBox { .. }) => {
+        NodeKind::Primitive(PrimitiveKind::RoundedBox {
+            half_extents,
+            roundness,
+        }) => {
+            let half_extent_minimum = (*roundness).max(MIN_PARAMETER_DIMENSION);
+            let half_extent_limits =
+                ParamLimits::new(half_extent_minimum, MAX_PARAMETER_DIMENSION, 0.01, 0.12);
             result.push(descriptor(
                 node.id,
                 "primitive.half_extents.x",
                 "Half Width",
                 ParamGroup::Form,
-                medium_form,
+                half_extent_limits,
             ));
             result.push(descriptor(
                 node.id,
                 "primitive.half_extents.y",
                 "Half Height",
                 ParamGroup::Form,
-                medium_form,
+                half_extent_limits,
             ));
             result.push(descriptor(
                 node.id,
                 "primitive.half_extents.z",
                 "Half Depth",
                 ParamGroup::Form,
-                medium_form,
+                half_extent_limits,
             ));
+            let max_roundness = half_extents
+                .x
+                .min(half_extents.y)
+                .min(half_extents.z)
+                .min(2.0);
             result.push(descriptor(
                 node.id,
                 "primitive.roundness",
                 "Roundness",
                 ParamGroup::Form,
-                roundness,
+                ParamLimits::new(0.0, max_roundness, 0.01, 0.05),
             ));
         }
         NodeKind::Primitive(PrimitiveKind::Capsule { .. }) => {
@@ -573,53 +1031,65 @@ fn enumerate_node_parameters(node: &ShapeNode) -> Vec<ParamDescriptor> {
                 "primitive.half_length",
                 "Half Length",
                 ParamGroup::Form,
-                medium_form,
+                form,
             ));
             result.push(descriptor(
                 node.id,
                 "primitive.radius",
                 "Radius",
                 ParamGroup::Form,
-                medium_form,
+                form,
             ));
         }
-        NodeKind::Primitive(PrimitiveKind::Cylinder { .. }) => {
+        NodeKind::Primitive(PrimitiveKind::Cylinder {
+            half_height,
+            radius,
+            ..
+        }) => {
             result.push(descriptor(
                 node.id,
                 "primitive.half_height",
                 "Half Height",
                 ParamGroup::Form,
-                medium_form,
+                form,
             ));
             result.push(descriptor(
                 node.id,
                 "primitive.radius",
                 "Radius",
                 ParamGroup::Form,
-                medium_form,
+                form,
             ));
+            let max_roundness = (*half_height).min(*radius).min(2.0);
             result.push(descriptor(
                 node.id,
                 "primitive.roundness",
                 "Roundness",
                 ParamGroup::Form,
-                roundness,
+                ParamLimits::new(0.0, max_roundness, 0.01, 0.05),
             ));
         }
-        NodeKind::Primitive(PrimitiveKind::Torus { .. }) => {
+        NodeKind::Primitive(PrimitiveKind::Torus {
+            major_radius,
+            minor_radius,
+        }) => {
+            let major_minimum = (*minor_radius + MIN_PARAMETER_DIMENSION)
+                .clamp(MIN_PARAMETER_DIMENSION, MAX_PARAMETER_DIMENSION);
             result.push(descriptor(
                 node.id,
                 "primitive.major_radius",
                 "Major Radius",
                 ParamGroup::Form,
-                ParamLimits::new(0.02, 5.0, 0.01, 0.12),
+                ParamLimits::new(major_minimum, MAX_PARAMETER_DIMENSION, 0.01, 0.12),
             ));
+            let minor_maximum =
+                (*major_radius - MIN_PARAMETER_DIMENSION).min(MAX_PARAMETER_DIMENSION);
             result.push(descriptor(
                 node.id,
                 "primitive.minor_radius",
                 "Minor Radius",
                 ParamGroup::Form,
-                ParamLimits::new(0.01, 2.5, 0.01, 0.08),
+                ParamLimits::new(MIN_PARAMETER_DIMENSION, minor_maximum, 0.01, 0.08),
             ));
         }
         NodeKind::SmoothUnion { .. } => {
@@ -628,11 +1098,12 @@ fn enumerate_node_parameters(node: &ShapeNode) -> Vec<ParamDescriptor> {
                 "csg.smoothness",
                 "Blend Smoothness",
                 ParamGroup::Blend,
-                roundness,
+                ParamLimits::new(0.0, 2.0, 0.01, 0.05),
             ));
         }
         NodeKind::Union { .. } | NodeKind::Difference { .. } | NodeKind::Intersection { .. } => {}
     }
+    result.sort_by(|a, b| a.path.cmp(&b.path));
     result
 }
 
@@ -816,7 +1287,7 @@ fn set_scalar_on_node(node: &mut ShapeNode, key: &str, value: Scalar) -> bool {
         },
         "primitive.half_height" => match &mut node.kind {
             NodeKind::Primitive(PrimitiveKind::Cylinder { half_height, .. }) => {
-                *half_height = value
+                *half_height = value;
             }
             _ => return false,
         },
@@ -845,7 +1316,7 @@ pub fn apply_edit(
     let mut clone = document.clone();
     for operation in &edit.operations {
         let actual = get_scalar(&clone, &operation.path)?;
-        if (actual - operation.before).abs() > 1.0e-4 {
+        if (actual - operation.before).abs() > EDIT_PRECONDITION_TOLERANCE {
             return Err(CoreError::EditPreconditionFailed {
                 path: operation.path.clone(),
                 expected: operation.before,
@@ -862,27 +1333,35 @@ pub fn apply_edit(
     }
 }
 
-/// Return descendants reachable from a node in stable order.
+/// Return descendants reachable from a node in stable order with no duplicates.
 pub fn descendants_of(document: &ShapeDocument, node: NodeId) -> Result<Vec<NodeId>, CoreError> {
     if !document.nodes.contains_key(&node) {
         return Err(CoreError::UnknownNode(node));
     }
     let mut result = BTreeSet::new();
-    collect_descendants(document, node, &mut result);
+    collect_descendants(document, node, &mut result)?;
     result.remove(&node);
     Ok(result.into_iter().collect())
 }
 
-fn collect_descendants(document: &ShapeDocument, node: NodeId, result: &mut BTreeSet<NodeId>) {
-    if !result.insert(node) {
-        return;
-    }
-    let Some(shape_node) = document.nodes.get(&node) else {
-        return;
-    };
+fn collect_descendants(
+    document: &ShapeDocument,
+    node: NodeId,
+    result: &mut BTreeSet<NodeId>,
+) -> Result<(), CoreError> {
+    let shape_node = document
+        .nodes
+        .get(&node)
+        .ok_or(CoreError::UnknownNode(node))?;
     for child in referenced_nodes(&shape_node.kind) {
-        collect_descendants(document, child, result);
+        if !document.nodes.contains_key(&child) {
+            return Err(CoreError::UnknownNode(child));
+        }
+        if result.insert(child) {
+            collect_descendants(document, child, result)?;
+        }
     }
+    Ok(())
 }
 
 fn referenced_nodes(kind: &NodeKind) -> Vec<NodeId> {
@@ -904,4 +1383,403 @@ pub fn allocate_node_id(document: &mut ShapeDocument) -> NodeId {
     let id = NodeId(document.next_node_id);
     document.next_node_id = document.next_node_id.saturating_add(1);
     id
+}
+
+/// Insert an already-built node, rejecting duplicate IDs.
+pub fn insert_node(document: &mut ShapeDocument, node: ShapeNode) -> Result<(), CoreError> {
+    if document.nodes.contains_key(&node.id) {
+        return Err(CoreError::DuplicateNode(node.id));
+    }
+    let node_id = node.id;
+    document.nodes.insert(node_id, node);
+    document.next_node_id = document.next_node_id.max(node_id.0.saturating_add(1));
+    Ok(())
+}
+
+fn path(node: NodeId, key: &'static str) -> ParamPath {
+    ParamPath {
+        node,
+        key: key.to_owned(),
+    }
+}
+
+fn push_issue(
+    report: &mut ValidationReport,
+    node: Option<NodeId>,
+    path: Option<ParamPath>,
+    code: &'static str,
+    message: impl Into<String>,
+) {
+    report.issues.push(ValidationIssue {
+        node,
+        path,
+        code: code.to_owned(),
+        message: message.into(),
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn primitive_node(id: u64, name: &str, primitive: PrimitiveKind) -> ShapeNode {
+        ShapeNode {
+            id: NodeId(id),
+            name: name.to_owned(),
+            tags: BTreeSet::new(),
+            enabled: true,
+            transform: Transform3::default(),
+            kind: NodeKind::Primitive(primitive),
+        }
+    }
+
+    fn csg_node(id: u64, name: &str, kind: NodeKind) -> ShapeNode {
+        ShapeNode {
+            id: NodeId(id),
+            name: name.to_owned(),
+            tags: BTreeSet::new(),
+            enabled: true,
+            transform: Transform3::default(),
+            kind,
+        }
+    }
+
+    fn sphere_document() -> ShapeDocument {
+        ShapeDocument::new(
+            "Sphere",
+            primitive_node(1, "Sphere", PrimitiveKind::Sphere { radius: 1.0 }),
+        )
+    }
+
+    fn issue_codes(report: &ValidationReport) -> BTreeSet<String> {
+        report
+            .issues
+            .iter()
+            .map(|issue| issue.code.clone())
+            .collect()
+    }
+
+    fn assert_valid(document: &ShapeDocument) {
+        let report = validate_document(document);
+        assert!(
+            report.is_valid(),
+            "expected valid document, got {:?}",
+            report.issues
+        );
+    }
+
+    #[test]
+    fn valid_mixed_primitive_csg_document() {
+        let root = csg_node(
+            5,
+            "Root difference",
+            NodeKind::Difference {
+                base: NodeId(4),
+                subtractors: vec![NodeId(3)],
+            },
+        );
+        let mut document = ShapeDocument::new("Mixed", root);
+        document
+            .insert_node(primitive_node(
+                1,
+                "Sphere",
+                PrimitiveKind::Sphere { radius: 1.0 },
+            ))
+            .unwrap();
+        document
+            .insert_node(primitive_node(
+                2,
+                "Box",
+                PrimitiveKind::RoundedBox {
+                    half_extents: Vec3::splat(0.75),
+                    roundness: 0.1,
+                },
+            ))
+            .unwrap();
+        document
+            .insert_node(primitive_node(
+                3,
+                "Cylinder",
+                PrimitiveKind::Cylinder {
+                    half_height: 0.8,
+                    radius: 0.25,
+                    roundness: 0.05,
+                },
+            ))
+            .unwrap();
+        document
+            .insert_node(csg_node(
+                4,
+                "Blend",
+                NodeKind::SmoothUnion {
+                    children: vec![NodeId(1), NodeId(2)],
+                    smoothness: 0.2,
+                },
+            ))
+            .unwrap();
+
+        assert_valid(&document);
+        assert_eq!(
+            descendants_of(&document, document.root).unwrap(),
+            vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)]
+        );
+    }
+
+    #[test]
+    fn dangling_child_is_reported() {
+        let document = ShapeDocument::new(
+            "Dangling",
+            csg_node(
+                1,
+                "Root",
+                NodeKind::Union {
+                    children: vec![NodeId(42)],
+                },
+            ),
+        );
+
+        let report = validate_document(&document);
+        assert!(issue_codes(&report).contains("dangling_reference"));
+    }
+
+    #[test]
+    fn cycle_is_reported() {
+        let mut document = ShapeDocument::new(
+            "Cycle",
+            csg_node(
+                1,
+                "A",
+                NodeKind::Union {
+                    children: vec![NodeId(2)],
+                },
+            ),
+        );
+        document
+            .insert_node(csg_node(
+                2,
+                "B",
+                NodeKind::Union {
+                    children: vec![NodeId(1)],
+                },
+            ))
+            .unwrap();
+
+        let report = validate_document(&document);
+        assert!(issue_codes(&report).contains("cycle"));
+    }
+
+    #[test]
+    fn shared_dag_child_is_valid_and_deduplicated() {
+        let mut document = ShapeDocument::new(
+            "DAG",
+            csg_node(
+                10,
+                "Root",
+                NodeKind::Union {
+                    children: vec![NodeId(2), NodeId(3)],
+                },
+            ),
+        );
+        document
+            .insert_node(primitive_node(
+                1,
+                "Shared",
+                PrimitiveKind::Sphere { radius: 0.5 },
+            ))
+            .unwrap();
+        document
+            .insert_node(csg_node(
+                2,
+                "Left",
+                NodeKind::Union {
+                    children: vec![NodeId(1)],
+                },
+            ))
+            .unwrap();
+        document
+            .insert_node(csg_node(
+                3,
+                "Right",
+                NodeKind::Intersection {
+                    children: vec![NodeId(1)],
+                },
+            ))
+            .unwrap();
+
+        assert_valid(&document);
+        assert_eq!(
+            descendants_of(&document, document.root).unwrap(),
+            vec![NodeId(1), NodeId(2), NodeId(3)]
+        );
+    }
+
+    #[test]
+    fn parameter_enumeration_is_stable() {
+        let mut document = ShapeDocument::new(
+            "Stable",
+            csg_node(
+                9,
+                "Root",
+                NodeKind::Union {
+                    children: vec![NodeId(5), NodeId(2)],
+                },
+            ),
+        );
+        document
+            .insert_node(primitive_node(
+                5,
+                "Torus",
+                PrimitiveKind::Torus {
+                    major_radius: 1.0,
+                    minor_radius: 0.2,
+                },
+            ))
+            .unwrap();
+        document
+            .insert_node(primitive_node(
+                2,
+                "Capsule",
+                PrimitiveKind::Capsule {
+                    half_length: 0.75,
+                    radius: 0.2,
+                },
+            ))
+            .unwrap();
+
+        let first = enumerate_parameters(&document);
+        let second = enumerate_parameters(&document);
+        assert_eq!(first, second);
+
+        let mut sorted = first
+            .iter()
+            .map(|descriptor| &descriptor.path)
+            .collect::<Vec<_>>();
+        let actual = sorted.clone();
+        sorted.sort();
+        assert_eq!(actual, sorted);
+    }
+
+    #[test]
+    fn set_get_round_trip_for_every_primitive_kind() {
+        let primitives = vec![
+            PrimitiveKind::Sphere { radius: 1.0 },
+            PrimitiveKind::RoundedBox {
+                half_extents: Vec3::splat(1.0),
+                roundness: 0.1,
+            },
+            PrimitiveKind::Capsule {
+                half_length: 1.0,
+                radius: 0.25,
+            },
+            PrimitiveKind::Cylinder {
+                half_height: 1.0,
+                radius: 0.3,
+                roundness: 0.05,
+            },
+            PrimitiveKind::Torus {
+                major_radius: 1.0,
+                minor_radius: 0.2,
+            },
+        ];
+
+        for primitive in primitives {
+            let mut document =
+                ShapeDocument::new("Primitive", primitive_node(1, "Primitive", primitive));
+            for descriptor in enumerate_parameters(&document) {
+                let value = (descriptor.minimum + descriptor.maximum) * 0.5;
+                set_scalar(&mut document, &descriptor.path, value).unwrap();
+                let actual = get_scalar(&document, &descriptor.path).unwrap();
+                assert!(
+                    (actual - value).abs() <= Scalar::EPSILON,
+                    "round trip failed for {:?}: {actual} != {value}",
+                    descriptor.path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn failed_edit_is_atomic() {
+        let document = sphere_document();
+        let edit = EditProgram {
+            label: "bad edit".to_owned(),
+            seed: 1,
+            operations: vec![
+                SetScalarEdit {
+                    path: path(NodeId(1), "primitive.radius"),
+                    before: 1.0,
+                    after: 1.5,
+                },
+                SetScalarEdit {
+                    path: path(NodeId(1), "transform.scale.x"),
+                    before: 2.0,
+                    after: 0.5,
+                },
+            ],
+        };
+
+        assert!(apply_edit(&document, &edit).is_err());
+        assert_eq!(
+            get_scalar(&document, &path(NodeId(1), "primitive.radius")).unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn locks_are_validated() {
+        let mut document = sphere_document();
+        document.locks.insert(path(NodeId(1), "primitive.radius"));
+        assert_valid(&document);
+
+        document
+            .locks
+            .insert(path(NodeId(1), "primitive.minor_radius"));
+        let report = validate_document(&document);
+        assert!(issue_codes(&report).contains("unknown_lock_path"));
+    }
+
+    #[test]
+    fn serde_json_round_trip() {
+        let mut document = sphere_document();
+        document
+            .nodes
+            .get_mut(&NodeId(1))
+            .unwrap()
+            .tags
+            .insert("primary".to_owned());
+
+        let json = serde_json::to_string(&document).unwrap();
+        let round_tripped: ShapeDocument = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(document, round_tripped);
+    }
+
+    #[test]
+    fn validation_collects_several_errors() {
+        let mut nodes = BTreeMap::new();
+        let mut bad_node = primitive_node(1, "Bad", PrimitiveKind::Sphere { radius: -1.0 });
+        bad_node.transform.translation.x = Scalar::NAN;
+        bad_node.transform.scale.y = 0.0;
+        nodes.insert(NodeId(1), bad_node);
+        let mut document = ShapeDocument {
+            schema_version: SCHEMA_VERSION,
+            title: "Bad".to_owned(),
+            root: NodeId(99),
+            nodes,
+            next_node_id: 1,
+            locks: BTreeSet::new(),
+        };
+        document
+            .locks
+            .insert(path(NodeId(1), "primitive.minor_radius"));
+
+        let codes = issue_codes(&validate_document(&document));
+
+        assert!(codes.contains("missing_root"));
+        assert!(codes.contains("non_finite"));
+        assert!(codes.contains("near_zero_scale"));
+        assert!(codes.contains("invalid_dimension"));
+        assert!(codes.contains("unknown_lock_path"));
+        assert!(codes.contains("next_node_id_not_fresh"));
+    }
 }
