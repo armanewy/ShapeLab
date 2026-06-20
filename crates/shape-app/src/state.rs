@@ -327,6 +327,23 @@ impl AppState {
         self.set_status("Project saved", AppPhase::Idle, None);
     }
 
+    /// Mark an export effect as completed successfully.
+    pub(crate) fn mark_exported(&mut self, path: PathBuf) {
+        self.set_status(format!("Exported {}", path.display()), AppPhase::Idle, None);
+    }
+
+    /// Schedule a rebuild of the current preview from the current document.
+    pub(crate) fn request_preview_rebuild(&mut self) -> Result<Vec<AppEffect>, AppStateError> {
+        self.invalidate_preview();
+        self.set_status("Building preview", AppPhase::BuildingPreview, None);
+        self.schedule_preview_rebuild(None)
+    }
+
+    /// Record a recoverable error from UI-side I/O or coordination code.
+    pub(crate) fn record_recoverable_error(&mut self, message: impl Into<String>) {
+        self.record_error(message.into());
+    }
+
     fn apply_command(&mut self, command: AppCommand) -> Result<Vec<AppEffect>, AppStateError> {
         match command {
             AppCommand::SelectNode(node) => {

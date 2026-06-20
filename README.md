@@ -14,10 +14,18 @@ The MVP proves a category-independent loop:
 
 ```bash
 cargo check --workspace
-cargo run -p shape-app
+cargo run -p shape-app --release
 ```
 
-The current headless vertical slice can generate visible demo artifacts from the CLI. The desktop app still opens a bootstrap shell until the Wave 3 and Wave 4 UI work is merged.
+The native app opens a local `egui` desktop workspace with:
+
+- a rendered current-shape viewport with orbit, pan, zoom, fit, and resize-triggered rerenders
+- preset loading for Desk Lamp, Toy Submarine, and Alien Plant
+- an outliner, inspector, revision history, status bar, and candidate gallery
+- background preview, render, and candidate generation jobs that keep the UI responsive
+- JSON project save/open and OBJ export
+
+Startup loads the Desk Lamp preset and builds the first preview in the background.
 
 On Linux, native GUI builds may require the platform packages expected by `eframe`/`wgpu`/`winit` and file-dialog backends, such as X11/Wayland development libraries.
 
@@ -44,7 +52,7 @@ shape-search deterministic candidate generation
 shape-project branchable revision history
 ```
 
-`shape-app` is the native `eframe`/`egui` shell. `shape-cli` is the headless integration driver.
+`shape-app` is the native `eframe`/`egui` desktop app. `shape-cli` is the headless integration driver.
 
 ## CLI
 

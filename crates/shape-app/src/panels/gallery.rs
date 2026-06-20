@@ -4,7 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Align2, Color32, CornerRadius, FontId, Sense, Stroke, StrokeKind, Vec2};
+use egui::{
+    Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle,
+    Vec2,
+};
 use shape_core::{CandidateId, ParamPath, ShapeDocument};
 use shape_search::Candidate;
 
@@ -18,7 +21,12 @@ const CARD_HEIGHT: f32 = 290.0;
 const THUMBNAIL_HEIGHT: f32 = 112.0;
 
 /// Draw the horizontally scrollable candidate gallery.
-pub(crate) fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<AppCommand> {
+pub(crate) fn show(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    current_texture: Option<&TextureHandle>,
+    candidate_textures: &BTreeMap<CandidateId, TextureHandle>,
+) -> Vec<AppCommand> {
     let mut commands = Vec::new();
 
     if is_generation_visible(state) {
@@ -40,10 +48,15 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<AppCommand> {
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                show_parent_card(ui, state);
+                show_parent_card(ui, state, current_texture);
                 for slot in 0..DEFAULT_CANDIDATE_SLOTS {
                     if let Some(preview) = preview_for_slot(&state.candidate_slots, slot) {
-                        commands.extend(show_candidate_card(ui, parent_document, preview));
+                        commands.extend(show_candidate_card(
+                            ui,
+                            parent_document,
+                            preview,
+                            candidate_textures.get(&preview.candidate.id),
+                        ));
                     } else {
                         show_loading_slot(ui, slot, state);
                     }
@@ -126,7 +139,7 @@ pub(crate) fn candidate_difference_lines(
     lines
 }
 
-fn show_parent_card(ui: &mut egui::Ui, state: &AppState) {
+fn show_parent_card(ui: &mut egui::Ui, state: &AppState, current_texture: Option<&TextureHandle>) {
     let response = egui::Frame::group(ui.style())
         .show(ui, |ui| {
             ui.set_min_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT));
@@ -134,6 +147,7 @@ fn show_parent_card(ui: &mut egui::Ui, state: &AppState) {
             ui.label("Control card");
             draw_thumbnail_frame(
                 ui,
+                current_texture,
                 state
                     .current_preview
                     .as_ref()
@@ -156,6 +170,7 @@ fn show_candidate_card(
     ui: &mut egui::Ui,
     parent_document: Option<&ShapeDocument>,
     preview: &CandidatePreview,
+    texture: Option<&TextureHandle>,
 ) -> Vec<AppCommand> {
     let mut commands = Vec::new();
     let label = stable_candidate_label(preview.slot, &preview.candidate);
@@ -166,6 +181,7 @@ fn show_candidate_card(
             ui.label(distance_label(preview.candidate.distance_from_parent));
             draw_thumbnail_frame(
                 ui,
+                texture,
                 Some((preview.image.width, preview.image.height)),
                 "Thumbnail ready",
             );
@@ -201,7 +217,7 @@ fn show_loading_slot(ui: &mut egui::Ui, slot: usize, state: &AppState) {
             } else {
                 "Empty slot"
             };
-            draw_thumbnail_frame(ui, None, text);
+            draw_thumbnail_frame(ui, None, None, text);
             ui.label("A generated direction will appear here.");
         })
         .response;
@@ -209,10 +225,15 @@ fn show_loading_slot(ui: &mut egui::Ui, slot: usize, state: &AppState) {
     paint_hover_outline(ui, &response);
 }
 
-fn draw_thumbnail_frame(ui: &mut egui::Ui, image_size: Option<(u32, u32)>, label: &str) {
+fn draw_thumbnail_frame(
+    ui: &mut egui::Ui,
+    texture: Option<&TextureHandle>,
+    image_size: Option<(u32, u32)>,
+    label: &str,
+) {
     let width = (CARD_WIDTH - 18.0).max(1.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, THUMBNAIL_HEIGHT), Sense::hover());
-    let fill = if image_size.is_some() {
+    let fill = if texture.is_some() || image_size.is_some() {
         Color32::from_rgb(48, 55, 61)
     } else {
         Color32::from_rgb(35, 37, 40)
@@ -224,17 +245,76 @@ fn draw_thumbnail_frame(ui: &mut egui::Ui, image_size: Option<(u32, u32)>, label
         Stroke::new(1.0, Color32::from_rgb(92, 101, 108)),
         StrokeKind::Inside,
     );
-    let text = match image_size {
-        Some((width, height)) => format!("{label}\n{width} x {height}"),
-        None => label.to_owned(),
-    };
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(12.0),
-        Color32::from_rgb(218, 222, 226),
+    if let Some(texture) = texture {
+        let image_rect = fit_rect_preserve_aspect(rect.shrink(4.0), texture.size_vec2());
+        ui.painter().image(
+            texture.id(),
+            image_rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        if let Some((width, height)) = image_size {
+            paint_thumbnail_badge(ui, rect, &format!("{width} x {height}"));
+        }
+    } else {
+        let text = match image_size {
+            Some((width, height)) => format!("{label}\n{width} x {height}"),
+            None => label.to_owned(),
+        };
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            FontId::proportional(12.0),
+            Color32::from_rgb(218, 222, 226),
+        );
+    }
+}
+
+fn paint_thumbnail_badge(ui: &egui::Ui, rect: Rect, text: &str) {
+    let padding = Vec2::new(6.0, 3.0);
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        FontId::proportional(11.0),
+        Color32::from_rgb(231, 235, 238),
     );
+    let badge_rect = Rect::from_min_size(
+        rect.left_bottom() + Vec2::new(6.0, -6.0 - galley.size().y - padding.y * 2.0),
+        galley.size() + padding * 2.0,
+    );
+    ui.painter().rect_filled(
+        badge_rect,
+        CornerRadius::same(4),
+        Color32::from_rgba_unmultiplied(18, 22, 25, 190),
+    );
+    ui.painter().galley(
+        badge_rect.min + padding,
+        galley,
+        Color32::from_rgb(231, 235, 238),
+    );
+}
+
+fn fit_rect_preserve_aspect(bounds: Rect, image_size: Vec2) -> Rect {
+    if bounds.width() <= 0.0
+        || bounds.height() <= 0.0
+        || image_size.x <= 0.0
+        || image_size.y <= 0.0
+        || !bounds.width().is_finite()
+        || !bounds.height().is_finite()
+        || !image_size.x.is_finite()
+        || !image_size.y.is_finite()
+    {
+        return bounds;
+    }
+
+    let bounds_aspect = bounds.width() / bounds.height();
+    let image_aspect = image_size.x / image_size.y;
+    let size = if bounds_aspect > image_aspect {
+        Vec2::new(bounds.height() * image_aspect, bounds.height())
+    } else {
+        Vec2::new(bounds.width(), bounds.width() / image_aspect)
+    };
+    Rect::from_center_size(bounds.center(), size)
 }
 
 fn paint_hover_outline(ui: &egui::Ui, response: &egui::Response) {
