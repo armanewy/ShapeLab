@@ -433,8 +433,6 @@ pub struct DecompileResult {
     pub manifest: DecompileManifest,
     /// Verification report after reconstruction.
     pub verification: VerificationReport,
-    /// Baked cumulative positions after the affine stage, when emitted.
-    pub affine_positions: Option<Vec<[f32; 3]>>,
     /// Ordered cumulative baked positions for every emitted reconstruction operator.
     pub stage_payloads: Vec<BakedStagePayload>,
     /// Vertex indices corrected by the lossless residual.
@@ -445,6 +443,22 @@ pub struct DecompileResult {
     pub reconstructed_positions: Vec<[f32; 3]>,
     /// Inference score breakdown for every operator candidate considered.
     pub inference_diagnostics: InferenceDiagnostics,
+}
+
+impl DecompileResult {
+    /// Compatibility accessor for the baked affine stage, when emitted.
+    ///
+    /// Ordered stage payloads are the authoritative source of cumulative stage
+    /// geometry. This accessor exists for schema-2 affine consumers and should
+    /// not be copied for future operator families.
+    pub fn affine_positions(&self) -> Option<&[[f32; 3]]> {
+        self.manifest
+            .operators
+            .iter()
+            .position(|operator| matches!(operator, OperatorManifest::GlobalAffine { .. }))
+            .and_then(|operator_index| self.stage_payloads.get(operator_index))
+            .map(|payload| payload.positions.as_slice())
+    }
 }
 
 /// Paths produced by writing a package.
@@ -650,7 +664,6 @@ pub fn decompile_pair(
     Ok(DecompileResult {
         manifest,
         verification,
-        affine_positions: affine_stage_positions,
         stage_payloads,
         residual_indices,
         residual_positions,
@@ -1516,13 +1529,13 @@ fn validate_package_relative_path(relative: &str, context: &Path) -> Result<(), 
     Ok(())
 }
 
-fn validate_stage_payload(
-    result: &DecompileResult,
+fn validate_stage_payload<'a>(
+    result: &'a DecompileResult,
     operator_index: usize,
     operator: &OperatorManifest,
     expected_file: &str,
     expected_positions: &[[f32; 3]],
-) -> Result<(), DecompileError> {
+) -> Result<&'a BakedStagePayload, DecompileError> {
     validate_package_relative_path(expected_file, Path::new(MANIFEST_FILE))?;
     let payload = result.stage_payloads.get(operator_index).ok_or_else(|| {
         invalid_package(
@@ -1542,7 +1555,7 @@ fn validate_stage_payload(
             format!("baked stage payload does not match operator index {operator_index}"),
         ));
     }
-    Ok(())
+    Ok(payload)
 }
 
 fn validate_result_consistency(
@@ -1641,20 +1654,8 @@ fn validate_result_consistency(
                     *uniform_scale,
                     Path::new(MANIFEST_FILE),
                 )?;
-                let affine_positions = result.affine_positions.as_ref().ok_or_else(|| {
-                    invalid_package(
-                        Path::new(AFFINE_POSITIONS_FILE),
-                        "affine operator is missing its baked positions",
-                    )
-                })?;
                 let evaluated = apply_affine_to_positions(&source.positions, *matrix_row_major_4x4);
-                if !position_slices_bit_equal(&evaluated, affine_positions) {
-                    return Err(invalid_package(
-                        Path::new(AFFINE_POSITIONS_FILE),
-                        "baked affine positions do not match the affine matrix",
-                    ));
-                }
-                validate_stage_payload(
+                let stage_payload = validate_stage_payload(
                     result,
                     operator_index,
                     operator,
@@ -1680,7 +1681,7 @@ fn validate_result_consistency(
                         "global affine metadata or emission decision is inconsistent",
                     ));
                 }
-                current_positions = evaluated;
+                current_positions = stage_payload.positions.clone();
                 saw_affine = true;
             }
             OperatorManifest::LosslessCorrection {
@@ -1736,21 +1737,19 @@ fn validate_result_consistency(
                         "lossless correction baked stage file metadata is inconsistent",
                     ));
                 }
-                validate_stage_payload(
+                let stage_payload = validate_stage_payload(
                     result,
                     operator_index,
                     operator,
                     &expected_stage_file,
                     &current_positions,
                 )?;
+                current_positions = stage_payload.positions.clone();
                 saw_lossless = true;
             }
         }
     }
-    if !saw_lossless
-        || saw_affine != result.affine_positions.is_some()
-        || result.stage_payloads.len() != result.manifest.operators.len()
-    {
+    if !saw_lossless || result.stage_payloads.len() != result.manifest.operators.len() {
         return Err(invalid_package(
             Path::new(MANIFEST_FILE),
             "decompile operator stream does not match its in-memory payloads",
@@ -2441,10 +2440,14 @@ impl OperatorHypothesis {
         rejection_reason: Option<String>,
     ) -> ProgramHypothesisDiagnostics {
         let residual_unit_size = std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>();
-        ProgramHypothesisDiagnostics {
-            operators: vec![ProgramOperatorDiagnostics {
+        let operators = match self.operator {
+            InferredOperator::NoOp => Vec::new(),
+            _ => vec![ProgramOperatorDiagnostics {
                 family: self.operator.family(),
             }],
+        };
+        ProgramHypothesisDiagnostics {
+            operators,
             final_correction: ProgramCorrectionDiagnostics {
                 kind: ProgramCorrectionKind::LosslessCorrection,
                 corrected_vertex_count: self.exact_residual_bytes / residual_unit_size,
@@ -4965,7 +4968,7 @@ mod tests {
     #[test]
     fn approximate_residual_cost_is_origin_invariant() {
         let base = cube_mesh();
-        let mut expected_family: Option<OperatorFamily> = None;
+        let mut expected_families: Option<Vec<OperatorFamily>> = None;
         let mut expected_cost: Option<f64> = None;
         for offset in [
             [0.0, 0.0, 0.0],
@@ -4983,12 +4986,12 @@ mod tests {
             target.positions[6][0] += 0.125;
             let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
             let selected = selected_program(&result.inference_diagnostics);
-            let selected_family = program_primary_family(selected);
+            let selected_families = program_families(selected);
 
-            if let Some(expected_family) = expected_family {
-                assert_eq!(selected_family, expected_family);
+            if let Some(expected_families) = &expected_families {
+                assert_eq!(&selected_families, expected_families);
             } else {
-                expected_family = Some(selected_family);
+                expected_families = Some(selected_families);
             }
             if let Some(expected_cost) = expected_cost {
                 assert!(
@@ -5155,6 +5158,7 @@ mod tests {
         let source = tetra_mesh();
 
         let result = decompile_pair(&source, &source, DecompileSettings::default()).unwrap();
+        let selected = selected_program(&result.inference_diagnostics);
 
         assert_eq!(result.manifest.operators.len(), 1);
         assert!(matches!(
@@ -5165,6 +5169,11 @@ mod tests {
             })
         ));
         assert!(result.residual_indices.is_empty());
+        assert!(selected.operators.is_empty());
+        assert_eq!(
+            selected.final_correction.kind,
+            ProgramCorrectionKind::LosslessCorrection
+        );
     }
 
     #[test]

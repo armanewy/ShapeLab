@@ -63,13 +63,31 @@ package-verification.json
 inference-diagnostics.json
 source.meshbin
 target.meshbin
-operators/0000-global-affine-positions.f32
+operators/
+    0000-global-affine-positions.f32
+    0001-lossless-correction-positions.f32
 residual/indices.u32
 residual/positions.f32
 blender_reconstruct.py
 ```
 
-The affine positions file exists only when the affine stage clears the configured threshold. The correction files always exist and may be empty.
+When no affine stage is emitted, the package instead contains the lossless stage as the first operator payload:
+
+```text
+manifest.json
+verification.json
+package-verification.json
+inference-diagnostics.json
+source.meshbin
+target.meshbin
+operators/
+    0000-lossless-correction-positions.f32
+residual/indices.u32
+residual/positions.f32
+blender_reconstruct.py
+```
+
+The affine positions file exists only when the affine stage clears the configured threshold. The cumulative lossless stage file and correction files always exist; the correction files may be empty.
 
 The manifest's numeric contract is:
 

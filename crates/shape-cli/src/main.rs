@@ -455,6 +455,9 @@ fn print_program_hypothesis_diagnostics(hypothesis: &ProgramHypothesisDiagnostic
 }
 
 fn program_hypothesis_label(hypothesis: &ProgramHypothesisDiagnostics) -> String {
+    if hypothesis.operators.is_empty() {
+        return "lossless correction only".to_owned();
+    }
     let mut labels = hypothesis
         .operators
         .iter()
