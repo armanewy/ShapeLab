@@ -77,7 +77,10 @@ FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x00000100000001B3
 ROTATION_ORTHONORMAL_TOLERANCE = 1.0e-3
 MIN_AXIS_LENGTH = 1.0e-6
+MIN_DIRECTION_ORTHOGONAL_RATIO = 1.0e-6
 IDENTITY_ANGLE_EPSILON = 1.0e-7
+SERIES_ANGLE_EPSILON = 1.0e-4
+MAX_ABS_BEND_ANGLE = 3.1415927410125732
 
 
 def command_line_arguments():
@@ -224,7 +227,11 @@ def f32_ulp_spacing(value):
     bits = f32_bits_u32(value)
     if bits >= 0x7F800000:
         return math.inf
-    return float(u32_to_f32(bits + 1)) - float(value)
+    next_value = u32_to_f32(bits + 1)
+    if math.isfinite(next_value):
+        return float(next_value) - float(value)
+    previous_value = u32_to_f32(bits - 1)
+    return float(value) - float(previous_value)
 
 
 def read_meshbin(relative_path):
@@ -375,22 +382,87 @@ def cross(left, right):
 
 
 def scale(vector, scalar):
-    return tuple(f32(component * scalar) for component in vector)
+    return tuple(float(component) * float(scalar) for component in vector)
 
 
 def sub(left, right):
-    return tuple(f32(a - b) for a, b in zip(left, right))
+    return tuple(float(a) - float(b) for a, b in zip(left, right))
 
 
 def add(left, right):
-    return tuple(f32(a + b) for a, b in zip(left, right))
+    return tuple(float(a) + float(b) for a, b in zip(left, right))
+
+
+def length(vector):
+    length_squared = dot(vector, vector)
+    if not math.isfinite(length_squared):
+        return None
+    value = math.sqrt(length_squared)
+    if not math.isfinite(value):
+        return None
+    return value
 
 
 def normalize(vector):
-    length = f32(math.sqrt(dot(vector, vector)))
-    if length <= MIN_AXIS_LENGTH or not math.isfinite(length):
+    vector_length = length(vector)
+    if vector_length is None or vector_length <= MIN_AXIS_LENGTH:
         return None
-    return scale(vector, f32(1.0 / length))
+    return scale(vector, 1.0 / vector_length)
+
+
+def canonicalize_zero(value):
+    return 0.0 if value == 0.0 else value
+
+
+def canonicalize_signed_zeroes(vector):
+    return tuple(canonicalize_zero(f32(component)) for component in vector)
+
+
+def should_flip_direction_sign(direction):
+    for component in direction:
+        if component != 0.0:
+            return component < 0.0
+    return False
+
+
+def negate_vector(vector):
+    return tuple(canonicalize_zero(f32(-component)) for component in vector)
+
+
+def to_f32_checked(vector):
+    if any(not math.isfinite(component) for component in vector):
+        raise ValueError("bend evaluation produced a non-finite coordinate")
+    try:
+        converted = tuple(f32(component) for component in vector)
+    except OverflowError as error:
+        raise ValueError("bend evaluation produced a non-finite coordinate") from error
+    if any(not math.isfinite(component) for component in converted):
+        raise ValueError("bend evaluation produced a non-finite coordinate")
+    return converted
+
+
+def sin_over_curvature(phi, curvature, distance):
+    if abs(phi) <= SERIES_ANGLE_EPSILON:
+        phi_squared = phi * phi
+        return distance * (
+            1.0
+            - phi_squared / 6.0
+            + phi_squared * phi_squared / 120.0
+            - phi_squared * phi_squared * phi_squared / 5040.0
+        )
+    return math.sin(phi) / curvature
+
+
+def one_minus_cos_over_curvature(phi, curvature, distance):
+    if abs(phi) <= SERIES_ANGLE_EPSILON:
+        phi_squared = phi * phi
+        return curvature * distance * distance * (
+            0.5
+            - phi_squared / 24.0
+            + phi_squared * phi_squared / 720.0
+            - phi_squared * phi_squared * phi_squared / 40320.0
+        )
+    return (1.0 - math.cos(phi)) / curvature
 
 
 def row_length(row):
@@ -498,25 +570,42 @@ def validate_bend_parameters(parameters):
     interval_end = f32(
         require_finite_number(parameters.get("interval_end"), "bend interval_end")
     )
-    if interval_end < interval_start:
-        raise ValueError("bend interval_end must be greater than or equal to interval_start")
+    if interval_end <= interval_start:
+        raise ValueError("bend interval_end must be greater than interval_start")
+    if abs(angle_radians) > MAX_ABS_BEND_ANGLE:
+        raise ValueError("bend angle magnitude must be at most pi radians")
 
     axis = normalize(longitudinal_axis)
     if axis is None:
         raise ValueError("bend longitudinal_axis must be non-zero")
-    direction_dot_axis = f32(dot(bend_direction, axis))
-    projected_direction = sub(bend_direction, scale(axis, direction_dot_axis))
-    direction = normalize(projected_direction)
-    if direction is None:
+    direction_length = length(bend_direction)
+    if direction_length is None or direction_length <= MIN_AXIS_LENGTH:
         raise ValueError("bend_direction must have a component orthogonal to the axis")
-    binormal = normalize(cross(axis, direction))
+    direction_dot_axis = dot(bend_direction, axis)
+    projected_direction = sub(bend_direction, scale(axis, direction_dot_axis))
+    projected_length = length(projected_direction)
+    if (
+        projected_length is None
+        or projected_length <= MIN_AXIS_LENGTH
+        or projected_length / direction_length <= MIN_DIRECTION_ORTHOGONAL_RATIO
+    ):
+        raise ValueError("bend_direction must have a component orthogonal to the axis")
+    longitudinal_axis = canonicalize_signed_zeroes(axis)
+    direction = canonicalize_signed_zeroes(
+        scale(projected_direction, 1.0 / projected_length)
+    )
+    angle_radians = canonicalize_zero(angle_radians)
+    if should_flip_direction_sign(direction):
+        direction = negate_vector(direction)
+        angle_radians = canonicalize_zero(f32(-angle_radians))
+    binormal = normalize(cross(longitudinal_axis, direction))
     if binormal is None:
         raise ValueError("bend frame is degenerate")
     return {
         "origin": tuple(origin),
-        "longitudinal_axis": tuple(axis),
+        "longitudinal_axis": tuple(longitudinal_axis),
         "bend_direction": tuple(direction),
-        "binormal": tuple(binormal),
+        "binormal": canonicalize_signed_zeroes(binormal),
         "angle_radians": angle_radians,
         "interval_start": interval_start,
         "interval_end": interval_end,
@@ -525,61 +614,66 @@ def validate_bend_parameters(parameters):
 
 def evaluate_bend(parameters, positions):
     bend = validate_bend_parameters(parameters)
+    if any(
+        not all(is_finite_number(component) for component in position)
+        for position in positions
+    ):
+        raise ValueError("bend source positions must be finite")
     angle = bend["angle_radians"]
     if abs(angle) <= IDENTITY_ANGLE_EPSILON:
-        return list(positions)
+        return [tuple(position) for position in positions]
+    return [evaluate_validated_bend_point(bend, position) for position in positions]
+
+
+def evaluate_validated_bend_point(bend, position):
     interval_start = bend["interval_start"]
     interval_end = bend["interval_end"]
-    interval_length = f32(interval_end - interval_start)
+    interval_length = float(interval_end) - float(interval_start)
     if interval_length <= 0.0:
         raise ValueError("non-identity bends require a positive interval length")
-    radius = f32(interval_length / angle)
     origin = bend["origin"]
     axis = bend["longitudinal_axis"]
     direction = bend["bend_direction"]
     binormal = bend["binormal"]
-    result = []
-    for position in positions:
-        relative = sub(position, origin)
-        local_x = f32(dot(relative, direction))
-        local_y = f32(dot(relative, axis))
-        local_z = f32(dot(relative, binormal))
-        if local_y < interval_start:
-            result.append(tuple(position))
-            continue
-        if local_y <= interval_end:
-            theta = f32(angle * f32((local_y - interval_start) / interval_length))
-            sin_theta = f32(math.sin(theta))
-            cos_theta = f32(math.cos(theta))
-            bent_x = f32(f32(radius * f32(1.0 - cos_theta)) + f32(local_x * cos_theta))
-            bent_y = f32(
-                interval_start
-                + f32(radius * sin_theta)
-                - f32(local_x * sin_theta)
-            )
-        else:
-            sin_angle = f32(math.sin(angle))
-            cos_angle = f32(math.cos(angle))
-            bent_x = f32(
-                f32(radius * f32(1.0 - cos_angle))
-                + f32(local_x * cos_angle)
-                + f32(f32(local_y - interval_end) * sin_angle)
-            )
-            bent_y = f32(
-                interval_start
-                + f32(radius * sin_angle)
-                - f32(local_x * sin_angle)
-                + f32(f32(local_y - interval_end) * cos_angle)
-            )
-        world = add(
-            origin,
+    relative = sub(position, origin)
+    s = dot(relative, axis)
+    u = dot(relative, direction)
+    v = dot(relative, binormal)
+    if s < interval_start:
+        return tuple(position)
+
+    angle = float(bend["angle_radians"])
+    curvature = angle / interval_length
+    if s <= interval_end:
+        distance = s - float(interval_start)
+        phi = curvature * distance
+        center = add(
+            add(origin, scale(axis, interval_start)),
             add(
-                add(scale(direction, bent_x), scale(axis, bent_y)),
-                scale(binormal, local_z),
+                scale(axis, sin_over_curvature(phi, curvature, distance)),
+                scale(direction, one_minus_cos_over_curvature(phi, curvature, distance)),
+            )
+        )
+        normal = add(scale(axis, -math.sin(phi)), scale(direction, math.cos(phi)))
+        bent = add(add(center, scale(normal, u)), scale(binormal, v))
+    else:
+        center_end = add(
+            add(origin, scale(axis, interval_start)),
+            add(
+                scale(axis, sin_over_curvature(angle, curvature, interval_length)),
+                scale(
+                    direction,
+                    one_minus_cos_over_curvature(angle, curvature, interval_length),
+                ),
             ),
         )
-        result.append(tuple(f32(component) for component in world))
-    return result
+        tangent_end = add(scale(axis, math.cos(angle)), scale(direction, math.sin(angle)))
+        normal_end = add(scale(axis, -math.sin(angle)), scale(direction, math.cos(angle)))
+        bent = add(
+            add(center_end, scale(tangent_end, s - float(interval_end))),
+            add(scale(normal_end, u), scale(binormal, v)),
+        )
+    return to_f32_checked(bent)
 
 
 def comparison_report(evaluated, baked, policy):
@@ -609,9 +703,11 @@ def comparison_report(evaluated, baked, policy):
             for a, b, error in zip(left, right, component_errors):
                 local = max(abs(float(a)), abs(float(b)))
                 allowed = (
-                    absolute_epsilon
-                    + relative_epsilon * local
-                    + ulp_multiplier * f32_ulp_spacing(local)
+                    max(
+                        absolute_epsilon,
+                        relative_epsilon * local,
+                        ulp_multiplier * f32_ulp_spacing(b),
+                    )
                 )
                 if error > allowed:
                     outside = True
