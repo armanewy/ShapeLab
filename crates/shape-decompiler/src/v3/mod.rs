@@ -7,6 +7,7 @@
 
 pub mod bend;
 pub mod blender;
+pub mod decompile;
 pub mod diagnostics;
 pub mod inference;
 pub mod package;
