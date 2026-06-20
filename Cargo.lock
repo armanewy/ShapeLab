@@ -3521,7 +3521,10 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "image",
  "log",
+ "serde",
+ "serde_json",
  "shape-core",
  "shape-field",
  "shape-mesh",
@@ -3529,6 +3532,7 @@ dependencies = [
  "shape-project",
  "shape-render",
  "shape-search",
+ "tempfile",
 ]
 
 [[package]]

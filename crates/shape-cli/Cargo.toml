@@ -9,7 +9,10 @@ rust-version.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+image.workspace = true
 log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 shape-core.workspace = true
 shape-field.workspace = true
 shape-mesh.workspace = true
@@ -17,3 +20,6 @@ shape-presets.workspace = true
 shape-project.workspace = true
 shape-render.workspace = true
 shape-search.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
