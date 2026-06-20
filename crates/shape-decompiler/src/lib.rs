@@ -228,17 +228,45 @@ pub struct InferenceDiagnostics {
     pub weighted_identity_error: f64,
     /// Scoring constants and tolerance policy used for this report.
     pub scoring_policy: InferenceScoringPolicy,
-    /// Index of the selected hypothesis in `hypotheses`.
-    pub selected_hypothesis_index: usize,
-    /// Candidate score breakdowns in deterministic inference order.
-    pub hypotheses: Vec<HypothesisDiagnostics>,
+    /// Index of the selected program hypothesis in `program_hypotheses`.
+    pub selected_program_hypothesis_index: usize,
+    /// Candidate program score breakdowns in deterministic inference order.
+    pub program_hypotheses: Vec<ProgramHypothesisDiagnostics>,
 }
 
-/// Auditable score breakdown for one inferred operator candidate.
+/// Ordered inferred reconstruction operator in a program hypothesis.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HypothesisDiagnostics {
+pub struct ProgramOperatorDiagnostics {
     /// Candidate operator family.
     pub family: OperatorFamily,
+}
+
+/// Terminal correction kind used to make a program exactly replayable.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgramCorrectionKind {
+    /// Exact absolute-position residual correction.
+    LosslessCorrection,
+}
+
+/// Terminal correction summary for an inferred program hypothesis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgramCorrectionDiagnostics {
+    /// Correction operator kind.
+    pub kind: ProgramCorrectionKind,
+    /// Number of vertices corrected by the exact residual.
+    pub corrected_vertex_count: usize,
+    /// Exact correction payload size in bytes.
+    pub exact_residual_bytes: usize,
+}
+
+/// Auditable score breakdown for one inferred ordered program candidate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgramHypothesisDiagnostics {
+    /// Ordered explanatory operators before the terminal exact correction.
+    pub operators: Vec<ProgramOperatorDiagnostics>,
+    /// Exact terminal correction needed after the ordered operators.
+    pub final_correction: ProgramCorrectionDiagnostics,
     /// Triangle-area-weighted squared geometric error.
     pub weighted_geometric_error: f64,
     /// Surface-weighted displacement fraction explained by the candidate.
@@ -2330,7 +2358,7 @@ fn choose_affine_candidate(
         .min_by(|(_, left), (_, right)| compare_hypotheses(left, right))
         .map(|(index, _)| index)
         .unwrap_or(0);
-    let hypothesis_diagnostics = hypotheses
+    let program_hypothesis_diagnostics = hypotheses
         .iter()
         .enumerate()
         .map(|(index, hypothesis)| {
@@ -2341,14 +2369,14 @@ fn choose_affine_candidate(
     InferenceResult {
         selected: hypotheses[selected_index].clone(),
         diagnostics: InferenceDiagnostics {
-            diagnostics_schema_version: 2,
+            diagnostics_schema_version: 3,
             package_schema_version: SCHEMA_VERSION,
             surface_weighting: "triangle_area_derived_vertex_weights".to_owned(),
             raw_identity_error,
             weighted_identity_error,
             scoring_policy: inference_scoring_policy(),
-            selected_hypothesis_index: selected_index,
-            hypotheses: hypothesis_diagnostics,
+            selected_program_hypothesis_index: selected_index,
+            program_hypotheses: program_hypothesis_diagnostics,
         },
     }
 }
@@ -2411,9 +2439,17 @@ impl OperatorHypothesis {
         &self,
         selected: bool,
         rejection_reason: Option<String>,
-    ) -> HypothesisDiagnostics {
-        HypothesisDiagnostics {
-            family: self.operator.family(),
+    ) -> ProgramHypothesisDiagnostics {
+        let residual_unit_size = std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>();
+        ProgramHypothesisDiagnostics {
+            operators: vec![ProgramOperatorDiagnostics {
+                family: self.operator.family(),
+            }],
+            final_correction: ProgramCorrectionDiagnostics {
+                kind: ProgramCorrectionKind::LosslessCorrection,
+                corrected_vertex_count: self.exact_residual_bytes / residual_unit_size,
+                exact_residual_bytes: self.exact_residual_bytes,
+            },
             weighted_geometric_error: self.weighted_geometric_error,
             weighted_explained_fraction: self.weighted_explained_fraction,
             raw_geometric_error: self.raw_geometric_error,
@@ -4645,6 +4681,30 @@ mod tests {
 
     use super::*;
 
+    fn selected_program(diagnostics: &InferenceDiagnostics) -> &ProgramHypothesisDiagnostics {
+        diagnostics
+            .program_hypotheses
+            .iter()
+            .find(|hypothesis| hypothesis.selected)
+            .expect("selected program hypothesis")
+    }
+
+    fn program_primary_family(hypothesis: &ProgramHypothesisDiagnostics) -> OperatorFamily {
+        hypothesis
+            .operators
+            .first()
+            .expect("program has an explanatory operator")
+            .family
+    }
+
+    fn program_families(hypothesis: &ProgramHypothesisDiagnostics) -> Vec<OperatorFamily> {
+        hypothesis
+            .operators
+            .iter()
+            .map(|operator| operator.family)
+            .collect()
+    }
+
     #[test]
     fn affine_stage_is_emitted_when_it_explains_the_deformation() {
         let source = tetra_mesh();
@@ -4869,13 +4929,11 @@ mod tests {
         };
         assert_eq!(*semantic_family, AffineSemanticFamily::Translation);
         assert_eq!(*explained_displacement_fraction, 0.0);
-        let selected = result
-            .inference_diagnostics
-            .hypotheses
-            .iter()
-            .find(|hypothesis| hypothesis.selected)
-            .expect("selected hypothesis");
-        assert_eq!(selected.family, OperatorFamily::Translation);
+        let selected = selected_program(&result.inference_diagnostics);
+        assert_eq!(
+            program_primary_family(selected),
+            OperatorFamily::Translation
+        );
         assert!(selected.weighted_explained_fraction > 0.99);
         assert_eq!(selected.raw_explained_fraction, 0.0);
         assert!(selected.exact_residual_bytes > 0);
@@ -4924,17 +4982,13 @@ mod tests {
             let mut target = source.clone();
             target.positions[6][0] += 0.125;
             let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
-            let selected = result
-                .inference_diagnostics
-                .hypotheses
-                .iter()
-                .find(|hypothesis| hypothesis.selected)
-                .expect("selected hypothesis");
+            let selected = selected_program(&result.inference_diagnostics);
+            let selected_family = program_primary_family(selected);
 
             if let Some(expected_family) = expected_family {
-                assert_eq!(selected.family, expected_family);
+                assert_eq!(selected_family, expected_family);
             } else {
-                expected_family = Some(selected.family);
+                expected_family = Some(selected_family);
             }
             if let Some(expected_cost) = expected_cost {
                 assert!(
@@ -4992,8 +5046,9 @@ mod tests {
                 .get(&OperatorFamily::GeneralAffine),
             Some(&1.0e-2)
         );
-        for hypothesis in &result.inference_diagnostics.hypotheses {
+        for hypothesis in &result.inference_diagnostics.program_hypotheses {
             let policy = &result.inference_diagnostics.scoring_policy;
+            let families = program_families(hypothesis);
             let recomputed_normalized =
                 hypothesis.weighted_geometric_error / hypothesis.error_normalization_scale;
             let recomputed_parameter = hypothesis.parameter_count as f64 * policy.parameter_weight;
@@ -5005,40 +5060,40 @@ mod tests {
             let recomputed_exact = hypothesis.exact_residual_bytes as f64
                 / hypothesis.literal_size_bytes as f64
                 * policy.exact_residual_weight;
-            let recomputed_prior = *policy
-                .family_priors
-                .get(&hypothesis.family)
-                .expect("family prior");
+            let recomputed_prior = families
+                .iter()
+                .map(|family| *policy.family_priors.get(family).expect("family prior"))
+                .sum::<f64>();
             assert!(
                 (recomputed_normalized - hypothesis.normalized_geometric_error_cost).abs()
                     <= 1.0e-12,
                 "normalized error mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (recomputed_parameter - hypothesis.parameter_cost).abs() <= 1.0e-12,
                 "parameter cost mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (recomputed_metadata - hypothesis.semantic_metadata_cost).abs() <= 1.0e-12,
                 "metadata cost mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (recomputed_approximate - hypothesis.approximate_residual_cost).abs() <= 1.0e-12,
                 "approximate residual cost mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (recomputed_exact - hypothesis.exact_residual_cost).abs() <= 1.0e-12,
                 "exact residual cost mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (recomputed_prior - hypothesis.prior_penalty).abs() <= 1.0e-12,
                 "prior mismatch for {:?}",
-                hypothesis.family
+                families
             );
             let component_sum = recomputed_normalized
                 + recomputed_parameter
@@ -5049,12 +5104,12 @@ mod tests {
             assert!(
                 (component_sum - hypothesis.score_component_sum).abs() <= 1.0e-12,
                 "component sum mismatch for {:?}",
-                hypothesis.family
+                families
             );
             assert!(
                 (hypothesis.score_component_sum - hypothesis.total_score).abs() <= 1.0e-12,
                 "total score mismatch for {:?}",
-                hypothesis.family
+                families
             );
         }
     }
@@ -5243,16 +5298,25 @@ mod tests {
         let diagnostics: InferenceDiagnostics =
             serde_json::from_str(&fs::read_to_string(paths.inference_diagnostics).unwrap())
                 .unwrap();
-        assert_eq!(diagnostics.diagnostics_schema_version, 2);
+        assert_eq!(diagnostics.diagnostics_schema_version, 3);
         assert_eq!(diagnostics.package_schema_version, SCHEMA_VERSION);
-        assert_eq!(diagnostics.selected_hypothesis_index, 2);
+        assert_eq!(diagnostics.selected_program_hypothesis_index, 2);
         assert_eq!(
             diagnostics
-                .hypotheses
+                .program_hypotheses
                 .iter()
                 .filter(|hypothesis| hypothesis.selected)
                 .count(),
             1
+        );
+        let selected = selected_program(&diagnostics);
+        assert_eq!(
+            program_families(selected),
+            vec![OperatorFamily::Translation]
+        );
+        assert_eq!(
+            selected.final_correction.kind,
+            ProgramCorrectionKind::LosslessCorrection
         );
 
         let package_verification = verify_decompile_package(dir.path()).unwrap();

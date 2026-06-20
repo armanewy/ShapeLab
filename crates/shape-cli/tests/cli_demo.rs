@@ -132,6 +132,15 @@ f 4 1 5
     assert!(package.join("residual").join("indices.u32").exists());
     assert!(package.join("residual").join("positions.f32").exists());
 
+    let diagnostics: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(package.join("inference-diagnostics.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(diagnostics["diagnostics_schema_version"], 3);
+    assert!(diagnostics["program_hypotheses"].is_array());
+    assert!(diagnostics.get("hypotheses").is_none());
+    assert!(diagnostics.get("selected_hypothesis_index").is_none());
+
     let verification: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(package.join("verification.json")).unwrap())
             .unwrap();

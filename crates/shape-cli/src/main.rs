@@ -10,8 +10,9 @@ use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
 use shape_decompiler::{
-    AffineSemanticFamily, DecompileSettings, HypothesisDiagnostics, OperatorFamily,
-    OperatorManifest, decompile_pair, verify_decompile_package, write_decompile_package,
+    AffineSemanticFamily, DecompileSettings, OperatorFamily, OperatorManifest,
+    ProgramHypothesisDiagnostics, decompile_pair, verify_decompile_package,
+    write_decompile_package,
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
@@ -416,9 +417,9 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     );
     println!("  blender script: {}", paths.blender_script.display());
     if args.verbose {
-        println!("Inference hypotheses:");
-        for hypothesis in &result.inference_diagnostics.hypotheses {
-            print_hypothesis_diagnostics(hypothesis);
+        println!("Inference program hypotheses:");
+        for hypothesis in &result.inference_diagnostics.program_hypotheses {
+            print_program_hypothesis_diagnostics(hypothesis);
         }
     }
     Ok(())
@@ -433,7 +434,7 @@ fn affine_family_label(semantic_family: AffineSemanticFamily) -> &'static str {
     }
 }
 
-fn print_hypothesis_diagnostics(hypothesis: &HypothesisDiagnostics) {
+fn print_program_hypothesis_diagnostics(hypothesis: &ProgramHypothesisDiagnostics) {
     let selected = if hypothesis.selected {
         "selected"
     } else {
@@ -442,7 +443,7 @@ fn print_hypothesis_diagnostics(hypothesis: &HypothesisDiagnostics) {
     let rejection = hypothesis.rejection_reason.as_deref().unwrap_or("viable");
     println!(
         "  - {} [{}]: score={:.9} raw={:.3}% weighted={:.3}% approx_residual={:.6} exact_bytes={} status={}",
-        operator_family_label(hypothesis.family),
+        program_hypothesis_label(hypothesis),
         selected,
         hypothesis.total_score,
         hypothesis.raw_explained_fraction * 100.0,
@@ -451,6 +452,16 @@ fn print_hypothesis_diagnostics(hypothesis: &HypothesisDiagnostics) {
         hypothesis.exact_residual_bytes,
         rejection
     );
+}
+
+fn program_hypothesis_label(hypothesis: &ProgramHypothesisDiagnostics) -> String {
+    let mut labels = hypothesis
+        .operators
+        .iter()
+        .map(|operator| operator_family_label(operator.family))
+        .collect::<Vec<_>>();
+    labels.push("lossless correction");
+    labels.join(" -> ")
 }
 
 fn operator_family_label(family: OperatorFamily) -> &'static str {
