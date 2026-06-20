@@ -632,6 +632,7 @@ impl AppState {
             ViewportAction::Orbit {
                 delta_yaw,
                 delta_pitch,
+                camera: _,
             } => {
                 self.camera.orbit(delta_yaw, delta_pitch);
                 self.schedule_current_render()
@@ -639,11 +640,12 @@ impl AppState {
             ViewportAction::Pan {
                 delta_right,
                 delta_up,
+                camera: _,
             } => {
                 self.camera.pan(delta_right, delta_up);
                 self.schedule_current_render()
             }
-            ViewportAction::Zoom { factor } => {
+            ViewportAction::Zoom { factor, camera: _ } => {
                 self.camera.zoom(factor);
                 self.schedule_current_render()
             }
@@ -656,7 +658,9 @@ impl AppState {
                 self.camera = OrbitCamera::default();
                 self.schedule_current_render()
             }
-            ViewportAction::RequestInteractiveRender | ViewportAction::RequestFinalRender => {
+            ViewportAction::RequestInteractiveRender(request)
+            | ViewportAction::RequestFinalRender(request) => {
+                self.camera = request.camera.clamped();
                 self.schedule_current_render()
             }
         }
