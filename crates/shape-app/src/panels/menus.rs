@@ -61,13 +61,13 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<AppCommand> {
                 ui.close();
             }
             if ui.button("Save As...").clicked() {
-                if let Some(path) = save_project_file() {
+                if let Some(path) = save_project_file(&state.project.title) {
                     commands.push(command_for_path_action(PathMenuAction::SaveAs, path));
                 }
                 ui.close();
             }
             if ui.button("Export Current OBJ...").clicked() {
-                if let Some(path) = export_obj_file() {
+                if let Some(path) = export_obj_file(&state.project.title) {
                     commands.push(command_for_path_action(
                         PathMenuAction::ExportCurrentObj,
                         path,
@@ -141,22 +141,89 @@ pub(crate) fn about_text() -> &'static str {
     "Native offline preference-guided shape exploration. Geometry, rendering, and project I/O stay local to this application."
 }
 
+/// Suggested project filename derived from a user-visible title.
+pub(crate) fn suggested_project_file_name(title: &str) -> String {
+    format!("{}.shapelab.json", safe_file_stem(title))
+}
+
+/// Suggested OBJ filename derived from a user-visible title.
+pub(crate) fn suggested_obj_file_name(title: &str) -> String {
+    format!("{}.obj", safe_file_stem(title))
+}
+
 fn pick_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Shape Lab project", &["shapelab.json", "json"])
         .pick_file()
 }
 
-fn save_project_file() -> Option<PathBuf> {
+fn save_project_file(title: &str) -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Shape Lab project", &["shapelab.json", "json"])
-        .set_file_name("untitled.shapelab.json")
+        .set_file_name(suggested_project_file_name(title))
         .save_file()
 }
 
-fn export_obj_file() -> Option<PathBuf> {
+fn export_obj_file(title: &str) -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Wavefront OBJ", &["obj"])
-        .set_file_name("shape-lab-export.obj")
+        .set_file_name(suggested_obj_file_name(title))
         .save_file()
+}
+
+fn safe_file_stem(title: &str) -> String {
+    let mut stem = String::new();
+    let mut pending_separator = false;
+
+    for character in title.trim().chars() {
+        if character.is_ascii_alphanumeric() {
+            if pending_separator && !stem.is_empty() {
+                stem.push('-');
+            }
+            stem.push(character.to_ascii_lowercase());
+            pending_separator = false;
+        } else if !stem.is_empty() {
+            pending_separator = true;
+        }
+
+        if stem.len() >= 64 {
+            break;
+        }
+    }
+
+    let stem = stem.trim_matches('-');
+    let stem = if stem.is_empty() { "untitled" } else { stem };
+    if is_windows_reserved_filename(stem) {
+        format!("shape-{stem}")
+    } else {
+        stem.to_owned()
+    }
+}
+
+fn is_windows_reserved_filename(stem: &str) -> bool {
+    matches!(
+        stem,
+        "con"
+            | "prn"
+            | "aux"
+            | "nul"
+            | "com1"
+            | "com2"
+            | "com3"
+            | "com4"
+            | "com5"
+            | "com6"
+            | "com7"
+            | "com8"
+            | "com9"
+            | "lpt1"
+            | "lpt2"
+            | "lpt3"
+            | "lpt4"
+            | "lpt5"
+            | "lpt6"
+            | "lpt7"
+            | "lpt8"
+            | "lpt9"
+    )
 }

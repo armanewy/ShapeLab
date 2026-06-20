@@ -2,9 +2,12 @@
 
 //! Uniform-grid mesh generation and OBJ export.
 
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use glam::Vec3;
 use shape_core::Aabb;
@@ -15,6 +18,10 @@ const MAX_GRID_SAMPLES: usize = 16_777_216;
 const MIN_GRADIENT_STEP: f32 = 1.0e-4;
 const MIN_NORMAL_LENGTH: f32 = 1.0e-6;
 const MIN_TRIANGLE_AREA_NORMAL: f32 = 1.0e-8;
+const OBJ_TEMP_PREFIX: &str = ".shape-lab-obj-";
+const TEMP_FILE_SUFFIX: &str = ".tmp";
+const OBSOLETE_TEMP_MIN_AGE: Duration = Duration::from_secs(60 * 60);
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Cube corner numbering is deterministic and shared by all voxels:
 // 0=(0,0,0), 1=(1,0,0), 2=(1,1,0), 3=(0,1,0),
@@ -172,6 +179,24 @@ pub fn write_obj(mesh: &TriangleMesh, mut writer: impl Write) -> Result<(), Mesh
     validate_mesh(mesh)?;
 
     writeln!(writer, "# Shape Lab generated OBJ")?;
+    writeln!(writer, "# format wavefront-obj")?;
+    writeln!(writer, "# vertex_count {}", mesh.positions.len())?;
+    writeln!(writer, "# normal_count {}", mesh.normals.len())?;
+    writeln!(writer, "# triangle_count {}", mesh.indices.len() / 3)?;
+    if mesh.bounds.is_empty() {
+        writeln!(writer, "# bounds empty")?;
+    } else {
+        writeln!(
+            writer,
+            "# bounds min {:.9} {:.9} {:.9} max {:.9} {:.9} {:.9}",
+            mesh.bounds.min.x,
+            mesh.bounds.min.y,
+            mesh.bounds.min.z,
+            mesh.bounds.max.x,
+            mesh.bounds.max.y,
+            mesh.bounds.max.z
+        )?;
+    }
     writeln!(
         writer,
         "# vertices {} triangles {}",
@@ -204,17 +229,12 @@ pub fn write_obj(mesh: &TriangleMesh, mut writer: impl Write) -> Result<(), Mesh
 /// Write OBJ text to a path.
 pub fn write_obj_to_path(mesh: &TriangleMesh, path: impl AsRef<Path>) -> Result<(), MeshError> {
     let path = path.as_ref();
-    let file = File::create(path).map_err(|source| MeshError::PathIo {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut writer = BufWriter::new(file);
-    write_obj(mesh, &mut writer).map_err(|error| attach_path(error, path))?;
-    writer.flush().map_err(|source| MeshError::PathIo {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    Ok(())
+    atomic_obj_replace(path, |file| {
+        let mut writer = BufWriter::new(file);
+        write_obj(mesh, &mut writer)?;
+        writer.flush()?;
+        Ok(())
+    })
 }
 
 /// Return OBJ text as a string for callers that need an in-memory export.
@@ -567,12 +587,166 @@ fn obj_index(index: u32) -> Result<u32, MeshError> {
     index.checked_add(1).ok_or(MeshError::IndexOverflow)
 }
 
+fn atomic_obj_replace(
+    path: &Path,
+    write_temp: impl FnOnce(&mut File) -> Result<(), MeshError>,
+) -> Result<(), MeshError> {
+    cleanup_obsolete_obj_temp_files(path);
+
+    let mut temp = TempSibling::create(path)?;
+
+    write_temp(temp.file_mut()).map_err(|error| attach_path(error, path))?;
+    temp.file_mut()
+        .sync_all()
+        .map_err(|source| path_io(path, source))?;
+    temp.persist(path).map_err(|source| path_io(path, source))?;
+
+    cleanup_obsolete_obj_temp_files(path);
+    Ok(())
+}
+
+struct TempSibling {
+    path: PathBuf,
+    file: Option<File>,
+    persisted: bool,
+}
+
+impl TempSibling {
+    fn create(target: &Path) -> Result<Self, MeshError> {
+        let parent = sibling_directory(target);
+        let prefix = obj_temp_prefix(target);
+        let process_id = process::id();
+
+        for _ in 0..100 {
+            let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!("{prefix}{process_id}-{counter}{TEMP_FILE_SUFFIX}"));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                        persisted: false,
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(path_io(target, error)),
+            }
+        }
+
+        Err(path_io(
+            target,
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate a unique temporary filename",
+            ),
+        ))
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        self.file
+            .as_mut()
+            .expect("temporary file handle must remain open until persist")
+    }
+
+    fn persist(mut self, target: &Path) -> std::io::Result<()> {
+        drop(self.file.take());
+        fs::rename(&self.path, target)?;
+        self.persisted = true;
+        Ok(())
+    }
+}
+
+impl Drop for TempSibling {
+    fn drop(&mut self) {
+        if !self.persisted {
+            drop(self.file.take());
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn cleanup_obsolete_obj_temp_files(path: &Path) {
+    let prefix = obj_temp_prefix(path);
+    let Ok(entries) = fs::read_dir(sibling_directory(path)) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.starts_with(&prefix) || !file_name.ends_with(TEMP_FILE_SUFFIX) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_file() && obsolete_temp_metadata(&metadata) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn obsolete_temp_metadata(metadata: &fs::Metadata) -> bool {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age >= OBSOLETE_TEMP_MIN_AGE)
+}
+
+fn sibling_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn obj_temp_prefix(path: &Path) -> String {
+    format!("{OBJ_TEMP_PREFIX}{}-", path_file_fragment(path))
+}
+
+fn path_file_fragment(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(safe_file_fragment)
+        .filter(|fragment| !fragment.is_empty())
+        .unwrap_or_else(|| "untitled".to_owned())
+}
+
+fn safe_file_fragment(value: &str) -> String {
+    let mut fragment = String::new();
+    let mut pending_separator = false;
+
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            if pending_separator && !fragment.is_empty() {
+                fragment.push('-');
+            }
+            fragment.push(character.to_ascii_lowercase());
+            pending_separator = false;
+        } else if !fragment.is_empty() {
+            pending_separator = true;
+        }
+
+        if fragment.len() >= 48 {
+            break;
+        }
+    }
+
+    fragment.trim_matches('-').to_owned()
+}
+
+fn path_io(path: &Path, source: std::io::Error) -> MeshError {
+    MeshError::PathIo {
+        path: path.to_path_buf(),
+        source,
+    }
+}
+
 fn attach_path(error: MeshError, path: &Path) -> MeshError {
     match error {
-        MeshError::Io(source) => MeshError::PathIo {
-            path: path.to_path_buf(),
-            source,
-        },
+        MeshError::Io(source) => path_io(path, source),
         other => other,
     }
 }
@@ -587,6 +761,11 @@ fn array_is_finite(array: [f32; 3]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::io::{self, Write};
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     #[derive(Debug, Copy, Clone)]
@@ -634,6 +813,32 @@ mod tests {
         fn bounds(&self) -> Aabb {
             unit_bounds()
         }
+    }
+
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn tempdir() -> TestTempDir {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!("shape-lab-mesh-tests-{nonce}"));
+        fs::create_dir(&path).unwrap();
+        TestTempDir { path }
     }
 
     #[test]
@@ -719,6 +924,14 @@ mod tests {
         let obj = obj_string(&mesh);
 
         assert!(obj.starts_with("# Shape Lab generated OBJ\n"));
+        assert!(obj.lines().any(|line| line == "# format wavefront-obj"));
+        assert!(obj.lines().any(|line| line.starts_with("# vertex_count ")));
+        assert!(obj.lines().any(|line| line.starts_with("# normal_count ")));
+        assert!(
+            obj.lines()
+                .any(|line| line.starts_with("# triangle_count "))
+        );
+        assert!(obj.lines().any(|line| line.starts_with("# bounds min ")));
         assert!(obj.lines().any(|line| line.starts_with("v ")));
         assert!(obj.lines().any(|line| line.starts_with("vn ")));
         assert!(obj.lines().any(|line| line.starts_with("f ")));
@@ -787,6 +1000,68 @@ mod tests {
         let second = sphere_mesh(12);
 
         assert_eq!(obj_string(&first), obj_string(&second));
+    }
+
+    #[test]
+    fn obj_export_atomically_replaces_existing_file() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("mesh.obj");
+        fs::write(&path, "old obj\n").unwrap();
+        let mesh = sphere_mesh(6);
+
+        write_obj_to_path(&mesh, &path).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+
+        assert!(saved.starts_with("# Shape Lab generated OBJ\n"));
+        assert_ne!(saved, "old obj\n");
+    }
+
+    #[test]
+    fn interrupted_obj_temp_write_preserves_existing_file() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("mesh.obj");
+        fs::write(&path, "valid old obj\n").unwrap();
+
+        let error = atomic_obj_replace(&path, |file| {
+            file.write_all(b"# partial obj\n")?;
+            Err(MeshError::Io(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "simulated interrupted write",
+            )))
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, MeshError::PathIo { .. }));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "valid old obj\n");
+    }
+
+    #[test]
+    fn invalid_mesh_export_preserves_existing_file() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("mesh.obj");
+        fs::write(&path, "valid old obj\n").unwrap();
+        let mesh = TriangleMesh {
+            positions: vec![[0.0, 0.0, 0.0]],
+            normals: Vec::new(),
+            indices: Vec::new(),
+            bounds: Aabb::empty(),
+        };
+
+        let error = write_obj_to_path(&mesh, &path).unwrap_err();
+
+        assert!(matches!(error, MeshError::InvalidMesh(_)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "valid old obj\n");
+    }
+
+    #[test]
+    fn obj_temp_prefix_is_scoped_to_target_name() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("Unsafe Mesh Name!.obj");
+
+        assert_eq!(
+            obj_temp_prefix(&path),
+            ".shape-lab-obj-unsafe-mesh-name-obj-"
+        );
     }
 
     fn sphere_mesh(resolution: usize) -> TriangleMesh {

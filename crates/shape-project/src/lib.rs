@@ -3,7 +3,12 @@
 //! Project history and persistence contracts.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use shape_core::{EditProgram, RevisionId, ShapeDocument, ValidationReport, validate_document};
@@ -13,6 +18,10 @@ use thiserror::Error;
 const PROJECT_SCHEMA_VERSION: u32 = 1;
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const ROOT_REVISION_ID: RevisionId = RevisionId(0);
+const PROJECT_TEMP_PREFIX: &str = ".shape-lab-project-";
+const TEMP_FILE_SUFFIX: &str = ".tmp";
+const OBSOLETE_TEMP_MIN_AGE: Duration = Duration::from_secs(60 * 60);
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// One revision in a branchable project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +76,14 @@ pub enum ProjectError {
     /// Project schema version is not supported.
     #[error("unsupported project schema version {0}")]
     UnsupportedSchemaVersion(u32),
+    /// Project schema version is newer than this build understands.
+    #[error("project schema version {found} is newer than supported version {supported}")]
+    FutureSchemaVersion {
+        /// Version found in the file.
+        found: u32,
+        /// Newest version supported by this build.
+        supported: u32,
+    },
     /// The project revision graph is malformed.
     #[error("invalid project: {0}")]
     InvalidProject(String),
@@ -84,9 +101,29 @@ pub enum ProjectError {
     /// Serialization failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    /// Serialization failed for a specific path.
+    #[error("json error while reading {}: {source}", path.display())]
+    JsonAtPath {
+        /// Path being read.
+        path: PathBuf,
+        /// Source error.
+        #[source]
+        source: serde_json::Error,
+    },
     /// I/O failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// I/O failed for a specific path.
+    #[error("io error while {action} {}: {source}", path.display())]
+    PathIo {
+        /// Action being performed.
+        action: &'static str,
+        /// Path being accessed.
+        path: PathBuf,
+        /// Source error.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 impl Project {
@@ -250,9 +287,7 @@ impl Project {
 
     /// Validate project-level and document-level invariants.
     pub fn validate(&self) -> Result<(), ProjectError> {
-        if self.schema_version != PROJECT_SCHEMA_VERSION {
-            return Err(ProjectError::UnsupportedSchemaVersion(self.schema_version));
-        }
+        ensure_supported_project_schema(self.schema_version)?;
         if self.revisions.is_empty() {
             return Err(ProjectError::InvalidProject(
                 "revision graph must contain revision 0".to_owned(),
@@ -312,15 +347,225 @@ impl Project {
     /// Save JSON to disk.
     pub fn save_json(&self, path: impl AsRef<Path>) -> Result<(), ProjectError> {
         self.validate()?;
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
-        Ok(())
+        atomic_project_write(path.as_ref(), &project_json_bytes(self)?)
     }
 
     /// Load JSON from disk.
     pub fn load_json(path: impl AsRef<Path>) -> Result<Self, ProjectError> {
-        let project: Self = serde_json::from_slice(&std::fs::read(path)?)?;
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|source| project_path_io("reading", path, source))?;
+        ensure_supported_project_schema(project_schema_version(&bytes, path)?)?;
+        let project: Self =
+            serde_json::from_slice(&bytes).map_err(|source| ProjectError::JsonAtPath {
+                path: path.to_path_buf(),
+                source,
+            })?;
         project.validate()?;
         Ok(project)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectSchemaProbe {
+    schema_version: u32,
+}
+
+fn ensure_supported_project_schema(schema_version: u32) -> Result<(), ProjectError> {
+    if schema_version == PROJECT_SCHEMA_VERSION {
+        Ok(())
+    } else if schema_version > PROJECT_SCHEMA_VERSION {
+        Err(ProjectError::FutureSchemaVersion {
+            found: schema_version,
+            supported: PROJECT_SCHEMA_VERSION,
+        })
+    } else {
+        Err(ProjectError::UnsupportedSchemaVersion(schema_version))
+    }
+}
+
+fn project_schema_version(bytes: &[u8], path: &Path) -> Result<u32, ProjectError> {
+    let probe: ProjectSchemaProbe =
+        serde_json::from_slice(bytes).map_err(|source| ProjectError::JsonAtPath {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(probe.schema_version)
+}
+
+fn project_json_bytes(project: &Project) -> Result<Vec<u8>, ProjectError> {
+    let mut bytes = serde_json::to_vec_pretty(project)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn atomic_project_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectError> {
+    atomic_project_replace(path, |file| file.write_all(bytes))
+}
+
+fn atomic_project_replace(
+    path: &Path,
+    write_temp: impl FnOnce(&mut File) -> io::Result<()>,
+) -> Result<(), ProjectError> {
+    cleanup_obsolete_project_temp_files(path);
+
+    let mut temp = TempSibling::create(path)?;
+
+    write_temp(temp.file_mut())
+        .map_err(|source| project_path_io("writing temporary project file for", path, source))?;
+    temp.file_mut()
+        .sync_all()
+        .map_err(|source| project_path_io("flushing temporary project file for", path, source))?;
+    temp.persist(path)
+        .map_err(|source| project_path_io("replacing", path, source))?;
+
+    cleanup_obsolete_project_temp_files(path);
+    Ok(())
+}
+
+struct TempSibling {
+    path: PathBuf,
+    file: Option<File>,
+    persisted: bool,
+}
+
+impl TempSibling {
+    fn create(target: &Path) -> Result<Self, ProjectError> {
+        let parent = sibling_directory(target);
+        let prefix = project_temp_prefix(target);
+        let process_id = process::id();
+
+        for _ in 0..100 {
+            let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!("{prefix}{process_id}-{counter}{TEMP_FILE_SUFFIX}"));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                        persisted: false,
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(project_path_io(
+                        "creating temporary project file for",
+                        target,
+                        error,
+                    ));
+                }
+            }
+        }
+
+        Err(project_path_io(
+            "creating temporary project file for",
+            target,
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not allocate a unique temporary filename",
+            ),
+        ))
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        self.file
+            .as_mut()
+            .expect("temporary file handle must remain open until persist")
+    }
+
+    fn persist(mut self, target: &Path) -> io::Result<()> {
+        drop(self.file.take());
+        fs::rename(&self.path, target)?;
+        self.persisted = true;
+        Ok(())
+    }
+}
+
+impl Drop for TempSibling {
+    fn drop(&mut self) {
+        if !self.persisted {
+            drop(self.file.take());
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn cleanup_obsolete_project_temp_files(path: &Path) {
+    let prefix = project_temp_prefix(path);
+    let Ok(entries) = fs::read_dir(sibling_directory(path)) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.starts_with(&prefix) || !file_name.ends_with(TEMP_FILE_SUFFIX) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_file() && obsolete_temp_metadata(&metadata) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn obsolete_temp_metadata(metadata: &fs::Metadata) -> bool {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age >= OBSOLETE_TEMP_MIN_AGE)
+}
+
+fn sibling_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn project_temp_prefix(path: &Path) -> String {
+    format!("{PROJECT_TEMP_PREFIX}{}-", path_file_fragment(path))
+}
+
+fn path_file_fragment(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(safe_file_fragment)
+        .filter(|fragment| !fragment.is_empty())
+        .unwrap_or_else(|| "untitled".to_owned())
+}
+
+fn safe_file_fragment(value: &str) -> String {
+    let mut fragment = String::new();
+    let mut pending_separator = false;
+
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            if pending_separator && !fragment.is_empty() {
+                fragment.push('-');
+            }
+            fragment.push(character.to_ascii_lowercase());
+            pending_separator = false;
+        } else if !fragment.is_empty() {
+            pending_separator = true;
+        }
+
+        if fragment.len() >= 48 {
+            break;
+        }
+    }
+
+    fragment.trim_matches('-').to_owned()
+}
+
+fn project_path_io(action: &'static str, path: &Path, source: io::Error) -> ProjectError {
+    ProjectError::PathIo {
+        action,
+        path: path.to_path_buf(),
+        source,
     }
 }
 
@@ -354,6 +599,8 @@ fn ensure_valid_document(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::{self, Write};
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use shape_core::{
@@ -362,7 +609,9 @@ mod tests {
     };
     use shape_search::{Candidate, ShapeDescriptor};
 
-    use super::{Project, ProjectError};
+    use super::{
+        Project, ProjectError, atomic_project_replace, project_json_bytes, project_temp_prefix,
+    };
 
     fn test_document(title: &str, radius: f32) -> ShapeDocument {
         ShapeDocument::new(
@@ -404,6 +653,32 @@ mod tests {
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
         std::env::temp_dir().join(format!("shape-lab-{name}-{nonce}.json"))
+    }
+
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn tempdir() -> TestTempDir {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!("shape-lab-project-tests-{nonce}"));
+        fs::create_dir(&path).unwrap();
+        TestTempDir { path }
     }
 
     #[test]
@@ -530,24 +805,118 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_json_formatting_is_stable() {
+        let mut project = Project::new("Test", test_document("Initial", 1.0));
+        project
+            .accept_candidate(candidate("First", 1.1, 1))
+            .unwrap();
+
+        let first = project_json_bytes(&project).unwrap();
+        let second = project_json_bytes(&project).unwrap();
+
+        assert_eq!(first, second);
+        assert!(first.ends_with(b"\n"));
+    }
+
+    #[test]
+    fn save_json_atomically_replaces_existing_file() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("project.shapelab.json");
+        let first = Project::new("First", test_document("Initial", 1.0));
+        let second = Project::new("Second", test_document("Updated", 1.4));
+
+        first.save_json(&path).unwrap();
+        second.save_json(&path).unwrap();
+
+        assert_eq!(Project::load_json(&path).unwrap(), second);
+    }
+
+    #[test]
+    fn interrupted_temp_write_preserves_existing_project_file() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("project.shapelab.json");
+        let original = Project::new("Original", test_document("Initial", 1.0));
+        original.save_json(&path).unwrap();
+        let original_bytes = fs::read(&path).unwrap();
+
+        let error = atomic_project_replace(&path, |file| {
+            file.write_all(b"{\"schema_version\":1,\"title\":\"partial\"")?;
+            Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "simulated interrupted write",
+            ))
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, ProjectError::PathIo { .. }));
+        assert_eq!(fs::read(&path).unwrap(), original_bytes);
+        assert_eq!(Project::load_json(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn failed_replacement_keeps_temporary_file_out_of_target() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("project-directory.shapelab.json");
+        fs::create_dir(&path).unwrap();
+
+        let error = Project::new("Test", test_document("Initial", 1.0))
+            .save_json(&path)
+            .unwrap_err();
+
+        assert!(matches!(error, ProjectError::PathIo { .. }));
+        assert!(path.is_dir());
+    }
+
+    #[test]
     fn malformed_and_unknown_schema_json_are_rejected() {
         let malformed = temp_json_path("malformed");
         fs::write(&malformed, b"{not valid json").unwrap();
         assert!(matches!(
             Project::load_json(&malformed),
-            Err(ProjectError::Json(_))
+            Err(ProjectError::JsonAtPath { .. })
         ));
         let _ = fs::remove_file(&malformed);
 
-        let unknown_schema = temp_json_path("unknown-schema");
+        let future_schema = temp_json_path("future-schema");
         let mut project = Project::new("Test", test_document("Initial", 1.0));
-        project.schema_version = 99;
-        fs::write(&unknown_schema, serde_json::to_vec(&project).unwrap()).unwrap();
+        project.schema_version = 2;
+        fs::write(&future_schema, serde_json::to_vec(&project).unwrap()).unwrap();
         assert!(matches!(
-            Project::load_json(&unknown_schema),
-            Err(ProjectError::UnsupportedSchemaVersion(99))
+            Project::load_json(&future_schema),
+            Err(ProjectError::FutureSchemaVersion {
+                found: 2,
+                supported: 1
+            })
         ));
-        let _ = fs::remove_file(&unknown_schema);
+        let _ = fs::remove_file(&future_schema);
+
+        let old_schema = temp_json_path("old-schema");
+        project.schema_version = 0;
+        fs::write(&old_schema, serde_json::to_vec(&project).unwrap()).unwrap();
+        assert!(matches!(
+            Project::load_json(&old_schema),
+            Err(ProjectError::UnsupportedSchemaVersion(0))
+        ));
+        let _ = fs::remove_file(&old_schema);
+    }
+
+    #[test]
+    fn future_schema_rejects_before_shape_deserialization() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("future.shapelab.json");
+        fs::write(
+            &path,
+            br#"{"schema_version":2,"future_payload":{"unknown":true}}"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            Project::load_json(&path),
+            Err(ProjectError::FutureSchemaVersion {
+                found: 2,
+                supported: 1
+            })
+        ));
     }
 
     #[test]
@@ -565,5 +934,16 @@ mod tests {
             Err(ProjectError::InvalidProject(_))
         ));
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn temp_file_prefix_is_scoped_to_target_name() {
+        let temp_dir = tempdir();
+        let path = temp_dir.path().join("Unsafe Project Name!.shapelab.json");
+
+        assert_eq!(
+            project_temp_prefix(&path),
+            ".shape-lab-project-unsafe-project-name-shapelab-json-"
+        );
     }
 }
