@@ -15,11 +15,24 @@ use crate::viewport::ViewportAction;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AppCommand {
     SelectNode(Option<NodeId>),
-    SetScalar { path: ParamPath, value: f32 },
-    ToggleLock { path: ParamPath, locked: bool },
+    SetScalar {
+        path: ParamPath,
+        value: f32,
+    },
+    ToggleLock {
+        path: ParamPath,
+        locked: bool,
+    },
     SetTargetScope(TargetScope),
-    SetParameterGroup { group: ParamGroup, enabled: bool },
+    SetParameterGroup {
+        group: ParamGroup,
+        enabled: bool,
+    },
     SetExplorationMode(ExplorationMode),
+    SetSearchBudget {
+        proposal_count: usize,
+        result_count: usize,
+    },
     SetSeed(u64),
     GenerateDirections,
     CancelActiveGeneration,
