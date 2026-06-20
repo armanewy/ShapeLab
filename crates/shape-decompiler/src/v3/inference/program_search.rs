@@ -8,17 +8,19 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+use shape_mesh::TriangleMesh;
+
 use crate::{
     AffineSemanticFamily, approximate_residual_cost, exact_residual_storage_size,
-    explained_fraction, sum_squared_distance, weighted_centered_sum_squared_distance,
-    weighted_sum_squared_distance,
+    explained_fraction, sum_squared_distance, vertex_area_weights,
+    weighted_centered_sum_squared_distance, weighted_sum_squared_distance,
 };
 
 use super::super::diagnostics::{
     DIAGNOSTICS_SCHEMA_VERSION_V4, InferenceDiagnosticsV4, ProgramCorrectionDiagnostics,
     ProgramDiagnosticsInput, ProgramHypothesisDiagnosticsV4, ProgramOperatorDiagnostics,
     StageDiagnosticsInput, build_program_diagnostics, build_stage_diagnostics,
-    compare_program_hypotheses, default_scoring_policy_v4,
+    compare_program_hypotheses, default_scoring_policy_v4, default_timing_by_phase_v4,
 };
 use super::super::program::{
     OperatorProgram, ProgramOperator, SemanticVerificationPolicy, SemanticVerificationReport,
@@ -32,7 +34,8 @@ use super::{
 };
 
 const PACKAGE_SCHEMA_VERSION_V3: u32 = 3;
-const SURFACE_WEIGHTING_MODEL: &str = "triangle_area_derived_vertex_weights";
+const TRIANGLE_AREA_SURFACE_WEIGHTING_MODEL: &str = "triangle_area_derived_vertex_weights";
+const UNIFORM_SURFACE_WEIGHTING_MODEL: &str = "uniform_vertex_weights";
 const MEANINGFUL_STAGE_WEIGHTED_IMPROVEMENT: f64 = 1.0e-9;
 const SUBSTANTIAL_SCORE_IMPROVEMENT: f64 = 1.0e-6;
 const DIAGNOSTICS_BUILD_ERROR: &str = "schema-4 program diagnostics could not be built";
@@ -73,6 +76,33 @@ impl BendCandidateGenerator for DefaultBendCandidateGenerator {
     }
 }
 
+struct MeshBendCandidateGenerator<'a> {
+    topology: &'a [u32],
+    surface_weights: &'a [f64],
+    enabled: bool,
+}
+
+impl BendCandidateGenerator for MeshBendCandidateGenerator<'_> {
+    fn generate_candidates(
+        &self,
+        source_positions: &[[f32; 3]],
+        target_positions: &[[f32; 3]],
+        fit_settings: &BendFitSettings,
+        _search_settings: &ProgramSearchSettings,
+    ) -> Result<Vec<FittedOperatorCandidate>, InferenceError> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
+        super::super::bend_fit::generate_bend_candidates(
+            source_positions,
+            target_positions,
+            self.topology,
+            self.surface_weights,
+            *fit_settings,
+        )
+    }
+}
+
 /// Searches ordered explanatory operator programs with the default providers.
 pub fn search_programs(
     source_positions: &[[f32; 3]],
@@ -91,6 +121,40 @@ pub fn search_programs(
     )
 }
 
+/// Searches ordered explanatory operator programs for a same-topology mesh pair.
+pub fn search_programs_for_mesh_pair(
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    settings: &ProgramSearchSettings,
+    enable_bend: bool,
+) -> Result<ProgramSearchResult, InferenceError> {
+    if source.positions.len() != target.positions.len()
+        || source.indices != target.indices
+        || source.positions.is_empty()
+    {
+        return Err(InferenceError::InvalidSettings(
+            "source and target meshes must have identical non-empty ordered topology",
+        ));
+    }
+    let weights = vertex_area_weights(source);
+    let candidate_weights = weights.clone();
+    let affine_generator = DefaultAffineCandidateGenerator;
+    let bend_generator = MeshBendCandidateGenerator {
+        topology: &source.indices,
+        surface_weights: &candidate_weights,
+        enabled: enable_bend,
+    };
+    search_programs_with_generators_and_weights(
+        &source.positions,
+        &target.positions,
+        &BendFitSettings::default(),
+        settings,
+        &affine_generator,
+        &bend_generator,
+        SearchWeights::new(weights, TRIANGLE_AREA_SURFACE_WEIGHTING_MODEL),
+    )
+}
+
 /// Searches ordered explanatory operator programs with injected providers.
 ///
 /// This entry point is used by focused tests so program enumeration and scoring
@@ -103,12 +167,64 @@ pub fn search_programs_with_generators(
     affine_generator: &impl AffineCandidateGenerator,
     bend_generator: &impl BendCandidateGenerator,
 ) -> Result<ProgramSearchResult, InferenceError> {
+    search_programs_with_generators_and_weights(
+        source_positions,
+        target_positions,
+        bend_fit_settings,
+        settings,
+        affine_generator,
+        bend_generator,
+        SearchWeights::new(
+            uniform_weights(source_positions.len()),
+            UNIFORM_SURFACE_WEIGHTING_MODEL,
+        ),
+    )
+}
+
+#[derive(Debug)]
+struct SearchWeights {
+    values: Vec<f64>,
+    surface_weighting: &'static str,
+}
+
+impl SearchWeights {
+    fn new(values: Vec<f64>, surface_weighting: &'static str) -> Self {
+        Self {
+            values,
+            surface_weighting,
+        }
+    }
+}
+
+fn search_programs_with_generators_and_weights(
+    source_positions: &[[f32; 3]],
+    target_positions: &[[f32; 3]],
+    bend_fit_settings: &BendFitSettings,
+    settings: &ProgramSearchSettings,
+    affine_generator: &impl AffineCandidateGenerator,
+    bend_generator: &impl BendCandidateGenerator,
+    weights: SearchWeights,
+) -> Result<ProgramSearchResult, InferenceError> {
     validate_position_pair(source_positions, target_positions)?;
     validate_program_search_settings(settings)?;
     validate_bend_fit_settings(bend_fit_settings)?;
 
-    let weights = uniform_weights(source_positions.len());
-    let context = SearchContext::new(source_positions, target_positions, weights);
+    if weights.values.len() != source_positions.len()
+        || weights
+            .values
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return Err(InferenceError::InvalidSettings(
+            "surface weights must be finite, non-negative, and match the vertex count",
+        ));
+    }
+    let context = SearchContext::new(
+        source_positions,
+        target_positions,
+        weights.values,
+        weights.surface_weighting,
+    );
     let mut builder = SearchBuilder::new(&context, settings);
 
     builder.consider_program(Vec::new())?;
@@ -184,6 +300,7 @@ struct SearchContext<'a> {
     error_normalization_scale: f64,
     literal_size_bytes: usize,
     scoring_policy: super::super::diagnostics::InferenceScoringPolicyV4,
+    surface_weighting: &'static str,
 }
 
 impl<'a> SearchContext<'a> {
@@ -191,6 +308,7 @@ impl<'a> SearchContext<'a> {
         source_positions: &'a [[f32; 3]],
         target_positions: &'a [[f32; 3]],
         weights: Vec<f64>,
+        surface_weighting: &'static str,
     ) -> Self {
         let raw_identity_error = sum_squared_distance(source_positions, target_positions);
         let weighted_identity_error =
@@ -211,6 +329,7 @@ impl<'a> SearchContext<'a> {
             error_normalization_scale,
             literal_size_bytes: source_positions.len() * 3 * std::mem::size_of::<f32>(),
             scoring_policy: default_scoring_policy_v4(),
+            surface_weighting,
         }
     }
 }
@@ -310,7 +429,7 @@ impl<'a, 'b> SearchBuilder<'a, 'b> {
         let diagnostics = InferenceDiagnosticsV4 {
             diagnostics_schema_version: DIAGNOSTICS_SCHEMA_VERSION_V4,
             package_schema_version: PACKAGE_SCHEMA_VERSION_V3,
-            surface_weighting: SURFACE_WEIGHTING_MODEL.to_owned(),
+            surface_weighting: self.context.surface_weighting.to_owned(),
             raw_identity_error: self.context.raw_identity_error,
             weighted_identity_error: self.context.weighted_identity_error,
             scoring_policy: self.context.scoring_policy.clone(),
@@ -320,6 +439,7 @@ impl<'a, 'b> SearchBuilder<'a, 'b> {
                 .iter()
                 .map(|entry| entry.diagnostics.clone())
                 .collect(),
+            timing_by_phase_ms: default_timing_by_phase_v4(),
         };
 
         ProgramSearchResult {

@@ -9,12 +9,17 @@ use clap::{Parser, Subcommand, ValueEnum};
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
-use shape_decompiler::v3::package::build_v3_package_from_program;
+use shape_decompiler::v3::diagnostics::{
+    InferenceDiagnosticsV4, ProgramHypothesisDiagnosticsV4,
+    ProgramOperatorDiagnostics as ProgramOperatorDiagnosticsV4,
+};
+use shape_decompiler::v3::inference::{ProgramSearchSettings, search_programs_for_mesh_pair};
+use shape_decompiler::v3::package::build_v3_package_from_program_with_diagnostics;
 use shape_decompiler::v3::program::{AffineOperator, OperatorProgram, ProgramOperator};
 use shape_decompiler::{
     AffineSemanticFamily, DecompileResult, DecompileSettings, OperatorFamily, OperatorManifest,
-    ProgramHypothesisDiagnostics, decompile_pair, verify_decompile_package,
-    write_decompile_package,
+    ProgramHypothesisDiagnostics as ProgramHypothesisDiagnosticsV3, decompile_pair,
+    verify_decompile_package, write_decompile_package,
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
@@ -127,6 +132,9 @@ struct DecompileArgs {
     /// Experimental decompile package schema to write.
     #[arg(long, value_enum, default_value_t = PackageSchema::Schema2)]
     package_schema: PackageSchema,
+    /// Enable experimental schema-3 bend program inference.
+    #[arg(long)]
+    enable_bend: bool,
     /// Print per-hypothesis inference diagnostics.
     #[arg(long)]
     verbose: bool,
@@ -364,6 +372,9 @@ fn run_export(args: ExportArgs) -> anyhow::Result<()> {
 }
 
 fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
+    if args.enable_bend && args.package_schema != PackageSchema::Schema3 {
+        bail!("--enable-bend requires --package-schema 3");
+    }
     let source = read_obj_from_path(&args.source)
         .with_context(|| format!("loading source OBJ {}", args.source.display()))?;
     let target = read_obj_from_path(&args.target)
@@ -372,13 +383,24 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
         affine_min_explained: args.affine_min_explained,
         residual_epsilon: args.residual_epsilon,
     };
+
+    if args.package_schema == PackageSchema::Schema3 && args.enable_bend {
+        return run_schema_three_bend_decompile(source, target, settings, &args);
+    }
+
     let result = decompile_pair(&source, &target, settings)
         .context("decompiling same-topology mesh pair")?;
     let paths = match args.package_schema {
         PackageSchema::Schema2 => write_decompile_package(&result, &source, &target, &args.out_dir),
         PackageSchema::Schema3 => {
             let program = schema_three_program_from_result(&result);
-            build_v3_package_from_program(&program, &source, &target, &args.out_dir)
+            build_v3_package_from_program_with_diagnostics(
+                &program,
+                &source,
+                &target,
+                &args.out_dir,
+                None,
+            )
         }
     }
     .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
@@ -445,8 +467,71 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     if args.verbose {
         println!("Inference program hypotheses:");
         for hypothesis in &result.inference_diagnostics.program_hypotheses {
-            print_program_hypothesis_diagnostics(hypothesis);
+            print_schema_two_program_hypothesis_diagnostics(hypothesis);
         }
+    }
+    Ok(())
+}
+
+fn run_schema_three_bend_decompile(
+    source: TriangleMesh,
+    target: TriangleMesh,
+    _settings: DecompileSettings,
+    args: &DecompileArgs,
+) -> anyhow::Result<()> {
+    let search_settings = ProgramSearchSettings::default();
+    let search = search_programs_for_mesh_pair(&source, &target, &search_settings, true)
+        .context("searching schema-3 bend program hypotheses")?;
+    let selected_index = search
+        .selected_hypothesis_index
+        .context("schema-3 bend search produced no selectable hypothesis")?;
+    let selected = &search.hypotheses[selected_index];
+    let diagnostics = search
+        .diagnostics
+        .clone()
+        .context("schema-3 bend search did not produce diagnostics")?;
+    let paths = build_v3_package_from_program_with_diagnostics(
+        &selected.program,
+        &source,
+        &target,
+        &args.out_dir,
+        Some(diagnostics.clone()),
+    )
+    .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
+    let verification = verify_decompile_package(&args.out_dir)
+        .with_context(|| format!("verifying decompile package {}", args.out_dir.display()))?;
+
+    println!("Decompiled same-topology mesh pair");
+    println!("  package schema: 3");
+    println!("  bend inference: enabled");
+    println!("  vertices: {}", verification.vertex_count);
+    println!("  triangles: {}", verification.triangle_count);
+    println!(
+        "  selected program: {}",
+        schema_three_program_label(&selected.program)
+    );
+    println!(
+        "  weighted explained: {:.3}%",
+        selected.weighted_explained_fraction * 100.0
+    );
+    println!("  program score: {:.9}", selected.total_score);
+    println!(
+        "  residual vertices: {}",
+        verification.residual_vertex_count
+    );
+    println!("  final max error: {:.9}", verification.max_euclidean_error);
+    println!("  manifest: {}", paths.manifest.display());
+    println!(
+        "  package verification: {}",
+        paths.package_verification.display()
+    );
+    println!(
+        "  inference diagnostics: {}",
+        paths.inference_diagnostics.display()
+    );
+    println!("  blender script: {}", paths.blender_script.display());
+    if args.verbose {
+        print_schema_three_diagnostics(&diagnostics);
     }
     Ok(())
 }
@@ -486,7 +571,7 @@ fn affine_family_label(semantic_family: AffineSemanticFamily) -> &'static str {
     }
 }
 
-fn print_program_hypothesis_diagnostics(hypothesis: &ProgramHypothesisDiagnostics) {
+fn print_schema_two_program_hypothesis_diagnostics(hypothesis: &ProgramHypothesisDiagnosticsV3) {
     let selected = if hypothesis.selected {
         "selected"
     } else {
@@ -506,7 +591,7 @@ fn print_program_hypothesis_diagnostics(hypothesis: &ProgramHypothesisDiagnostic
     );
 }
 
-fn program_hypothesis_label(hypothesis: &ProgramHypothesisDiagnostics) -> String {
+fn program_hypothesis_label(hypothesis: &ProgramHypothesisDiagnosticsV3) -> String {
     if hypothesis.operators.is_empty() {
         return "lossless correction only".to_owned();
     }
@@ -526,6 +611,126 @@ fn operator_family_label(family: OperatorFamily) -> &'static str {
         OperatorFamily::RigidTransform => "rigid transform",
         OperatorFamily::SimilarityTransform => "similarity transform",
         OperatorFamily::GeneralAffine => "global affine",
+    }
+}
+
+fn schema_three_program_label(program: &OperatorProgram) -> String {
+    if program.operators.is_empty() {
+        return "lossless correction only".to_owned();
+    }
+    let mut labels = program
+        .operators
+        .iter()
+        .map(|operator| match operator {
+            ProgramOperator::Affine(affine) => affine_family_label(affine.semantic_family),
+            ProgramOperator::Bend(_) => "bend",
+        })
+        .collect::<Vec<_>>();
+    labels.push("lossless correction");
+    labels.join(" -> ")
+}
+
+fn print_schema_three_diagnostics(diagnostics: &InferenceDiagnosticsV4) {
+    println!("Schema-3 ordered program hypotheses:");
+    for (index, hypothesis) in diagnostics.program_hypotheses.iter().enumerate() {
+        print_schema_three_program_hypothesis(index, hypothesis);
+    }
+    println!("Schema-3 timing by phase (ms):");
+    for (phase, elapsed_ms) in &diagnostics.timing_by_phase_ms {
+        println!("  - {phase}: {elapsed_ms}");
+    }
+}
+
+fn print_schema_three_program_hypothesis(
+    index: usize,
+    hypothesis: &ProgramHypothesisDiagnosticsV4,
+) {
+    let selected = if hypothesis.selected {
+        "selected"
+    } else {
+        "candidate"
+    };
+    let rejection = hypothesis.rejection_reason.as_deref().unwrap_or("viable");
+    println!(
+        "  - #{index} {} [{}]: score={:.9} weighted={:.3}% raw={:.3}% exact_bytes={} status={}",
+        schema_three_hypothesis_label(hypothesis),
+        selected,
+        hypothesis.score.total_component_sum,
+        hypothesis.weighted_explained_fraction * 100.0,
+        hypothesis.raw_explained_fraction * 100.0,
+        hypothesis.exact_residual_bytes,
+        rejection
+    );
+    for operator in &hypothesis.operators {
+        println!(
+            "      operator: {}",
+            schema_three_operator_parameters(operator)
+        );
+    }
+    for stage in &hypothesis.stages {
+        println!(
+            "      stage {}: weighted {:.9} -> {:.9}, raw {:.9} -> {:.9}, semantic_passed={}",
+            stage.stage_index,
+            stage.weighted_error_before,
+            stage.weighted_error_after,
+            stage.raw_error_before,
+            stage.raw_error_after,
+            stage.semantic_verification_passed
+        );
+    }
+}
+
+fn schema_three_hypothesis_label(hypothesis: &ProgramHypothesisDiagnosticsV4) -> String {
+    if hypothesis.operators.is_empty() {
+        return "lossless correction only".to_owned();
+    }
+    let mut labels = hypothesis
+        .operators
+        .iter()
+        .map(schema_three_operator_label)
+        .collect::<Vec<_>>();
+    labels.push("lossless correction");
+    labels.join(" -> ")
+}
+
+fn schema_three_operator_label(operator: &ProgramOperatorDiagnosticsV4) -> &'static str {
+    match operator {
+        ProgramOperatorDiagnosticsV4::Translation { .. } => "translation",
+        ProgramOperatorDiagnosticsV4::RigidTransform { .. } => "rigid transform",
+        ProgramOperatorDiagnosticsV4::SimilarityTransform { .. } => "similarity transform",
+        ProgramOperatorDiagnosticsV4::GeneralAffine { .. } => "global affine",
+        ProgramOperatorDiagnosticsV4::Bend { .. } => "bend",
+    }
+}
+
+fn schema_three_operator_parameters(operator: &ProgramOperatorDiagnosticsV4) -> String {
+    match operator {
+        ProgramOperatorDiagnosticsV4::Translation { translation } => {
+            format!("translation={translation:?}")
+        }
+        ProgramOperatorDiagnosticsV4::RigidTransform {
+            translation,
+            rotation_row_major_3x3,
+        } => format!("translation={translation:?} rotation={rotation_row_major_3x3:?}"),
+        ProgramOperatorDiagnosticsV4::SimilarityTransform {
+            translation,
+            rotation_row_major_3x3,
+            uniform_scale,
+        } => format!(
+            "translation={translation:?} rotation={rotation_row_major_3x3:?} scale={uniform_scale}"
+        ),
+        ProgramOperatorDiagnosticsV4::GeneralAffine {
+            matrix_row_major_4x4,
+        } => format!("matrix={matrix_row_major_4x4:?}"),
+        ProgramOperatorDiagnosticsV4::Bend { parameters } => format!(
+            "origin={:?} axis={:?} direction={:?} angle_degrees={:.6} interval=[{:.6}, {:.6}]",
+            parameters.origin,
+            parameters.longitudinal_axis,
+            parameters.bend_direction,
+            parameters.angle_radians.to_degrees(),
+            parameters.interval_start,
+            parameters.interval_end
+        ),
     }
 }
 

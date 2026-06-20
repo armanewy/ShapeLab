@@ -14,13 +14,13 @@ pub const DIAGNOSTICS_SCHEMA_VERSION_V4: u32 = 4;
 /// Score formula version for schema-4 ordered program diagnostics.
 pub const INFERENCE_SCORING_VERSION_V4: u32 = 4;
 /// Initial conservative bend prior serialized by the default policy.
-pub const DEFAULT_BEND_FAMILY_PRIOR_V4: f64 = 1.5e-2;
+pub const DEFAULT_BEND_FAMILY_PRIOR_V4: f64 = 1.0e-3;
 
 const FLOAT32_SIZE_BYTES: usize = 4;
-const DEFAULT_GEOMETRIC_ERROR_WEIGHT: f64 = 1.0;
+const DEFAULT_GEOMETRIC_ERROR_WEIGHT: f64 = 10.0;
 const DEFAULT_PARAMETER_WEIGHT: f64 = 2.0e-3;
 const DEFAULT_SEMANTIC_METADATA_WEIGHT: f64 = 5.0e-4;
-const DEFAULT_APPROXIMATE_RESIDUAL_WEIGHT: f64 = 1.0;
+const DEFAULT_APPROXIMATE_RESIDUAL_WEIGHT: f64 = 5.0e-2;
 const DEFAULT_EXACT_RESIDUAL_WEIGHT: f64 = 1.0e-3;
 const DEFAULT_PER_OPERATOR_OVERHEAD: f64 = 1.0e-3;
 const DEFAULT_ABSOLUTE_RESIDUAL_EPSILON: f64 = 1.0e-6;
@@ -363,6 +363,9 @@ pub struct InferenceDiagnosticsV4 {
     pub selected_program_hypothesis_index: usize,
     /// Ordered program hypotheses in deterministic inference order.
     pub program_hypotheses: Vec<ProgramHypothesisDiagnosticsV4>,
+    /// Advisory wall-clock timing by implementation phase in milliseconds.
+    #[serde(default)]
+    pub timing_by_phase_ms: BTreeMap<String, u64>,
 }
 
 /// Diagnostics and scoring validation failures.
@@ -447,6 +450,18 @@ pub fn default_scoring_policy_v4() -> InferenceScoringPolicyV4 {
             ulp_multiplier: DEFAULT_RESIDUAL_ULP_MULTIPLIER,
         },
     }
+}
+
+/// Returns deterministic advisory timing buckets for schema-4 diagnostics.
+pub fn default_timing_by_phase_v4() -> BTreeMap<String, u64> {
+    [
+        ("affine_candidate_generation_ms".to_owned(), 0),
+        ("bend_candidate_generation_ms".to_owned(), 0),
+        ("program_scoring_ms".to_owned(), 0),
+        ("package_build_ms".to_owned(), 0),
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// Returns the default fixed family priors used by schema-4 scoring.
@@ -1164,6 +1179,7 @@ mod tests {
             scoring_policy: policy,
             selected_program_hypothesis_index: 0,
             program_hypotheses: vec![hypothesis],
+            timing_by_phase_ms: default_timing_by_phase_v4(),
         };
 
         let json = serde_json::to_string_pretty(&diagnostics).unwrap();

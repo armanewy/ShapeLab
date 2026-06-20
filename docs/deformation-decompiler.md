@@ -12,7 +12,7 @@ This is deliberately narrower than general inverse modeling. It proves a measura
 
 The default package format is **schema 2**. Schema 2 fixes affine evaluation to left-to-right IEEE-754 binary32 arithmetic, rounding after every multiplication and addition and forbidding fused multiply-add contraction. JSON matrix numbers are normalized back to binary32 before evaluation. Packages produced by the earlier experimental schema 1 should be regenerated.
 
-Schema 3 is available as an experimental opt-in transport with the same source/target topology contract. It preserves schema-2 affine numeric conventions, serializes ordered explanatory operators separately from exact replay, writes one cumulative baked stage per package operator, emits diagnostics schema 4, and always ends with a terminal lossless correction. Bend inference is not enabled yet.
+Schema 3 is available as an experimental opt-in transport with the same source/target topology contract. It preserves schema-2 affine numeric conventions, serializes ordered explanatory operators separately from exact replay, writes one cumulative baked stage per package operator, emits diagnostics schema 4, and always ends with a terminal lossless correction. Passing `--enable-bend` with `--package-schema 3` enables the experimental bend program search.
 
 ## Commands
 
@@ -31,6 +31,16 @@ cargo run -p shape-cli -- decompile source.obj target.obj \
   --out-dir target/decompile-v3
 ```
 
+Create an experimental schema-3 package with bend inference:
+
+```bash
+cargo run -p shape-cli -- decompile source.obj target.obj \
+  --package-schema 3 \
+  --enable-bend \
+  --verbose \
+  --out-dir target/bend-decompile
+```
+
 Verify the serialized package independently of the in-memory decompile result:
 
 ```bash
@@ -43,9 +53,12 @@ Useful creation options:
 
 ```bash
 --package-schema 2
+--enable-bend
 --affine-min-explained 0.01
 --residual-epsilon 0.0
 ```
+
+`--enable-bend` is accepted only with `--package-schema 3`. Schema 2 remains the default. Schema 3 without `--enable-bend` continues to build a schema-3 package from the existing affine-only inference result.
 
 `--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler now scores ordered program hypotheses instead of returning the first simple family that is close enough. In the current schema-2 replay manifest those programs contain at most one affine-family explanatory operator followed by the mandatory lossless correction; diagnostics schema 3 records them as ordered programs so multi-step operators can be added without changing the audit model again. Eligibility and semantic scoring use triangle-area-weighted explained displacement, while the manifest still reports the raw unweighted vertex explained fraction as a backward-compatible diagnostic. The internal score combines normalized weighted geometric error, operator parameter complexity, semantic metadata size, tolerance-based approximate residual cost, exact audit-correction bytes as a light tie-breaker, and small operator prior penalties. Approximate residual tolerance uses intrinsic object scale plus a shape-local `f32` ULP floor, so translating both meshes far from the origin does not change semantic residual coverage. This lets rigid or similarity win over translation when the simpler model would force a large meaningful correction, while still letting lossless-only reconstruction win for isolated local edits. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
 
@@ -130,9 +143,9 @@ The manifest also contains an FNV-1a topology fingerprint for quick diagnostics.
 
 ## Schema 3 Experimental Transport
 
-Schema 3 is documented in [schema3-decompiler.md](schema3-decompiler.md). At this milestone it supports lossless-only programs and one selected affine-family operator followed by the lossless correction. A no-op inference result writes an empty explanatory program and then the correction stage; it does not serialize a no-op operator.
+Schema 3 is documented in [schema3-decompiler.md](schema3-decompiler.md). It supports lossless-only programs, affine-family programs, bend programs, and shallow affine/bend compositions followed by the lossless correction. A no-op inference result writes an empty explanatory program and then the correction stage; it does not serialize a no-op operator.
 
-The schema-3 CLI path derives an `OperatorProgram` from the same selected affine/no-op inference result used by schema 2. Translation, rigid transform, similarity transform, and general affine are represented as schema-3 affine operators with authoritative cumulative baked stage positions. Exact package replay advances from baked stage to baked stage and then verifies the final target bits.
+With `--enable-bend`, the schema-3 CLI path searches the ordered program families `[]`, `[Affine]`, `[Bend]`, `[Affine, Bend]`, and `[Bend, Affine]`, then appends the exact lossless correction. Affine operators include translation, rigid transform, similarity transform, and general affine. Bend operators store a validated uniform-curvature frame, signed angle, and longitudinal interval. Exact package replay advances from baked stage to baked stage and then verifies the final target bits.
 
 ## Exact Correction Count
 
@@ -188,7 +201,8 @@ A Blender verification passes only when:
 
 - No vertex or face correspondence solving.
 - No topology-changing operation inference.
-- Only affine-family explanatory operators are inferred before the exact correction. The current semantic split is translation, rigid transform, similarity transform, and general affine; bend, twist, regional operators, FFDs, and structural operators are not implemented yet.
+- Schema 3 bend inference is experimental. It handles one uniform-curvature bend and shallow affine/bend compositions, but it can still choose deterministic affine-plus-corrective-bend approximations for ambiguous pre/post affine cases.
+- No twist, falloff masks, multiple bends, regional handles, FFDs, or structural operators are implemented yet.
 - No Maya reconstruction adapter yet; the package itself is DCC-independent, but only Blender execution is emitted.
 - UVs, normals, materials, skinning, animation, custom attributes, and object hierarchy are not reconstructed.
 - The topology fingerprint is diagnostic rather than cryptographic.

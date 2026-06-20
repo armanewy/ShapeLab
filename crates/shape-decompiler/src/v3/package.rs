@@ -18,6 +18,7 @@ use super::diagnostics::{
     DIAGNOSTICS_SCHEMA_VERSION_V4, InferenceDiagnosticsV4, ProgramCorrectionDiagnostics,
     ProgramDiagnosticsInput, ProgramOperatorDiagnostics, StageDiagnosticsInput,
     build_program_diagnostics, build_stage_diagnostics, default_scoring_policy_v4,
+    default_timing_by_phase_v4,
 };
 use super::program::{
     AffineOperator, OperatorId, OperatorProgram, ProgramOperator, SemanticVerificationMode,
@@ -361,8 +362,29 @@ pub fn build_v3_package_from_program(
     target: &TriangleMesh,
     out_dir: impl AsRef<Path>,
 ) -> Result<PackagePaths, DecompileError> {
+    build_v3_package_from_program_with_diagnostics(semantic_program, source, target, out_dir, None)
+}
+
+/// Build, write, and replay-verify a schema-3 package using externally
+/// produced diagnostics for the complete ordered program search.
+pub fn build_v3_package_from_program_with_diagnostics(
+    semantic_program: &OperatorProgram,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    out_dir: impl AsRef<Path>,
+    inference_diagnostics: Option<InferenceDiagnosticsV4>,
+) -> Result<PackagePaths, DecompileError> {
     let out_dir = out_dir.as_ref();
-    let built = build_decompile_package_v3(semantic_program, source, target)?;
+    let mut built = build_decompile_package_v3(semantic_program, source, target)?;
+    if let Some(inference_diagnostics) = inference_diagnostics {
+        validate_inference_diagnostics_for_program_v3(
+            &inference_diagnostics,
+            semantic_program,
+            source,
+            target,
+        )?;
+        built.inference_diagnostics = inference_diagnostics;
+    }
 
     let staging = StagedPackageDirectory::create(out_dir)?;
     write_decompile_package_v3_contents(&built, source, target, staging.path())?;
@@ -802,6 +824,7 @@ fn build_decompile_package_v3(
         scoring_policy,
         selected_program_hypothesis_index: 0,
         program_hypotheses: vec![program_hypothesis],
+        timing_by_phase_ms: default_timing_by_phase_v4(),
     };
 
     let manifest = DecompileManifestV3 {
@@ -842,6 +865,83 @@ fn build_decompile_package_v3(
         residual_positions,
         inference_diagnostics,
     })
+}
+
+fn validate_inference_diagnostics_for_program_v3(
+    diagnostics: &InferenceDiagnosticsV4,
+    semantic_program: &OperatorProgram,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+) -> Result<(), DecompileError> {
+    if diagnostics.diagnostics_schema_version != DIAGNOSTICS_SCHEMA_VERSION_V4 {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "inference diagnostics schema version must be 4",
+        ));
+    }
+    if diagnostics.package_schema_version != SCHEMA_VERSION_V3 {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "schema-4 diagnostics must describe a schema-3 package",
+        ));
+    }
+    if diagnostics.selected_program_hypothesis_index >= diagnostics.program_hypotheses.len() {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "selected program index is outside the diagnostics hypothesis list",
+        ));
+    }
+    let selected = &diagnostics.program_hypotheses[diagnostics.selected_program_hypothesis_index];
+    if !selected.selected {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "selected program hypothesis is not marked selected",
+        ));
+    }
+    if diagnostics
+        .program_hypotheses
+        .iter()
+        .enumerate()
+        .any(|(index, hypothesis)| {
+            hypothesis.selected != (index == diagnostics.selected_program_hypothesis_index)
+        })
+    {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "exactly one diagnostics hypothesis must be marked selected",
+        ));
+    }
+
+    let selected_operators = semantic_program
+        .operators
+        .iter()
+        .map(|operator| program_operator_diagnostics_v3(operator, Path::new(MANIFEST_FILE)))
+        .collect::<Result<Vec<_>, _>>()?;
+    if selected.operators != selected_operators {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "selected diagnostics operators do not match the baked schema-3 program",
+        ));
+    }
+
+    let weights = vertex_area_weights(source);
+    let raw_identity_error = sum_squared_distance(&source.positions, &target.positions);
+    let weighted_identity_error =
+        weighted_sum_squared_distance(&source.positions, &target.positions, &weights);
+    if !diagnostic_f64_matches(diagnostics.raw_identity_error, raw_identity_error)
+        || !diagnostic_f64_matches(diagnostics.weighted_identity_error, weighted_identity_error)
+    {
+        return Err(invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            "diagnostics identity errors do not match the mesh pair",
+        ));
+    }
+
+    Ok(())
+}
+
+fn diagnostic_f64_matches(left: f64, right: f64) -> bool {
+    left.is_finite() && right.is_finite() && (left - right).abs() <= 1.0e-9
 }
 
 fn program_operator_diagnostics_v3(

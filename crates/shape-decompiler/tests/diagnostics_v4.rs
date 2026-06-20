@@ -7,7 +7,7 @@ use shape_decompiler::v3::diagnostics::{
     ProgramDiagnosticsInput, ProgramHypothesisDiagnosticsV4, ProgramOperatorDiagnostics,
     ProgramOperatorFamilyV4, StageDiagnostics, StageDiagnosticsInput, build_program_diagnostics,
     build_stage_diagnostics, compare_program_hypotheses, default_scoring_policy_v4,
-    verify_score_recomputation,
+    default_timing_by_phase_v4, verify_score_recomputation,
 };
 use shape_decompiler::v3::program::{
     SemanticVerificationMode, SemanticVerificationPolicy, SemanticVerificationReport,
@@ -190,7 +190,7 @@ fn empty_program_scoring_uses_empty_operator_array() {
     assert_eq!(hypothesis.score.per_operator_overhead, 0.0);
     assert_close(
         hypothesis.score.normalized_weighted_final_geometric_error,
-        1.0,
+        policy.geometric_error_weight,
     );
     assert_close(
         hypothesis.score.exact_residual_byte_cost,
@@ -518,6 +518,7 @@ fn diagnostics_schema_version_is_four() {
         scoring_policy: policy,
         selected_program_hypothesis_index: 0,
         program_hypotheses: vec![hypothesis],
+        timing_by_phase_ms: default_timing_by_phase_v4(),
     };
 
     assert_eq!(DIAGNOSTICS_SCHEMA_VERSION_V4, 4);

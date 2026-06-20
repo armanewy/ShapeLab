@@ -17,6 +17,7 @@ use super::diagnostics::{
     DIAGNOSTICS_SCHEMA_VERSION_V4, InferenceDiagnosticsV4, ProgramCorrectionDiagnostics,
     ProgramDiagnosticsInput, ProgramOperatorDiagnostics, StageDiagnosticsInput,
     build_program_diagnostics, build_stage_diagnostics, default_scoring_policy_v4,
+    default_timing_by_phase_v4,
 };
 use super::package::{
     DecompileManifestV3, LosslessCorrectionManifestV3, MeshAssetV3, NumericFormatV3,
@@ -313,6 +314,7 @@ pub fn build_v3_package_from_program(
         scoring_policy,
         selected_program_hypothesis_index: 0,
         program_hypotheses: vec![program_hypothesis],
+        timing_by_phase_ms: default_timing_by_phase_v4(),
     };
 
     let mut manifest = DecompileManifestV3 {

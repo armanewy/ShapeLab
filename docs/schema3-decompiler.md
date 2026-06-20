@@ -8,6 +8,16 @@ cargo run -p shape-cli -- decompile source.obj target.obj \
   --out-dir target/decompile-v3
 ```
 
+Enable the experimental bend search with:
+
+```bash
+cargo run -p shape-cli -- decompile source.obj target.obj \
+  --package-schema 3 \
+  --enable-bend \
+  --verbose \
+  --out-dir target/bend-decompile
+```
+
 Schema 2 remains the default and keeps its existing manifest shape and numeric conventions. Schema 3 reuses the same canonical affine evaluation contract, but separates semantic explanation from exact replay.
 
 ## Current Scope
@@ -16,15 +26,17 @@ Supported in this milestone:
 
 - lossless-only programs
 - one selected affine-family operator followed by lossless correction
+- one selected bend operator followed by lossless correction
+- affine then bend, and bend then affine, followed by lossless correction
 - translation, rigid transform, similarity transform, and general affine metadata
+- uniform-curvature bend metadata: origin, longitudinal axis, bend direction, signed angle, and interval
 - diagnostics schema 4
 - schema-3 Blender reconstruction and saved-file verification script
 
 Not enabled yet:
 
-- bend inference
-- multi-operator inference from the CLI path
 - topology-changing or correspondence-solving operations
+- falloff masks, multiple bends, arbitrary handles, twist, FFDs, or native DCC deformers
 
 A no-op inference result serializes no explanatory operators. The package still contains one terminal `lossless_correction` operator with a cumulative baked stage.
 
@@ -56,6 +68,25 @@ lossless_correction
 or:
 
 ```text
+affine
+lossless_correction
+```
+
+With `--enable-bend`, the current CLI may emit:
+
+```text
+bend
+lossless_correction
+```
+
+```text
+affine
+bend
+lossless_correction
+```
+
+```text
+bend
 affine
 lossless_correction
 ```
@@ -106,6 +137,7 @@ Schema-3 verification checks:
 - the lossless correction is terminal
 - every declared baked stage exists
 - affine semantic evaluation matches its baked stage bit-exactly
+- bend semantic evaluation matches its baked stage within the declared bend tolerance policy
 - lossless correction residual indices are strictly increasing
 - final positions match the target by `f32` bits
 
@@ -137,21 +169,30 @@ Schema 3 writes `inference-diagnostics.json` with diagnostics schema 4. The repo
 
 - package schema version
 - scoring policy
+- every considered ordered program hypothesis
 - selected ordered program hypothesis
+- actual affine and bend parameters
 - per-stage weighted and raw errors
 - semantic-to-baked verification metrics
 - terminal correction counts and exact residual bytes
 - recomputable score components
+- rejection reasons for non-selected hypotheses
+- advisory timing buckets by phase
 
 No `no_op` explanatory operator is serialized in diagnostics or package manifests.
 
-## Wave 3 Interfaces
+## Integration Interfaces
 
-These interfaces are the current handoff points for bend and ordered program work:
+These interfaces are the current handoff points for ordered program work:
 
 - `shape_decompiler::v3::inference::generate_affine_candidates`
 - `shape_decompiler::v3::inference::generate_bend_candidates`
 - `shape_decompiler::v3::inference::search_programs`
-- `shape_decompiler::v3::package::build_v3_package_from_program`
+- `shape_decompiler::v3::inference::search_programs_for_mesh_pair`
+- `shape_decompiler::v3::package::build_v3_package_from_program_with_diagnostics`
 
-`generate_bend_candidates` validates settings and returns no candidates until bend inference is enabled. `search_programs` currently enumerates the lossless baseline and one-step affine candidates. `build_v3_package_from_program` appends the terminal lossless correction, writes cumulative baked stage payloads, emits diagnostics schema 4, writes the schema-3 Blender adapter, and replay-verifies before publishing.
+`search_programs_for_mesh_pair` uses source topology to derive surface weights and optionally admits bend candidates. `build_v3_package_from_program_with_diagnostics` appends the terminal lossless correction, writes cumulative baked stage payloads, preserves the full schema-4 search report, writes the schema-3 Blender adapter, and replay-verifies before publishing.
+
+## Current Search Limits
+
+The bend search is intentionally shallow. It can recover bend-only, negative bend, partial interval bend, uneven tessellation, large coordinate offsets, local edits after a bend, affine-only cases, and scale variants in the generated corpus. Some pre- and post-affine bend compositions are deterministic but ambiguous: the selected program can be an affine-plus-corrective-bend approximation rather than the exact generating sequence. The final lossless correction remains exact in all cases.

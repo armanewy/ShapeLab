@@ -3,6 +3,8 @@
 use std::fs;
 use std::process::Command;
 
+use shape_decompiler::v3::bend::{BendParameters, evaluate_bend};
+
 #[test]
 fn demo_generates_headless_artifacts() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
@@ -256,4 +258,161 @@ f 1 3 4
         .status()
         .expect("run shape-cli verify-decompile for schema 3");
     assert!(verify_status.success());
+}
+
+#[test]
+fn enable_bend_requires_schema_three() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let source = temp_dir.path().join("source.obj");
+    let target = temp_dir.path().join("target.obj");
+    let obj = "\
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+";
+    fs::write(&source, obj).expect("write source obj");
+    fs::write(&target, obj).expect("write target obj");
+
+    let status = Command::new(exe)
+        .arg("decompile")
+        .arg(&source)
+        .arg(&target)
+        .arg("--enable-bend")
+        .arg("--out-dir")
+        .arg(temp_dir.path().join("package"))
+        .status()
+        .expect("run shape-cli invalid bend decompile");
+
+    assert!(!status.success());
+}
+
+#[test]
+fn decompile_schema_three_enable_bend_writes_bend_program() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let source = temp_dir.path().join("source.obj");
+    let target = temp_dir.path().join("target.obj");
+    let package = temp_dir.path().join("bend-package");
+    let (source_obj, target_obj) = bend_pair_objs();
+    fs::write(&source, source_obj).expect("write bend source obj");
+    fs::write(&target, target_obj).expect("write bend target obj");
+
+    let status = Command::new(exe)
+        .arg("decompile")
+        .arg(&source)
+        .arg(&target)
+        .arg("--package-schema")
+        .arg("3")
+        .arg("--enable-bend")
+        .arg("--verbose")
+        .arg("--out-dir")
+        .arg(&package)
+        .status()
+        .expect("run shape-cli bend decompile");
+
+    assert!(status.success());
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(package.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema_version"], 3);
+    assert!(
+        manifest["operators"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operator| operator["kind"] == "bend")
+    );
+
+    let diagnostics: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(package.join("inference-diagnostics.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(diagnostics["diagnostics_schema_version"], 4);
+    assert!(diagnostics["program_hypotheses"].as_array().unwrap().len() > 1);
+    assert!(diagnostics["timing_by_phase_ms"]["program_scoring_ms"].is_number());
+    let selected = diagnostics["selected_program_hypothesis_index"]
+        .as_u64()
+        .unwrap() as usize;
+    let selected_hypothesis = &diagnostics["program_hypotheses"].as_array().unwrap()[selected];
+    assert!(
+        selected_hypothesis["operators"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operator| operator["family"] == "bend")
+    );
+
+    let verify_status = Command::new(exe)
+        .arg("verify-decompile")
+        .arg(&package)
+        .status()
+        .expect("run shape-cli verify-decompile for bend package");
+    assert!(verify_status.success());
+}
+
+fn bend_pair_objs() -> (String, String) {
+    let mut source_positions = Vec::new();
+    for index in 0..=10 {
+        let x = index as f32 / 10.0;
+        source_positions.extend([
+            [x, -0.10, -0.05],
+            [x, 0.10, -0.05],
+            [x, 0.10, 0.05],
+            [x, -0.10, 0.05],
+        ]);
+    }
+    let target_positions = evaluate_bend(
+        &BendParameters {
+            origin: [0.5, 0.0, 0.0],
+            longitudinal_axis: [1.0, 0.0, 0.0],
+            bend_direction: [0.0, 1.0, 0.0],
+            angle_radians: 45.0_f32.to_radians(),
+            interval_start: -0.5,
+            interval_end: 0.5,
+        },
+        &source_positions,
+    )
+    .unwrap();
+    let faces = beam_faces(11);
+    (
+        obj_from_positions(&source_positions, &faces),
+        obj_from_positions(&target_positions, &faces),
+    )
+}
+
+fn beam_faces(station_count: usize) -> Vec<[usize; 3]> {
+    let mut faces = Vec::new();
+    for ring in 0..station_count - 1 {
+        let current = ring * 4 + 1;
+        let next = current + 4;
+        for corner in 0..4 {
+            let a = current + corner;
+            let b = current + (corner + 1) % 4;
+            let c = next + (corner + 1) % 4;
+            let d = next + corner;
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+    }
+    let last = (station_count - 1) * 4 + 1;
+    faces.push([1, 2, 3]);
+    faces.push([1, 3, 4]);
+    faces.push([last, last + 2, last + 1]);
+    faces.push([last, last + 3, last + 2]);
+    faces
+}
+
+fn obj_from_positions(positions: &[[f32; 3]], faces: &[[usize; 3]]) -> String {
+    let mut obj = String::new();
+    for position in positions {
+        obj.push_str(&format!(
+            "v {:.9} {:.9} {:.9}\n",
+            position[0], position[1], position[2]
+        ));
+    }
+    for [a, b, c] in faces {
+        obj.push_str(&format!("f {a} {b} {c}\n"));
+    }
+    obj
 }

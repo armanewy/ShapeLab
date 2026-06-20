@@ -4,6 +4,7 @@
 //! and ordered search.
 
 use serde::{Deserialize, Serialize};
+use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
 use crate::{
@@ -33,7 +34,7 @@ impl Default for BendFitSettings {
         Self {
             maximum_absolute_angle_radians: std::f32::consts::PI,
             minimum_interval_length: 1.0e-4,
-            maximum_refinement_iterations: 0,
+            maximum_refinement_iterations: 4,
         }
     }
 }
@@ -325,6 +326,17 @@ pub fn search_programs(
     settings: &ProgramSearchSettings,
 ) -> Result<ProgramSearchResult, InferenceError> {
     program_search::search_programs(source_positions, target_positions, settings)
+}
+
+/// Searches ordered explanatory operator programs using mesh topology for
+/// area-derived surface weights.
+pub fn search_programs_for_mesh_pair(
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    settings: &ProgramSearchSettings,
+    enable_bend: bool,
+) -> Result<ProgramSearchResult, InferenceError> {
+    program_search::search_programs_for_mesh_pair(source, target, settings, enable_bend)
 }
 
 /// Validates bend fit settings.
