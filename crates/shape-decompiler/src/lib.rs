@@ -22,6 +22,7 @@ const SCHEMA_VERSION: u32 = 2;
 const SOURCE_MESHBIN: &str = "source.meshbin";
 const TARGET_MESHBIN: &str = "target.meshbin";
 const AFFINE_POSITIONS_FILE: &str = "operators/0000-global-affine-positions.f32";
+const LOSSLESS_STAGE_FILE_SUFFIX: &str = "lossless-correction-positions.f32";
 const RESIDUAL_INDEX_FILE: &str = "residual/indices.u32";
 const RESIDUAL_POSITION_FILE: &str = "residual/positions.f32";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -326,6 +327,9 @@ pub enum OperatorManifest {
         corrected_vertex_count: usize,
         /// Largest Euclidean error after applying the residual.
         max_error_after: f32,
+        /// Package-relative baked cumulative stage positions, absent in older schema-2 packages.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baked_positions_file: Option<String>,
     },
 }
 
@@ -381,6 +385,19 @@ pub struct PackageVerificationReport {
     pub outside_tolerance: usize,
 }
 
+/// Cumulative baked positions after one ordered reconstruction operator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BakedStagePayload {
+    /// Operator ID this baked stage belongs to.
+    pub operator_id: String,
+    /// Operator label this baked stage belongs to.
+    pub label: String,
+    /// Package-relative stage positions sidecar path.
+    pub positions_file: String,
+    /// Cumulative positions after applying the operator.
+    pub positions: Vec<[f32; 3]>,
+}
+
 /// In-memory decompile result and package payloads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecompileResult {
@@ -390,6 +407,8 @@ pub struct DecompileResult {
     pub verification: VerificationReport,
     /// Baked cumulative positions after the affine stage, when emitted.
     pub affine_positions: Option<Vec<[f32; 3]>>,
+    /// Ordered cumulative baked positions for every emitted reconstruction operator.
+    pub stage_payloads: Vec<BakedStagePayload>,
     /// Vertex indices corrected by the lossless residual.
     pub residual_indices: Vec<u32>,
     /// Absolute target positions for each residual index.
@@ -479,12 +498,12 @@ pub fn decompile_pair(
     let inference = choose_affine_candidate(source, target, settings, raw_identity_error);
     let affine_hypothesis = inference.selected;
     let emit_affine = !affine_hypothesis.operator.is_no_op();
+    let affine_stage_positions =
+        emit_affine.then(|| affine_hypothesis.reconstructed_positions.clone());
 
-    let current_positions = if emit_affine {
-        affine_hypothesis.reconstructed_positions.clone()
-    } else {
-        source.positions.clone()
-    };
+    let current_positions = affine_stage_positions
+        .clone()
+        .unwrap_or_else(|| source.positions.clone());
 
     let mut residual_indices = Vec::new();
     let mut residual_positions = Vec::new();
@@ -521,6 +540,7 @@ pub fn decompile_pair(
     };
 
     let mut operators = Vec::new();
+    let mut stage_payloads = Vec::new();
     if emit_affine {
         let operator = affine_hypothesis.operator;
         let semantic_family = operator.semantic_family();
@@ -534,9 +554,11 @@ pub fn decompile_pair(
             }
             AffineSemanticFamily::GeneralAffine => ("op-0000-global-affine", "Global affine fit"),
         };
+        let id = id.to_owned();
+        let label = label.to_owned();
         operators.push(OperatorManifest::GlobalAffine {
-            id: id.to_owned(),
-            label: label.to_owned(),
+            id: id.clone(),
+            label: label.clone(),
             matrix_row_major_4x4: matrix,
             semantic_family,
             translation: parameters.translation,
@@ -549,7 +571,18 @@ pub fn decompile_pair(
             ),
             baked_positions_file: AFFINE_POSITIONS_FILE.to_owned(),
         });
+        stage_payloads.push(BakedStagePayload {
+            operator_id: id,
+            label,
+            positions_file: AFFINE_POSITIONS_FILE.to_owned(),
+            positions: affine_stage_positions
+                .as_ref()
+                .expect("affine stage positions exist when affine is emitted")
+                .clone(),
+        });
     }
+    let lossless_operator_index = operators.len();
+    let lossless_stage_file = lossless_stage_positions_file(lossless_operator_index);
     operators.push(OperatorManifest::LosslessCorrection {
         id: "op-final-lossless-correction".to_owned(),
         label: "Lossless final correction".to_owned(),
@@ -557,6 +590,13 @@ pub fn decompile_pair(
         residual_position_file: RESIDUAL_POSITION_FILE.to_owned(),
         corrected_vertex_count: residual_indices.len(),
         max_error_after: verification.max_euclidean_error,
+        baked_positions_file: Some(lossless_stage_file.clone()),
+    });
+    stage_payloads.push(BakedStagePayload {
+        operator_id: "op-final-lossless-correction".to_owned(),
+        label: "Lossless final correction".to_owned(),
+        positions_file: lossless_stage_file,
+        positions: reconstructed_positions.clone(),
     });
 
     let manifest = DecompileManifest {
@@ -582,7 +622,8 @@ pub fn decompile_pair(
     Ok(DecompileResult {
         manifest,
         verification,
-        affine_positions: emit_affine.then_some(affine_hypothesis.reconstructed_positions),
+        affine_positions: affine_stage_positions,
+        stage_payloads,
         residual_indices,
         residual_positions,
         reconstructed_positions,
@@ -625,8 +666,11 @@ fn write_decompile_package_contents(
 
     write_meshbin(&package_path(out_dir, SOURCE_MESHBIN), source)?;
     write_meshbin(&package_path(out_dir, TARGET_MESHBIN), target)?;
-    if let Some(positions) = &result.affine_positions {
-        write_positions(&package_path(out_dir, AFFINE_POSITIONS_FILE), positions)?;
+    for stage in &result.stage_payloads {
+        write_positions(
+            &package_path(out_dir, &stage.positions_file),
+            &stage.positions,
+        )?;
     }
     write_u32s(
         &package_path(out_dir, RESIDUAL_INDEX_FILE),
@@ -972,6 +1016,7 @@ pub fn verify_decompile_package(
                 residual_position_file,
                 corrected_vertex_count,
                 max_error_after,
+                baked_positions_file,
                 ..
             } => {
                 saw_lossless = true;
@@ -999,6 +1044,16 @@ pub fn verify_decompile_package(
                         ));
                     }
                     current_positions[index] = *position;
+                }
+                if let Some(baked_positions_file) = baked_positions_file {
+                    let baked_path = resolve_package_asset(package_dir, baked_positions_file)?;
+                    let baked = read_positions(&baked_path, source.positions.len())?;
+                    if !position_slices_bit_equal(&baked, &current_positions) {
+                        return Err(invalid_package(
+                            &baked_path,
+                            "baked lossless positions do not match the replayed operator stream",
+                        ));
+                    }
                 }
                 residual_vertex_count = indices.len();
                 declared_lossless_max_error = Some(*max_error_after);
@@ -1414,6 +1469,54 @@ fn ensure_identical_topology(
     Ok(())
 }
 
+fn validate_package_relative_path(relative: &str, context: &Path) -> Result<(), DecompileError> {
+    let relative_path = Path::new(relative);
+    if relative_path.as_os_str().is_empty()
+        || relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(invalid_package(
+            context,
+            format!("unsafe package-relative path '{relative}'"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stage_payload(
+    result: &DecompileResult,
+    operator_index: usize,
+    operator: &OperatorManifest,
+    expected_file: &str,
+    expected_positions: &[[f32; 3]],
+) -> Result<(), DecompileError> {
+    validate_package_relative_path(expected_file, Path::new(MANIFEST_FILE))?;
+    let payload = result.stage_payloads.get(operator_index).ok_or_else(|| {
+        invalid_package(
+            Path::new(MANIFEST_FILE),
+            format!("missing baked stage payload for operator index {operator_index}"),
+        )
+    })?;
+    validate_package_relative_path(&payload.positions_file, Path::new(MANIFEST_FILE))?;
+    let (operator_id, operator_label) = operator_identity(operator);
+    if payload.operator_id != operator_id
+        || payload.label != operator_label
+        || payload.positions_file != expected_file
+        || !position_slices_bit_equal(&payload.positions, expected_positions)
+    {
+        return Err(invalid_package(
+            Path::new(MANIFEST_FILE),
+            format!("baked stage payload does not match operator index {operator_index}"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_result_consistency(
     result: &DecompileResult,
     source: &TriangleMesh,
@@ -1523,6 +1626,13 @@ fn validate_result_consistency(
                         "baked affine positions do not match the affine matrix",
                     ));
                 }
+                validate_stage_payload(
+                    result,
+                    operator_index,
+                    operator,
+                    baked_positions_file,
+                    &evaluated,
+                )?;
                 let affine_error = sum_squared_distance(&evaluated, &target.positions);
                 let weighted_affine_error =
                     weighted_sum_squared_distance(&evaluated, &target.positions, &weights);
@@ -1550,6 +1660,7 @@ fn validate_result_consistency(
                 residual_position_file,
                 corrected_vertex_count,
                 max_error_after,
+                baked_positions_file,
                 ..
             } => {
                 if residual_index_file != RESIDUAL_INDEX_FILE
@@ -1590,11 +1701,28 @@ fn validate_result_consistency(
                         "lossless correction max-error metadata is inconsistent",
                     ));
                 }
+                let expected_stage_file = lossless_stage_positions_file(operator_index);
+                if baked_positions_file.as_deref() != Some(expected_stage_file.as_str()) {
+                    return Err(invalid_package(
+                        Path::new(MANIFEST_FILE),
+                        "lossless correction baked stage file metadata is inconsistent",
+                    ));
+                }
+                validate_stage_payload(
+                    result,
+                    operator_index,
+                    operator,
+                    &expected_stage_file,
+                    &current_positions,
+                )?;
                 saw_lossless = true;
             }
         }
     }
-    if !saw_lossless || saw_affine != result.affine_positions.is_some() {
+    if !saw_lossless
+        || saw_affine != result.affine_positions.is_some()
+        || result.stage_payloads.len() != result.manifest.operators.len()
+    {
         return Err(invalid_package(
             Path::new(MANIFEST_FILE),
             "decompile operator stream does not match its in-memory payloads",
@@ -3542,6 +3670,10 @@ fn package_path(root: &Path, relative: &str) -> PathBuf {
     path
 }
 
+fn lossless_stage_positions_file(operator_index: usize) -> String {
+    format!("operators/{operator_index:04}-{LOSSLESS_STAGE_FILE_SUFFIX}")
+}
+
 fn path_io(path: &Path, source: std::io::Error) -> DecompileError {
     DecompileError::PathIo {
         path: path.to_path_buf(),
@@ -4031,6 +4163,13 @@ def replay_operators(manifest, source_positions, source_indices, target_position
             expected_after = max_euclidean_distance(current, target_positions)
             if f32_bits(operator["max_error_after"]) != f32_bits(expected_after):
                 raise ValueError("lossless correction max-error metadata is inconsistent")
+            baked_positions_file = operator.get("baked_positions_file")
+            if baked_positions_file is not None:
+                baked = read_positions(baked_positions_file, len(source_positions))
+                if not positions_bit_equal(baked, current):
+                    raise ValueError(
+                        "baked lossless positions do not match the replayed operator stream"
+                    )
             stages.append((label, list(current)))
         else:
             raise ValueError(f"unsupported operator kind: {kind}")
@@ -5090,6 +5229,16 @@ mod tests {
         );
         assert_eq!(manifest.verification.max_euclidean_error, 0.0);
         assert_eq!(manifest.topology.vertex_count, source.positions.len());
+        assert_eq!(result.stage_payloads.len(), result.manifest.operators.len());
+        for stage in &result.stage_payloads {
+            let path = dir.path().join(&stage.positions_file);
+            assert!(path.exists(), "{} should exist", stage.positions_file);
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "{} is empty",
+                stage.positions_file
+            );
+        }
 
         let diagnostics: InferenceDiagnostics =
             serde_json::from_str(&fs::read_to_string(paths.inference_diagnostics).unwrap())
@@ -5110,6 +5259,141 @@ mod tests {
         assert!(package_verification.topology_exact);
         assert!(package_verification.positions_bit_exact);
         assert_eq!(package_verification.max_euclidean_error, 0.0);
+    }
+
+    #[test]
+    fn package_verifier_detects_corrupted_baked_stage_payload() {
+        let source = tetra_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [position[0] + 0.5, position[1], position[2] - 0.25]
+        });
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_decompile_package(&result, &source, &target, dir.path()).unwrap();
+        let stage_path = dir.path().join(AFFINE_POSITIONS_FILE);
+        let mut stage = fs::read(&stage_path).unwrap();
+        stage[0] ^= 1;
+        fs::write(&stage_path, stage).unwrap();
+
+        let error = verify_decompile_package(dir.path()).unwrap_err();
+
+        assert!(matches!(error, DecompileError::InvalidPackage { .. }));
+    }
+
+    #[test]
+    fn package_verifier_detects_corrupted_lossless_baked_stage_payload() {
+        let source = pyramid_mesh();
+        let mut target = source.clone();
+        target.positions[4][2] += 0.25;
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_decompile_package(&result, &source, &target, dir.path()).unwrap();
+        let lossless_stage = result
+            .manifest
+            .operators
+            .iter()
+            .find_map(|operator| match operator {
+                OperatorManifest::LosslessCorrection {
+                    baked_positions_file,
+                    ..
+                } => baked_positions_file.as_deref(),
+                OperatorManifest::GlobalAffine { .. } => None,
+            })
+            .unwrap();
+        let stage_path = dir.path().join(lossless_stage);
+        let mut stage = fs::read(&stage_path).unwrap();
+        stage[0] ^= 1;
+        fs::write(&stage_path, stage).unwrap();
+
+        let error = verify_decompile_package(dir.path()).unwrap_err();
+
+        assert!(matches!(error, DecompileError::InvalidPackage { .. }));
+    }
+
+    #[test]
+    fn package_verifier_detects_missing_declared_lossless_baked_stage_payload() {
+        let source = pyramid_mesh();
+        let mut target = source.clone();
+        target.positions[4][2] += 0.25;
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_decompile_package(&result, &source, &target, dir.path()).unwrap();
+        let lossless_stage = result
+            .manifest
+            .operators
+            .iter()
+            .find_map(|operator| match operator {
+                OperatorManifest::LosslessCorrection {
+                    baked_positions_file,
+                    ..
+                } => baked_positions_file.as_deref(),
+                OperatorManifest::GlobalAffine { .. } => None,
+            })
+            .unwrap();
+        fs::remove_file(dir.path().join(lossless_stage)).unwrap();
+
+        let error = verify_decompile_package(dir.path()).unwrap_err();
+
+        assert!(matches!(error, DecompileError::PathIo { .. }));
+    }
+
+    #[test]
+    fn package_verifier_accepts_schema_two_lossless_without_baked_stage_metadata() {
+        let source = pyramid_mesh();
+        let mut target = source.clone();
+        target.positions[4][2] += 0.25;
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_decompile_package(&result, &source, &target, dir.path()).unwrap();
+        let lossless_stage = result
+            .manifest
+            .operators
+            .iter()
+            .find_map(|operator| match operator {
+                OperatorManifest::LosslessCorrection {
+                    baked_positions_file,
+                    ..
+                } => baked_positions_file.as_deref(),
+                OperatorManifest::GlobalAffine { .. } => None,
+            })
+            .unwrap();
+        fs::remove_file(dir.path().join(lossless_stage)).unwrap();
+        let manifest_path = dir.path().join(MANIFEST_FILE);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        for operator in manifest["operators"].as_array_mut().unwrap() {
+            if operator["kind"] == "lossless_correction" {
+                operator
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("baked_positions_file");
+            }
+        }
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let report = verify_decompile_package(dir.path()).unwrap();
+
+        assert!(report.positions_bit_exact);
+    }
+
+    #[test]
+    fn identity_package_writes_lossless_only_baked_stage_payload() {
+        let source = tetra_mesh();
+        let result = decompile_pair(&source, &source, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_decompile_package(&result, &source, &source, dir.path()).unwrap();
+        let stage_file = lossless_stage_positions_file(0);
+        let stage_path = dir.path().join(&stage_file);
+
+        assert!(stage_path.exists());
+        assert!(stage_path.metadata().unwrap().len() > 0);
+        assert_eq!(result.stage_payloads.len(), 1);
+        assert_eq!(result.stage_payloads[0].positions_file, stage_file);
+        verify_decompile_package(dir.path()).unwrap();
     }
 
     #[test]

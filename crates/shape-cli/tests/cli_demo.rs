@@ -145,6 +145,23 @@ f 4 1 5
         manifest["numeric_format"]["affine_evaluation"],
         "float32_stepwise_no_fma"
     );
+    let operators = manifest["operators"].as_array().unwrap();
+    assert_eq!(operators.len(), 2);
+    for operator in operators {
+        if let Some(baked_positions_file) = operator["baked_positions_file"].as_str() {
+            let path = package.join(baked_positions_file);
+            assert!(path.exists(), "{baked_positions_file} should exist");
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "{baked_positions_file} is empty"
+            );
+        }
+    }
+    let lossless_stage = package
+        .join("operators")
+        .join("0001-lossless-correction-positions.f32");
+    assert!(lossless_stage.exists());
+    assert!(lossless_stage.metadata().expect("metadata").len() > 0);
 
     let verify_status = Command::new(exe)
         .arg("verify-decompile")
