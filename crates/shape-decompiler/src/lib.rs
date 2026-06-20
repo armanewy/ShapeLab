@@ -33,6 +33,8 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const JACOBI_MAX_ITERATIONS: usize = 96;
 const PSEUDOINVERSE_RELATIVE_EPSILON: f64 = 1.0e-11;
+const SIMPLE_OPERATOR_ERROR_SLACK: f64 = 1.0e-3;
+const ROTATION_ORTHONORMAL_TOLERANCE: f64 = 1.0e-3;
 const PACKAGE_TEMP_MARKER: &str = ".shapelab-package-tmp-";
 const PACKAGE_BACKUP_MARKER: &str = ".shapelab-package-backup-";
 static PACKAGE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -145,6 +147,25 @@ pub struct TopologySummary {
     pub hash: String,
 }
 
+/// Semantic interpretation of a serialized affine stage.
+///
+/// The exact replay contract is still the baked affine matrix and stage
+/// positions. This field lets the decompiler prefer simpler editable controls
+/// when they explain the target nearly as well as a general affine.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AffineSemanticFamily {
+    /// Arbitrary affine transform.
+    #[default]
+    GeneralAffine,
+    /// Pure translation.
+    Translation,
+    /// Proper rotation plus translation.
+    RigidTransform,
+    /// Proper rotation, uniform scale, and translation.
+    SimilarityTransform,
+}
+
 /// One manifest operator in the reconstruction stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -157,6 +178,18 @@ pub enum OperatorManifest {
         label: String,
         /// Row-major 4x4 matrix mapping source positions to the affine stage.
         matrix_row_major_4x4: [f32; 16],
+        /// More editable semantic family represented by this affine matrix.
+        #[serde(default)]
+        semantic_family: AffineSemanticFamily,
+        /// Translation vector for translation, rigid, and similarity semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        translation: Option<[f32; 3]>,
+        /// Row-major 3x3 rotation basis for rigid and similarity semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation_row_major_3x3: Option<[f32; 9]>,
+        /// Uniform scale for similarity semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uniform_scale: Option<f32>,
         /// Fraction of source-to-target squared displacement explained.
         explained_displacement_fraction: f32,
         /// Largest remaining Euclidean error after the affine stage.
@@ -324,16 +357,13 @@ pub fn decompile_pair(
     ensure_identical_topology(source, target)?;
 
     let identity_error = sum_squared_distance(&source.positions, &target.positions);
-    let affine_matrix = fit_affine(&source.positions, &target.positions).unwrap_or(identity());
-    let fitted_positions = apply_affine_to_positions(&source.positions, affine_matrix);
-    let affine_error = sum_squared_distance(&fitted_positions, &target.positions);
-    let explained = explained_fraction(identity_error, affine_error);
+    let affine_candidate = choose_affine_candidate(source, target, settings, identity_error);
     let emit_affine = identity_error > 0.0
-        && affine_error < identity_error
-        && explained >= f64::from(settings.affine_min_explained);
+        && affine_candidate.error < identity_error
+        && affine_candidate.explained >= f64::from(settings.affine_min_explained);
 
     let current_positions = if emit_affine {
-        fitted_positions.clone()
+        affine_candidate.positions.clone()
     } else {
         source.positions.clone()
     };
@@ -374,12 +404,27 @@ pub fn decompile_pair(
 
     let mut operators = Vec::new();
     if emit_affine {
+        let (id, label) = match affine_candidate.semantic_family {
+            AffineSemanticFamily::Translation => ("op-0000-translation", "Translation"),
+            AffineSemanticFamily::RigidTransform => ("op-0000-rigid-transform", "Rigid transform"),
+            AffineSemanticFamily::SimilarityTransform => {
+                ("op-0000-similarity-transform", "Similarity transform")
+            }
+            AffineSemanticFamily::GeneralAffine => ("op-0000-global-affine", "Global affine fit"),
+        };
         operators.push(OperatorManifest::GlobalAffine {
-            id: "op-0000-global-affine".to_owned(),
-            label: "Global affine fit".to_owned(),
-            matrix_row_major_4x4: affine_matrix,
-            explained_displacement_fraction: explained as f32,
-            max_remaining_error: max_euclidean_distance(&fitted_positions, &target.positions),
+            id: id.to_owned(),
+            label: label.to_owned(),
+            matrix_row_major_4x4: affine_candidate.matrix,
+            semantic_family: affine_candidate.semantic_family,
+            translation: affine_candidate.parameters.translation,
+            rotation_row_major_3x3: affine_candidate.parameters.rotation,
+            uniform_scale: affine_candidate.parameters.uniform_scale,
+            explained_displacement_fraction: affine_candidate.explained as f32,
+            max_remaining_error: max_euclidean_distance(
+                &affine_candidate.positions,
+                &target.positions,
+            ),
             baked_positions_file: AFFINE_POSITIONS_FILE.to_owned(),
         });
     }
@@ -415,7 +460,7 @@ pub fn decompile_pair(
     Ok(DecompileResult {
         manifest,
         verification,
-        affine_positions: emit_affine.then_some(fitted_positions),
+        affine_positions: emit_affine.then_some(affine_candidate.positions),
         residual_indices,
         residual_positions,
         reconstructed_positions,
@@ -726,6 +771,10 @@ pub fn verify_decompile_package(
         match operator {
             OperatorManifest::GlobalAffine {
                 matrix_row_major_4x4,
+                semantic_family,
+                translation,
+                rotation_row_major_3x3,
+                uniform_scale,
                 explained_displacement_fraction,
                 max_remaining_error,
                 baked_positions_file,
@@ -738,6 +787,14 @@ pub fn verify_decompile_package(
                     ));
                 }
                 validate_affine_matrix(*matrix_row_major_4x4, &manifest_path)?;
+                validate_affine_semantics(
+                    *matrix_row_major_4x4,
+                    *semantic_family,
+                    *translation,
+                    *rotation_row_major_3x3,
+                    *uniform_scale,
+                    &manifest_path,
+                )?;
                 let path = resolve_package_asset(package_dir, baked_positions_file)?;
                 let baked = read_positions(&path, source.positions.len())?;
                 let evaluated = apply_affine_to_positions(&source.positions, *matrix_row_major_4x4);
@@ -889,6 +946,143 @@ fn validate_affine_matrix(matrix: [f32; 16], path: &Path) -> Result<(), Decompil
         return Err(invalid_package(
             path,
             "global affine matrix bottom row must be exactly [0, 0, 0, 1]",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_affine_semantics(
+    matrix: [f32; 16],
+    semantic_family: AffineSemanticFamily,
+    translation: Option<[f32; 3]>,
+    rotation: Option<[f32; 9]>,
+    uniform_scale: Option<f32>,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    match semantic_family {
+        AffineSemanticFamily::GeneralAffine => {
+            if translation.is_some() || rotation.is_some() || uniform_scale.is_some() {
+                return Err(invalid_package(
+                    path,
+                    "general affine operator must not declare semantic parameters",
+                ));
+            }
+        }
+        AffineSemanticFamily::Translation => {
+            reject_rotation_or_scale(rotation, uniform_scale, path, "translation operator")?;
+            let translation = translation.ok_or_else(|| {
+                invalid_package(
+                    path,
+                    "translation operator is missing translation parameters",
+                )
+            })?;
+            if !array_is_finite(translation) {
+                return Err(invalid_package(
+                    path,
+                    "translation operator contains non-finite parameters",
+                ));
+            }
+            let expected = translation_matrix(translation);
+            if !matrices_bit_equal(matrix, expected) {
+                return Err(invalid_package(
+                    path,
+                    "translation operator matrix does not match its translation parameters",
+                ));
+            }
+        }
+        AffineSemanticFamily::RigidTransform => {
+            let translation = require_translation(translation, path, "rigid transform operator")?;
+            let rotation = require_rotation(rotation, path, "rigid transform operator")?;
+            if uniform_scale.is_some() {
+                return Err(invalid_package(
+                    path,
+                    "rigid transform operator must not declare uniform scale",
+                ));
+            }
+            let expected = rigid_matrix(rotation, translation);
+            if !matrices_bit_equal(matrix, expected) {
+                return Err(invalid_package(
+                    path,
+                    "rigid transform matrix does not match its semantic parameters",
+                ));
+            }
+        }
+        AffineSemanticFamily::SimilarityTransform => {
+            let translation =
+                require_translation(translation, path, "similarity transform operator")?;
+            let rotation = require_rotation(rotation, path, "similarity transform operator")?;
+            let scale = uniform_scale.ok_or_else(|| {
+                invalid_package(
+                    path,
+                    "similarity transform operator is missing uniform scale",
+                )
+            })?;
+            if !scale.is_finite() || scale <= 0.0 {
+                return Err(invalid_package(
+                    path,
+                    "similarity transform operator contains invalid uniform scale",
+                ));
+            }
+            let expected = similarity_matrix(rotation, scale, translation);
+            if !matrices_bit_equal(matrix, expected) {
+                return Err(invalid_package(
+                    path,
+                    "similarity transform matrix does not match its semantic parameters",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn require_translation(
+    translation: Option<[f32; 3]>,
+    path: &Path,
+    label: &str,
+) -> Result<[f32; 3], DecompileError> {
+    let translation = translation
+        .ok_or_else(|| invalid_package(path, format!("{label} is missing translation")))?;
+    if !array_is_finite(translation) {
+        return Err(invalid_package(
+            path,
+            format!("{label} contains non-finite translation parameters"),
+        ));
+    }
+    Ok(translation)
+}
+
+fn require_rotation(
+    rotation: Option<[f32; 9]>,
+    path: &Path,
+    label: &str,
+) -> Result<[f32; 9], DecompileError> {
+    let rotation =
+        rotation.ok_or_else(|| invalid_package(path, format!("{label} is missing rotation")))?;
+    if !array_is_finite(rotation) {
+        return Err(invalid_package(
+            path,
+            format!("{label} contains non-finite rotation parameters"),
+        ));
+    }
+    if !is_proper_rotation(rotation) {
+        return Err(invalid_package(
+            path,
+            format!("{label} rotation is not a proper orthonormal basis"),
+        ));
+    }
+    Ok(rotation)
+}
+
+fn reject_rotation_or_scale(
+    rotation: Option<[f32; 9]>,
+    uniform_scale: Option<f32>,
+    path: &Path,
+    label: &str,
+) -> Result<(), DecompileError> {
+    if rotation.is_some() || uniform_scale.is_some() {
+        return Err(invalid_package(
+            path,
+            format!("{label} must not declare rotation or scale parameters"),
         ));
     }
     Ok(())
@@ -1150,6 +1344,10 @@ fn validate_result_consistency(
         match operator {
             OperatorManifest::GlobalAffine {
                 matrix_row_major_4x4,
+                semantic_family,
+                translation,
+                rotation_row_major_3x3,
+                uniform_scale,
                 explained_displacement_fraction,
                 max_remaining_error,
                 baked_positions_file,
@@ -1165,6 +1363,14 @@ fn validate_result_consistency(
                     ));
                 }
                 validate_affine_matrix(*matrix_row_major_4x4, Path::new(MANIFEST_FILE))?;
+                validate_affine_semantics(
+                    *matrix_row_major_4x4,
+                    *semantic_family,
+                    *translation,
+                    *rotation_row_major_3x3,
+                    *uniform_scale,
+                    Path::new(MANIFEST_FILE),
+                )?;
                 let affine_positions = result.affine_positions.as_ref().ok_or_else(|| {
                     invalid_package(
                         Path::new(AFFINE_POSITIONS_FILE),
@@ -1523,6 +1729,477 @@ fn ensure_strictly_increasing_indices(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct AffineOperatorCandidate {
+    semantic_family: AffineSemanticFamily,
+    matrix: [f32; 16],
+    parameters: AffineSemanticParameters,
+    positions: Vec<[f32; 3]>,
+    error: f64,
+    explained: f64,
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+struct AffineSemanticParameters {
+    translation: Option<[f32; 3]>,
+    rotation: Option<[f32; 9]>,
+    uniform_scale: Option<f32>,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct SemanticAffineMatrix {
+    matrix: [f32; 16],
+    parameters: AffineSemanticParameters,
+}
+
+fn choose_affine_candidate(
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    settings: DecompileSettings,
+    identity_error: f64,
+) -> AffineOperatorCandidate {
+    let general_matrix = fit_affine(&source.positions, &target.positions).unwrap_or(identity());
+    let general = affine_candidate(
+        AffineSemanticFamily::GeneralAffine,
+        general_matrix,
+        AffineSemanticParameters::default(),
+        &source.positions,
+        &target.positions,
+        identity_error,
+    );
+
+    let mut simple_candidates = Vec::new();
+    if let Some(translation_matrix) = fit_translation_matrix(&source.positions, &target.positions) {
+        let translation_delta = [
+            translation_matrix[3],
+            translation_matrix[7],
+            translation_matrix[11],
+        ];
+        let translation = affine_candidate(
+            AffineSemanticFamily::Translation,
+            translation_matrix,
+            AffineSemanticParameters {
+                translation: Some(translation_delta),
+                ..AffineSemanticParameters::default()
+            },
+            &source.positions,
+            &target.positions,
+            identity_error,
+        );
+        simple_candidates.push(translation);
+    }
+
+    if let Some(rigid) = fit_rigid_matrix(&source.positions, &target.positions) {
+        simple_candidates.push(affine_candidate(
+            AffineSemanticFamily::RigidTransform,
+            rigid.matrix,
+            rigid.parameters,
+            &source.positions,
+            &target.positions,
+            identity_error,
+        ));
+    }
+    if let Some(similarity) = fit_similarity_matrix(&source.positions, &target.positions) {
+        simple_candidates.push(affine_candidate(
+            AffineSemanticFamily::SimilarityTransform,
+            similarity.matrix,
+            similarity.parameters,
+            &source.positions,
+            &target.positions,
+            identity_error,
+        ));
+    }
+
+    let simple_error_slack =
+        semantic_candidate_error_slack(&source.positions, &target.positions, identity_error);
+    for candidate in simple_candidates {
+        if candidate.explained >= f64::from(settings.affine_min_explained)
+            && candidate.error <= general.error + simple_error_slack
+        {
+            return candidate;
+        }
+    }
+    general
+}
+
+fn affine_candidate(
+    semantic_family: AffineSemanticFamily,
+    matrix: [f32; 16],
+    parameters: AffineSemanticParameters,
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    identity_error: f64,
+) -> AffineOperatorCandidate {
+    let positions = apply_affine_to_positions(source, matrix);
+    let error = sum_squared_distance(&positions, target);
+    let explained = explained_fraction(identity_error, error);
+    AffineOperatorCandidate {
+        semantic_family,
+        matrix,
+        parameters,
+        positions,
+        error,
+        explained,
+    }
+}
+
+fn fit_translation_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
+    if source.is_empty() || source.len() != target.len() {
+        return None;
+    }
+    if let Some(matrix) = exact_translation_matrix(source, target) {
+        return Some(matrix);
+    }
+    let source_center = centroid_f64(source);
+    let target_center = centroid_f64(target);
+    let translation = [
+        (target_center[0] - source_center[0]) as f32,
+        (target_center[1] - source_center[1]) as f32,
+        (target_center[2] - source_center[2]) as f32,
+    ];
+    array_is_finite(translation).then_some(translation_matrix(translation))
+}
+
+fn translation_matrix(translation: [f32; 3]) -> [f32; 16] {
+    [
+        1.0,
+        0.0,
+        0.0,
+        translation[0],
+        0.0,
+        1.0,
+        0.0,
+        translation[1],
+        0.0,
+        0.0,
+        1.0,
+        translation[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+fn fit_rigid_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<SemanticAffineMatrix> {
+    let rotation = fit_rotation(source, target)?;
+    let source_center = centroid_f64(source);
+    let target_center = centroid_f64(target);
+    let translation = transform_translation(rotation, 1.0, source_center, target_center)?;
+    let candidate = rigid_matrix(rotation, translation);
+    candidate
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(SemanticAffineMatrix {
+            matrix: candidate,
+            parameters: AffineSemanticParameters {
+                translation: Some(translation),
+                rotation: Some(rotation),
+                uniform_scale: None,
+            },
+        })
+}
+
+fn fit_similarity_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<SemanticAffineMatrix> {
+    let rotation = fit_rotation(source, target)?;
+    let scale = fit_uniform_scale(source, target, rotation)?;
+    let source_center = centroid_f64(source);
+    let target_center = centroid_f64(target);
+    let translation =
+        transform_translation(rotation, f64::from(scale), source_center, target_center)?;
+    let candidate = similarity_matrix(rotation, scale, translation);
+    candidate
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(SemanticAffineMatrix {
+            matrix: candidate,
+            parameters: AffineSemanticParameters {
+                translation: Some(translation),
+                rotation: Some(rotation),
+                uniform_scale: Some(scale),
+            },
+        })
+}
+
+fn semantic_candidate_error_slack(
+    source: &[[f32; 3]],
+    target: &[[f32; 3]],
+    identity_error: f64,
+) -> f64 {
+    let shape_scale = centered_sum_squared_distance(source)
+        .max(centered_sum_squared_distance(target))
+        .max(f64::EPSILON);
+    shape_scale
+        .mul_add(SIMPLE_OPERATOR_ERROR_SLACK, identity_error * f64::EPSILON)
+        .max(f64::EPSILON)
+}
+
+fn centered_sum_squared_distance(positions: &[[f32; 3]]) -> f64 {
+    let center = centroid_f64(positions);
+    positions
+        .iter()
+        .map(|position| {
+            let dx = f64::from(position[0]) - center[0];
+            let dy = f64::from(position[1]) - center[1];
+            let dz = f64::from(position[2]) - center[2];
+            dx * dx + dy * dy + dz * dz
+        })
+        .sum()
+}
+
+fn fit_rotation(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 9]> {
+    if source.is_empty() || source.len() != target.len() {
+        return None;
+    }
+    let source_center = centroid_f64(source);
+    let target_center = centroid_f64(target);
+    let mut covariance = [[0.0_f64; 3]; 3];
+    let mut source_variance = 0.0_f64;
+    let mut target_variance = 0.0_f64;
+    for (source_position, target_position) in source.iter().zip(target) {
+        let source_centered = [
+            f64::from(source_position[0]) - source_center[0],
+            f64::from(source_position[1]) - source_center[1],
+            f64::from(source_position[2]) - source_center[2],
+        ];
+        let target_centered = [
+            f64::from(target_position[0]) - target_center[0],
+            f64::from(target_position[1]) - target_center[1],
+            f64::from(target_position[2]) - target_center[2],
+        ];
+        source_variance += dot_f64(source_centered, source_centered);
+        target_variance += dot_f64(target_centered, target_centered);
+        for row in 0..3 {
+            for col in 0..3 {
+                covariance[row][col] += source_centered[row] * target_centered[col];
+            }
+        }
+    }
+    if source_variance <= f64::EPSILON || target_variance <= f64::EPSILON {
+        return None;
+    }
+    let rotation = quaternion_to_rotation(largest_eigenvector_4x4(davenport_matrix(covariance))?);
+    let rotation = snap_rotation(rotation);
+    is_proper_rotation(rotation).then_some(rotation)
+}
+
+fn davenport_matrix(covariance: [[f64; 3]; 3]) -> [[f64; 4]; 4] {
+    let sxx = covariance[0][0];
+    let sxy = covariance[0][1];
+    let sxz = covariance[0][2];
+    let syx = covariance[1][0];
+    let syy = covariance[1][1];
+    let syz = covariance[1][2];
+    let szx = covariance[2][0];
+    let szy = covariance[2][1];
+    let szz = covariance[2][2];
+    [
+        [sxx + syy + szz, syz - szy, szx - sxz, sxy - syx],
+        [syz - szy, sxx - syy - szz, sxy + syx, szx + sxz],
+        [szx - sxz, sxy + syx, -sxx + syy - szz, syz + szy],
+        [sxy - syx, szx + sxz, syz + szy, -sxx - syy + szz],
+    ]
+}
+
+fn largest_eigenvector_4x4(matrix: [[f64; 4]; 4]) -> Option<[f64; 4]> {
+    let (eigenvalues, eigenvectors) = symmetric_eigendecomposition(matrix);
+    let (column, _) = eigenvalues
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, value)| value.is_finite())
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))?;
+    let mut vector = [
+        eigenvectors[0][column],
+        eigenvectors[1][column],
+        eigenvectors[2][column],
+        eigenvectors[3][column],
+    ];
+    let length = vector.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if !length.is_finite() || length <= f64::EPSILON {
+        return None;
+    }
+    for value in &mut vector {
+        *value /= length;
+    }
+    Some(vector)
+}
+
+fn quaternion_to_rotation(quaternion: [f64; 4]) -> [f32; 9] {
+    let [w, x, y, z] = quaternion;
+    [
+        (1.0 - 2.0 * (y * y + z * z)) as f32,
+        (2.0 * (x * y - z * w)) as f32,
+        (2.0 * (x * z + y * w)) as f32,
+        (2.0 * (x * y + z * w)) as f32,
+        (1.0 - 2.0 * (x * x + z * z)) as f32,
+        (2.0 * (y * z - x * w)) as f32,
+        (2.0 * (x * z - y * w)) as f32,
+        (2.0 * (y * z + x * w)) as f32,
+        (1.0 - 2.0 * (x * x + y * y)) as f32,
+    ]
+}
+
+fn snap_rotation(mut rotation: [f32; 9]) -> [f32; 9] {
+    for value in &mut rotation {
+        if value.abs() <= 1.0e-6 {
+            *value = 0.0;
+        } else if (*value - 1.0).abs() <= 1.0e-6 {
+            *value = 1.0;
+        } else if (*value + 1.0).abs() <= 1.0e-6 {
+            *value = -1.0;
+        }
+    }
+    rotation
+}
+
+fn fit_uniform_scale(source: &[[f32; 3]], target: &[[f32; 3]], rotation: [f32; 9]) -> Option<f32> {
+    let source_center = centroid_f64(source);
+    let target_center = centroid_f64(target);
+    let mut numerator = 0.0_f64;
+    let mut denominator = 0.0_f64;
+    for (source_position, target_position) in source.iter().zip(target) {
+        let source_centered = [
+            f64::from(source_position[0]) - source_center[0],
+            f64::from(source_position[1]) - source_center[1],
+            f64::from(source_position[2]) - source_center[2],
+        ];
+        let target_centered = [
+            f64::from(target_position[0]) - target_center[0],
+            f64::from(target_position[1]) - target_center[1],
+            f64::from(target_position[2]) - target_center[2],
+        ];
+        let rotated = apply_rotation_f64(rotation, source_centered);
+        numerator += dot_f64(target_centered, rotated);
+        denominator += dot_f64(source_centered, source_centered);
+    }
+    if !numerator.is_finite() || !denominator.is_finite() || denominator <= f64::EPSILON {
+        return None;
+    }
+    let scale = (numerator / denominator) as f32;
+    (scale.is_finite() && scale > 0.0).then_some(scale)
+}
+
+fn transform_translation(
+    rotation: [f32; 9],
+    scale: f64,
+    source_center: [f64; 3],
+    target_center: [f64; 3],
+) -> Option<[f32; 3]> {
+    let rotated_center = apply_rotation_f64(rotation, source_center);
+    let translation = [
+        (target_center[0] - scale * rotated_center[0]) as f32,
+        (target_center[1] - scale * rotated_center[1]) as f32,
+        (target_center[2] - scale * rotated_center[2]) as f32,
+    ];
+    array_is_finite(translation).then_some(translation)
+}
+
+fn apply_rotation_f64(rotation: [f32; 9], position: [f64; 3]) -> [f64; 3] {
+    [
+        f64::from(rotation[0]) * position[0]
+            + f64::from(rotation[1]) * position[1]
+            + f64::from(rotation[2]) * position[2],
+        f64::from(rotation[3]) * position[0]
+            + f64::from(rotation[4]) * position[1]
+            + f64::from(rotation[5]) * position[2],
+        f64::from(rotation[6]) * position[0]
+            + f64::from(rotation[7]) * position[1]
+            + f64::from(rotation[8]) * position[2],
+    ]
+}
+
+fn rigid_matrix(rotation: [f32; 9], translation: [f32; 3]) -> [f32; 16] {
+    [
+        rotation[0],
+        rotation[1],
+        rotation[2],
+        translation[0],
+        rotation[3],
+        rotation[4],
+        rotation[5],
+        translation[1],
+        rotation[6],
+        rotation[7],
+        rotation[8],
+        translation[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+fn similarity_matrix(rotation: [f32; 9], scale: f32, translation: [f32; 3]) -> [f32; 16] {
+    [
+        canonical_f32_mul(scale, rotation[0]),
+        canonical_f32_mul(scale, rotation[1]),
+        canonical_f32_mul(scale, rotation[2]),
+        translation[0],
+        canonical_f32_mul(scale, rotation[3]),
+        canonical_f32_mul(scale, rotation[4]),
+        canonical_f32_mul(scale, rotation[5]),
+        translation[1],
+        canonical_f32_mul(scale, rotation[6]),
+        canonical_f32_mul(scale, rotation[7]),
+        canonical_f32_mul(scale, rotation[8]),
+        translation[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+fn is_proper_rotation(rotation: [f32; 9]) -> bool {
+    if !array_is_finite(rotation) {
+        return false;
+    }
+    let rows = [&rotation[0..3], &rotation[3..6], &rotation[6..9]];
+    let unit_rows = rows
+        .iter()
+        .all(|row| (row_length(row) - 1.0).abs() <= ROTATION_ORTHONORMAL_TOLERANCE);
+    let orthogonal_rows = dot(rows[0], rows[1]).abs() <= ROTATION_ORTHONORMAL_TOLERANCE
+        && dot(rows[0], rows[2]).abs() <= ROTATION_ORTHONORMAL_TOLERANCE
+        && dot(rows[1], rows[2]).abs() <= ROTATION_ORTHONORMAL_TOLERANCE;
+    let determinant = determinant_3x3(rotation);
+    unit_rows
+        && orthogonal_rows
+        && determinant.is_finite()
+        && (determinant - 1.0).abs() <= ROTATION_ORTHONORMAL_TOLERANCE
+}
+
+fn row_length(row: &[f32]) -> f64 {
+    dot(row, row).sqrt()
+}
+
+fn dot(left: &[f32], right: &[f32]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| f64::from(*left) * f64::from(*right))
+        .sum()
+}
+
+fn dot_f64(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
+}
+
+fn determinant_3x3(matrix: [f32; 9]) -> f64 {
+    let a = f64::from(matrix[0]);
+    let b = f64::from(matrix[1]);
+    let c = f64::from(matrix[2]);
+    let d = f64::from(matrix[3]);
+    let e = f64::from(matrix[4]);
+    let f = f64::from(matrix[5]);
+    let g = f64::from(matrix[6]);
+    let h = f64::from(matrix[7]);
+    let i = f64::from(matrix[8]);
+    a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+}
+
 fn fit_affine(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<[f32; 16]> {
     if source.is_empty() || source.len() != target.len() {
         return None;
@@ -1631,10 +2308,7 @@ fn exact_translation_matrix(source: &[[f32; 3]], target: &[[f32; 3]]) -> Option<
             canonical_f32_add(source[axis], delta[axis]).to_bits() == target[axis].to_bits()
         })
     });
-    exact.then_some([
-        1.0, 0.0, 0.0, delta[0], 0.0, 1.0, 0.0, delta[1], 0.0, 0.0, 1.0, delta[2], 0.0, 0.0, 0.0,
-        1.0,
-    ])
+    exact.then_some(translation_matrix(delta))
 }
 
 fn centroid_f64(positions: &[[f32; 3]]) -> [f64; 3] {
@@ -1867,6 +2541,12 @@ fn f32_bits_equal(left: f32, right: f32) -> bool {
     left.to_bits() == right.to_bits()
 }
 
+fn matrices_bit_equal<const N: usize>(left: [f32; N], right: [f32; N]) -> bool {
+    left.iter()
+        .zip(right)
+        .all(|(left, right)| f32_bits_equal(*left, right))
+}
+
 fn positions_bit_equal(left: [f32; 3], right: [f32; 3]) -> bool {
     left[0].to_bits() == right[0].to_bits()
         && left[1].to_bits() == right[1].to_bits()
@@ -2006,8 +2686,8 @@ fn invalid_package(path: impl AsRef<Path>, message: impl Into<String>) -> Decomp
     }
 }
 
-fn array_is_finite(value: [f32; 3]) -> bool {
-    value[0].is_finite() && value[1].is_finite() && value[2].is_finite()
+fn array_is_finite<const N: usize>(value: [f32; N]) -> bool {
+    value.iter().all(|component| component.is_finite())
 }
 
 fn blender_reconstruction_script() -> &'static str {
@@ -2027,6 +2707,7 @@ BAKED_OBJECT_NAME = "ShapeLab_Reconstructed_Baked"
 VERTEX_ID_ATTRIBUTE = "shapelab_vertex_id"
 FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x00000100000001B3
+ROTATION_ORTHONORMAL_TOLERANCE = 1.0e-3
 
 
 def command_line_arguments():
@@ -2054,6 +2735,14 @@ def command_line_arguments():
 def output_path(value):
     path = Path(value)
     return path if path.is_absolute() else ROOT / path
+
+
+def is_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def package_path(relative_path):
@@ -2142,7 +2831,7 @@ def topology_hash(vertex_count, indices):
 
 
 def apply_affine(positions, matrix):
-    if len(matrix) != 16 or not all(math.isfinite(value) for value in matrix):
+    if len(matrix) != 16 or not all(is_finite_number(value) for value in matrix):
         raise ValueError("global affine matrix must contain sixteen finite values")
     # JSON numbers are Python binary64 values. Normalize every serialized
     # matrix coefficient back to its declared binary32 value before applying
@@ -2199,6 +2888,89 @@ def explained_fraction(identity_error, candidate_error):
     return max(0.0, min(1.0, 1.0 - candidate_error / identity_error))
 
 
+def matrices_bit_equal(left, right):
+    return all(f32_bits(actual) == f32_bits(expected) for actual, expected in zip(left, right))
+
+
+def require_vector(operator, key, length, label):
+    value = operator.get(key)
+    if (
+        not isinstance(value, list)
+        or len(value) != length
+        or not all(is_finite_number(component) for component in value)
+    ):
+        raise ValueError(f"{label} is missing finite {key}")
+    return [f32(component) for component in value]
+
+
+def reject_semantic_parameters(operator, keys, label):
+    for key in keys:
+        if operator.get(key) is not None:
+            raise ValueError(f"{label} must not declare {key}")
+
+
+def translation_matrix(translation):
+    tx, ty, tz = translation
+    return [
+        1.0, 0.0, 0.0, tx,
+        0.0, 1.0, 0.0, ty,
+        0.0, 0.0, 1.0, tz,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def rigid_matrix(rotation, translation):
+    tx, ty, tz = translation
+    return [
+        rotation[0], rotation[1], rotation[2], tx,
+        rotation[3], rotation[4], rotation[5], ty,
+        rotation[6], rotation[7], rotation[8], tz,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def similarity_matrix(rotation, scale, translation):
+    tx, ty, tz = translation
+    return [
+        f32(scale * rotation[0]), f32(scale * rotation[1]), f32(scale * rotation[2]), tx,
+        f32(scale * rotation[3]), f32(scale * rotation[4]), f32(scale * rotation[5]), ty,
+        f32(scale * rotation[6]), f32(scale * rotation[7]), f32(scale * rotation[8]), tz,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def dot(left, right):
+    return sum(float(a) * float(b) for a, b in zip(left, right))
+
+
+def row_length(row):
+    return math.sqrt(dot(row, row))
+
+
+def determinant_3x3(matrix):
+    a, b, c, d, e, f, g, h, i = (float(value) for value in matrix)
+    return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+
+def is_proper_rotation(rotation):
+    rows = [rotation[0:3], rotation[3:6], rotation[6:9]]
+    unit_rows = all(
+        abs(row_length(row) - 1.0) <= ROTATION_ORTHONORMAL_TOLERANCE for row in rows
+    )
+    orthogonal_rows = (
+        abs(dot(rows[0], rows[1])) <= ROTATION_ORTHONORMAL_TOLERANCE
+        and abs(dot(rows[0], rows[2])) <= ROTATION_ORTHONORMAL_TOLERANCE
+        and abs(dot(rows[1], rows[2])) <= ROTATION_ORTHONORMAL_TOLERANCE
+    )
+    determinant = determinant_3x3(rotation)
+    return (
+        unit_rows
+        and orthogonal_rows
+        and math.isfinite(determinant)
+        and abs(determinant - 1.0) <= ROTATION_ORTHONORMAL_TOLERANCE
+    )
+
+
 def replay_operators(manifest, source_positions, target_positions):
     current = list(source_positions)
     stages = []
@@ -2225,13 +2997,55 @@ def replay_operators(manifest, source_positions, target_positions):
             if operator_index != 0:
                 raise ValueError("the global affine operator must be first")
             matrix = operator["matrix_row_major_4x4"]
-            if len(matrix) != 16 or not all(math.isfinite(value) for value in matrix):
+            if len(matrix) != 16 or not all(is_finite_number(value) for value in matrix):
                 raise ValueError("global affine matrix must contain sixteen finite values")
             if any(
                 f32_bits(actual) != f32_bits(expected)
                 for actual, expected in zip(matrix[12:16], (0.0, 0.0, 0.0, 1.0))
             ):
                 raise ValueError("global affine matrix bottom row must be [0, 0, 0, 1]")
+            semantic_family = operator.get("semantic_family", "general_affine")
+            if semantic_family == "translation":
+                reject_semantic_parameters(
+                    operator, ("rotation_row_major_3x3", "uniform_scale"), "translation affine"
+                )
+                translation = require_vector(operator, "translation", 3, "translation affine")
+                if not matrices_bit_equal(matrix, translation_matrix(translation)):
+                    raise ValueError("translation affine matrix does not match its parameters")
+            elif semantic_family == "general_affine":
+                reject_semantic_parameters(
+                    operator,
+                    ("translation", "rotation_row_major_3x3", "uniform_scale"),
+                    "general affine",
+                )
+            elif semantic_family == "rigid_transform":
+                if operator.get("uniform_scale") is not None:
+                    raise ValueError("rigid transform must not declare uniform_scale")
+                translation = require_vector(operator, "translation", 3, "rigid transform")
+                rotation = require_vector(
+                    operator, "rotation_row_major_3x3", 9, "rigid transform"
+                )
+                if not is_proper_rotation(rotation):
+                    raise ValueError("rigid transform rotation is not a proper basis")
+                if not matrices_bit_equal(matrix, rigid_matrix(rotation, translation)):
+                    raise ValueError("rigid transform matrix does not match its parameters")
+            elif semantic_family == "similarity_transform":
+                translation = require_vector(operator, "translation", 3, "similarity transform")
+                rotation = require_vector(
+                    operator, "rotation_row_major_3x3", 9, "similarity transform"
+                )
+                scale = operator.get("uniform_scale")
+                if not is_finite_number(scale):
+                    raise ValueError("similarity transform is missing a valid uniform_scale")
+                scale = f32(scale)
+                if not math.isfinite(scale) or scale <= 0.0:
+                    raise ValueError("similarity transform is missing a valid uniform_scale")
+                if not is_proper_rotation(rotation):
+                    raise ValueError("similarity transform rotation is not a proper basis")
+                if not matrices_bit_equal(matrix, similarity_matrix(rotation, scale, translation)):
+                    raise ValueError("similarity transform matrix does not match its parameters")
+            else:
+                raise ValueError(f"unsupported affine semantic family: {semantic_family}")
             baked = read_positions(operator["baked_positions_file"], len(source_positions))
             evaluated = apply_affine(source_positions, matrix)
             if not positions_bit_equal(evaluated, baked):
@@ -2396,13 +3210,13 @@ def load_and_validate_package():
     residual_epsilon = settings.get("residual_epsilon")
     if (
         not isinstance(affine_min_explained, (int, float))
-        or not math.isfinite(affine_min_explained)
+        or not is_finite_number(affine_min_explained)
         or not 0.0 <= affine_min_explained <= 1.0
     ):
         raise ValueError("affine_min_explained must be finite and between zero and one")
     if (
         not isinstance(residual_epsilon, (int, float))
-        or not math.isfinite(residual_epsilon)
+        or not is_finite_number(residual_epsilon)
         or residual_epsilon < 0.0
     ):
         raise ValueError("residual_epsilon must be finite and non-negative")
@@ -2763,7 +3577,11 @@ mod tests {
 
         assert!(matches!(
             result.manifest.operators.first(),
-            Some(OperatorManifest::GlobalAffine { .. })
+            Some(OperatorManifest::GlobalAffine {
+                semantic_family: AffineSemanticFamily::GeneralAffine,
+                translation: None,
+                ..
+            })
         ));
         assert_eq!(result.reconstructed_positions, target.positions);
         assert_eq!(result.verification.max_euclidean_error, 0.0);
@@ -2811,12 +3629,148 @@ mod tests {
 
         let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
 
-        assert!(matches!(
-            result.manifest.operators.first(),
-            Some(OperatorManifest::GlobalAffine { .. })
-        ));
+        let Some(OperatorManifest::GlobalAffine {
+            id,
+            label,
+            semantic_family,
+            translation,
+            matrix_row_major_4x4,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected translation affine operator");
+        };
+        assert_eq!(id, "op-0000-translation");
+        assert_eq!(label, "Translation");
+        assert_eq!(*semantic_family, AffineSemanticFamily::Translation);
+        assert_eq!(*translation, Some([0.5, -0.25, 2.0]));
+        assert_eq!(*matrix_row_major_4x4, translation_matrix([0.5, -0.25, 2.0]));
         assert!(result.residual_indices.is_empty());
         assert!(result.residual_positions.is_empty());
+        assert!(position_slices_bit_equal(
+            &result.reconstructed_positions,
+            &target.positions
+        ));
+    }
+
+    #[test]
+    fn exact_rigid_transform_is_labeled_as_rigid() {
+        let source = cube_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [-position[1] + 0.25, position[0] - 0.5, position[2] + 1.0]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family,
+            translation,
+            rotation_row_major_3x3,
+            uniform_scale,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected rigid affine operator");
+        };
+        assert_eq!(*semantic_family, AffineSemanticFamily::RigidTransform);
+        assert_eq!(*translation, Some([0.25, -0.5, 1.0]));
+        assert_eq!(
+            *rotation_row_major_3x3,
+            Some([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        );
+        assert_eq!(*uniform_scale, None);
+        assert!(position_slices_bit_equal(
+            &result.reconstructed_positions,
+            &target.positions
+        ));
+    }
+
+    #[test]
+    fn large_translation_does_not_hide_rigid_transform() {
+        let source = cube_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [
+                -position[1] + 1000.0,
+                position[0] - 1000.0,
+                position[2] + 500.0,
+            ]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family,
+            translation,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected rigid affine operator");
+        };
+        assert_eq!(*semantic_family, AffineSemanticFamily::RigidTransform);
+        assert_eq!(*translation, Some([1000.0, -1000.0, 500.0]));
+        assert!(result.residual_indices.is_empty());
+        assert!(position_slices_bit_equal(
+            &result.reconstructed_positions,
+            &target.positions
+        ));
+    }
+
+    #[test]
+    fn planar_rigid_transform_is_labeled_as_rigid() {
+        let source = square_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [-position[1] + 0.25, position[0] - 0.5, position[2]]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family,
+            translation,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected rigid affine operator");
+        };
+        assert_eq!(*semantic_family, AffineSemanticFamily::RigidTransform);
+        assert_eq!(*translation, Some([0.25, -0.5, 0.0]));
+        assert!(result.residual_indices.is_empty());
+        assert!(position_slices_bit_equal(
+            &result.reconstructed_positions,
+            &target.positions
+        ));
+    }
+
+    #[test]
+    fn exact_similarity_transform_is_labeled_as_similarity() {
+        let source = cube_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [
+                -2.0 * position[1] + 0.25,
+                2.0 * position[0] - 0.5,
+                2.0 * position[2] + 1.0,
+            ]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family,
+            translation,
+            rotation_row_major_3x3,
+            uniform_scale,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected similarity affine operator");
+        };
+        assert_eq!(*semantic_family, AffineSemanticFamily::SimilarityTransform);
+        assert_eq!(*translation, Some([0.25, -0.5, 1.0]));
+        assert_eq!(
+            *rotation_row_major_3x3,
+            Some([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        );
+        assert_eq!(*uniform_scale, Some(2.0));
         assert!(position_slices_bit_equal(
             &result.reconstructed_positions,
             &target.positions
@@ -3115,6 +4069,108 @@ mod tests {
     }
 
     #[test]
+    fn package_verifier_rejects_tampered_translation_metadata() {
+        let source = tetra_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [position[0] + 0.5, position[1] - 0.25, position[2] + 2.0]
+        });
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        write_decompile_package(&result, &source, &target, &package).unwrap();
+        let manifest_path = package.join(MANIFEST_FILE);
+        let mut manifest: DecompileManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        let translation = manifest
+            .operators
+            .iter_mut()
+            .find_map(|operator| match operator {
+                OperatorManifest::GlobalAffine { translation, .. } => translation.as_mut(),
+                OperatorManifest::LosslessCorrection { .. } => None,
+            })
+            .unwrap();
+        translation[0] += 0.25;
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let error = verify_decompile_package(&package).unwrap_err();
+
+        assert!(matches!(error, DecompileError::InvalidPackage { .. }));
+    }
+
+    #[test]
+    fn package_verifier_rejects_tampered_similarity_metadata() {
+        let source = cube_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [
+                -2.0 * position[1] + 0.25,
+                2.0 * position[0] - 0.5,
+                2.0 * position[2] + 1.0,
+            ]
+        });
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        write_decompile_package(&result, &source, &target, &package).unwrap();
+        let manifest_path = package.join(MANIFEST_FILE);
+        let mut manifest: DecompileManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        let uniform_scale = manifest
+            .operators
+            .iter_mut()
+            .find_map(|operator| match operator {
+                OperatorManifest::GlobalAffine { uniform_scale, .. } => uniform_scale.as_mut(),
+                OperatorManifest::LosslessCorrection { .. } => None,
+            })
+            .unwrap();
+        *uniform_scale = 2.25;
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let error = verify_decompile_package(&package).unwrap_err();
+
+        assert!(matches!(error, DecompileError::InvalidPackage { .. }));
+    }
+
+    #[test]
+    fn package_verifier_accepts_schema_two_affine_without_semantic_metadata() {
+        let source = tetra_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [position[0] + 0.5, position[1] - 0.25, position[2] + 2.0]
+        });
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        write_decompile_package(&result, &source, &target, &package).unwrap();
+        let manifest_path = package.join(MANIFEST_FILE);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        let operators = manifest["operators"].as_array_mut().unwrap();
+        let affine = operators
+            .iter_mut()
+            .find(|operator| operator["kind"] == "global_affine")
+            .unwrap();
+        affine.as_object_mut().unwrap().remove("semantic_family");
+        affine.as_object_mut().unwrap().remove("translation");
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let report = verify_decompile_package(&package).unwrap();
+
+        assert!(report.positions_bit_exact);
+        assert_eq!(report.max_euclidean_error, 0.0);
+    }
+
+    #[test]
     fn package_replacement_removes_stale_files_and_stays_verifiable() {
         let source = tetra_mesh();
         let first_target = transformed_mesh(&source, |position| {
@@ -3226,7 +4282,19 @@ mod tests {
         assert!(script.contains("editable_shape_key"));
         assert!(script.contains("stage_positions_exact"));
         assert!(script.contains("float32_stepwise_no_fma"));
+        assert!(script.contains("def is_finite_number(value):"));
         assert!(script.contains("matrix = [f32(value) for value in matrix]"));
+        assert!(
+            script.contains(
+                "semantic_family = operator.get(\"semantic_family\", \"general_affine\")"
+            )
+        );
+        assert!(script.contains("translation affine matrix does not match its parameters"));
+        assert!(script.contains("general affine"));
+        assert!(script.contains("must not declare"));
+        assert!(script.contains("semantic_family == \"rigid_transform\""));
+        assert!(script.contains("semantic_family == \"similarity_transform\""));
+        assert!(script.contains("rotation is not a proper basis"));
         assert!(script.contains(
             "create_mesh_object(BAKED_OBJECT_NAME, reconstructed_positions, source_indices)"
         ));
@@ -3244,6 +4312,20 @@ v 0 0 1
 f 1 2 3
 f 1 2 4
 f 2 3 4
+f 1 3 4
+",
+        ))
+        .unwrap()
+    }
+
+    fn square_mesh() -> TriangleMesh {
+        read_obj(Cursor::new(
+            "\
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+f 1 2 3
 f 1 3 4
 ",
         ))

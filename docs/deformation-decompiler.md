@@ -2,7 +2,7 @@
 
 The decompiler is an offline, same-topology round-trip demo. It accepts a source OBJ and a target OBJ, requires identical ordered topology, and emits a portable reconstruction package containing:
 
-1. an editable global-affine stage when it explains enough of the motion
+1. an editable affine stage when it explains enough of the motion
 2. a final exact correction containing absolute target positions for every remaining mismatched vertex
 3. canonical little-endian source and target mesh payloads
 4. a versioned manifest and independent replay-verification reports
@@ -34,7 +34,7 @@ Useful creation options:
 --residual-epsilon 0.0
 ```
 
-`--affine-min-explained` controls whether the least-squares affine fit is worth emitting as an editable stage. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
+`--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler prefers simpler semantic families when they explain the target nearly as well as the general affine fit, in this order: translation, rigid transform, similarity transform, then general affine. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
 
 The package writer builds and verifies a sibling staging directory before replacing the requested output directory. A failed write therefore does not partially overwrite an existing valid package, and stale files from an older package are removed on successful replacement.
 
@@ -77,6 +77,8 @@ The manifest's numeric contract is:
   "affine_evaluation": "float32_stepwise_no_fma"
 }
 ```
+
+Affine operators are still serialized as `kind: "global_affine"` in schema 2, so exact replay remains a matrix-plus-baked-stage contract. Newer packages may also include `semantic_family` metadata. `semantic_family: "translation"` includes a `translation` vector and is accepted only when its matrix is bit-identical to that translation matrix. `semantic_family: "rigid_transform"` includes `translation` and `rotation_row_major_3x3`; `semantic_family: "similarity_transform"` additionally includes `uniform_scale`. Rigid and similarity rotations must be proper orthonormal bases and their parameters must reconstruct the matrix bit-for-bit. `semantic_family: "general_affine"` must not declare semantic parameters.
 
 `source.meshbin` and `target.meshbin` contain:
 
@@ -145,7 +147,7 @@ A Blender verification passes only when:
 
 - No vertex or face correspondence solving.
 - No topology-changing operation inference.
-- Only a global affine explanatory operator is inferred before the exact correction.
+- Only affine-family explanatory operators are inferred before the exact correction. The current semantic split is translation, rigid transform, similarity transform, and general affine; bend, twist, regional operators, FFDs, and structural operators are not implemented yet.
 - No Maya reconstruction adapter yet; the package itself is DCC-independent, but only Blender execution is emitted.
 - UVs, normals, materials, skinning, animation, custom attributes, and object hierarchy are not reconstructed.
 - The topology fingerprint is diagnostic rather than cryptographic.

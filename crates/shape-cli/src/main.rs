@@ -10,8 +10,8 @@ use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
 use shape_decompiler::{
-    DecompileSettings, OperatorManifest, decompile_pair, verify_decompile_package,
-    write_decompile_package,
+    AffineSemanticFamily, DecompileSettings, OperatorManifest, decompile_pair,
+    verify_decompile_package, write_decompile_package,
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
@@ -360,24 +360,33 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     let paths = write_decompile_package(&result, &source, &target, &args.out_dir)
         .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
 
-    let affine_explained = result
+    let affine_summary = result
         .manifest
         .operators
         .iter()
         .find_map(|operator| match operator {
             OperatorManifest::GlobalAffine {
+                semantic_family,
                 explained_displacement_fraction,
                 ..
-            } => Some(*explained_displacement_fraction),
+            } => Some((*semantic_family, *explained_displacement_fraction)),
             OperatorManifest::LosslessCorrection { .. } => None,
-        })
-        .unwrap_or(0.0);
+        });
     println!("Decompiled same-topology mesh pair");
     println!("  vertices: {}", result.manifest.topology.vertex_count);
     println!("  triangles: {}", result.manifest.topology.triangle_count);
     println!("  topology hash: {}", result.manifest.topology.hash);
     println!("  operators: {}", result.manifest.operators.len());
-    println!("  affine explained: {:.3}%", affine_explained * 100.0);
+    if let Some((semantic_family, affine_explained)) = affine_summary {
+        println!(
+            "  affine operator: {}",
+            affine_family_label(semantic_family)
+        );
+        println!("  affine explained: {:.3}%", affine_explained * 100.0);
+    } else {
+        println!("  affine operator: none");
+        println!("  affine explained: 0.000%");
+    }
     println!("  residual vertices: {}", result.residual_indices.len());
     println!(
         "  final max error: {:.9}",
@@ -390,6 +399,15 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     );
     println!("  blender script: {}", paths.blender_script.display());
     Ok(())
+}
+
+fn affine_family_label(semantic_family: AffineSemanticFamily) -> &'static str {
+    match semantic_family {
+        AffineSemanticFamily::GeneralAffine => "global affine",
+        AffineSemanticFamily::Translation => "translation",
+        AffineSemanticFamily::RigidTransform => "rigid transform",
+        AffineSemanticFamily::SimilarityTransform => "similarity transform",
+    }
 }
 
 fn run_verify_decompile(args: VerifyDecompileArgs) -> anyhow::Result<()> {
