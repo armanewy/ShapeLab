@@ -7,6 +7,8 @@
 //! lossless residual. The current MVP intentionally starts with a strict
 //! contract: same vertex order, same face order, same indices.
 
+pub mod v3;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
