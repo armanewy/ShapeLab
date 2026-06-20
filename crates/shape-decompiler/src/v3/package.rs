@@ -5,18 +5,36 @@
 //! positions file is authoritative for exact reconstruction.
 
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
 use super::bend::BendParameters;
 use super::program::{
-    AffineOperator, OperatorId, OperatorProgram, SemanticVerificationPolicy,
-    SemanticVerificationReport, StageIndex,
+    AffineOperator, OperatorId, OperatorProgram, ProgramOperator, SemanticVerificationMode,
+    SemanticVerificationPolicy, SemanticVerificationReport, StageIndex, evaluate_operator,
+    validate_program,
+};
+use crate::{
+    DecompileError, MANIFEST_FILE, PACKAGE_VERIFICATION_FILE, PackagePaths, RESIDUAL_INDEX_FILE,
+    RESIDUAL_POSITION_FILE, SOURCE_MESHBIN, StagedPackageDirectory, TARGET_MESHBIN,
+    ensure_identical_topology, ensure_strictly_increasing_indices, invalid_package, package_path,
+    path_io, position_slices_bit_equal, positions_bit_equal, read_meshbin, read_positions,
+    read_u32s, resolve_package_asset, topology_hash, topology_hash_from_parts,
+    validate_decompile_mesh, write_json, write_meshbin, write_positions, write_u32s,
 };
 
 /// Decompiler package manifest schema version for schema 3.
 pub const SCHEMA_VERSION_V3: u32 = 3;
+const COORDINATE_SYSTEM_V3: &str = "right-handed-y-up";
+const OPERATORS_DIR: &str = "operators";
+const RESIDUAL_DIR: &str = "residual";
+const AFFINE_STAGE_SLUG: &str = "affine";
+const BEND_STAGE_SLUG: &str = "bend";
+const LOSSLESS_STAGE_SLUG: &str = "lossless-correction";
 
 /// Top-level schema-3 manifest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -279,6 +297,918 @@ impl OperatorManifestV3 {
             | OperatorManifestV3::Bend { stage, .. }
             | OperatorManifestV3::LosslessCorrection { stage, .. } => stage,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StagePayloadV3 {
+    positions_file: String,
+    positions: Vec<[f32; 3]>,
+}
+
+#[derive(Debug, Clone)]
+struct BuiltPackageV3 {
+    manifest: DecompileManifestV3,
+    stage_payloads: Vec<StagePayloadV3>,
+    residual_indices: Vec<u32>,
+    residual_positions: Vec<[f32; 3]>,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PositionComparisonMetrics {
+    max_component_error: f64,
+    max_euclidean_error: f64,
+    mean_euclidean_error: f64,
+    rms_euclidean_error: f64,
+    outside_tolerance: usize,
+}
+
+/// Write a schema-3 decompile package directory for an ordered semantic
+/// program plus a terminal lossless correction.
+///
+/// The package is assembled and replay-verified in a sibling staging directory
+/// before it atomically replaces the requested output directory.
+pub fn write_decompile_package_v3(
+    semantic_program: &OperatorProgram,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    out_dir: impl AsRef<Path>,
+) -> Result<PackagePaths, DecompileError> {
+    let out_dir = out_dir.as_ref();
+    let built = build_decompile_package_v3(semantic_program, source, target)?;
+
+    let staging = StagedPackageDirectory::create(out_dir)?;
+    write_decompile_package_v3_contents(&built, source, target, staging.path())?;
+    staging.publish(out_dir)?;
+
+    Ok(crate::package_paths(out_dir))
+}
+
+/// Read a schema-3 package manifest and package-verification sidecar, then
+/// structurally validate its ordered program and declared asset paths.
+pub fn read_decompile_package_v3(
+    package_dir: impl AsRef<Path>,
+) -> Result<DecompilePackageV3, DecompileError> {
+    let package_dir = package_dir.as_ref();
+    let manifest_path = resolve_package_asset(package_dir, MANIFEST_FILE)?;
+    let manifest_bytes =
+        fs::read(&manifest_path).map_err(|source| path_io(&manifest_path, source))?;
+    let mut manifest: DecompileManifestV3 = serde_json::from_slice(&manifest_bytes)?;
+    validate_manifest_contract_v3(&manifest, &manifest_path)?;
+    validate_manifest_asset_paths_v3(package_dir, &manifest, &manifest_path)?;
+
+    let package_verification_sidecar = read_optional_package_verification_v3(package_dir)?;
+    if let (Some(manifest_report), Some(sidecar_report)) = (
+        &manifest.package_verification,
+        &package_verification_sidecar,
+    ) && manifest_report != sidecar_report
+    {
+        return Err(invalid_package(
+            package_path(package_dir, PACKAGE_VERIFICATION_FILE),
+            "package verification sidecar does not match manifest.json",
+        ));
+    }
+    let package_verification = package_verification_sidecar
+        .clone()
+        .or_else(|| manifest.package_verification.clone());
+    if manifest.package_verification.is_none() {
+        manifest.package_verification = package_verification.clone();
+    }
+
+    let semantic_program = semantic_program_from_manifest_v3(&manifest, &manifest_path)?;
+
+    Ok(DecompilePackageV3 {
+        manifest,
+        semantic_program,
+        package_verification,
+    })
+}
+
+/// Read a schema-3 package from disk, replay its sidecars, and verify the
+/// semantic-to-baked and final lossless reconstruction contracts.
+pub fn verify_decompile_package_v3(
+    package_dir: impl AsRef<Path>,
+) -> Result<PackageVerificationReportV3, DecompileError> {
+    let package_dir = package_dir.as_ref();
+    let package = read_decompile_package_v3(package_dir)?;
+    let manifest = &package.manifest;
+    let manifest_path = resolve_package_asset(package_dir, MANIFEST_FILE)?;
+    validate_operator_stage_file_count_v3(package_dir, manifest.operators.len(), &manifest_path)?;
+
+    let source_path =
+        resolve_required_package_asset_v3(package_dir, &manifest.source.path, &manifest_path)?;
+    let target_path =
+        resolve_required_package_asset_v3(package_dir, &manifest.target.path, &manifest_path)?;
+    let source = read_meshbin(&source_path)?;
+    let target = read_meshbin(&target_path)?;
+    ensure_mesh_asset_counts_v3(&manifest.source, &source, &source_path)?;
+    ensure_mesh_asset_counts_v3(&manifest.target, &target, &target_path)?;
+
+    let topology_exact =
+        source.indices == target.indices && source.positions.len() == target.positions.len();
+    if !topology_exact {
+        return Err(invalid_package(
+            package_dir,
+            "source and target payload topology is not identical",
+        ));
+    }
+    let topology_hash_matches_manifest =
+        topology_hash_from_parts(source.positions.len(), &source.indices) == manifest.topology.hash;
+    if manifest.topology.vertex_count != source.positions.len()
+        || manifest.topology.index_count != source.indices.len()
+        || manifest.topology.triangle_count != source.indices.len() / 3
+    {
+        return Err(invalid_package(
+            &manifest_path,
+            "manifest topology counts do not match source.meshbin",
+        ));
+    }
+
+    let mut current_positions = source.positions.clone();
+    let mut residual_vertex_count = 0_usize;
+    let mut semantic_stage_reports_passed = true;
+
+    for (operator_index, operator) in manifest.operators.iter().enumerate() {
+        let stage = operator.stage();
+        let baked_path = resolve_required_package_asset_v3(
+            package_dir,
+            &stage.baked_positions_file,
+            &manifest_path,
+        )?;
+        let baked = read_positions(&baked_path, source.positions.len())?;
+
+        match operator {
+            OperatorManifestV3::Affine {
+                stage, operator, ..
+            } => {
+                let program_operator = ProgramOperator::Affine(*operator);
+                let semantic_positions = evaluate_package_operator_v3(
+                    &program_operator,
+                    &current_positions,
+                    &manifest_path,
+                )?;
+                let report = compare_positions_with_policy_v3(
+                    &semantic_positions,
+                    &baked,
+                    &stage.semantic_verification_policy,
+                    &baked_path,
+                )?;
+                validate_stage_report_v3(stage, report, &baked_path)?;
+                semantic_stage_reports_passed &= report.passed;
+                if !report.passed {
+                    return Err(invalid_package(
+                        &baked_path,
+                        format!(
+                            "semantic affine stage {operator_index} does not match its baked positions"
+                        ),
+                    ));
+                }
+                current_positions = baked;
+            }
+            OperatorManifestV3::Bend {
+                stage, parameters, ..
+            } => {
+                let program_operator = ProgramOperator::Bend(*parameters);
+                let semantic_positions = evaluate_package_operator_v3(
+                    &program_operator,
+                    &current_positions,
+                    &manifest_path,
+                )?;
+                let report = compare_positions_with_policy_v3(
+                    &semantic_positions,
+                    &baked,
+                    &stage.semantic_verification_policy,
+                    &baked_path,
+                )?;
+                validate_stage_report_v3(stage, report, &baked_path)?;
+                semantic_stage_reports_passed &= report.passed;
+                if !report.passed {
+                    return Err(invalid_package(
+                        &baked_path,
+                        format!(
+                            "semantic bend stage {operator_index} does not match its baked positions"
+                        ),
+                    ));
+                }
+                current_positions = baked;
+            }
+            OperatorManifestV3::LosslessCorrection { stage, correction } => {
+                let index_path = resolve_required_package_asset_v3(
+                    package_dir,
+                    &correction.residual_index_file,
+                    &manifest_path,
+                )?;
+                let position_path = resolve_required_package_asset_v3(
+                    package_dir,
+                    &correction.residual_position_file,
+                    &manifest_path,
+                )?;
+                let indices = read_u32s(&index_path)?;
+                let positions = read_positions(&position_path, indices.len())?;
+                if indices.len() != correction.corrected_vertex_count {
+                    return Err(invalid_package(
+                        &manifest_path,
+                        format!(
+                            "lossless correction declares {} corrected vertices but stores {}",
+                            correction.corrected_vertex_count,
+                            indices.len()
+                        ),
+                    ));
+                }
+                ensure_strictly_increasing_indices(&indices, current_positions.len(), &index_path)?;
+                for (index, position) in indices.iter().zip(&positions) {
+                    let index = *index as usize;
+                    if !positions_bit_equal(*position, target.positions[index]) {
+                        return Err(invalid_package(
+                            &position_path,
+                            format!(
+                                "lossless correction position for vertex {index} is not the absolute target position"
+                            ),
+                        ));
+                    }
+                    current_positions[index] = *position;
+                }
+
+                let report = compare_positions_with_policy_v3(
+                    &current_positions,
+                    &baked,
+                    &stage.semantic_verification_policy,
+                    &baked_path,
+                )?;
+                validate_stage_report_v3(stage, report, &baked_path)?;
+                semantic_stage_reports_passed &= report.passed;
+                if !report.passed {
+                    return Err(invalid_package(
+                        &baked_path,
+                        "baked lossless positions do not match the replayed correction",
+                    ));
+                }
+                current_positions = baked;
+                residual_vertex_count = indices.len();
+            }
+        }
+    }
+
+    let final_metrics = compare_position_metrics_v3(
+        &current_positions,
+        &target.positions,
+        &SemanticVerificationPolicy::default(),
+        package_dir,
+    )?;
+    let positions_bit_exact = position_slices_bit_equal(&current_positions, &target.positions);
+    if !positions_bit_exact {
+        return Err(invalid_package(
+            package_dir,
+            format!(
+                "serialized operators did not reconstruct target positions exactly; max error={}",
+                final_metrics.max_euclidean_error
+            ),
+        ));
+    }
+
+    let report = PackageVerificationReportV3 {
+        schema_version: manifest.schema_version,
+        topology_exact,
+        topology_hash_matches_manifest,
+        positions_bit_exact,
+        vertex_count: source.positions.len(),
+        triangle_count: source.indices.len() / 3,
+        operator_count: manifest.operators.len(),
+        stage_count: manifest.operators.len(),
+        residual_vertex_count,
+        max_component_error: final_metrics.max_component_error,
+        max_euclidean_error: final_metrics.max_euclidean_error,
+        outside_tolerance: final_metrics.outside_tolerance,
+        semantic_stage_reports_passed,
+    };
+
+    if let Some(stored_report) = &manifest.package_verification
+        && stored_report != &report
+    {
+        return Err(invalid_package(
+            &manifest_path,
+            "manifest package verification report does not match replayed package data",
+        ));
+    }
+
+    Ok(report)
+}
+
+fn build_decompile_package_v3(
+    semantic_program: &OperatorProgram,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+) -> Result<BuiltPackageV3, DecompileError> {
+    validate_decompile_mesh(source, "source")?;
+    validate_decompile_mesh(target, "target")?;
+    ensure_identical_topology(source, target)?;
+    validate_program(semantic_program).map_err(|source| {
+        invalid_package(
+            Path::new(MANIFEST_FILE),
+            format!("schema-3 semantic program is invalid: {source}"),
+        )
+    })?;
+
+    let mut operators = Vec::with_capacity(semantic_program.operators.len() + 1);
+    let mut stage_payloads = Vec::with_capacity(semantic_program.operators.len() + 1);
+    let mut current_positions = source.positions.clone();
+
+    for (index, operator) in semantic_program.operators.iter().copied().enumerate() {
+        let semantic_positions =
+            evaluate_package_operator_v3(&operator, &current_positions, Path::new(MANIFEST_FILE))?;
+        let (slug, label) = program_operator_stage_identity_v3(&operator);
+        let policy = semantic_policy_for_program_operator_v3(&operator);
+        let report = compare_positions_with_policy_v3(
+            &semantic_positions,
+            &semantic_positions,
+            &policy,
+            Path::new(MANIFEST_FILE),
+        )?;
+        let stage = StageManifestV3 {
+            stage_index: StageIndex(index),
+            operator_id: OperatorId(format!("op-{index:04}-{slug}")),
+            label: label.to_owned(),
+            baked_positions_file: stage_positions_file_v3(index, slug),
+            semantic_verification_policy: policy,
+            semantic_verification_report: report,
+        };
+        operators.push(match operator {
+            ProgramOperator::Affine(operator) => OperatorManifestV3::Affine { stage, operator },
+            ProgramOperator::Bend(parameters) => OperatorManifestV3::Bend { stage, parameters },
+        });
+        stage_payloads.push(StagePayloadV3 {
+            positions_file: stage_positions_file_v3(index, slug),
+            positions: semantic_positions.clone(),
+        });
+        current_positions = semantic_positions;
+    }
+
+    let mut residual_indices = Vec::new();
+    let mut residual_positions = Vec::new();
+    let mut final_positions = current_positions.clone();
+    for (index, (current, target_position)) in
+        current_positions.iter().zip(&target.positions).enumerate()
+    {
+        if !positions_bit_equal(*current, *target_position) {
+            residual_indices.push(u32::try_from(index).map_err(|_| {
+                DecompileError::InvalidMesh {
+                    mesh_name: "source",
+                    message: "vertex count exceeds the u32 residual index contract".to_owned(),
+                }
+            })?);
+            residual_positions.push(*target_position);
+            final_positions[index] = *target_position;
+        }
+    }
+
+    let lossless_index = operators.len();
+    let lossless_policy = SemanticVerificationPolicy::default();
+    let lossless_report = compare_positions_with_policy_v3(
+        &final_positions,
+        &final_positions,
+        &lossless_policy,
+        Path::new(MANIFEST_FILE),
+    )?;
+    let lossless_stage_file = stage_positions_file_v3(lossless_index, LOSSLESS_STAGE_SLUG);
+    operators.push(OperatorManifestV3::LosslessCorrection {
+        stage: StageManifestV3 {
+            stage_index: StageIndex(lossless_index),
+            operator_id: OperatorId(format!("op-{lossless_index:04}-{LOSSLESS_STAGE_SLUG}")),
+            label: "Lossless correction".to_owned(),
+            baked_positions_file: lossless_stage_file.clone(),
+            semantic_verification_policy: lossless_policy,
+            semantic_verification_report: lossless_report,
+        },
+        correction: LosslessCorrectionManifestV3 {
+            residual_index_file: RESIDUAL_INDEX_FILE.to_owned(),
+            residual_position_file: RESIDUAL_POSITION_FILE.to_owned(),
+            corrected_vertex_count: residual_indices.len(),
+        },
+    });
+    stage_payloads.push(StagePayloadV3 {
+        positions_file: lossless_stage_file,
+        positions: final_positions,
+    });
+
+    let manifest = DecompileManifestV3 {
+        schema_version: SCHEMA_VERSION_V3,
+        coordinate_system: COORDINATE_SYSTEM_V3.to_owned(),
+        numeric_format: NumericFormatV3::default(),
+        source: MeshAssetV3 {
+            path: SOURCE_MESHBIN.to_owned(),
+            vertex_count: source.positions.len(),
+            triangle_count: source.indices.len() / 3,
+        },
+        target: MeshAssetV3 {
+            path: TARGET_MESHBIN.to_owned(),
+            vertex_count: target.positions.len(),
+            triangle_count: target.indices.len() / 3,
+        },
+        topology: TopologySummaryV3 {
+            vertex_count: source.positions.len(),
+            triangle_count: source.indices.len() / 3,
+            index_count: source.indices.len(),
+            hash: topology_hash(source),
+        },
+        operators,
+        package_verification: None,
+    };
+
+    validate_manifest_contract_v3(&manifest, Path::new(MANIFEST_FILE))?;
+    ensure_strictly_increasing_indices(
+        &residual_indices,
+        source.positions.len(),
+        Path::new(RESIDUAL_INDEX_FILE),
+    )?;
+
+    Ok(BuiltPackageV3 {
+        manifest,
+        stage_payloads,
+        residual_indices,
+        residual_positions,
+    })
+}
+
+fn write_decompile_package_v3_contents(
+    built: &BuiltPackageV3,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    out_dir: &Path,
+) -> Result<(), DecompileError> {
+    fs::create_dir_all(out_dir).map_err(|source| path_io(out_dir, source))?;
+    fs::create_dir_all(out_dir.join(OPERATORS_DIR))
+        .map_err(|source| path_io(&out_dir.join(OPERATORS_DIR), source))?;
+    fs::create_dir_all(out_dir.join(RESIDUAL_DIR))
+        .map_err(|source| path_io(&out_dir.join(RESIDUAL_DIR), source))?;
+
+    write_meshbin(&package_path(out_dir, SOURCE_MESHBIN), source)?;
+    write_meshbin(&package_path(out_dir, TARGET_MESHBIN), target)?;
+    for stage in &built.stage_payloads {
+        write_positions(
+            &package_path(out_dir, &stage.positions_file),
+            &stage.positions,
+        )?;
+    }
+    write_u32s(
+        &package_path(out_dir, RESIDUAL_INDEX_FILE),
+        &built.residual_indices,
+    )?;
+    write_positions(
+        &package_path(out_dir, RESIDUAL_POSITION_FILE),
+        &built.residual_positions,
+    )?;
+
+    let mut manifest = built.manifest.clone();
+    write_json(&package_path(out_dir, MANIFEST_FILE), &manifest)?;
+    let package_verification = verify_decompile_package_v3(out_dir)?;
+    manifest.package_verification = Some(package_verification.clone());
+    write_json(&package_path(out_dir, MANIFEST_FILE), &manifest)?;
+    write_json(
+        &package_path(out_dir, PACKAGE_VERIFICATION_FILE),
+        &package_verification,
+    )?;
+    Ok(())
+}
+
+fn validate_manifest_contract_v3(
+    manifest: &DecompileManifestV3,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    validate_decompile_manifest_v3(manifest)
+        .map_err(|source| invalid_package(path, source.to_string()))?;
+    if manifest.coordinate_system != COORDINATE_SYSTEM_V3 {
+        return Err(invalid_package(
+            path,
+            format!(
+                "unsupported schema-3 coordinate system '{}'",
+                manifest.coordinate_system
+            ),
+        ));
+    }
+    if manifest.numeric_format != NumericFormatV3::default() {
+        return Err(invalid_package(path, "unsupported schema-3 numeric format"));
+    }
+    if manifest.source.vertex_count != manifest.topology.vertex_count
+        || manifest.target.vertex_count != manifest.topology.vertex_count
+        || manifest.source.triangle_count != manifest.topology.triangle_count
+        || manifest.target.triangle_count != manifest.topology.triangle_count
+        || manifest.topology.index_count != manifest.topology.triangle_count * 3
+    {
+        return Err(invalid_package(
+            path,
+            "manifest mesh asset counts do not match topology summary",
+        ));
+    }
+    for (index, operator) in manifest.operators.iter().enumerate() {
+        let stage = operator.stage();
+        if stage.label.trim().is_empty() {
+            return Err(invalid_package(path, "stage labels must not be empty"));
+        }
+        validate_stage_positions_file_v3(index, &stage.baked_positions_file, path)?;
+        validate_stage_policy_for_operator_v3(operator, path)?;
+    }
+    let semantic_program = semantic_program_from_manifest_v3(manifest, path)?;
+    validate_program(&semantic_program).map_err(|source| {
+        invalid_package(path, format!("schema-3 program is invalid: {source}"))
+    })?;
+    Ok(())
+}
+
+fn validate_manifest_asset_paths_v3(
+    package_dir: &Path,
+    manifest: &DecompileManifestV3,
+    manifest_path: &Path,
+) -> Result<(), DecompileError> {
+    resolve_required_package_asset_v3(package_dir, &manifest.source.path, manifest_path)?;
+    resolve_required_package_asset_v3(package_dir, &manifest.target.path, manifest_path)?;
+    for operator in &manifest.operators {
+        let stage = operator.stage();
+        resolve_required_package_asset_v3(package_dir, &stage.baked_positions_file, manifest_path)?;
+        if let OperatorManifestV3::LosslessCorrection { correction, .. } = operator {
+            resolve_required_package_asset_v3(
+                package_dir,
+                &correction.residual_index_file,
+                manifest_path,
+            )?;
+            resolve_required_package_asset_v3(
+                package_dir,
+                &correction.residual_position_file,
+                manifest_path,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn read_optional_package_verification_v3(
+    package_dir: &Path,
+) -> Result<Option<PackageVerificationReportV3>, DecompileError> {
+    let path = package_path(package_dir, PACKAGE_VERIFICATION_FILE);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            let path = resolve_package_asset(package_dir, PACKAGE_VERIFICATION_FILE)?;
+            let bytes = fs::read(&path).map_err(|source| path_io(&path, source))?;
+            Ok(Some(serde_json::from_slice(&bytes)?))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(path_io(&path, error)),
+    }
+}
+
+fn semantic_program_from_manifest_v3(
+    manifest: &DecompileManifestV3,
+    path: &Path,
+) -> Result<OperatorProgram, DecompileError> {
+    let mut operators = Vec::new();
+    for operator in &manifest.operators {
+        match operator {
+            OperatorManifestV3::Affine { operator, .. } => {
+                operators.push(ProgramOperator::Affine(*operator));
+            }
+            OperatorManifestV3::Bend { parameters, .. } => {
+                operators.push(ProgramOperator::Bend(*parameters));
+            }
+            OperatorManifestV3::LosslessCorrection { .. } => {}
+        }
+    }
+    let program = OperatorProgram { operators };
+    validate_program(&program).map_err(|source| {
+        invalid_package(path, format!("schema-3 program is invalid: {source}"))
+    })?;
+    Ok(program)
+}
+
+fn evaluate_package_operator_v3(
+    operator: &ProgramOperator,
+    positions: &[[f32; 3]],
+    path: impl AsRef<Path>,
+) -> Result<Vec<[f32; 3]>, DecompileError> {
+    evaluate_operator(operator, positions).map_err(|source| {
+        invalid_package(
+            path,
+            format!("schema-3 operator semantic evaluation failed: {source}"),
+        )
+    })
+}
+
+fn validate_stage_policy_for_operator_v3(
+    operator: &OperatorManifestV3,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    let stage = operator.stage();
+    validate_semantic_verification_policy_v3(&stage.semantic_verification_policy, path)?;
+    let expected_mode = match operator {
+        OperatorManifestV3::Affine { .. } | OperatorManifestV3::LosslessCorrection { .. } => {
+            SemanticVerificationMode::BitExact
+        }
+        OperatorManifestV3::Bend { .. } => SemanticVerificationMode::Tolerance,
+    };
+    if stage.semantic_verification_policy.mode != expected_mode {
+        return Err(invalid_package(
+            path,
+            format!(
+                "stage {} uses {:?} semantic verification but {:?} is required",
+                stage.stage_index.0, stage.semantic_verification_policy.mode, expected_mode
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_semantic_verification_policy_v3(
+    policy: &SemanticVerificationPolicy,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    if !policy.absolute_epsilon.is_finite()
+        || !policy.relative_epsilon.is_finite()
+        || !policy.ulp_multiplier.is_finite()
+        || policy.absolute_epsilon < 0.0
+        || policy.relative_epsilon < 0.0
+        || policy.ulp_multiplier < 0.0
+    {
+        return Err(invalid_package(
+            path,
+            "semantic verification tolerances must be finite and non-negative",
+        ));
+    }
+    if policy.mode == SemanticVerificationMode::BitExact
+        && (policy.absolute_epsilon != 0.0
+            || policy.relative_epsilon != 0.0
+            || policy.ulp_multiplier != 0.0)
+    {
+        return Err(invalid_package(
+            path,
+            "bit-exact semantic verification must use zero tolerances",
+        ));
+    }
+    Ok(())
+}
+
+fn compare_positions_with_policy_v3(
+    left: &[[f32; 3]],
+    right: &[[f32; 3]],
+    policy: &SemanticVerificationPolicy,
+    path: &Path,
+) -> Result<SemanticVerificationReport, DecompileError> {
+    let metrics = compare_position_metrics_v3(left, right, policy, path)?;
+    Ok(SemanticVerificationReport {
+        max_component_error: metrics.max_component_error,
+        max_euclidean_error: metrics.max_euclidean_error,
+        mean_euclidean_error: metrics.mean_euclidean_error,
+        rms_euclidean_error: metrics.rms_euclidean_error,
+        outside_tolerance: metrics.outside_tolerance,
+        passed: metrics.outside_tolerance == 0,
+    })
+}
+
+fn compare_position_metrics_v3(
+    left: &[[f32; 3]],
+    right: &[[f32; 3]],
+    policy: &SemanticVerificationPolicy,
+    path: impl AsRef<Path>,
+) -> Result<PositionComparisonMetrics, DecompileError> {
+    let path = path.as_ref();
+    validate_semantic_verification_policy_v3(policy, path)?;
+    if left.len() != right.len() {
+        return Err(invalid_package(
+            path,
+            format!(
+                "position counts differ: left={} right={}",
+                left.len(),
+                right.len()
+            ),
+        ));
+    }
+
+    let mut max_component_error = 0.0_f64;
+    let mut max_euclidean_error = 0.0_f64;
+    let mut total_euclidean_error = 0.0_f64;
+    let mut total_squared_euclidean_error = 0.0_f64;
+    let mut outside_tolerance = 0_usize;
+
+    for (left_position, right_position) in left.iter().zip(right) {
+        let mut outside_vertex = false;
+        let mut squared_euclidean = 0.0_f64;
+        for component in 0..3 {
+            let left_component = left_position[component];
+            let right_component = right_position[component];
+            let component_error = (f64::from(left_component) - f64::from(right_component)).abs();
+            max_component_error = max_component_error.max(component_error);
+            squared_euclidean += component_error * component_error;
+            if component_outside_policy_v3(left_component, right_component, policy) {
+                outside_vertex = true;
+            }
+        }
+        let euclidean = squared_euclidean.sqrt();
+        max_euclidean_error = max_euclidean_error.max(euclidean);
+        total_euclidean_error += euclidean;
+        total_squared_euclidean_error += squared_euclidean;
+        if outside_vertex {
+            outside_tolerance += 1;
+        }
+    }
+
+    let count = left.len().max(1) as f64;
+    Ok(PositionComparisonMetrics {
+        max_component_error,
+        max_euclidean_error,
+        mean_euclidean_error: total_euclidean_error / count,
+        rms_euclidean_error: (total_squared_euclidean_error / count).sqrt(),
+        outside_tolerance,
+    })
+}
+
+fn component_outside_policy_v3(left: f32, right: f32, policy: &SemanticVerificationPolicy) -> bool {
+    match policy.mode {
+        SemanticVerificationMode::BitExact => left.to_bits() != right.to_bits(),
+        SemanticVerificationMode::Tolerance => {
+            let error = (f64::from(left) - f64::from(right)).abs();
+            let magnitude = f64::from(left.abs().max(right.abs()));
+            let tolerance = policy
+                .absolute_epsilon
+                .max(policy.relative_epsilon * magnitude)
+                .max(policy.ulp_multiplier * f32_ulp_spacing_v3(right));
+            error > tolerance
+        }
+    }
+}
+
+fn f32_ulp_spacing_v3(value: f32) -> f64 {
+    let value = value.abs();
+    if value == 0.0 {
+        return f64::from(f32::from_bits(1));
+    }
+    let bits = value.to_bits();
+    let next = f32::from_bits(bits.saturating_add(1));
+    if next.is_finite() {
+        f64::from(next - value)
+    } else {
+        f64::from(value - f32::from_bits(bits.saturating_sub(1)))
+    }
+}
+
+fn validate_stage_report_v3(
+    stage: &StageManifestV3,
+    report: SemanticVerificationReport,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    if stage.semantic_verification_report != report {
+        return Err(invalid_package(
+            path,
+            format!(
+                "stage {} semantic verification report does not match replay",
+                stage.stage_index.0
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_mesh_asset_counts_v3(
+    asset: &MeshAssetV3,
+    payload: &crate::MeshPayload,
+    path: &Path,
+) -> Result<(), DecompileError> {
+    if asset.vertex_count != payload.positions.len()
+        || asset.triangle_count != payload.indices.len() / 3
+    {
+        return Err(invalid_package(
+            path,
+            format!(
+                "manifest counts ({}, {} triangles) do not match payload counts ({}, {} triangles)",
+                asset.vertex_count,
+                asset.triangle_count,
+                payload.positions.len(),
+                payload.indices.len() / 3
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_required_package_asset_v3(
+    package_dir: &Path,
+    relative: &str,
+    owner: impl AsRef<Path>,
+) -> Result<PathBuf, DecompileError> {
+    match resolve_package_asset(package_dir, relative) {
+        Ok(path) => Ok(path),
+        Err(DecompileError::PathIo { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Err(invalid_package(
+                owner,
+                format!("declared package asset '{relative}' is missing"),
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn validate_operator_stage_file_count_v3(
+    package_dir: &Path,
+    expected: usize,
+    manifest_path: &Path,
+) -> Result<(), DecompileError> {
+    let operators_dir = package_dir.join(OPERATORS_DIR);
+    let metadata = fs::symlink_metadata(&operators_dir).map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            invalid_package(manifest_path, "operators directory is missing")
+        } else {
+            path_io(&operators_dir, source)
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid_package(
+            &operators_dir,
+            "operators path must be a regular package directory",
+        ));
+    }
+
+    let mut count = 0_usize;
+    for entry in fs::read_dir(&operators_dir).map_err(|source| path_io(&operators_dir, source))? {
+        let entry = entry.map_err(|source| path_io(&operators_dir, source))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|source| path_io(&path, source))?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_package(
+                &path,
+                "operator stage files must not be symlinks",
+            ));
+        }
+        if metadata.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("-positions.f32"))
+        {
+            count += 1;
+        }
+    }
+    if count != expected {
+        return Err(invalid_package(
+            manifest_path,
+            format!("manifest declares {expected} operators but stores {count} baked stages"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stage_positions_file_v3(
+    index: usize,
+    path: &str,
+    manifest_path: &Path,
+) -> Result<(), DecompileError> {
+    let prefix = format!("{OPERATORS_DIR}/{index:04}-");
+    let suffix = "-positions.f32";
+    if !path.starts_with(&prefix) || !path.ends_with(suffix) {
+        return Err(invalid_package(
+            manifest_path,
+            format!("stage {index} path '{path}' does not follow schema-3 stage naming"),
+        ));
+    }
+    let slug = &path[prefix.len()..path.len() - suffix.len()];
+    if !is_stable_slug_v3(slug) {
+        return Err(invalid_package(
+            manifest_path,
+            format!("stage {index} path slug '{slug}' is not stable"),
+        ));
+    }
+    Ok(())
+}
+
+fn is_stable_slug_v3(slug: &str) -> bool {
+    !slug.is_empty()
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+        && !slug.contains("--")
+        && slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn stage_positions_file_v3(index: usize, slug: &str) -> String {
+    format!("{OPERATORS_DIR}/{index:04}-{slug}-positions.f32")
+}
+
+fn program_operator_stage_identity_v3(operator: &ProgramOperator) -> (&'static str, &'static str) {
+    match operator {
+        ProgramOperator::Affine(_) => (AFFINE_STAGE_SLUG, "Affine"),
+        ProgramOperator::Bend(_) => (BEND_STAGE_SLUG, "Bend"),
+    }
+}
+
+fn semantic_policy_for_program_operator_v3(
+    operator: &ProgramOperator,
+) -> SemanticVerificationPolicy {
+    match operator {
+        ProgramOperator::Affine(_) => SemanticVerificationPolicy::default(),
+        ProgramOperator::Bend(_) => SemanticVerificationPolicy {
+            mode: SemanticVerificationMode::Tolerance,
+            absolute_epsilon: 0.0,
+            relative_epsilon: 0.0,
+            ulp_multiplier: 0.0,
+        },
     }
 }
 
