@@ -11,7 +11,7 @@ use shape_decompiler::v3::package::{
 use shape_decompiler::v3::program::{
     AffineOperator, OperatorProgram, ProgramOperator, SemanticVerificationMode,
 };
-use shape_decompiler::{AffineSemanticFamily, DecompileError};
+use shape_decompiler::{AffineSemanticFamily, DecompileError, verify_decompile_package};
 use shape_mesh::{TriangleMesh, read_obj};
 
 fn square_mesh() -> TriangleMesh {
@@ -43,6 +43,46 @@ fn translation_program(offset: [f32; 3]) -> OperatorProgram {
     }
 }
 
+fn rigid_program(rotation: [f32; 9], translation: [f32; 3]) -> OperatorProgram {
+    OperatorProgram {
+        operators: vec![ProgramOperator::Affine(AffineOperator {
+            semantic_family: AffineSemanticFamily::RigidTransform,
+            matrix_row_major_4x4: rigid_matrix(rotation, translation),
+            translation: Some(translation),
+            rotation_row_major_3x3: Some(rotation),
+            uniform_scale: None,
+        })],
+    }
+}
+
+fn similarity_program(
+    rotation: [f32; 9],
+    uniform_scale: f32,
+    translation: [f32; 3],
+) -> OperatorProgram {
+    OperatorProgram {
+        operators: vec![ProgramOperator::Affine(AffineOperator {
+            semantic_family: AffineSemanticFamily::SimilarityTransform,
+            matrix_row_major_4x4: similarity_matrix(rotation, uniform_scale, translation),
+            translation: Some(translation),
+            rotation_row_major_3x3: Some(rotation),
+            uniform_scale: Some(uniform_scale),
+        })],
+    }
+}
+
+fn general_affine_program(matrix: [f32; 16]) -> OperatorProgram {
+    OperatorProgram {
+        operators: vec![ProgramOperator::Affine(AffineOperator {
+            semantic_family: AffineSemanticFamily::GeneralAffine,
+            matrix_row_major_4x4: matrix,
+            translation: None,
+            rotation_row_major_3x3: None,
+            uniform_scale: None,
+        })],
+    }
+}
+
 fn two_affine_program(offset: [f32; 3], scale: f32) -> OperatorProgram {
     OperatorProgram {
         operators: vec![translation_operator(offset), scale_operator(scale)],
@@ -60,6 +100,56 @@ fn translation_operator(offset: [f32; 3]) -> ProgramOperator {
         rotation_row_major_3x3: None,
         uniform_scale: None,
     })
+}
+
+fn rigid_matrix(rotation: [f32; 9], translation: [f32; 3]) -> [f32; 16] {
+    [
+        rotation[0],
+        rotation[1],
+        rotation[2],
+        translation[0],
+        rotation[3],
+        rotation[4],
+        rotation[5],
+        translation[1],
+        rotation[6],
+        rotation[7],
+        rotation[8],
+        translation[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+fn similarity_matrix(rotation: [f32; 9], scale: f32, translation: [f32; 3]) -> [f32; 16] {
+    [
+        rotation[0] * scale,
+        rotation[1] * scale,
+        rotation[2] * scale,
+        translation[0],
+        rotation[3] * scale,
+        rotation[4] * scale,
+        rotation[5] * scale,
+        translation[1],
+        rotation[6] * scale,
+        rotation[7] * scale,
+        rotation[8] * scale,
+        translation[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+fn apply_matrix(position: [f32; 3], matrix: [f32; 16]) -> [f32; 3] {
+    [
+        matrix[0] * position[0] + matrix[1] * position[1] + matrix[2] * position[2] + matrix[3],
+        matrix[4] * position[0] + matrix[5] * position[1] + matrix[6] * position[2] + matrix[7],
+        matrix[8] * position[0] + matrix[9] * position[1] + matrix[10] * position[2] + matrix[11],
+    ]
 }
 
 fn scale_operator(scale: f32) -> ProgramOperator {
@@ -155,6 +245,21 @@ fn write_positions_payload(path: &Path, positions: &[[f32; 3]]) {
     fs::write(path, bytes).unwrap();
 }
 
+fn read_positions_payload(path: &Path) -> Vec<[f32; 3]> {
+    let bytes = fs::read(path).unwrap();
+    assert_eq!(bytes.len() % 12, 0);
+    bytes
+        .chunks_exact(12)
+        .map(|chunk| {
+            [
+                f32::from_le_bytes(chunk[0..4].try_into().unwrap()),
+                f32::from_le_bytes(chunk[4..8].try_into().unwrap()),
+                f32::from_le_bytes(chunk[8..12].try_into().unwrap()),
+            ]
+        })
+        .collect()
+}
+
 fn collect_package_bytes(root: &Path) -> Vec<(String, Vec<u8>)> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -200,6 +305,9 @@ fn residual_only_v3_package_roundtrips() {
     assert_eq!(report.residual_vertex_count, 1);
     assert!(read_package.semantic_program.operators.is_empty());
     assert!(read_package.package_verification.is_some());
+    let root_report = verify_decompile_package(&package).unwrap();
+    assert_eq!(root_report.schema_version, 3);
+    assert!(root_report.positions_bit_exact);
 }
 
 #[test]
@@ -218,6 +326,20 @@ fn affine_plus_residual_v3_package_roundtrips() {
     assert_eq!(report.stage_count, 2);
     assert_eq!(report.residual_vertex_count, 1);
     assert!(report.semantic_stage_reports_passed);
+    let diagnostics: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(package.join("inference-diagnostics.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(diagnostics["diagnostics_schema_version"], 4);
+    assert_eq!(diagnostics["package_schema_version"], 3);
+    assert_eq!(
+        diagnostics["program_hypotheses"][0]["operators"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(package.join("blender_reconstruct.py").exists());
 }
 
 #[test]
@@ -237,6 +359,113 @@ fn two_affine_stages_roundtrip_with_final_lossless_stage() {
     assert_eq!(report.stage_count, 3);
     assert_eq!(report.residual_vertex_count, 0);
     assert!(report.positions_bit_exact);
+}
+
+#[test]
+fn rigid_transform_v3_package_roundtrips() {
+    let source = square_mesh();
+    let rotation = [0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    let translation = [0.25, -0.5, 1.5];
+    let matrix = rigid_matrix(rotation, translation);
+    let target = transformed_mesh(&source, |position| apply_matrix(position, matrix));
+    let program = rigid_program(rotation, translation);
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("package");
+
+    write_decompile_package_v3(&program, &source, &target, &package).unwrap();
+    let report = verify_decompile_package_v3(&package).unwrap();
+    let manifest = read_manifest(&package);
+
+    assert!(report.positions_bit_exact);
+    let OperatorManifestV3::Affine { operator, .. } = &manifest.operators[0] else {
+        panic!("expected affine operator");
+    };
+    assert_eq!(
+        operator.semantic_family,
+        AffineSemanticFamily::RigidTransform
+    );
+}
+
+#[test]
+fn similarity_transform_v3_package_roundtrips() {
+    let source = square_mesh();
+    let rotation = [0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    let translation = [0.25, -0.5, 1.5];
+    let scale = 2.0;
+    let matrix = similarity_matrix(rotation, scale, translation);
+    let target = transformed_mesh(&source, |position| apply_matrix(position, matrix));
+    let program = similarity_program(rotation, scale, translation);
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("package");
+
+    write_decompile_package_v3(&program, &source, &target, &package).unwrap();
+    let report = verify_decompile_package_v3(&package).unwrap();
+    let manifest = read_manifest(&package);
+
+    assert!(report.positions_bit_exact);
+    let OperatorManifestV3::Affine { operator, .. } = &manifest.operators[0] else {
+        panic!("expected affine operator");
+    };
+    assert_eq!(
+        operator.semantic_family,
+        AffineSemanticFamily::SimilarityTransform
+    );
+}
+
+#[test]
+fn general_affine_v3_package_roundtrips() {
+    let source = square_mesh();
+    let matrix = [
+        1.2, 0.25, 0.0, -0.5, 0.1, 0.8, 0.0, 0.75, 0.0, 0.0, 1.0, 0.25, 0.0, 0.0, 0.0, 1.0,
+    ];
+    let target = transformed_mesh(&source, |position| apply_matrix(position, matrix));
+    let program = general_affine_program(matrix);
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("package");
+
+    write_decompile_package_v3(&program, &source, &target, &package).unwrap();
+    let report = verify_decompile_package_v3(&package).unwrap();
+    let manifest = read_manifest(&package);
+
+    assert!(report.positions_bit_exact);
+    let OperatorManifestV3::Affine { operator, .. } = &manifest.operators[0] else {
+        panic!("expected affine operator");
+    };
+    assert_eq!(
+        operator.semantic_family,
+        AffineSemanticFamily::GeneralAffine
+    );
+}
+
+#[test]
+fn exact_baked_stages_and_final_positions_are_serialized() {
+    let source = square_mesh();
+    let offset = [0.25, -0.5, 1.5];
+    let target = translated_residual_target(&source, offset);
+    let program = translation_program(offset);
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("package");
+
+    write_decompile_package_v3(&program, &source, &target, &package).unwrap();
+
+    let affine_stage = read_positions_payload(&package_path(
+        &package,
+        "operators/0000-affine-positions.f32",
+    ));
+    let final_stage = read_positions_payload(&package_path(
+        &package,
+        "operators/0001-lossless-correction-positions.f32",
+    ));
+    let expected_affine = transformed_mesh(&source, |position| {
+        [
+            position[0] + offset[0],
+            position[1] + offset[1],
+            position[2] + offset[2],
+        ]
+    });
+
+    assert_eq!(affine_stage, expected_affine.positions);
+    assert_eq!(final_stage, target.positions);
 }
 
 #[test]

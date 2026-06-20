@@ -10,7 +10,9 @@ The decompiler is an offline, same-topology round-trip demo. It accepts a source
 
 This is deliberately narrower than general inverse modeling. It proves a measurable contract first: the serialized deformation program must reconstruct the target with the same ordered triangle topology and the same canonical `f32` position bits.
 
-The current package format is **schema 2**. Schema 2 fixes affine evaluation to left-to-right IEEE-754 binary32 arithmetic, rounding after every multiplication and addition and forbidding fused multiply-add contraction. JSON matrix numbers are normalized back to binary32 before evaluation. Packages produced by the earlier experimental schema 1 should be regenerated.
+The default package format is **schema 2**. Schema 2 fixes affine evaluation to left-to-right IEEE-754 binary32 arithmetic, rounding after every multiplication and addition and forbidding fused multiply-add contraction. JSON matrix numbers are normalized back to binary32 before evaluation. Packages produced by the earlier experimental schema 1 should be regenerated.
+
+Schema 3 is available as an experimental opt-in transport with the same source/target topology contract. It preserves schema-2 affine numeric conventions, serializes ordered explanatory operators separately from exact replay, writes one cumulative baked stage per package operator, emits diagnostics schema 4, and always ends with a terminal lossless correction. Bend inference is not enabled yet.
 
 ## Commands
 
@@ -21,15 +23,26 @@ cargo run -p shape-cli -- decompile source.obj target.obj \
   --out-dir target/decompile-package
 ```
 
+Create an experimental schema-3 package:
+
+```bash
+cargo run -p shape-cli -- decompile source.obj target.obj \
+  --package-schema 3 \
+  --out-dir target/decompile-v3
+```
+
 Verify the serialized package independently of the in-memory decompile result:
 
 ```bash
 cargo run -p shape-cli -- verify-decompile target/decompile-package
 ```
 
+`verify-decompile` reads `manifest.json` and auto-detects schema 2 or schema 3. Unknown schema versions are rejected.
+
 Useful creation options:
 
 ```bash
+--package-schema 2
 --affine-min-explained 0.01
 --residual-epsilon 0.0
 ```
@@ -38,7 +51,7 @@ Useful creation options:
 
 Affine fitting uses deterministic triangle-area-derived vertex weights so densely tessellated regions do not automatically dominate the inferred geometric explanation. Exact package verification still compares every original vertex and ordered triangle index directly.
 
-The package writer builds and verifies a sibling staging directory before replacing the requested output directory. A failed write therefore does not partially overwrite an existing valid package, and stale files from an older package are removed on successful replacement.
+`--package-schema` accepts `2` or `3`; the default remains `2`. The package writer builds and verifies a sibling staging directory before replacing the requested output directory. A failed write therefore does not partially overwrite an existing valid package, and stale files from an older package are removed on successful replacement.
 
 ## Input Contract
 
@@ -54,7 +67,7 @@ The current OBJ reader accepts `v` records and triangular `f` records using exac
 
 There is no correspondence solver yet. Geometrically identical meshes with reordered vertices or faces are rejected.
 
-## Package Layout
+## Schema 2 Package Layout
 
 ```text
 manifest.json
@@ -111,9 +124,15 @@ Affine operators are still serialized as `kind: "global_affine"` in schema 2, so
 
 Correction positions are absolute target positions, not accumulated deltas. This prevents drift during the final exact reconstruction.
 
-`verification.json` must match the verification embedded in `manifest.json`. `package-verification.json` is a generated replay report. `inference-diagnostics.json` is advisory and versioned independently from the replay manifest: diagnostics schema 3 records every model-selection program hypothesis, its ordered explanatory operators, terminal lossless correction summary, weighted and raw explained fractions, normalized geometric-error cost, approximate residual coverage and score contribution, exact residual bytes and score contribution, prior penalty, total score, selection state, and rejection reason. It also serializes the scoring policy, including coefficient values, family priors, and the approximate-residual tolerance policy, so score components can be recomputed from the JSON. The `verify-decompile` command does not trust generated reports or diagnostics; it rereads the package, validates all declared formats and paths, recomputes operator metadata, replays every serialized stage, compares the ordered topology arrays directly, and checks every final position component by its `f32` bit pattern.
+`verification.json` must match the verification embedded in `manifest.json`. `package-verification.json` is a generated replay report. `inference-diagnostics.json` is advisory and versioned independently from the replay manifest: schema-2 packages currently write diagnostics schema 3, while schema-3 packages write diagnostics schema 4. Diagnostics record model-selection program hypotheses, ordered explanatory operators, terminal lossless correction summary, weighted and raw explained fractions, residual coverage and byte counts, score components, selection state, and rejection reasons. The `verify-decompile` command does not trust generated reports or diagnostics; it rereads the package, validates all declared formats and paths, replays every serialized stage, compares the ordered topology arrays directly, and checks every final position component by its `f32` bit pattern.
 
 The manifest also contains an FNV-1a topology fingerprint for quick diagnostics. That fingerprint is not treated as proof of equality: exact verification compares vertex counts and the complete ordered index arrays.
+
+## Schema 3 Experimental Transport
+
+Schema 3 is documented in [schema3-decompiler.md](schema3-decompiler.md). At this milestone it supports lossless-only programs and one selected affine-family operator followed by the lossless correction. A no-op inference result writes an empty explanatory program and then the correction stage; it does not serialize a no-op operator.
+
+The schema-3 CLI path derives an `OperatorProgram` from the same selected affine/no-op inference result used by schema 2. Translation, rigid transform, similarity transform, and general affine are represented as schema-3 affine operators with authoritative cumulative baked stage positions. Exact package replay advances from baked stage to baked stage and then verifies the final target bits.
 
 ## Exact Correction Count
 
@@ -132,7 +151,8 @@ Create the Blender file and the first report:
 
 ```bash
 blender --background \
-  --python target/decompile-package/blender_reconstruct.py
+  --python target/decompile-package/blender_reconstruct.py \
+  --
 ```
 
 The generated script:

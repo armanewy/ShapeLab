@@ -179,3 +179,81 @@ f 4 1 5
         .expect("run shape-cli verify-decompile");
     assert!(verify_status.success());
 }
+
+#[test]
+fn decompile_generates_schema_three_residual_only_package() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let source = temp_dir.path().join("source.obj");
+    let target = temp_dir.path().join("target.obj");
+    let package = temp_dir.path().join("package-v3");
+    let source_obj = "\
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+f 1 2 3
+f 1 3 4
+";
+    fs::write(&source, source_obj).expect("write source obj");
+    fs::write(&target, source_obj).expect("write target obj");
+
+    let status = Command::new(exe)
+        .arg("decompile")
+        .arg(&source)
+        .arg(&target)
+        .arg("--package-schema")
+        .arg("3")
+        .arg("--out-dir")
+        .arg(&package)
+        .status()
+        .expect("run shape-cli schema-3 decompile");
+
+    assert!(status.success());
+    for name in [
+        "manifest.json",
+        "package-verification.json",
+        "inference-diagnostics.json",
+        "source.meshbin",
+        "target.meshbin",
+        "blender_reconstruct.py",
+    ] {
+        let path = package.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(package.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema_version"], 3);
+    let operators = manifest["operators"].as_array().unwrap();
+    assert_eq!(operators.len(), 1);
+    assert_eq!(operators[0]["kind"], "lossless_correction");
+    assert_eq!(
+        operators[0]["stage"]["baked_positions_file"],
+        "operators/0000-lossless-correction-positions.f32"
+    );
+
+    let diagnostics: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(package.join("inference-diagnostics.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(diagnostics["diagnostics_schema_version"], 4);
+    assert_eq!(diagnostics["package_schema_version"], 3);
+    assert!(
+        diagnostics["program_hypotheses"][0]["operators"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let verify_status = Command::new(exe)
+        .arg("verify-decompile")
+        .arg(&package)
+        .status()
+        .expect("run shape-cli verify-decompile for schema 3");
+    assert!(verify_status.success());
+}

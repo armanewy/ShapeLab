@@ -1,12 +1,13 @@
 # Schema 3 Package Transport
 
-Wave 1 schema-3 package transport is additive to the schema-2 package path.
-The root `verify_decompile_package` dispatcher still reads schema 2 only; callers
-that need schema 3 should use `shape_decompiler::v3::package`.
+Schema-3 package transport is additive to the schema-2 package path. The root
+`verify_decompile_package` dispatcher now reads `manifest.json` and verifies
+schema 2 or schema 3 packages automatically.
 
 Implemented entry points:
 
 - `write_decompile_package_v3`
+- `build_v3_package_from_program`
 - `read_decompile_package_v3`
 - `verify_decompile_package_v3`
 

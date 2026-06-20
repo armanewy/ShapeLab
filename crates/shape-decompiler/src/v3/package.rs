@@ -13,18 +13,27 @@ use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
 use super::bend::BendParameters;
+use super::blender::{BlenderAdapterOptions, blender_reconstruction_script_v3};
+use super::diagnostics::{
+    DIAGNOSTICS_SCHEMA_VERSION_V4, InferenceDiagnosticsV4, ProgramCorrectionDiagnostics,
+    ProgramDiagnosticsInput, ProgramOperatorDiagnostics, StageDiagnosticsInput,
+    build_program_diagnostics, build_stage_diagnostics, default_scoring_policy_v4,
+};
 use super::program::{
     AffineOperator, OperatorId, OperatorProgram, ProgramOperator, SemanticVerificationMode,
     SemanticVerificationPolicy, SemanticVerificationReport, StageIndex, evaluate_operator,
     validate_program,
 };
 use crate::{
-    DecompileError, MANIFEST_FILE, PACKAGE_VERIFICATION_FILE, PackagePaths, RESIDUAL_INDEX_FILE,
+    AffineSemanticFamily, BLENDER_SCRIPT_FILE, DecompileError, INFERENCE_DIAGNOSTICS_FILE,
+    MANIFEST_FILE, PACKAGE_VERIFICATION_FILE, PackagePaths, RESIDUAL_INDEX_FILE,
     RESIDUAL_POSITION_FILE, SOURCE_MESHBIN, StagedPackageDirectory, TARGET_MESHBIN,
-    ensure_identical_topology, ensure_strictly_increasing_indices, invalid_package, package_path,
-    path_io, position_slices_bit_equal, positions_bit_equal, read_meshbin, read_positions,
-    read_u32s, resolve_package_asset, topology_hash, topology_hash_from_parts,
-    validate_decompile_mesh, write_json, write_meshbin, write_positions, write_u32s,
+    approximate_residual_cost, ensure_identical_topology, ensure_strictly_increasing_indices,
+    invalid_package, package_path, path_io, position_slices_bit_equal, positions_bit_equal,
+    read_meshbin, read_positions, read_u32s, resolve_package_asset, sum_squared_distance,
+    topology_hash, topology_hash_from_parts, validate_decompile_mesh, vertex_area_weights,
+    weighted_centered_sum_squared_distance, weighted_sum_squared_distance, write_json,
+    write_meshbin, write_positions, write_text, write_u32s,
 };
 
 /// Decompiler package manifest schema version for schema 3.
@@ -312,6 +321,7 @@ struct BuiltPackageV3 {
     stage_payloads: Vec<StagePayloadV3>,
     residual_indices: Vec<u32>,
     residual_positions: Vec<[f32; 3]>,
+    inference_diagnostics: InferenceDiagnosticsV4,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -329,6 +339,23 @@ struct PositionComparisonMetrics {
 /// The package is assembled and replay-verified in a sibling staging directory
 /// before it atomically replaces the requested output directory.
 pub fn write_decompile_package_v3(
+    semantic_program: &OperatorProgram,
+    source: &TriangleMesh,
+    target: &TriangleMesh,
+    out_dir: impl AsRef<Path>,
+) -> Result<PackagePaths, DecompileError> {
+    build_v3_package_from_program(semantic_program, source, target, out_dir)
+}
+
+/// Build, write, and replay-verify a schema-3 package from an ordered
+/// semantic program.
+///
+/// This is the stable integration point for Wave 3 program search: callers
+/// provide only explanatory operators in [`OperatorProgram`]. The package
+/// builder appends the terminal lossless correction, writes one cumulative
+/// baked stage per package operator, emits diagnostics schema 4, and publishes
+/// through the staged package directory flow.
+pub fn build_v3_package_from_program(
     semantic_program: &OperatorProgram,
     source: &TriangleMesh,
     target: &TriangleMesh,
@@ -612,10 +639,30 @@ fn build_decompile_package_v3(
     let mut operators = Vec::with_capacity(semantic_program.operators.len() + 1);
     let mut stage_payloads = Vec::with_capacity(semantic_program.operators.len() + 1);
     let mut current_positions = source.positions.clone();
+    let weights = vertex_area_weights(source);
+    let raw_identity_error = sum_squared_distance(&source.positions, &target.positions);
+    let weighted_identity_error =
+        weighted_sum_squared_distance(&source.positions, &target.positions, &weights);
+    let error_normalization_scale =
+        weighted_centered_sum_squared_distance(&source.positions, &weights)
+            .max(weighted_centered_sum_squared_distance(
+                &target.positions,
+                &weights,
+            ))
+            .max(f64::EPSILON);
+    let literal_size_bytes = source.positions.len().saturating_mul(12).max(1);
+    let mut diagnostic_operators = Vec::with_capacity(semantic_program.operators.len());
+    let mut diagnostic_stages = Vec::with_capacity(semantic_program.operators.len());
 
     for (index, operator) in semantic_program.operators.iter().copied().enumerate() {
+        let raw_error_before = sum_squared_distance(&current_positions, &target.positions);
+        let weighted_error_before =
+            weighted_sum_squared_distance(&current_positions, &target.positions, &weights);
         let semantic_positions =
             evaluate_package_operator_v3(&operator, &current_positions, Path::new(MANIFEST_FILE))?;
+        let raw_error_after = sum_squared_distance(&semantic_positions, &target.positions);
+        let weighted_error_after =
+            weighted_sum_squared_distance(&semantic_positions, &target.positions, &weights);
         let (slug, label) = program_operator_stage_identity_v3(&operator);
         let policy = semantic_policy_for_program_operator_v3(&operator);
         let report = compare_positions_with_policy_v3(
@@ -632,6 +679,26 @@ fn build_decompile_package_v3(
             semantic_verification_policy: policy,
             semantic_verification_report: report,
         };
+        let diagnostic_operator =
+            program_operator_diagnostics_v3(&operator, Path::new(MANIFEST_FILE))?;
+        let diagnostic_stage = build_stage_diagnostics(StageDiagnosticsInput {
+            stage_index: index,
+            operator: diagnostic_operator.clone(),
+            weighted_error_before,
+            weighted_error_after,
+            raw_error_before,
+            raw_error_after,
+            semantic_verification_policy: policy,
+            semantic_verification_report: report,
+        })
+        .map_err(|source| {
+            invalid_package(
+                Path::new(INFERENCE_DIAGNOSTICS_FILE),
+                format!("schema-4 stage diagnostics are invalid: {source}"),
+            )
+        })?;
+        diagnostic_operators.push(diagnostic_operator);
+        diagnostic_stages.push(diagnostic_stage);
         operators.push(match operator {
             ProgramOperator::Affine(operator) => OperatorManifestV3::Affine { stage, operator },
             ProgramOperator::Bend(parameters) => OperatorManifestV3::Bend { stage, parameters },
@@ -690,6 +757,53 @@ fn build_decompile_package_v3(
         positions: final_positions,
     });
 
+    let scoring_policy = default_scoring_policy_v4();
+    let weighted_error_before_correction =
+        weighted_sum_squared_distance(&current_positions, &target.positions, &weights);
+    let raw_error_before_correction = sum_squared_distance(&current_positions, &target.positions);
+    let exact_residual_bytes =
+        exact_residual_storage_size_v3(&current_positions, &target.positions);
+    let program_hypothesis = build_program_diagnostics(ProgramDiagnosticsInput {
+        operators: diagnostic_operators,
+        stages: diagnostic_stages,
+        final_correction: ProgramCorrectionDiagnostics {
+            corrected_vertex_count: residual_indices.len(),
+            exact_residual_bytes,
+            weighted_error_before: weighted_error_before_correction,
+            weighted_error_after: 0.0,
+            raw_error_before: raw_error_before_correction,
+            raw_error_after: 0.0,
+        },
+        raw_identity_error,
+        weighted_identity_error,
+        error_normalization_scale,
+        literal_size_bytes,
+        approximate_residual_coverage: approximate_residual_cost(
+            &current_positions,
+            &target.positions,
+            &weights,
+        ),
+        scoring_policy: scoring_policy.clone(),
+        selected: true,
+        rejection_reason: None,
+    })
+    .map_err(|source| {
+        invalid_package(
+            Path::new(INFERENCE_DIAGNOSTICS_FILE),
+            format!("schema-4 program diagnostics are invalid: {source}"),
+        )
+    })?;
+    let inference_diagnostics = InferenceDiagnosticsV4 {
+        diagnostics_schema_version: DIAGNOSTICS_SCHEMA_VERSION_V4,
+        package_schema_version: SCHEMA_VERSION_V3,
+        surface_weighting: "triangle_area_derived_vertex_weights".to_owned(),
+        raw_identity_error,
+        weighted_identity_error,
+        scoring_policy,
+        selected_program_hypothesis_index: 0,
+        program_hypotheses: vec![program_hypothesis],
+    };
+
     let manifest = DecompileManifestV3 {
         schema_version: SCHEMA_VERSION_V3,
         coordinate_system: COORDINATE_SYSTEM_V3.to_owned(),
@@ -726,7 +840,67 @@ fn build_decompile_package_v3(
         stage_payloads,
         residual_indices,
         residual_positions,
+        inference_diagnostics,
     })
+}
+
+fn program_operator_diagnostics_v3(
+    operator: &ProgramOperator,
+    path: &Path,
+) -> Result<ProgramOperatorDiagnostics, DecompileError> {
+    match operator {
+        ProgramOperator::Affine(affine) => match affine.semantic_family {
+            AffineSemanticFamily::Translation => Ok(ProgramOperatorDiagnostics::Translation {
+                translation: affine.translation.ok_or_else(|| {
+                    invalid_package(
+                        path,
+                        "translation operator is missing translation parameters",
+                    )
+                })?,
+            }),
+            AffineSemanticFamily::RigidTransform => {
+                Ok(ProgramOperatorDiagnostics::RigidTransform {
+                    translation: affine.translation.ok_or_else(|| {
+                        invalid_package(path, "rigid transform is missing translation parameters")
+                    })?,
+                    rotation_row_major_3x3: affine.rotation_row_major_3x3.ok_or_else(|| {
+                        invalid_package(path, "rigid transform is missing rotation parameters")
+                    })?,
+                })
+            }
+            AffineSemanticFamily::SimilarityTransform => {
+                Ok(ProgramOperatorDiagnostics::SimilarityTransform {
+                    translation: affine.translation.ok_or_else(|| {
+                        invalid_package(
+                            path,
+                            "similarity transform is missing translation parameters",
+                        )
+                    })?,
+                    rotation_row_major_3x3: affine.rotation_row_major_3x3.ok_or_else(|| {
+                        invalid_package(path, "similarity transform is missing rotation parameters")
+                    })?,
+                    uniform_scale: affine.uniform_scale.ok_or_else(|| {
+                        invalid_package(path, "similarity transform is missing uniform scale")
+                    })?,
+                })
+            }
+            AffineSemanticFamily::GeneralAffine => Ok(ProgramOperatorDiagnostics::GeneralAffine {
+                matrix_row_major_4x4: affine.matrix_row_major_4x4,
+            }),
+        },
+        ProgramOperator::Bend(parameters) => Ok(ProgramOperatorDiagnostics::Bend {
+            parameters: *parameters,
+        }),
+    }
+}
+
+fn exact_residual_storage_size_v3(reconstructed: &[[f32; 3]], target: &[[f32; 3]]) -> usize {
+    reconstructed
+        .iter()
+        .zip(target)
+        .filter(|(left, right)| !positions_bit_equal(**left, **right))
+        .count()
+        * (std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>())
 }
 
 fn write_decompile_package_v3_contents(
@@ -756,6 +930,14 @@ fn write_decompile_package_v3_contents(
     write_positions(
         &package_path(out_dir, RESIDUAL_POSITION_FILE),
         &built.residual_positions,
+    )?;
+    write_json(
+        &package_path(out_dir, INFERENCE_DIAGNOSTICS_FILE),
+        &built.inference_diagnostics,
+    )?;
+    write_text(
+        &package_path(out_dir, BLENDER_SCRIPT_FILE),
+        &blender_reconstruction_script_v3(&BlenderAdapterOptions::default()),
     )?;
 
     let mut manifest = built.manifest.clone();

@@ -9,8 +9,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
+use shape_decompiler::v3::package::build_v3_package_from_program;
+use shape_decompiler::v3::program::{AffineOperator, OperatorProgram, ProgramOperator};
 use shape_decompiler::{
-    AffineSemanticFamily, DecompileSettings, OperatorFamily, OperatorManifest,
+    AffineSemanticFamily, DecompileResult, DecompileSettings, OperatorFamily, OperatorManifest,
     ProgramHypothesisDiagnostics, decompile_pair, verify_decompile_package,
     write_decompile_package,
 };
@@ -122,6 +124,9 @@ struct DecompileArgs {
     /// Verification tolerance; the final residual remains lossless.
     #[arg(long, default_value_t = 0.0)]
     residual_epsilon: f32,
+    /// Experimental decompile package schema to write.
+    #[arg(long, value_enum, default_value_t = PackageSchema::Schema2)]
+    package_schema: PackageSchema,
     /// Print per-hypothesis inference diagnostics.
     #[arg(long)]
     verbose: bool,
@@ -137,6 +142,14 @@ struct VerifyDecompileArgs {
 enum CliMode {
     Refine,
     Explore,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum PackageSchema {
+    #[value(name = "2")]
+    Schema2,
+    #[value(name = "3")]
+    Schema3,
 }
 
 impl From<CliMode> for ExplorationMode {
@@ -361,8 +374,14 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     };
     let result = decompile_pair(&source, &target, settings)
         .context("decompiling same-topology mesh pair")?;
-    let paths = write_decompile_package(&result, &source, &target, &args.out_dir)
-        .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
+    let paths = match args.package_schema {
+        PackageSchema::Schema2 => write_decompile_package(&result, &source, &target, &args.out_dir),
+        PackageSchema::Schema3 => {
+            let program = schema_three_program_from_result(&result);
+            build_v3_package_from_program(&program, &source, &target, &args.out_dir)
+        }
+    }
+    .with_context(|| format!("writing decompile package to {}", args.out_dir.display()))?;
 
     let affine_summary = result
         .manifest
@@ -382,6 +401,13 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
             OperatorManifest::LosslessCorrection { .. } => None,
         });
     println!("Decompiled same-topology mesh pair");
+    println!(
+        "  package schema: {}",
+        match args.package_schema {
+            PackageSchema::Schema2 => 2,
+            PackageSchema::Schema3 => 3,
+        }
+    );
     println!("  vertices: {}", result.manifest.topology.vertex_count);
     println!("  triangles: {}", result.manifest.topology.triangle_count);
     println!("  topology hash: {}", result.manifest.topology.hash);
@@ -423,6 +449,32 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn schema_three_program_from_result(result: &DecompileResult) -> OperatorProgram {
+    let mut operators = Vec::new();
+    for operator in &result.manifest.operators {
+        match operator {
+            OperatorManifest::GlobalAffine {
+                matrix_row_major_4x4,
+                semantic_family,
+                translation,
+                rotation_row_major_3x3,
+                uniform_scale,
+                ..
+            } => {
+                operators.push(ProgramOperator::Affine(AffineOperator {
+                    semantic_family: *semantic_family,
+                    matrix_row_major_4x4: *matrix_row_major_4x4,
+                    translation: *translation,
+                    rotation_row_major_3x3: *rotation_row_major_3x3,
+                    uniform_scale: *uniform_scale,
+                }));
+            }
+            OperatorManifest::LosslessCorrection { .. } => {}
+        }
+    }
+    OperatorProgram { operators }
 }
 
 fn affine_family_label(semantic_family: AffineSemanticFamily) -> &'static str {

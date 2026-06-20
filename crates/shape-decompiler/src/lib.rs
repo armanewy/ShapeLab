@@ -882,9 +882,54 @@ fn package_paths(out_dir: &Path) -> PackagePaths {
     }
 }
 
-/// Read a serialized decompile package, replay all operators from the binary
-/// sidecars, and verify exact topology and final `f32` positions.
+/// Read a serialized decompile package, auto-detect schema 2 or 3 from
+/// `manifest.json`, replay all operators from the binary sidecars, and verify
+/// exact topology and final `f32` positions.
 pub fn verify_decompile_package(
+    package_dir: impl AsRef<Path>,
+) -> Result<PackageVerificationReport, DecompileError> {
+    let package_dir = package_dir.as_ref();
+    match manifest_schema_version(package_dir)? {
+        SCHEMA_VERSION => verify_decompile_package_v2(package_dir),
+        v3::package::SCHEMA_VERSION_V3 => {
+            let report = v3::package::verify_decompile_package_v3(package_dir)?;
+            Ok(PackageVerificationReport {
+                schema_version: report.schema_version,
+                topology_exact: report.topology_exact,
+                topology_hash_matches_manifest: report.topology_hash_matches_manifest,
+                positions_bit_exact: report.positions_bit_exact,
+                vertex_count: report.vertex_count,
+                triangle_count: report.triangle_count,
+                operator_count: report.operator_count,
+                residual_vertex_count: report.residual_vertex_count,
+                max_component_error: report.max_component_error as f32,
+                max_euclidean_error: report.max_euclidean_error as f32,
+                outside_tolerance: report.outside_tolerance,
+            })
+        }
+        found => Err(DecompileError::UnsupportedSchema {
+            found,
+            supported: v3::package::SCHEMA_VERSION_V3,
+        }),
+    }
+}
+
+fn manifest_schema_version(package_dir: &Path) -> Result<u32, DecompileError> {
+    #[derive(Deserialize)]
+    struct ManifestSchema {
+        schema_version: u32,
+    }
+
+    let manifest_path = resolve_package_asset(package_dir, MANIFEST_FILE)?;
+    let manifest_bytes =
+        fs::read(&manifest_path).map_err(|source| path_io(&manifest_path, source))?;
+    let manifest: ManifestSchema = serde_json::from_slice(&manifest_bytes)?;
+    Ok(manifest.schema_version)
+}
+
+/// Read a serialized schema-2 decompile package, replay all operators from the
+/// binary sidecars, and verify exact topology and final `f32` positions.
+fn verify_decompile_package_v2(
     package_dir: impl AsRef<Path>,
 ) -> Result<PackageVerificationReport, DecompileError> {
     let package_dir = package_dir.as_ref();
@@ -5552,7 +5597,35 @@ mod tests {
             error,
             DecompileError::UnsupportedSchema {
                 found: 1,
-                supported: 2
+                supported: 3
+            }
+        ));
+    }
+
+    #[test]
+    fn package_verifier_rejects_unknown_schema_version() {
+        let source = tetra_mesh();
+        let result = decompile_pair(&source, &source, DecompileSettings::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        write_decompile_package(&result, &source, &source, &package).unwrap();
+        let manifest_path = package.join(MANIFEST_FILE);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest["schema_version"] = serde_json::Value::from(99);
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let error = verify_decompile_package(&package).unwrap_err();
+
+        assert!(matches!(
+            error,
+            DecompileError::UnsupportedSchema {
+                found: 99,
+                supported: 3
             }
         ));
     }
