@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+glam.workspace = true
 shape-core.workspace = true
 shape-field.workspace = true
 thiserror.workspace = true
