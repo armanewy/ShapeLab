@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn bend_not_implemented_is_typed() {
+    fn bend_program_evaluates_with_tolerance_report() {
         let program = OperatorProgram {
             operators: vec![ProgramOperator::Bend(BendParameters {
                 origin: [0.0, 0.0, 0.0],
@@ -536,11 +536,11 @@ mod tests {
             })],
         };
 
-        let error = evaluate_program(&program, &[[0.0, 0.0, 0.0]]).unwrap_err();
+        let evaluation = evaluate_program(&program, &[[0.0, 0.0, 0.0]]).unwrap();
 
-        assert_eq!(
-            error,
-            ProgramEvaluationError::Bend(BendEvaluationError::NotImplemented)
-        );
+        assert_eq!(evaluation.stages.len(), 1);
+        assert_eq!(evaluation.stages[0].operator_index, StageIndex(0));
+        assert!(evaluation.stages[0].semantic_verification_report.passed);
+        assert_eq!(evaluation.final_positions, vec![[0.0, 0.0, 0.0]]);
     }
 }
