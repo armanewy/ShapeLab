@@ -7,7 +7,7 @@
 //! lossless residual. The current MVP intentionally starts with a strict
 //! contract: same vertex order, same face order, same indices.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
@@ -40,6 +40,7 @@ const APPROXIMATE_RESIDUAL_SCORE_WEIGHT: f64 = 1.0;
 const EXACT_RESIDUAL_BYTES_SCORE_WEIGHT: f64 = 1.0e-3;
 const APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON: f64 = 1.0e-6;
 const APPROXIMATE_RESIDUAL_RELATIVE_EPSILON: f64 = 1.0e-5;
+const APPROXIMATE_RESIDUAL_ULP_MULTIPLIER: f64 = 2.0;
 const ROTATION_ORTHONORMAL_TOLERANCE: f64 = 1.0e-3;
 const PACKAGE_TEMP_MARKER: &str = ".shapelab-package-tmp-";
 const PACKAGE_BACKUP_MARKER: &str = ".shapelab-package-backup-";
@@ -173,7 +174,7 @@ pub enum AffineSemanticFamily {
 }
 
 /// Candidate operator family reported by inference diagnostics.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperatorFamily {
     /// No explanatory operator; the exact correction carries the deformation.
@@ -186,6 +187,29 @@ pub enum OperatorFamily {
     SimilarityTransform,
     /// Arbitrary affine transform.
     GeneralAffine,
+}
+
+/// Scoring constants and tolerance policy serialized with inference diagnostics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InferenceScoringPolicy {
+    /// Human-readable scoring model identifier.
+    pub model: String,
+    /// Weight applied to semantic parameter count.
+    pub parameter_weight: f64,
+    /// Weight applied to additional semantic metadata bytes.
+    pub semantic_metadata_weight: f64,
+    /// Weight applied to tolerance-based approximate residual coverage.
+    pub approximate_residual_weight: f64,
+    /// Weight applied to exact audit-correction bytes.
+    pub exact_residual_weight: f64,
+    /// Absolute residual tolerance floor.
+    pub absolute_residual_epsilon: f64,
+    /// Residual tolerance multiplier for intrinsic shape scale.
+    pub relative_residual_epsilon: f64,
+    /// Residual tolerance multiplier for local `f32` coordinate spacing.
+    pub ulp_multiplier: f64,
+    /// Fixed family prior penalties used until measured conditioning is added.
+    pub family_priors: BTreeMap<OperatorFamily, f64>,
 }
 
 /// Out-of-band inference report written beside the replay-verified package.
@@ -201,6 +225,8 @@ pub struct InferenceDiagnostics {
     pub raw_identity_error: f64,
     /// Triangle-area-weighted source-to-target squared displacement.
     pub weighted_identity_error: f64,
+    /// Scoring constants and tolerance policy used for this report.
+    pub scoring_policy: InferenceScoringPolicy,
     /// Index of the selected hypothesis in `hypotheses`.
     pub selected_hypothesis_index: usize,
     /// Candidate score breakdowns in deterministic inference order.
@@ -220,16 +246,32 @@ pub struct HypothesisDiagnostics {
     pub raw_geometric_error: f64,
     /// Unweighted vertex displacement fraction. Schema-2 affine metadata uses this value.
     pub raw_explained_fraction: f64,
+    /// Weighted error scale used to normalize geometric error.
+    pub error_normalization_scale: f64,
+    /// Weighted geometric error divided by `error_normalization_scale`.
+    pub normalized_geometric_error_cost: f64,
+    /// Full target literal position payload size used for byte-normalized costs.
+    pub literal_size_bytes: usize,
+    /// Semantic parameter count used for parameter cost.
+    pub parameter_count: usize,
     /// Score contribution from semantic parameter count.
     pub parameter_cost: f64,
+    /// Additional semantic metadata bytes used for metadata cost.
+    pub semantic_metadata_bytes: usize,
     /// Score contribution from additional semantic metadata.
     pub semantic_metadata_cost: f64,
+    /// Tolerance-based residual coverage before applying the policy weight.
+    pub approximate_residual_coverage: f64,
     /// Tolerance-based residual cost used for semantic model selection.
     pub approximate_residual_cost: f64,
     /// Exact audit-correction payload size in bytes.
     pub exact_residual_bytes: usize,
+    /// Score contribution from exact audit-correction bytes.
+    pub exact_residual_cost: f64,
     /// Family prior until measured fit-conditioning penalties are introduced.
     pub prior_penalty: f64,
+    /// Sum of every serialized score component.
+    pub score_component_sum: f64,
     /// Total model-selection score.
     pub total_score: f64,
     /// Whether this candidate was selected.
@@ -1841,11 +1883,17 @@ struct OperatorHypothesis {
     raw_explained_fraction: f64,
     parameter_count: usize,
     semantic_metadata_size: usize,
+    literal_size_bytes: usize,
+    approximate_residual_coverage: f64,
     approximate_residual_cost: f64,
     exact_residual_bytes: usize,
+    error_normalization_scale: f64,
+    normalized_geometric_error_cost: f64,
     parameter_cost: f64,
     semantic_metadata_cost: f64,
+    exact_residual_cost: f64,
     operator_prior_penalty: f64,
+    score_component_sum: f64,
     score: f64,
 }
 
@@ -1997,6 +2045,58 @@ impl InferredOperator {
     }
 }
 
+fn inference_scoring_policy() -> InferenceScoringPolicy {
+    InferenceScoringPolicy {
+        model: "weighted_affine_origin_invariant_residual_v1".to_owned(),
+        parameter_weight: OPERATOR_PARAMETER_SCORE_WEIGHT,
+        semantic_metadata_weight: SEMANTIC_METADATA_SCORE_WEIGHT,
+        approximate_residual_weight: APPROXIMATE_RESIDUAL_SCORE_WEIGHT,
+        exact_residual_weight: EXACT_RESIDUAL_BYTES_SCORE_WEIGHT,
+        absolute_residual_epsilon: APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON,
+        relative_residual_epsilon: APPROXIMATE_RESIDUAL_RELATIVE_EPSILON,
+        ulp_multiplier: APPROXIMATE_RESIDUAL_ULP_MULTIPLIER,
+        family_priors: [
+            (
+                OperatorFamily::NoOp,
+                InferredOperator::NoOp.operator_prior_penalty(),
+            ),
+            (
+                OperatorFamily::Translation,
+                InferredOperator::Translation {
+                    matrix: identity(),
+                    translation: [0.0; 3],
+                }
+                .operator_prior_penalty(),
+            ),
+            (
+                OperatorFamily::RigidTransform,
+                InferredOperator::RigidTransform {
+                    matrix: identity(),
+                    translation: [0.0; 3],
+                    rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                }
+                .operator_prior_penalty(),
+            ),
+            (
+                OperatorFamily::SimilarityTransform,
+                InferredOperator::SimilarityTransform {
+                    matrix: identity(),
+                    translation: [0.0; 3],
+                    rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    uniform_scale: 1.0,
+                }
+                .operator_prior_penalty(),
+            ),
+            (
+                OperatorFamily::GeneralAffine,
+                InferredOperator::GeneralAffine { matrix: identity() }.operator_prior_penalty(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
 fn choose_affine_candidate(
     source: &TriangleMesh,
     target: &TriangleMesh,
@@ -2118,6 +2218,7 @@ fn choose_affine_candidate(
             surface_weighting: "triangle_area_derived_vertex_weights".to_owned(),
             raw_identity_error,
             weighted_identity_error,
+            scoring_policy: inference_scoring_policy(),
             selected_hypothesis_index: selected_index,
             hypotheses: hypothesis_diagnostics,
         },
@@ -2162,11 +2263,17 @@ fn operator_hypothesis(
         raw_explained_fraction,
         parameter_count,
         semantic_metadata_size,
+        literal_size_bytes: score.literal_size_bytes,
+        approximate_residual_coverage: score.approximate_residual_coverage,
         approximate_residual_cost: score.approximate_residual_cost,
         exact_residual_bytes,
+        error_normalization_scale: score.error_normalization_scale,
+        normalized_geometric_error_cost: score.normalized_geometric_error_cost,
         parameter_cost: score.parameter_cost,
         semantic_metadata_cost: score.semantic_metadata_cost,
+        exact_residual_cost: score.exact_residual_cost,
         operator_prior_penalty: score.operator_prior_penalty,
+        score_component_sum: score.score_component_sum,
         score: score.total_score,
     }
 }
@@ -2183,11 +2290,19 @@ impl OperatorHypothesis {
             weighted_explained_fraction: self.weighted_explained_fraction,
             raw_geometric_error: self.raw_geometric_error,
             raw_explained_fraction: self.raw_explained_fraction,
+            error_normalization_scale: self.error_normalization_scale,
+            normalized_geometric_error_cost: self.normalized_geometric_error_cost,
+            literal_size_bytes: self.literal_size_bytes,
+            parameter_count: self.parameter_count,
             parameter_cost: self.parameter_cost,
+            semantic_metadata_bytes: self.semantic_metadata_size,
             semantic_metadata_cost: self.semantic_metadata_cost,
+            approximate_residual_coverage: self.approximate_residual_coverage,
             approximate_residual_cost: self.approximate_residual_cost,
             exact_residual_bytes: self.exact_residual_bytes,
+            exact_residual_cost: self.exact_residual_cost,
             prior_penalty: self.operator_prior_penalty,
+            score_component_sum: self.score_component_sum,
             total_score: self.score,
             selected,
             rejection_reason,
@@ -2249,10 +2364,16 @@ struct HypothesisScoreInputs<'a> {
 
 #[derive(Debug, Copy, Clone)]
 struct HypothesisScore {
+    error_normalization_scale: f64,
+    literal_size_bytes: usize,
+    normalized_geometric_error_cost: f64,
     parameter_cost: f64,
     semantic_metadata_cost: f64,
+    approximate_residual_coverage: f64,
     approximate_residual_cost: f64,
+    exact_residual_cost: f64,
     operator_prior_penalty: f64,
+    score_component_sum: f64,
     total_score: f64,
 }
 
@@ -2264,28 +2385,35 @@ fn hypothesis_score(inputs: HypothesisScoreInputs<'_>) -> HypothesisScore {
         ))
         .max(f64::EPSILON);
     let literal_size = inputs.source.len().saturating_mul(12).max(1) as f64;
-    let normalized_geometric_error = inputs.weighted_geometric_error / error_scale;
+    let normalized_geometric_error_cost = inputs.weighted_geometric_error / error_scale;
     let parameter_cost = inputs.parameter_count as f64 * OPERATOR_PARAMETER_SCORE_WEIGHT;
     let semantic_metadata_cost =
         inputs.semantic_metadata_size as f64 / literal_size * SEMANTIC_METADATA_SCORE_WEIGHT;
+    let approximate_residual_coverage =
+        approximate_residual_cost(inputs.reconstructed, inputs.target, inputs.weights);
     let approximate_residual_cost =
-        approximate_residual_cost(inputs.reconstructed, inputs.target, inputs.weights)
-            * APPROXIMATE_RESIDUAL_SCORE_WEIGHT;
+        approximate_residual_coverage * APPROXIMATE_RESIDUAL_SCORE_WEIGHT;
     let exact_residual_cost =
         inputs.exact_residual_bytes as f64 / literal_size * EXACT_RESIDUAL_BYTES_SCORE_WEIGHT;
     let operator_prior_penalty = inputs.operator.operator_prior_penalty();
-    let total_score = normalized_geometric_error
+    let score_component_sum = normalized_geometric_error_cost
         + parameter_cost
         + semantic_metadata_cost
         + approximate_residual_cost
         + exact_residual_cost
         + operator_prior_penalty;
     HypothesisScore {
+        error_normalization_scale: error_scale,
+        literal_size_bytes: literal_size as usize,
+        normalized_geometric_error_cost,
         parameter_cost,
         semantic_metadata_cost,
+        approximate_residual_coverage,
         approximate_residual_cost,
+        exact_residual_cost,
         operator_prior_penalty,
-        total_score,
+        score_component_sum,
+        total_score: score_component_sum,
     }
 }
 
@@ -2309,19 +2437,14 @@ fn approximate_residual_cost(
         .filter(|weight| weight.is_finite() && *weight > 0.0)
         .sum::<f64>()
         .max(f64::EPSILON);
-    let centered_scale = weighted_centered_sum_squared_distance(target, weights).max(
-        weighted_centered_sum_squared_distance(reconstructed, weights),
-    ) / total_weight;
-    let coordinate_scale = target
-        .iter()
-        .chain(reconstructed)
-        .flat_map(|position| position.iter())
-        .map(|coordinate| f64::from(*coordinate).abs())
-        .fold(0.0_f64, f64::max);
-    let scale = centered_scale.sqrt().max(coordinate_scale).max(1.0);
-    let epsilon =
-        APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON.max(scale * APPROXIMATE_RESIDUAL_RELATIVE_EPSILON);
-    let threshold_squared = epsilon * epsilon;
+    let intrinsic_scale = weighted_rms_radius(target, weights)
+        .max(weighted_rms_radius(reconstructed, weights))
+        .max(bounding_box_diagonal(target))
+        .max(bounding_box_diagonal(reconstructed));
+    let base_epsilon = APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON
+        .max(intrinsic_scale * APPROXIMATE_RESIDUAL_RELATIVE_EPSILON);
+    let reconstructed_centroid = weighted_centroid_f64(reconstructed, weights);
+    let target_centroid = weighted_centroid_f64(target, weights);
     let residual_weight = reconstructed
         .iter()
         .zip(target)
@@ -2331,6 +2454,16 @@ fn approximate_residual_cost(
             let dy = f64::from(left[1]) - f64::from(right[1]);
             let dz = f64::from(left[2]) - f64::from(right[2]);
             let distance_squared = dx * dx + dy * dy + dz * dz;
+            let epsilon = base_epsilon.max(
+                APPROXIMATE_RESIDUAL_ULP_MULTIPLIER
+                    * position_local_coordinate_ulp(
+                        *left,
+                        *right,
+                        reconstructed_centroid,
+                        target_centroid,
+                    ),
+            );
+            let threshold_squared = epsilon * epsilon;
             if distance_squared <= threshold_squared {
                 None
             } else {
@@ -2340,6 +2473,82 @@ fn approximate_residual_cost(
         .sum::<f64>();
     let cost = (residual_weight / total_weight).clamp(0.0, 1.0);
     if cost <= 0.0 { 0.0 } else { cost }
+}
+
+fn weighted_rms_radius(positions: &[[f32; 3]], weights: &[f64]) -> f64 {
+    let total_weight = weights
+        .iter()
+        .copied()
+        .filter(|weight| weight.is_finite() && *weight > 0.0)
+        .sum::<f64>()
+        .max(f64::EPSILON);
+    (weighted_centered_sum_squared_distance(positions, weights) / total_weight).sqrt()
+}
+
+fn bounding_box_diagonal(positions: &[[f32; 3]]) -> f64 {
+    let Some(first) = positions.first() else {
+        return 0.0;
+    };
+    let mut min = [
+        f64::from(first[0]),
+        f64::from(first[1]),
+        f64::from(first[2]),
+    ];
+    let mut max = min;
+    for position in positions.iter().skip(1) {
+        for axis in 0..3 {
+            let value = f64::from(position[axis]);
+            min[axis] = min[axis].min(value);
+            max[axis] = max[axis].max(value);
+        }
+    }
+    let dx = max[0] - min[0];
+    let dy = max[1] - min[1];
+    let dz = max[2] - min[2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn position_local_coordinate_ulp(
+    left: [f32; 3],
+    right: [f32; 3],
+    left_centroid: [f64; 3],
+    right_centroid: [f64; 3],
+) -> f64 {
+    (0..3)
+        .flat_map(|axis| {
+            [
+                (f64::from(left[axis]) - left_centroid[axis]) as f32,
+                (f64::from(right[axis]) - right_centroid[axis]) as f32,
+            ]
+        })
+        .map(f32_ulp)
+        .fold(0.0_f64, f64::max)
+}
+
+fn f32_ulp(value: f32) -> f64 {
+    if !value.is_finite() {
+        return f64::INFINITY;
+    }
+    if value == 0.0 {
+        return f64::from(f32::from_bits(1));
+    }
+    let bits = value.to_bits();
+    let next_bits = if value.is_sign_negative() {
+        bits.wrapping_sub(1)
+    } else {
+        bits.wrapping_add(1)
+    };
+    let next = f32::from_bits(next_bits);
+    if next.is_finite() {
+        (f64::from(next) - f64::from(value)).abs()
+    } else {
+        let previous_bits = if value.is_sign_negative() {
+            bits.wrapping_add(1)
+        } else {
+            bits.wrapping_sub(1)
+        };
+        (f64::from(value) - f64::from(f32::from_bits(previous_bits))).abs()
+    }
 }
 
 fn vertex_area_weights(mesh: &TriangleMesh) -> Vec<f64> {
@@ -4554,6 +4763,161 @@ mod tests {
             approximate_residual_cost(&source.positions, &target, &weights),
             0.0
         );
+    }
+
+    #[test]
+    fn approximate_residual_cost_is_origin_invariant() {
+        let base = cube_mesh();
+        let mut expected_family: Option<OperatorFamily> = None;
+        let mut expected_cost: Option<f64> = None;
+        for offset in [
+            [0.0, 0.0, 0.0],
+            [1_000.0, -1_000.0, 500.0],
+            [1_000_000.0, -1_000_000.0, 500_000.0],
+        ] {
+            let source = transformed_mesh(&base, |position| {
+                [
+                    position[0] + offset[0],
+                    position[1] + offset[1],
+                    position[2] + offset[2],
+                ]
+            });
+            let mut target = source.clone();
+            target.positions[6][0] += 0.125;
+            let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+            let selected = result
+                .inference_diagnostics
+                .hypotheses
+                .iter()
+                .find(|hypothesis| hypothesis.selected)
+                .expect("selected hypothesis");
+
+            if let Some(expected_family) = expected_family {
+                assert_eq!(selected.family, expected_family);
+            } else {
+                expected_family = Some(selected.family);
+            }
+            if let Some(expected_cost) = expected_cost {
+                assert!(
+                    (selected.approximate_residual_cost - expected_cost).abs() <= 1.0e-12,
+                    "offset {offset:?} changed approximate residual cost from {expected_cost} to {}",
+                    selected.approximate_residual_cost
+                );
+            } else {
+                expected_cost = Some(selected.approximate_residual_cost);
+            }
+        }
+    }
+
+    #[test]
+    fn approximate_residual_cost_keeps_small_object_residuals_visible() {
+        let source = transformed_mesh(&cube_mesh(), |position| {
+            [
+                position[0] * 1.0e-3,
+                position[1] * 1.0e-3,
+                position[2] * 1.0e-3,
+            ]
+        });
+        let mut target = source.clone();
+        target.positions[6][0] += 2.0e-6;
+        let weights = vertex_area_weights(&source);
+
+        assert!(
+            approximate_residual_cost(&source.positions, &target.positions, &weights) > 0.0,
+            "absolute floor should not be replaced by a one-unit relative scale floor"
+        );
+    }
+
+    #[test]
+    fn diagnostics_scores_are_reproducible_from_components() {
+        let source = cube_mesh();
+        let target = transformed_mesh(&source, |position| {
+            [
+                -1.01 * position[1] + 0.25,
+                1.01 * position[0] - 0.5,
+                1.01 * position[2] + 1.5,
+            ]
+        });
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        assert_eq!(
+            result.inference_diagnostics.scoring_policy.model,
+            "weighted_affine_origin_invariant_residual_v1"
+        );
+        assert_eq!(
+            result
+                .inference_diagnostics
+                .scoring_policy
+                .family_priors
+                .get(&OperatorFamily::GeneralAffine),
+            Some(&1.0e-2)
+        );
+        for hypothesis in &result.inference_diagnostics.hypotheses {
+            let policy = &result.inference_diagnostics.scoring_policy;
+            let recomputed_normalized =
+                hypothesis.weighted_geometric_error / hypothesis.error_normalization_scale;
+            let recomputed_parameter = hypothesis.parameter_count as f64 * policy.parameter_weight;
+            let recomputed_metadata = hypothesis.semantic_metadata_bytes as f64
+                / hypothesis.literal_size_bytes as f64
+                * policy.semantic_metadata_weight;
+            let recomputed_approximate =
+                hypothesis.approximate_residual_coverage * policy.approximate_residual_weight;
+            let recomputed_exact = hypothesis.exact_residual_bytes as f64
+                / hypothesis.literal_size_bytes as f64
+                * policy.exact_residual_weight;
+            let recomputed_prior = *policy
+                .family_priors
+                .get(&hypothesis.family)
+                .expect("family prior");
+            assert!(
+                (recomputed_normalized - hypothesis.normalized_geometric_error_cost).abs()
+                    <= 1.0e-12,
+                "normalized error mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (recomputed_parameter - hypothesis.parameter_cost).abs() <= 1.0e-12,
+                "parameter cost mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (recomputed_metadata - hypothesis.semantic_metadata_cost).abs() <= 1.0e-12,
+                "metadata cost mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (recomputed_approximate - hypothesis.approximate_residual_cost).abs() <= 1.0e-12,
+                "approximate residual cost mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (recomputed_exact - hypothesis.exact_residual_cost).abs() <= 1.0e-12,
+                "exact residual cost mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (recomputed_prior - hypothesis.prior_penalty).abs() <= 1.0e-12,
+                "prior mismatch for {:?}",
+                hypothesis.family
+            );
+            let component_sum = recomputed_normalized
+                + recomputed_parameter
+                + recomputed_metadata
+                + recomputed_approximate
+                + recomputed_exact
+                + recomputed_prior;
+            assert!(
+                (component_sum - hypothesis.score_component_sum).abs() <= 1.0e-12,
+                "component sum mismatch for {:?}",
+                hypothesis.family
+            );
+            assert!(
+                (hypothesis.score_component_sum - hypothesis.total_score).abs() <= 1.0e-12,
+                "total score mismatch for {:?}",
+                hypothesis.family
+            );
+        }
     }
 
     #[test]
