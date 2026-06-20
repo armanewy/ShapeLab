@@ -693,11 +693,17 @@ impl AppState {
     }
 
     fn export_current_obj(&mut self, path: PathBuf) -> Result<Vec<AppEffect>, AppStateError> {
-        if self.current_preview.is_none() {
-            return Err(AppStateError::MissingPreviewForExport);
-        }
+        let mesh = self
+            .current_preview
+            .as_ref()
+            .map(|preview| preview.mesh.clone())
+            .ok_or(AppStateError::MissingPreviewForExport)?;
+        let job_id = self.allocate_job_id()?;
+        self.active_jobs.insert(job_id);
         self.set_status("Exporting OBJ", AppPhase::Exporting, None);
-        Ok(vec![AppEffect::ExportCurrentObj(path)])
+        Ok(vec![AppEffect::StartJob(Box::new(
+            JobRequest::ExportCurrent { job_id, mesh, path },
+        ))])
     }
 
     fn fit_view(&mut self) -> Result<Vec<AppEffect>, AppStateError> {

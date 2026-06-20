@@ -554,7 +554,7 @@ fn run_candidate_generation(
         let progress_base = 0.20 + 0.80 * (slot as f32 / total_candidates as f32);
         runner.progress(JobPhase::Search, progress_base);
 
-        let Some(field) = compile_candidate_field(runner, slot, &candidate.document) else {
+        let Some(field) = compile_candidate_field(slot, &candidate.document) else {
             continue;
         };
         if runner.check_cancelled().is_err() {
@@ -564,8 +564,7 @@ fn run_candidate_generation(
         runner.started(JobPhase::Mesh);
         let mesh = match mesh_field(&field, candidate_mesh_settings) {
             Ok(mesh) => mesh,
-            Err(error) => {
-                runner.fail(format!("candidate slot {slot} mesh failed: {error}"));
+            Err(_error) => {
                 continue;
             }
         };
@@ -576,8 +575,7 @@ fn run_candidate_generation(
         runner.started(JobPhase::Render);
         let image = match render_mesh(&mesh, &camera, &thumbnail_settings) {
             Ok(image) => image,
-            Err(error) => {
-                runner.fail(format!("candidate slot {slot} render failed: {error}"));
+            Err(_error) => {
                 continue;
             }
         };
@@ -696,18 +694,11 @@ fn build_mesh_and_camera(
 }
 
 fn compile_candidate_field(
-    runner: &JobRunner,
     slot: usize,
     document: &ShapeDocument,
 ) -> Option<shape_field::CompiledField> {
-    runner.started(JobPhase::CompileField);
-    match compile_document(document) {
-        Ok(field) => Some(field),
-        Err(error) => {
-            runner.fail(format!("candidate slot {slot} compile failed: {error}"));
-            None
-        }
-    }
+    let _ = slot;
+    compile_document(document).ok()
 }
 
 fn with_cancellations<T>(

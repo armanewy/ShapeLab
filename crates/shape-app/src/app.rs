@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use egui::{ColorImage, TextureHandle, TextureOptions};
 use shape_core::CandidateId;
-use shape_mesh::write_obj_to_path;
 use shape_project::Project;
 use shape_render::RenderedImage;
 
@@ -186,7 +185,6 @@ impl ShapeLabApp {
                 AppEffect::StartJob(request) => self.submit_job(*request),
                 AppEffect::SaveProject(path) => self.save_project(path),
                 AppEffect::LoadProject(path) => self.load_project(path, ctx),
-                AppEffect::ExportCurrentObj(path) => self.export_current_obj(path),
                 AppEffect::RequestExit => {
                     if let Some(ctx) = ctx {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -280,25 +278,6 @@ impl ShapeLabApp {
             }
             Err(error) => self.state.record_recoverable_error(error),
         }
-    }
-
-    fn export_current_obj(&mut self, path: PathBuf) {
-        let Some(preview) = &self.state.current_preview else {
-            self.state
-                .record_recoverable_error("export requires a ready preview");
-            return;
-        };
-        match write_obj_to_path(&preview.mesh, &path) {
-            Ok(()) => {
-                self.state.mark_exported(path);
-                true
-            }
-            Err(error) => {
-                self.state
-                    .record_recoverable_error(format!("export failed: {error}"));
-                false
-            }
-        };
     }
 
     fn viewport_overlay(&self) -> ViewportOverlayInfo {

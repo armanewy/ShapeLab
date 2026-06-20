@@ -58,6 +58,5 @@ pub(crate) enum AppEffect {
     StartJob(Box<JobRequest>),
     SaveProject(PathBuf),
     LoadProject(PathBuf),
-    ExportCurrentObj(PathBuf),
     RequestExit,
 }

@@ -382,14 +382,29 @@ fn save_load_and_export_commands_emit_effects_only() {
             .unwrap_err(),
         AppStateError::MissingPreviewForExport
     ));
+    let mesh = empty_mesh();
     state.current_preview = Some(CurrentPreview {
-        mesh: empty_mesh(),
+        mesh: mesh.clone(),
         image: blank_image(),
     });
-    assert_eq!(
-        state
-            .handle_command(AppCommand::ExportCurrentObj(export_path.clone()))
-            .unwrap(),
-        vec![AppEffect::ExportCurrentObj(export_path)]
-    );
+    let effects = state
+        .handle_command(AppCommand::ExportCurrentObj(export_path.clone()))
+        .unwrap();
+    assert_eq!(effects.len(), 1);
+    match &effects[0] {
+        AppEffect::StartJob(request) => match request.as_ref() {
+            JobRequest::ExportCurrent {
+                job_id,
+                mesh: exported_mesh,
+                path,
+            } => {
+                assert_eq!(*job_id, JobId(1));
+                assert_eq!(exported_mesh, &mesh);
+                assert_eq!(path, &export_path);
+                assert!(state.active_jobs.contains(job_id));
+            }
+            other => panic!("expected export job, got {other:?}"),
+        },
+        other => panic!("expected start-job effect, got {other:?}"),
+    }
 }
