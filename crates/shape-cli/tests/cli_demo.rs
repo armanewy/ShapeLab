@@ -117,6 +117,7 @@ f 4 1 5
         "manifest.json",
         "verification.json",
         "package-verification.json",
+        "inference-diagnostics.json",
         "source.meshbin",
         "target.meshbin",
         "blender_reconstruct.py",

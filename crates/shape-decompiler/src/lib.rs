@@ -27,6 +27,7 @@ const RESIDUAL_POSITION_FILE: &str = "residual/positions.f32";
 const MANIFEST_FILE: &str = "manifest.json";
 const VERIFICATION_FILE: &str = "verification.json";
 const PACKAGE_VERIFICATION_FILE: &str = "package-verification.json";
+const INFERENCE_DIAGNOSTICS_FILE: &str = "inference-diagnostics.json";
 const BLENDER_SCRIPT_FILE: &str = "blender_reconstruct.py";
 const MESHBIN_MAGIC: &[u8; 8] = b"SLMBIN01";
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -34,8 +35,11 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const JACOBI_MAX_ITERATIONS: usize = 96;
 const PSEUDOINVERSE_RELATIVE_EPSILON: f64 = 1.0e-11;
 const OPERATOR_PARAMETER_SCORE_WEIGHT: f64 = 2.0e-3;
-const OPERATOR_ENCODED_SIZE_SCORE_WEIGHT: f64 = 5.0e-4;
-const RESIDUAL_SIZE_SCORE_WEIGHT: f64 = 1.0;
+const SEMANTIC_METADATA_SCORE_WEIGHT: f64 = 5.0e-4;
+const APPROXIMATE_RESIDUAL_SCORE_WEIGHT: f64 = 1.0;
+const EXACT_RESIDUAL_BYTES_SCORE_WEIGHT: f64 = 1.0e-3;
+const APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON: f64 = 1.0e-6;
+const APPROXIMATE_RESIDUAL_RELATIVE_EPSILON: f64 = 1.0e-5;
 const ROTATION_ORTHONORMAL_TOLERANCE: f64 = 1.0e-3;
 const PACKAGE_TEMP_MARKER: &str = ".shapelab-package-tmp-";
 const PACKAGE_BACKUP_MARKER: &str = ".shapelab-package-backup-";
@@ -168,6 +172,73 @@ pub enum AffineSemanticFamily {
     SimilarityTransform,
 }
 
+/// Candidate operator family reported by inference diagnostics.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperatorFamily {
+    /// No explanatory operator; the exact correction carries the deformation.
+    NoOp,
+    /// Pure translation.
+    Translation,
+    /// Proper rotation plus translation.
+    RigidTransform,
+    /// Proper rotation, uniform scale, and translation.
+    SimilarityTransform,
+    /// Arbitrary affine transform.
+    GeneralAffine,
+}
+
+/// Out-of-band inference report written beside the replay-verified package.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InferenceDiagnostics {
+    /// Diagnostics format version, independent of the replay manifest schema.
+    pub diagnostics_schema_version: u32,
+    /// Replay manifest schema version the diagnostics were produced for.
+    pub package_schema_version: u32,
+    /// Weighting model used for semantic fitting and eligibility.
+    pub surface_weighting: String,
+    /// Unweighted source-to-target vertex squared displacement.
+    pub raw_identity_error: f64,
+    /// Triangle-area-weighted source-to-target squared displacement.
+    pub weighted_identity_error: f64,
+    /// Index of the selected hypothesis in `hypotheses`.
+    pub selected_hypothesis_index: usize,
+    /// Candidate score breakdowns in deterministic inference order.
+    pub hypotheses: Vec<HypothesisDiagnostics>,
+}
+
+/// Auditable score breakdown for one inferred operator candidate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HypothesisDiagnostics {
+    /// Candidate operator family.
+    pub family: OperatorFamily,
+    /// Triangle-area-weighted squared geometric error.
+    pub weighted_geometric_error: f64,
+    /// Surface-weighted displacement fraction explained by the candidate.
+    pub weighted_explained_fraction: f64,
+    /// Unweighted vertex squared geometric error.
+    pub raw_geometric_error: f64,
+    /// Unweighted vertex displacement fraction. Schema-2 affine metadata uses this value.
+    pub raw_explained_fraction: f64,
+    /// Score contribution from semantic parameter count.
+    pub parameter_cost: f64,
+    /// Score contribution from additional semantic metadata.
+    pub semantic_metadata_cost: f64,
+    /// Tolerance-based residual cost used for semantic model selection.
+    pub approximate_residual_cost: f64,
+    /// Exact audit-correction payload size in bytes.
+    pub exact_residual_bytes: usize,
+    /// Family prior until measured fit-conditioning penalties are introduced.
+    pub prior_penalty: f64,
+    /// Total model-selection score.
+    pub total_score: f64,
+    /// Whether this candidate was selected.
+    pub selected: bool,
+    /// Why the candidate was not eligible for selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+}
+
 /// One manifest operator in the reconstruction stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -283,6 +354,8 @@ pub struct DecompileResult {
     pub residual_positions: Vec<[f32; 3]>,
     /// Final reconstructed positions after every operator.
     pub reconstructed_positions: Vec<[f32; 3]>,
+    /// Inference score breakdown for every operator candidate considered.
+    pub inference_diagnostics: InferenceDiagnostics,
 }
 
 /// Paths produced by writing a package.
@@ -296,6 +369,8 @@ pub struct PackagePaths {
     pub verification: PathBuf,
     /// Package replay verification JSON path.
     pub package_verification: PathBuf,
+    /// Out-of-band inference diagnostics JSON path.
+    pub inference_diagnostics: PathBuf,
     /// Blender reconstruction script path.
     pub blender_script: PathBuf,
 }
@@ -358,11 +433,10 @@ pub fn decompile_pair(
     validate_decompile_mesh(target, "target")?;
     ensure_identical_topology(source, target)?;
 
-    let identity_error = sum_squared_distance(&source.positions, &target.positions);
-    let affine_hypothesis = choose_affine_candidate(source, target, settings, identity_error);
-    let emit_affine = identity_error > 0.0
-        && affine_hypothesis.geometric_error < identity_error
-        && affine_hypothesis.explained >= f64::from(settings.affine_min_explained);
+    let raw_identity_error = sum_squared_distance(&source.positions, &target.positions);
+    let inference = choose_affine_candidate(source, target, settings, raw_identity_error);
+    let affine_hypothesis = inference.selected;
+    let emit_affine = !affine_hypothesis.operator.is_no_op();
 
     let current_positions = if emit_affine {
         affine_hypothesis.reconstructed_positions.clone()
@@ -426,7 +500,7 @@ pub fn decompile_pair(
             translation: parameters.translation,
             rotation_row_major_3x3: parameters.rotation,
             uniform_scale: parameters.uniform_scale,
-            explained_displacement_fraction: affine_hypothesis.explained as f32,
+            explained_displacement_fraction: affine_hypothesis.raw_explained_fraction as f32,
             max_remaining_error: max_euclidean_distance(
                 &affine_hypothesis.reconstructed_positions,
                 &target.positions,
@@ -470,6 +544,7 @@ pub fn decompile_pair(
         residual_indices,
         residual_positions,
         reconstructed_positions,
+        inference_diagnostics: inference.diagnostics,
     })
 }
 
@@ -524,6 +599,10 @@ fn write_decompile_package_contents(
     write_json(
         &package_path(out_dir, VERIFICATION_FILE),
         &result.verification,
+    )?;
+    write_json(
+        &package_path(out_dir, INFERENCE_DIAGNOSTICS_FILE),
+        &result.inference_diagnostics,
     )?;
     write_text(
         &package_path(out_dir, BLENDER_SCRIPT_FILE),
@@ -669,6 +748,7 @@ fn package_paths(out_dir: &Path) -> PackagePaths {
         manifest: package_path(out_dir, MANIFEST_FILE),
         verification: package_path(out_dir, VERIFICATION_FILE),
         package_verification: package_path(out_dir, PACKAGE_VERIFICATION_FILE),
+        inference_diagnostics: package_path(out_dir, INFERENCE_DIAGNOSTICS_FILE),
         blender_script: package_path(out_dir, BLENDER_SCRIPT_FILE),
     }
 }
@@ -747,6 +827,9 @@ pub fn verify_decompile_package(
     }
 
     let identity_error = sum_squared_distance(&source.positions, &target.positions);
+    let weights = vertex_area_weights_from_parts(&source.positions, &source.indices);
+    let weighted_identity_error =
+        weighted_sum_squared_distance(&source.positions, &target.positions, &weights);
     let mut current_positions = source.positions.clone();
     let mut residual_vertex_count = 0_usize;
     let mut saw_lossless = false;
@@ -812,7 +895,11 @@ pub fn verify_decompile_package(
                 }
 
                 let affine_error = sum_squared_distance(&evaluated, &target.positions);
+                let weighted_affine_error =
+                    weighted_sum_squared_distance(&evaluated, &target.positions, &weights);
                 let expected_explained = explained_fraction(identity_error, affine_error) as f32;
+                let expected_weighted_explained =
+                    explained_fraction(weighted_identity_error, weighted_affine_error);
                 let expected_max_error = max_euclidean_distance(&evaluated, &target.positions);
                 if !f32_bits_equal(*explained_displacement_fraction, expected_explained) {
                     return Err(invalid_package(
@@ -826,9 +913,10 @@ pub fn verify_decompile_package(
                         "global affine remaining-error metadata is inconsistent",
                     ));
                 }
-                if identity_error <= 0.0
-                    || affine_error >= identity_error
-                    || expected_explained < manifest.settings.affine_min_explained
+                if weighted_identity_error <= 0.0
+                    || weighted_affine_error >= weighted_identity_error
+                    || expected_weighted_explained
+                        < f64::from(manifest.settings.affine_min_explained)
                 {
                     return Err(invalid_package(
                         &manifest_path,
@@ -1337,6 +1425,9 @@ fn validate_result_consistency(
     )?;
 
     let identity_error = sum_squared_distance(&source.positions, &target.positions);
+    let weights = vertex_area_weights(source);
+    let weighted_identity_error =
+        weighted_sum_squared_distance(&source.positions, &target.positions, &weights);
     let mut current_positions = source.positions.clone();
     let mut saw_affine = false;
     let mut saw_lossless = false;
@@ -1391,13 +1482,18 @@ fn validate_result_consistency(
                     ));
                 }
                 let affine_error = sum_squared_distance(&evaluated, &target.positions);
+                let weighted_affine_error =
+                    weighted_sum_squared_distance(&evaluated, &target.positions, &weights);
                 let expected_explained = explained_fraction(identity_error, affine_error) as f32;
+                let expected_weighted_explained =
+                    explained_fraction(weighted_identity_error, weighted_affine_error);
                 let expected_max = max_euclidean_distance(&evaluated, &target.positions);
                 if !f32_bits_equal(*explained_displacement_fraction, expected_explained)
                     || !f32_bits_equal(*max_remaining_error, expected_max)
-                    || identity_error <= 0.0
-                    || affine_error >= identity_error
-                    || expected_explained < result.manifest.settings.affine_min_explained
+                    || weighted_identity_error <= 0.0
+                    || weighted_affine_error >= weighted_identity_error
+                    || expected_weighted_explained
+                        < f64::from(result.manifest.settings.affine_min_explained)
                 {
                     return Err(invalid_package(
                         Path::new(MANIFEST_FILE),
@@ -1739,12 +1835,24 @@ fn ensure_strictly_increasing_indices(
 struct OperatorHypothesis {
     operator: InferredOperator,
     reconstructed_positions: Vec<[f32; 3]>,
-    geometric_error: f64,
-    explained: f64,
+    weighted_geometric_error: f64,
+    weighted_explained_fraction: f64,
+    raw_geometric_error: f64,
+    raw_explained_fraction: f64,
     parameter_count: usize,
-    encoded_size: usize,
-    residual_size: usize,
+    semantic_metadata_size: usize,
+    approximate_residual_cost: f64,
+    exact_residual_bytes: usize,
+    parameter_cost: f64,
+    semantic_metadata_cost: f64,
+    operator_prior_penalty: f64,
     score: f64,
+}
+
+#[derive(Debug, Clone)]
+struct InferenceResult {
+    selected: OperatorHypothesis,
+    diagnostics: InferenceDiagnostics,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -1784,6 +1892,16 @@ enum InferredOperator {
 }
 
 impl InferredOperator {
+    fn family(self) -> OperatorFamily {
+        match self {
+            Self::NoOp => OperatorFamily::NoOp,
+            Self::Translation { .. } => OperatorFamily::Translation,
+            Self::RigidTransform { .. } => OperatorFamily::RigidTransform,
+            Self::SimilarityTransform { .. } => OperatorFamily::SimilarityTransform,
+            Self::GeneralAffine { .. } => OperatorFamily::GeneralAffine,
+        }
+    }
+
     fn semantic_family(self) -> AffineSemanticFamily {
         match self {
             Self::NoOp => AffineSemanticFamily::GeneralAffine,
@@ -1844,7 +1962,7 @@ impl InferredOperator {
         }
     }
 
-    fn encoded_size(self) -> usize {
+    fn semantic_metadata_size(self) -> usize {
         match self {
             Self::NoOp => 0,
             Self::Translation { .. } => 3 * 4,
@@ -1854,7 +1972,7 @@ impl InferredOperator {
         }
     }
 
-    fn instability_penalty(self) -> f64 {
+    fn operator_prior_penalty(self) -> f64 {
         match self {
             Self::NoOp => 0.0,
             Self::Translation { .. } => 0.0,
@@ -1883,16 +2001,19 @@ fn choose_affine_candidate(
     source: &TriangleMesh,
     target: &TriangleMesh,
     settings: DecompileSettings,
-    identity_error: f64,
-) -> OperatorHypothesis {
+    raw_identity_error: f64,
+) -> InferenceResult {
     let weights = vertex_area_weights(source);
+    let weighted_identity_error =
+        weighted_sum_squared_distance(&source.positions, &target.positions, &weights);
     let mut hypotheses = Vec::new();
     hypotheses.push(operator_hypothesis(
         InferredOperator::NoOp,
         &source.positions,
         &target.positions,
         &weights,
-        identity_error,
+        raw_identity_error,
+        weighted_identity_error,
     ));
     let general_matrix =
         fit_affine(&source.positions, &target.positions, &weights).unwrap_or(identity());
@@ -1903,7 +2024,8 @@ fn choose_affine_candidate(
         &source.positions,
         &target.positions,
         &weights,
-        identity_error,
+        raw_identity_error,
+        weighted_identity_error,
     ));
 
     if let Some(translation_matrix) =
@@ -1922,7 +2044,8 @@ fn choose_affine_candidate(
             &source.positions,
             &target.positions,
             &weights,
-            identity_error,
+            raw_identity_error,
+            weighted_identity_error,
         ));
     }
 
@@ -1942,7 +2065,8 @@ fn choose_affine_candidate(
             &source.positions,
             &target.positions,
             &weights,
-            identity_error,
+            raw_identity_error,
+            weighted_identity_error,
         ));
     }
     if let Some(similarity) = fit_similarity_matrix(&source.positions, &target.positions, &weights)
@@ -1962,21 +2086,42 @@ fn choose_affine_candidate(
             &source.positions,
             &target.positions,
             &weights,
-            identity_error,
+            raw_identity_error,
+            weighted_identity_error,
         ));
     }
 
-    let mut viable = hypotheses
-        .into_iter()
-        .filter(|hypothesis| {
-            hypothesis.operator.is_no_op()
-                || (identity_error > 0.0
-                    && hypothesis.geometric_error < identity_error
-                    && hypothesis.explained >= f64::from(settings.affine_min_explained))
-        })
+    let rejections = hypotheses
+        .iter()
+        .map(|hypothesis| hypothesis_rejection(hypothesis, settings, weighted_identity_error))
         .collect::<Vec<_>>();
-    viable.sort_by(compare_hypotheses);
-    viable.remove(0)
+    let selected_index = hypotheses
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| rejections[*index].is_none())
+        .min_by(|(_, left), (_, right)| compare_hypotheses(left, right))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    let hypothesis_diagnostics = hypotheses
+        .iter()
+        .enumerate()
+        .map(|(index, hypothesis)| {
+            hypothesis.diagnostics(index == selected_index, rejections[index].clone())
+        })
+        .collect();
+
+    InferenceResult {
+        selected: hypotheses[selected_index].clone(),
+        diagnostics: InferenceDiagnostics {
+            diagnostics_schema_version: 1,
+            package_schema_version: SCHEMA_VERSION,
+            surface_weighting: "triangle_area_derived_vertex_weights".to_owned(),
+            raw_identity_error,
+            weighted_identity_error,
+            selected_hypothesis_index: selected_index,
+            hypotheses: hypothesis_diagnostics,
+        },
+    }
 }
 
 fn operator_hypothesis(
@@ -1984,44 +2129,105 @@ fn operator_hypothesis(
     source: &[[f32; 3]],
     target: &[[f32; 3]],
     weights: &[f64],
-    identity_error: f64,
+    raw_identity_error: f64,
+    weighted_identity_error: f64,
 ) -> OperatorHypothesis {
     let reconstructed_positions = apply_affine_to_positions(source, operator.matrix());
-    let geometric_error = sum_squared_distance(&reconstructed_positions, target);
+    let raw_geometric_error = sum_squared_distance(&reconstructed_positions, target);
     let weighted_geometric_error =
         weighted_sum_squared_distance(&reconstructed_positions, target, weights);
-    let explained = explained_fraction(identity_error, geometric_error);
+    let raw_explained_fraction = explained_fraction(raw_identity_error, raw_geometric_error);
+    let weighted_explained_fraction =
+        explained_fraction(weighted_identity_error, weighted_geometric_error);
     let parameter_count = operator.parameter_count();
-    let encoded_size = operator.encoded_size();
-    let residual_size = residual_storage_size(&reconstructed_positions, target);
+    let semantic_metadata_size = operator.semantic_metadata_size();
+    let exact_residual_bytes = exact_residual_storage_size(&reconstructed_positions, target);
     let score = hypothesis_score(HypothesisScoreInputs {
         operator,
         weighted_geometric_error,
         parameter_count,
-        encoded_size,
-        residual_size,
+        semantic_metadata_size,
+        exact_residual_bytes,
         source,
         target,
         weights,
+        reconstructed: &reconstructed_positions,
     });
     OperatorHypothesis {
         operator,
         reconstructed_positions,
-        geometric_error,
-        explained,
+        weighted_geometric_error,
+        weighted_explained_fraction,
+        raw_geometric_error,
+        raw_explained_fraction,
         parameter_count,
-        encoded_size,
-        residual_size,
-        score,
+        semantic_metadata_size,
+        approximate_residual_cost: score.approximate_residual_cost,
+        exact_residual_bytes,
+        parameter_cost: score.parameter_cost,
+        semantic_metadata_cost: score.semantic_metadata_cost,
+        operator_prior_penalty: score.operator_prior_penalty,
+        score: score.total_score,
     }
+}
+
+impl OperatorHypothesis {
+    fn diagnostics(
+        &self,
+        selected: bool,
+        rejection_reason: Option<String>,
+    ) -> HypothesisDiagnostics {
+        HypothesisDiagnostics {
+            family: self.operator.family(),
+            weighted_geometric_error: self.weighted_geometric_error,
+            weighted_explained_fraction: self.weighted_explained_fraction,
+            raw_geometric_error: self.raw_geometric_error,
+            raw_explained_fraction: self.raw_explained_fraction,
+            parameter_cost: self.parameter_cost,
+            semantic_metadata_cost: self.semantic_metadata_cost,
+            approximate_residual_cost: self.approximate_residual_cost,
+            exact_residual_bytes: self.exact_residual_bytes,
+            prior_penalty: self.operator_prior_penalty,
+            total_score: self.score,
+            selected,
+            rejection_reason,
+        }
+    }
+}
+
+fn hypothesis_rejection(
+    hypothesis: &OperatorHypothesis,
+    settings: DecompileSettings,
+    weighted_identity_error: f64,
+) -> Option<String> {
+    if hypothesis.operator.is_no_op() {
+        return None;
+    }
+    if weighted_identity_error <= f64::EPSILON {
+        return Some("source and target have no surface-weighted displacement".to_owned());
+    }
+    if hypothesis.weighted_geometric_error >= weighted_identity_error {
+        return Some("candidate does not improve surface-weighted geometric error".to_owned());
+    }
+    let threshold = f64::from(settings.affine_min_explained);
+    if hypothesis.weighted_explained_fraction < threshold {
+        return Some(format!(
+            "surface-weighted explained fraction {:.9} is below affine_min_explained {:.9}",
+            hypothesis.weighted_explained_fraction, threshold
+        ));
+    }
+    None
 }
 
 fn compare_hypotheses(left: &OperatorHypothesis, right: &OperatorHypothesis) -> std::cmp::Ordering {
     left.score
         .total_cmp(&right.score)
-        .then_with(|| left.residual_size.cmp(&right.residual_size))
+        .then_with(|| left.exact_residual_bytes.cmp(&right.exact_residual_bytes))
         .then_with(|| left.parameter_count.cmp(&right.parameter_count))
-        .then_with(|| left.encoded_size.cmp(&right.encoded_size))
+        .then_with(|| {
+            left.semantic_metadata_size
+                .cmp(&right.semantic_metadata_size)
+        })
         .then_with(|| {
             left.operator
                 .preference_order()
@@ -2033,14 +2239,24 @@ struct HypothesisScoreInputs<'a> {
     operator: InferredOperator,
     weighted_geometric_error: f64,
     parameter_count: usize,
-    encoded_size: usize,
-    residual_size: usize,
+    semantic_metadata_size: usize,
+    exact_residual_bytes: usize,
     source: &'a [[f32; 3]],
     target: &'a [[f32; 3]],
     weights: &'a [f64],
+    reconstructed: &'a [[f32; 3]],
 }
 
-fn hypothesis_score(inputs: HypothesisScoreInputs<'_>) -> f64 {
+#[derive(Debug, Copy, Clone)]
+struct HypothesisScore {
+    parameter_cost: f64,
+    semantic_metadata_cost: f64,
+    approximate_residual_cost: f64,
+    operator_prior_penalty: f64,
+    total_score: f64,
+}
+
+fn hypothesis_score(inputs: HypothesisScoreInputs<'_>) -> HypothesisScore {
     let error_scale = weighted_centered_sum_squared_distance(inputs.source, inputs.weights)
         .max(weighted_centered_sum_squared_distance(
             inputs.target,
@@ -2049,18 +2265,31 @@ fn hypothesis_score(inputs: HypothesisScoreInputs<'_>) -> f64 {
         .max(f64::EPSILON);
     let literal_size = inputs.source.len().saturating_mul(12).max(1) as f64;
     let normalized_geometric_error = inputs.weighted_geometric_error / error_scale;
-    let complexity_cost = inputs.parameter_count as f64 * OPERATOR_PARAMETER_SCORE_WEIGHT;
-    let encoded_cost =
-        inputs.encoded_size as f64 / literal_size * OPERATOR_ENCODED_SIZE_SCORE_WEIGHT;
-    let residual_cost = inputs.residual_size as f64 / literal_size * RESIDUAL_SIZE_SCORE_WEIGHT;
-    normalized_geometric_error
-        + complexity_cost
-        + encoded_cost
-        + residual_cost
-        + inputs.operator.instability_penalty()
+    let parameter_cost = inputs.parameter_count as f64 * OPERATOR_PARAMETER_SCORE_WEIGHT;
+    let semantic_metadata_cost =
+        inputs.semantic_metadata_size as f64 / literal_size * SEMANTIC_METADATA_SCORE_WEIGHT;
+    let approximate_residual_cost =
+        approximate_residual_cost(inputs.reconstructed, inputs.target, inputs.weights)
+            * APPROXIMATE_RESIDUAL_SCORE_WEIGHT;
+    let exact_residual_cost =
+        inputs.exact_residual_bytes as f64 / literal_size * EXACT_RESIDUAL_BYTES_SCORE_WEIGHT;
+    let operator_prior_penalty = inputs.operator.operator_prior_penalty();
+    let total_score = normalized_geometric_error
+        + parameter_cost
+        + semantic_metadata_cost
+        + approximate_residual_cost
+        + exact_residual_cost
+        + operator_prior_penalty;
+    HypothesisScore {
+        parameter_cost,
+        semantic_metadata_cost,
+        approximate_residual_cost,
+        operator_prior_penalty,
+        total_score,
+    }
 }
 
-fn residual_storage_size(reconstructed: &[[f32; 3]], target: &[[f32; 3]]) -> usize {
+fn exact_residual_storage_size(reconstructed: &[[f32; 3]], target: &[[f32; 3]]) -> usize {
     reconstructed
         .iter()
         .zip(target)
@@ -2069,18 +2298,66 @@ fn residual_storage_size(reconstructed: &[[f32; 3]], target: &[[f32; 3]]) -> usi
         * (std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>())
 }
 
+fn approximate_residual_cost(
+    reconstructed: &[[f32; 3]],
+    target: &[[f32; 3]],
+    weights: &[f64],
+) -> f64 {
+    let total_weight = weights
+        .iter()
+        .copied()
+        .filter(|weight| weight.is_finite() && *weight > 0.0)
+        .sum::<f64>()
+        .max(f64::EPSILON);
+    let centered_scale = weighted_centered_sum_squared_distance(target, weights).max(
+        weighted_centered_sum_squared_distance(reconstructed, weights),
+    ) / total_weight;
+    let coordinate_scale = target
+        .iter()
+        .chain(reconstructed)
+        .flat_map(|position| position.iter())
+        .map(|coordinate| f64::from(*coordinate).abs())
+        .fold(0.0_f64, f64::max);
+    let scale = centered_scale.sqrt().max(coordinate_scale).max(1.0);
+    let epsilon =
+        APPROXIMATE_RESIDUAL_ABSOLUTE_EPSILON.max(scale * APPROXIMATE_RESIDUAL_RELATIVE_EPSILON);
+    let threshold_squared = epsilon * epsilon;
+    let residual_weight = reconstructed
+        .iter()
+        .zip(target)
+        .enumerate()
+        .filter_map(|(index, (left, right))| {
+            let dx = f64::from(left[0]) - f64::from(right[0]);
+            let dy = f64::from(left[1]) - f64::from(right[1]);
+            let dz = f64::from(left[2]) - f64::from(right[2]);
+            let distance_squared = dx * dx + dy * dy + dz * dz;
+            if distance_squared <= threshold_squared {
+                None
+            } else {
+                Some(weights.get(index).copied().unwrap_or(1.0).max(0.0))
+            }
+        })
+        .sum::<f64>();
+    let cost = (residual_weight / total_weight).clamp(0.0, 1.0);
+    if cost <= 0.0 { 0.0 } else { cost }
+}
+
 fn vertex_area_weights(mesh: &TriangleMesh) -> Vec<f64> {
-    let mut weights = vec![0.0_f64; mesh.positions.len()];
-    for triangle in mesh.indices.chunks_exact(3) {
+    vertex_area_weights_from_parts(&mesh.positions, &mesh.indices)
+}
+
+fn vertex_area_weights_from_parts(positions: &[[f32; 3]], indices: &[u32]) -> Vec<f64> {
+    let mut weights = vec![0.0_f64; positions.len()];
+    for triangle in indices.chunks_exact(3) {
         let [a, b, c] = [
             triangle[0] as usize,
             triangle[1] as usize,
             triangle[2] as usize,
         ];
-        if a >= mesh.positions.len() || b >= mesh.positions.len() || c >= mesh.positions.len() {
+        if a >= positions.len() || b >= positions.len() || c >= positions.len() {
             continue;
         }
-        let area = triangle_area(mesh.positions[a], mesh.positions[b], mesh.positions[c]);
+        let area = triangle_area(positions[a], positions[b], positions[c]);
         if area.is_finite() && area > 0.0 {
             let share = area / 3.0;
             weights[a] += share;
@@ -2090,9 +2367,9 @@ fn vertex_area_weights(mesh: &TriangleMesh) -> Vec<f64> {
     }
     let total = weights.iter().sum::<f64>();
     if !total.is_finite() || total <= f64::EPSILON {
-        return vec![1.0; mesh.positions.len()];
+        return vec![1.0; positions.len()];
     }
-    let average = total / mesh.positions.len().max(1) as f64;
+    let average = total / positions.len().max(1) as f64;
     for weight in &mut weights {
         if !weight.is_finite() || *weight <= 0.0 {
             *weight = average;
@@ -3256,6 +3533,62 @@ def sum_squared_distance(left, right):
     )
 
 
+def triangle_area(a, b, c):
+    ab = (
+        float(b[0]) - float(a[0]),
+        float(b[1]) - float(a[1]),
+        float(b[2]) - float(a[2]),
+    )
+    ac = (
+        float(c[0]) - float(a[0]),
+        float(c[1]) - float(a[1]),
+        float(c[2]) - float(a[2]),
+    )
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    return 0.5 * math.sqrt(sum(component * component for component in cross))
+
+
+def vertex_area_weights(positions, indices):
+    weights = [0.0] * len(positions)
+    for offset in range(0, len(indices), 3):
+        a, b, c = indices[offset : offset + 3]
+        if a >= len(positions) or b >= len(positions) or c >= len(positions):
+            continue
+        area = triangle_area(positions[a], positions[b], positions[c])
+        if math.isfinite(area) and area > 0.0:
+            share = area / 3.0
+            weights[a] += share
+            weights[b] += share
+            weights[c] += share
+    total = sum(weights)
+    if not math.isfinite(total) or total <= sys.float_info.epsilon:
+        return [1.0] * len(positions)
+    average = total / max(len(positions), 1)
+    normalized = []
+    for weight in weights:
+        if not math.isfinite(weight) or weight <= 0.0:
+            weight = average
+        normalized.append(weight / average)
+    return normalized
+
+
+def weighted_sum_squared_distance(left, right, weights):
+    total = 0.0
+    for index, (left_position, right_position) in enumerate(zip(left, right)):
+        weight = weights[index] if index < len(weights) else 1.0
+        if not math.isfinite(weight) or weight <= 0.0:
+            continue
+        error = sum(
+            (float(a) - float(b)) ** 2 for a, b in zip(left_position, right_position)
+        )
+        total += error * weight
+    return total
+
+
 def max_euclidean_distance(left, right):
     return max(
         (
@@ -3362,13 +3695,17 @@ def is_proper_rotation(rotation):
     )
 
 
-def replay_operators(manifest, source_positions, target_positions):
+def replay_operators(manifest, source_positions, source_indices, target_positions):
     current = list(source_positions)
     stages = []
     saw_lossless = False
     operator_ids = set()
     operator_labels = set()
     identity_error = sum_squared_distance(source_positions, target_positions)
+    weights = vertex_area_weights(source_positions, source_indices)
+    weighted_identity_error = weighted_sum_squared_distance(
+        source_positions, target_positions, weights
+    )
     for operator_index, operator in enumerate(manifest["operators"]):
         if saw_lossless:
             raise ValueError("the lossless correction must be the final operator")
@@ -3442,7 +3779,13 @@ def replay_operators(manifest, source_positions, target_positions):
             if not positions_bit_equal(evaluated, baked):
                 raise ValueError("baked affine positions do not match the serialized matrix")
             affine_error = sum_squared_distance(evaluated, target_positions)
+            weighted_affine_error = weighted_sum_squared_distance(
+                evaluated, target_positions, weights
+            )
             expected_explained = f32(explained_fraction(identity_error, affine_error))
+            expected_weighted_explained = explained_fraction(
+                weighted_identity_error, weighted_affine_error
+            )
             expected_max_error = max_euclidean_distance(evaluated, target_positions)
             if f32_bits(operator["explained_displacement_fraction"]) != f32_bits(
                 expected_explained
@@ -3451,10 +3794,10 @@ def replay_operators(manifest, source_positions, target_positions):
             if f32_bits(operator["max_remaining_error"]) != f32_bits(expected_max_error):
                 raise ValueError("global affine remaining-error metadata is inconsistent")
             if (
-                identity_error <= 0.0
-                or affine_error >= identity_error
-                or expected_explained
-                < f32(manifest["settings"]["affine_min_explained"])
+                weighted_identity_error <= 0.0
+                or weighted_affine_error >= weighted_identity_error
+                or expected_weighted_explained
+                < float(f32(manifest["settings"]["affine_min_explained"]))
             ):
                 raise ValueError("global affine does not satisfy its emission threshold")
             current = baked
@@ -3666,7 +4009,7 @@ def load_and_validate_package():
             raise ValueError(f"verification field {field} must be finite and non-negative")
 
     final_positions, stages = replay_operators(
-        manifest, source_positions, target_positions
+        manifest, source_positions, source_indices, target_positions
     )
     if not positions_bit_equal(final_positions, target_positions):
         raise ValueError("serialized operators do not reconstruct target positions exactly")
@@ -4159,6 +4502,61 @@ mod tests {
     }
 
     #[test]
+    fn surface_weighted_eligibility_resists_dense_small_patch_bias() {
+        let source = uneven_area_mesh();
+        let mut target = source.clone();
+        for position in target.positions.iter_mut().take(4) {
+            position[0] += 10.0;
+        }
+
+        let result = decompile_pair(&source, &target, DecompileSettings::default()).unwrap();
+
+        let Some(OperatorManifest::GlobalAffine {
+            semantic_family,
+            explained_displacement_fraction,
+            ..
+        }) = result.manifest.operators.first()
+        else {
+            panic!("expected weighted translation operator");
+        };
+        assert_eq!(*semantic_family, AffineSemanticFamily::Translation);
+        assert_eq!(*explained_displacement_fraction, 0.0);
+        let selected = result
+            .inference_diagnostics
+            .hypotheses
+            .iter()
+            .find(|hypothesis| hypothesis.selected)
+            .expect("selected hypothesis");
+        assert_eq!(selected.family, OperatorFamily::Translation);
+        assert!(selected.weighted_explained_fraction > 0.99);
+        assert_eq!(selected.raw_explained_fraction, 0.0);
+        assert!(selected.exact_residual_bytes > 0);
+        assert!(position_slices_bit_equal(
+            &result.reconstructed_positions,
+            &target.positions
+        ));
+    }
+
+    #[test]
+    fn approximate_residual_cost_ignores_one_ulp_audit_differences() {
+        let source = cube_mesh();
+        let mut target = source.positions.clone();
+        for position in &mut target {
+            position[0] = f32::from_bits(position[0].to_bits() + 1);
+        }
+        let weights = vertex_area_weights(&source);
+
+        assert_eq!(
+            exact_residual_storage_size(&source.positions, &target),
+            source.positions.len() * (std::mem::size_of::<u32>() + 3 * std::mem::size_of::<f32>())
+        );
+        assert_eq!(
+            approximate_residual_cost(&source.positions, &target, &weights),
+            0.0
+        );
+    }
+
+    #[test]
     fn exact_similarity_transform_is_labeled_as_similarity() {
         let source = cube_mesh();
         let target = transformed_mesh(&source, |position| {
@@ -4313,6 +4711,7 @@ mod tests {
         assert!(paths.manifest.exists());
         assert!(paths.verification.exists());
         assert!(paths.package_verification.exists());
+        assert!(paths.inference_diagnostics.exists());
         assert!(paths.blender_script.exists());
         assert!(dir.path().join(SOURCE_MESHBIN).exists());
         assert!(dir.path().join(TARGET_MESHBIN).exists());
@@ -4327,6 +4726,21 @@ mod tests {
         );
         assert_eq!(manifest.verification.max_euclidean_error, 0.0);
         assert_eq!(manifest.topology.vertex_count, source.positions.len());
+
+        let diagnostics: InferenceDiagnostics =
+            serde_json::from_str(&fs::read_to_string(paths.inference_diagnostics).unwrap())
+                .unwrap();
+        assert_eq!(diagnostics.diagnostics_schema_version, 1);
+        assert_eq!(diagnostics.package_schema_version, SCHEMA_VERSION);
+        assert_eq!(diagnostics.selected_hypothesis_index, 2);
+        assert_eq!(
+            diagnostics
+                .hypotheses
+                .iter()
+                .filter(|hypothesis| hypothesis.selected)
+                .count(),
+            1
+        );
 
         let package_verification = verify_decompile_package(dir.path()).unwrap();
         assert!(package_verification.topology_exact);

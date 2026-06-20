@@ -34,7 +34,7 @@ Useful creation options:
 --residual-epsilon 0.0
 ```
 
-`--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler now scores affine-family hypotheses instead of returning the first simple family that is close enough. The internal score combines normalized geometric error, operator parameter complexity, encoded semantic metadata size, exact residual storage size, and a small instability penalty. This lets rigid or similarity win over translation when the simpler model would force a large exact correction, while still letting lossless-only reconstruction win for isolated local edits. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
+`--affine-min-explained` controls whether an affine fit is worth emitting as an editable stage. The decompiler now scores affine-family hypotheses instead of returning the first simple family that is close enough. Eligibility and semantic scoring use triangle-area-weighted explained displacement, while the schema-2 manifest still reports the raw unweighted vertex explained fraction as a backward-compatible diagnostic. The internal score combines normalized weighted geometric error, operator parameter complexity, semantic metadata size, tolerance-based approximate residual cost, exact audit-correction bytes as a light tie-breaker, and a small operator prior penalty. This lets rigid or similarity win over translation when the simpler model would force a large meaningful correction, while still letting lossless-only reconstruction win for isolated local edits. `--residual-epsilon` affects verification reporting only; the final correction remains bit-exact.
 
 Affine fitting uses deterministic triangle-area-derived vertex weights so densely tessellated regions do not automatically dominate the inferred geometric explanation. Exact package verification still compares every original vertex and ordered triangle index directly.
 
@@ -60,6 +60,7 @@ There is no correspondence solver yet. Geometrically identical meshes with reord
 manifest.json
 verification.json
 package-verification.json
+inference-diagnostics.json
 source.meshbin
 target.meshbin
 operators/0000-global-affine-positions.f32
@@ -92,7 +93,7 @@ Affine operators are still serialized as `kind: "global_affine"` in schema 2, so
 
 Correction positions are absolute target positions, not accumulated deltas. This prevents drift during the final exact reconstruction.
 
-`verification.json` must match the verification embedded in `manifest.json`. `package-verification.json` is a generated replay report. The `verify-decompile` command does not trust that report; it rereads the package, validates all declared formats and paths, recomputes operator metadata, replays every serialized stage, compares the ordered topology arrays directly, and checks every final position component by its `f32` bit pattern.
+`verification.json` must match the verification embedded in `manifest.json`. `package-verification.json` is a generated replay report. `inference-diagnostics.json` is advisory: it records every model-selection hypothesis, weighted and raw explained fractions, approximate residual cost, exact residual bytes, prior penalty, total score, selection state, and rejection reason. The `verify-decompile` command does not trust generated reports or diagnostics; it rereads the package, validates all declared formats and paths, recomputes operator metadata, replays every serialized stage, compares the ordered topology arrays directly, and checks every final position component by its `f32` bit pattern.
 
 The manifest also contains an FNV-1a topology fingerprint for quick diagnostics. That fingerprint is not treated as proof of equality: exact verification compares vertex counts and the complete ordered index arrays.
 
@@ -102,7 +103,7 @@ A mathematically affine target can still require a few exact-correction entries.
 
 For this reason the CLI reports both:
 
-- the affine stage's explained-displacement percentage and maximum geometric error
+- the affine stage's raw vertex explained-displacement percentage and maximum geometric error
 - the number of **exact correction vertices** needed to reach bit equality
 
 The exact-correction count should not be interpreted as the number of semantically non-affine edits by itself.

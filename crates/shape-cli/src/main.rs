@@ -10,8 +10,8 @@ use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
 use shape_core::{ParamGroup, ShapeDocument, validate_document};
 use shape_decompiler::{
-    AffineSemanticFamily, DecompileSettings, OperatorManifest, decompile_pair,
-    verify_decompile_package, write_decompile_package,
+    AffineSemanticFamily, DecompileSettings, HypothesisDiagnostics, OperatorFamily,
+    OperatorManifest, decompile_pair, verify_decompile_package, write_decompile_package,
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
@@ -121,6 +121,9 @@ struct DecompileArgs {
     /// Verification tolerance; the final residual remains lossless.
     #[arg(long, default_value_t = 0.0)]
     residual_epsilon: f32,
+    /// Print per-hypothesis inference diagnostics.
+    #[arg(long)]
+    verbose: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -368,8 +371,13 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
             OperatorManifest::GlobalAffine {
                 semantic_family,
                 explained_displacement_fraction,
+                max_remaining_error,
                 ..
-            } => Some((*semantic_family, *explained_displacement_fraction)),
+            } => Some((
+                *semantic_family,
+                *explained_displacement_fraction,
+                *max_remaining_error,
+            )),
             OperatorManifest::LosslessCorrection { .. } => None,
         });
     println!("Decompiled same-topology mesh pair");
@@ -377,15 +385,20 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
     println!("  triangles: {}", result.manifest.topology.triangle_count);
     println!("  topology hash: {}", result.manifest.topology.hash);
     println!("  operators: {}", result.manifest.operators.len());
-    if let Some((semantic_family, affine_explained)) = affine_summary {
+    if let Some((semantic_family, affine_explained, affine_max_error)) = affine_summary {
         println!(
             "  affine operator: {}",
             affine_family_label(semantic_family)
         );
-        println!("  affine explained: {:.3}%", affine_explained * 100.0);
+        println!(
+            "  affine explained (raw vertices): {:.3}%",
+            affine_explained * 100.0
+        );
+        println!("  affine max error: {:.9}", affine_max_error);
     } else {
         println!("  affine operator: none");
-        println!("  affine explained: 0.000%");
+        println!("  affine explained (raw vertices): 0.000%");
+        println!("  affine max error: 0.000000000");
     }
     println!("  residual vertices: {}", result.residual_indices.len());
     println!(
@@ -397,7 +410,17 @@ fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {
         "  package verification: {}",
         paths.package_verification.display()
     );
+    println!(
+        "  inference diagnostics: {}",
+        paths.inference_diagnostics.display()
+    );
     println!("  blender script: {}", paths.blender_script.display());
+    if args.verbose {
+        println!("Inference hypotheses:");
+        for hypothesis in &result.inference_diagnostics.hypotheses {
+            print_hypothesis_diagnostics(hypothesis);
+        }
+    }
     Ok(())
 }
 
@@ -407,6 +430,36 @@ fn affine_family_label(semantic_family: AffineSemanticFamily) -> &'static str {
         AffineSemanticFamily::Translation => "translation",
         AffineSemanticFamily::RigidTransform => "rigid transform",
         AffineSemanticFamily::SimilarityTransform => "similarity transform",
+    }
+}
+
+fn print_hypothesis_diagnostics(hypothesis: &HypothesisDiagnostics) {
+    let selected = if hypothesis.selected {
+        "selected"
+    } else {
+        "candidate"
+    };
+    let rejection = hypothesis.rejection_reason.as_deref().unwrap_or("viable");
+    println!(
+        "  - {} [{}]: score={:.9} raw={:.3}% weighted={:.3}% approx_residual={:.6} exact_bytes={} status={}",
+        operator_family_label(hypothesis.family),
+        selected,
+        hypothesis.total_score,
+        hypothesis.raw_explained_fraction * 100.0,
+        hypothesis.weighted_explained_fraction * 100.0,
+        hypothesis.approximate_residual_cost,
+        hypothesis.exact_residual_bytes,
+        rejection
+    );
+}
+
+fn operator_family_label(family: OperatorFamily) -> &'static str {
+    match family {
+        OperatorFamily::NoOp => "no-op",
+        OperatorFamily::Translation => "translation",
+        OperatorFamily::RigidTransform => "rigid transform",
+        OperatorFamily::SimilarityTransform => "similarity transform",
+        OperatorFamily::GeneralAffine => "global affine",
     }
 }
 
