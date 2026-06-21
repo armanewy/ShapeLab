@@ -551,11 +551,26 @@ fn plate_multiple_same_face_cuts_compose_closed_semantic_geometry() {
         });
     }
 
-    let part = generate_cut_plate_with_operations(operations, [4.0, 2.0], 0.30)
+    let part = generate_cut_plate_with_operations(operations.clone(), [4.0, 2.0], 0.30)
         .expect("multi-cut plate should generate");
+    let reversed_part = generate_cut_plate_with_operations(
+        operations.into_iter().rev().collect(),
+        [4.0, 2.0],
+        0.30,
+    )
+    .expect("reordered independent cuts should generate");
 
     assert_closed_mesh(&part.mesh);
     assert_common_mesh_quality(&part.mesh);
+    assert_region_faces_have_no_operation(&part, RegionId(3));
+    assert_region_faces_have_no_operation(&reversed_part, RegionId(3));
+    assert_operation_faces_on_plane_use_region(
+        &part,
+        OperationId(50),
+        SurfaceRole::PrimarySurface,
+        -0.15,
+        RegionId(2),
+    );
     for operation in [
         OperationId(40),
         OperationId(50),
@@ -637,6 +652,63 @@ fn plate_multi_cut_rejects_overlapping_footprints() {
     ];
 
     assert!(generate_cut_plate_with_operations(operations, [3.0, 2.0], 0.30).is_err());
+}
+
+#[test]
+fn negative_face_multi_cut_uses_front_region_for_opposite_support() {
+    let operations = vec![
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(90),
+            region: RegionId(2),
+            face: PlanarCutFace::NegativeY,
+            center: [-0.40, 0.0],
+            radius: 0.12,
+            radial_segments: 12,
+            rim_width: 0.04,
+            entry_loop: BoundaryLoopId(90),
+            exit_loop: BoundaryLoopId(91),
+            outer_region: RegionId(2),
+            rim_region: RegionId(190),
+            wall_region: RegionId(191),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        },
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(91),
+            region: RegionId(2),
+            face: PlanarCutFace::NegativeY,
+            center: [0.40, 0.0],
+            radius: 0.12,
+            radial_segments: 12,
+            rim_width: 0.04,
+            entry_loop: BoundaryLoopId(92),
+            exit_loop: BoundaryLoopId(93),
+            outer_region: RegionId(2),
+            rim_region: RegionId(192),
+            wall_region: RegionId(193),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        },
+    ];
+
+    let part = generate_cut_plate_with_operations(operations, [2.0, 1.2], 0.30)
+        .expect("negative-face multi-cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_faces_have_no_operation(&part, RegionId(3));
+    assert_operation_faces_on_plane_use_region(
+        &part,
+        OperationId(90),
+        SurfaceRole::PrimarySurface,
+        0.15,
+        RegionId(1),
+    );
+    assert_operation_faces_on_plane_use_region(
+        &part,
+        OperationId(90),
+        SurfaceRole::PrimarySurface,
+        -0.15,
+        RegionId(2),
+    );
 }
 
 fn context() -> GeneratorContext {
@@ -800,6 +872,53 @@ fn assert_region_role(part: &GeneratedPart, region: RegionId, role: SurfaceRole)
         .role
         .clone();
     assert_eq!(actual, role);
+}
+
+fn assert_region_faces_have_no_operation(part: &GeneratedPart, region: RegionId) {
+    let mut checked = 0;
+    for metadata in &part.mesh.face_metadata {
+        if metadata.region != Some(region) {
+            continue;
+        }
+        checked += 1;
+        assert_eq!(
+            metadata.operation, None,
+            "base region {region:?} should not carry cut operation provenance"
+        );
+    }
+    assert!(checked > 0, "expected faces for region {region:?}");
+}
+
+fn assert_operation_faces_on_plane_use_region(
+    part: &GeneratedPart,
+    operation: OperationId,
+    role: SurfaceRole,
+    y: f32,
+    region: RegionId,
+) {
+    let mut checked = 0;
+    for (face, metadata) in part.mesh.faces.iter().zip(&part.mesh.face_metadata) {
+        if metadata.operation != Some(operation) || metadata.surface_role != Some(role.clone()) {
+            continue;
+        }
+        let on_plane = face
+            .vertices
+            .iter()
+            .all(|vertex| (part.mesh.positions[*vertex as usize][1] - y).abs() <= 0.0001);
+        if !on_plane {
+            continue;
+        }
+        checked += 1;
+        assert_eq!(
+            metadata.region,
+            Some(region),
+            "operation {operation:?} faces on y={y} should use host region {region:?}"
+        );
+    }
+    assert!(
+        checked > 0,
+        "expected operation {operation:?} {role:?} faces on y={y}"
+    );
 }
 
 fn assert_circular_rim_region_is_radial_band(

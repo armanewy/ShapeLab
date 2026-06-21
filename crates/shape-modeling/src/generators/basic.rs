@@ -566,7 +566,7 @@ fn build_cut_plate(
         &outside_host,
         &host_points,
         context,
-        cut.operation,
+        Some(cut.operation),
     );
 
     match cut.kind {
@@ -929,7 +929,7 @@ fn build_multi_cut_plate(
         &outside_host,
         &host_points,
         context,
-        first.operation,
+        None,
     );
 
     add_plate_grid_face_with_holes(
@@ -977,6 +977,7 @@ fn build_multi_cut_plate(
             outside_normal,
             &xs,
             &zs,
+            entry_region,
             context,
             &mut boundary_marks,
         )?;
@@ -988,6 +989,7 @@ fn build_multi_cut_plate(
                 opposite_normal,
                 &xs,
                 &zs,
+                opposite_region,
                 context,
                 &mut boundary_marks,
             )?;
@@ -1684,6 +1686,7 @@ fn add_cut_features_for_face(
     desired_normal: [f32; 3],
     xs: &[f32],
     zs: &[f32],
+    host_region: RegionId,
     context: &GeneratorContext,
     _boundary_marks: &mut Vec<BoundaryLoopMark>,
 ) -> Result<(), ModelingError> {
@@ -1719,7 +1722,7 @@ fn add_cut_features_for_face(
         desired_normal,
         context,
         cut.operation,
-        cut.outer_region,
+        host_region,
         SurfaceRole::PrimarySurface,
     )?;
     add_matched_ring_band(
@@ -2080,7 +2083,7 @@ fn add_plate_shell_sides(
     front_ring: &[u32],
     points: &[[f32; 2]],
     context: &GeneratorContext,
-    operation: OperationId,
+    operation: Option<OperationId>,
 ) {
     for index in 0..points.len() {
         let next = (index + 1) % points.len();
@@ -2089,6 +2092,18 @@ fn add_plate_shell_sides(
             0.0,
             (points[index][1] + points[next][1]) * 0.5,
         ];
+        let metadata = operation.map_or_else(
+            || plate_metadata(context, PLATE_SIDE_REGION),
+            |operation| {
+                cut_metadata(
+                    context,
+                    PLATE_SIDE_REGION,
+                    SurfaceRole::Side,
+                    operation,
+                    Some(2),
+                )
+            },
+        );
         add_oriented_face(
             builder,
             vec![
@@ -2098,13 +2113,7 @@ fn add_plate_shell_sides(
                 front_ring[index],
             ],
             normalize_or(midpoint, [1.0, 0.0, 0.0]),
-            cut_metadata(
-                context,
-                PLATE_SIDE_REGION,
-                SurfaceRole::Side,
-                operation,
-                Some(2),
-            ),
+            metadata,
         );
     }
 }
