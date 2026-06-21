@@ -904,6 +904,26 @@ impl ModelingOperationSpec {
         }
     }
 
+    /// Return the coarse execution phase for this operation.
+    #[must_use]
+    pub fn phase(&self) -> OperationPhase {
+        match self {
+            Self::SetBevelProfile { .. } => OperationPhase::BoundaryTreatment,
+            Self::AddPanel { .. }
+            | Self::AddTrim { .. }
+            | Self::RecessedPanelCut { .. }
+            | Self::RectangularThroughCut { .. }
+            | Self::CircularThroughCut { .. }
+            | Self::ReservedBoolean { .. } => OperationPhase::LocalTopology,
+            Self::TransformGeometry { .. } | Self::ReservedDeformationProgram { .. } => {
+                OperationPhase::LocalTransform
+            }
+            Self::MirrorInstances { .. } | Self::LinearArray { .. } | Self::RadialArray { .. } => {
+                OperationPhase::AssemblyGeneration
+            }
+        }
+    }
+
     /// Return generated boundary loops authored by this operation.
     #[must_use]
     pub fn boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
@@ -2008,6 +2028,9 @@ pub enum AssetEdit {
         definition: PartDefinitionId,
         /// Operation to remove.
         operation: OperationId,
+        /// How to handle descriptors and authored hints that reference the operation.
+        #[serde(default)]
+        policy: OperationRemovalPolicy,
     },
     /// Duplicate an authored cut operation with fresh semantic IDs.
     DuplicateCutOperation {
@@ -2133,6 +2156,31 @@ pub enum AssetEdit {
         /// Requested child order.
         ordered_children: Vec<PartInstanceId>,
     },
+}
+
+/// Explicit policy for removing authored modeling operations.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OperationRemovalPolicy {
+    /// Fail when parameters or variation metadata still reference the operation.
+    #[default]
+    RejectIfReferenced,
+    /// Remove metadata owned by the operation before deleting it.
+    CascadeOwnedMetadata,
+}
+
+/// Coarse execution phase for ordered modeling operations.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum OperationPhase {
+    /// Controls that configure the base source before local topology is generated.
+    SourceConfiguration,
+    /// Operations that create or remove local topology.
+    LocalTopology,
+    /// Operations that consume existing local boundaries or alter boundary treatment.
+    BoundaryTreatment,
+    /// Operations that move local generated geometry without assembly fan-out.
+    LocalTransform,
+    /// Operations that generate assembly occurrences such as arrays and mirrors.
+    AssemblyGeneration,
 }
 
 /// Ordered edit program with a deterministic seed.
@@ -4987,7 +5035,8 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
         AssetEdit::RemoveModelingOperation {
             definition,
             operation,
-        } => remove_modeling_operation(recipe, *definition, *operation),
+            policy,
+        } => remove_modeling_operation(recipe, *definition, *operation, *policy),
         AssetEdit::DuplicateCutOperation {
             definition,
             source,
@@ -5482,6 +5531,9 @@ fn insert_modeling_operation(
         .geometry
         .operations
         .insert(index, operation.clone());
+    ensure_operation_phase_order(&definition_ref.geometry.operations).inspect_err(|_| {
+        definition_ref.geometry.operations.remove(index);
+    })?;
     bump_next_ids_for_operation(recipe, operation);
     Ok(())
 }
@@ -5490,18 +5542,41 @@ fn remove_modeling_operation(
     recipe: &mut AssetRecipe,
     definition: PartDefinitionId,
     operation: OperationId,
+    policy: OperationRemovalPolicy,
 ) -> Result<(), AssetError> {
     edits::ensure_topology_editable(recipe, definition)?;
+    let index = {
+        let definition_ref = recipe
+            .definitions
+            .get(&definition)
+            .ok_or(AssetError::UnknownDefinition(definition))?;
+        definition_ref
+            .geometry
+            .operations
+            .iter()
+            .position(|candidate| candidate.operation_id() == operation)
+            .ok_or_else(|| {
+                AssetError::UnsupportedEdit(format!("unknown operation {operation:?}"))
+            })?
+    };
+    let references = operation_metadata_references(recipe, definition, operation);
+    match policy {
+        OperationRemovalPolicy::RejectIfReferenced if !references.is_empty() => {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "operation {:?} is still referenced by {}",
+                operation,
+                references.join(", ")
+            )));
+        }
+        OperationRemovalPolicy::CascadeOwnedMetadata => {
+            cascade_operation_metadata(recipe, definition, operation);
+        }
+        OperationRemovalPolicy::RejectIfReferenced => {}
+    }
     let definition_ref = recipe
         .definitions
         .get_mut(&definition)
         .ok_or(AssetError::UnknownDefinition(definition))?;
-    let index = definition_ref
-        .geometry
-        .operations
-        .iter()
-        .position(|candidate| candidate.operation_id() == operation)
-        .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {operation:?}")))?;
     definition_ref.geometry.operations.remove(index);
     Ok(())
 }
@@ -5549,6 +5624,9 @@ fn duplicate_cut_operation(
         .geometry
         .operations
         .insert(index, duplicate.clone());
+    ensure_operation_phase_order(&definition_ref.geometry.operations).inspect_err(|_| {
+        definition_ref.geometry.operations.remove(index);
+    })?;
     bump_next_ids_for_operation(recipe, &duplicate);
     Ok(())
 }
@@ -5579,8 +5657,92 @@ fn move_modeling_operation(
     definition_ref
         .geometry
         .operations
-        .insert(new_index, operation);
+        .insert(new_index, operation.clone());
+    ensure_operation_phase_order(&definition_ref.geometry.operations).inspect_err(|_| {
+        definition_ref.geometry.operations.remove(new_index);
+        definition_ref
+            .geometry
+            .operations
+            .insert(old_index, operation);
+    })?;
     Ok(())
+}
+
+fn ensure_operation_phase_order(operations: &[ModelingOperationSpec]) -> Result<(), AssetError> {
+    for pair in operations.windows(2) {
+        let previous = pair[0].phase();
+        let next = pair[1].phase();
+        if previous > next {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "operation phase order violation: {:?} cannot appear before {:?}",
+                pair[1].operation_id(),
+                pair[0].operation_id()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn operation_metadata_references(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Vec<String> {
+    let owned_parameters = operation_parameter_ids(recipe, definition, operation);
+    let mut references = Vec::new();
+    references.extend(
+        owned_parameters
+            .iter()
+            .map(|parameter| format!("parameter.{}", parameter.0)),
+    );
+    references.extend(
+        owned_parameters
+            .iter()
+            .filter(|parameter| recipe.locks.contains(parameter))
+            .map(|parameter| format!("lock.{}", parameter.0)),
+    );
+    if recipe.variation.count_ranges.contains_key(&operation) {
+        references.push(format!("variation.count_range.{}", operation.0));
+    }
+    references.extend(
+        owned_parameters
+            .iter()
+            .filter(|parameter| {
+                recipe
+                    .variation
+                    .parameter_range_overrides
+                    .contains_key(parameter)
+            })
+            .map(|parameter| format!("variation.parameter_range.{}", parameter.0)),
+    );
+    references
+}
+
+fn cascade_operation_metadata(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) {
+    let owned_parameters = operation_parameter_ids(recipe, definition, operation);
+    for parameter in &owned_parameters {
+        recipe.parameters.remove(parameter);
+        recipe.locks.remove(parameter);
+        recipe.variation.parameter_range_overrides.remove(parameter);
+    }
+    recipe.variation.count_ranges.remove(&operation);
+}
+
+fn operation_parameter_ids(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Vec<ParameterId> {
+    let prefix = format!("definition.{}.operation.{}.", definition.0, operation.0);
+    recipe
+        .parameters
+        .iter()
+        .filter_map(|(id, descriptor)| descriptor.path.starts_with(&prefix).then_some(*id))
+        .collect()
 }
 
 fn remap_cut_operation(

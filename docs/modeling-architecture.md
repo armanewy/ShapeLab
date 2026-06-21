@@ -48,6 +48,8 @@ Part definitions declare:
 - generic `SocketSpec` values with local frames for later attachment and articulation work
 - a local pivot frame and optional variant or production hints
 
+Modeling operations are grouped into coarse phases: source configuration, local topology, boundary treatment, local transform, and assembly generation. Structural edits may reorder operations only within phase-compatible positions until the runtime supports true cross-phase sequential execution. Operation removal is explicit: callers either reject removal while parameter descriptors or authored variation hints still reference the operation, or request cascade cleanup of operation-owned metadata.
+
 Part instances declare:
 
 - the referenced definition

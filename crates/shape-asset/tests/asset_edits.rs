@@ -975,6 +975,7 @@ fn structural_modeling_operation_edits_update_history_and_ids() {
                 AssetEdit::RemoveModelingOperation {
                     definition: PLATE,
                     operation: OperationId(10),
+                    policy: OperationRemovalPolicy::CascadeOwnedMetadata,
                 },
             ],
         },
@@ -1004,6 +1005,158 @@ fn structural_modeling_operation_edits_update_history_and_ids() {
     assert_eq!(outcome.next_ids.operation, 14);
     assert_eq!(outcome.next_ids.boundary_loop, 16);
     assert_eq!(outcome.next_ids.region, 44);
+}
+
+#[test]
+fn remove_modeling_operation_rejects_or_cascades_owned_metadata() {
+    let mut recipe = edit_recipe();
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(10),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.16, 0.08],
+        corner_radius: 0.0,
+        rim_width: 0.02,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(40),
+        wall_region: RegionId(41),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+    recipe
+        .definitions
+        .get_mut(&PLATE)
+        .expect("plate definition should exist")
+        .geometry
+        .operations
+        .push(cut);
+    add_parameter(
+        &mut recipe,
+        ParameterSeed {
+            id: ParameterId(30),
+            path: definition_scalar_path(PLATE, "operation.10.rectangular_through_cut.size.x"),
+            label: "Cut width",
+            group: "Cuts",
+            minimum: 0.01,
+            maximum: 1.0,
+            topology_changing: false,
+        },
+    );
+    recipe.locks.insert(ParameterId(30));
+    recipe.variation.parameter_range_overrides.insert(
+        ParameterId(30),
+        ParameterRangeOverride {
+            minimum: 0.02,
+            maximum: 0.4,
+            step: Some(0.01),
+            mutation_sigma: None,
+        },
+    );
+    recipe.variation.count_ranges.insert(
+        OperationId(10),
+        CountRangeHint {
+            minimum: 1,
+            maximum: 5,
+        },
+    );
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "reject".to_owned(),
+                seed: 82,
+                operations: vec![AssetEdit::RemoveModelingOperation {
+                    definition: PLATE,
+                    operation: OperationId(10),
+                    policy: OperationRemovalPolicy::RejectIfReferenced,
+                }],
+            },
+        ),
+        Err(AssetError::UnsupportedEdit(_))
+    ));
+
+    let outcome = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "cascade".to_owned(),
+            seed: 83,
+            operations: vec![AssetEdit::RemoveModelingOperation {
+                definition: PLATE,
+                operation: OperationId(10),
+                policy: OperationRemovalPolicy::CascadeOwnedMetadata,
+            }],
+        },
+    )
+    .expect("cascade removal should remove operation metadata");
+
+    assert!(
+        outcome.definitions[&PLATE]
+            .geometry
+            .operations
+            .iter()
+            .all(|operation| operation.operation_id() != OperationId(10))
+    );
+    assert!(!outcome.parameters.contains_key(&ParameterId(30)));
+    assert!(!outcome.locks.contains(&ParameterId(30)));
+    assert!(
+        !outcome
+            .variation
+            .parameter_range_overrides
+            .contains_key(&ParameterId(30))
+    );
+    assert!(
+        !outcome
+            .variation
+            .count_ranges
+            .contains_key(&OperationId(10))
+    );
+}
+
+#[test]
+fn modeling_operation_moves_cannot_cross_phase_boundaries() {
+    let recipe = edit_recipe();
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "move array before bevel".to_owned(),
+                seed: 84,
+                operations: vec![AssetEdit::MoveModelingOperation {
+                    definition: BODY,
+                    operation: LINEAR_ARRAY,
+                    new_index: 0,
+                }],
+            },
+        ),
+        Err(AssetError::UnsupportedEdit(_))
+    ));
+
+    let outcome = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "move arrays".to_owned(),
+            seed: 85,
+            operations: vec![AssetEdit::MoveModelingOperation {
+                definition: BODY,
+                operation: RADIAL_ARRAY,
+                new_index: 1,
+            }],
+        },
+    )
+    .expect("same-phase assembly operations can reorder");
+
+    let operation_ids = outcome.definitions[&BODY]
+        .geometry
+        .operations
+        .iter()
+        .map(ModelingOperationSpec::operation_id)
+        .collect::<Vec<_>>();
+    assert_eq!(operation_ids, vec![BEVEL, RADIAL_ARRAY, LINEAR_ARRAY]);
 }
 
 #[test]
