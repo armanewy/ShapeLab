@@ -20,7 +20,7 @@ use crate::asset::{
     AssetAppCommand, AssetAppEffect, AssetAppState, AssetCandidateId, AssetJobEvent,
     AssetJobRequest, AssetTemplate, run_asset_job,
 };
-use crate::viewport::ViewportInteractionState;
+use crate::viewport::{ViewportAction, ViewportInteractionState, ViewportRenderRequest};
 
 const MAX_STATUS_MESSAGES: usize = 8;
 
@@ -320,6 +320,7 @@ impl AssetModelingLabApp {
                 continue;
             }
             let render_after_accept = matches!(command, AssetAppCommand::AcceptCandidate(_));
+            let render_after_viewport = self.prepare_viewport_command(&command);
             let Some(state) = &mut self.state else {
                 if let AssetAppCommand::LoadTemplate(template) = command {
                     self.load_template(template, ctx);
@@ -338,9 +339,33 @@ impl AssetModelingLabApp {
                             Err(error) => self.push_status(error.to_string()),
                         }
                     }
+                    if render_after_viewport && let Some(state) = &mut self.state {
+                        match state.request_render_current_preview(self.render_settings.clone()) {
+                            Ok(effects) => self.apply_effects(effects, ctx),
+                            Err(error) => self.push_status(error.to_string()),
+                        }
+                    }
                 }
                 Err(error) => self.push_status(error.to_string()),
             }
+        }
+    }
+
+    fn prepare_viewport_command(&mut self, command: &AssetAppCommand) -> bool {
+        match command {
+            AssetAppCommand::Viewport(
+                ViewportAction::RequestInteractiveRender(request)
+                | ViewportAction::RequestFinalRender(request),
+            ) => {
+                apply_viewport_render_size(&mut self.render_settings, request);
+                true
+            }
+            AssetAppCommand::Viewport(
+                ViewportAction::FitToObject
+                | ViewportAction::ResetCamera
+                | ViewportAction::SetCamera(_),
+            ) => true,
+            _ => false,
         }
     }
 
@@ -708,6 +733,11 @@ fn candidate_render_settings(settings: &RenderSettings) -> RenderSettings {
     candidate.width = candidate.width.clamp(180, 320);
     candidate.height = candidate.height.clamp(140, 240);
     candidate
+}
+
+fn apply_viewport_render_size(settings: &mut RenderSettings, request: &ViewportRenderRequest) {
+    settings.width = request.size.width;
+    settings.height = request.size.height;
 }
 
 fn load_asset_candidate_texture(

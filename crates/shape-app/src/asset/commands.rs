@@ -9,6 +9,8 @@ use shape_asset::{
     RevisionId, Transform3,
 };
 
+use crate::viewport::ViewportAction;
+
 use super::jobs::{AssetCandidateId, AssetJobRequest};
 use super::state::AssetModelingProject;
 
@@ -73,6 +75,7 @@ pub(crate) enum AssetAppCommand {
     ExportPackage(PathBuf),
     FitCamera,
     SetWireframe(bool),
+    Viewport(ViewportAction),
 }
 
 /// Side effects requested by the state reducer.

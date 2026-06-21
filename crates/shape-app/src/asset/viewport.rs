@@ -7,8 +7,8 @@ use shape_render::OrbitCamera;
 
 use crate::asset::{AssetAppCommand, AssetValidationState};
 use crate::viewport::{
-    ViewportInteractionState, ViewportOverlayInfo, ViewportRenderSize, ViewportResponse,
-    show_viewport,
+    ViewportAction, ViewportInteractionState, ViewportOverlayInfo, ViewportRenderSize,
+    ViewportResponse, show_viewport,
 };
 
 /// Normalized screen-space rectangle for part bounds overlays.
@@ -76,9 +76,9 @@ pub(crate) fn show_asset_viewport(
         ..ViewportOverlayInfo::default()
     };
     let viewport = show_viewport(ui, state, camera, texture, &base_overlay);
+    let mut commands = viewport_commands(&viewport.actions);
     paint_asset_overlays(ui, viewport.response.rect, overlay);
 
-    let mut commands = Vec::new();
     ui.horizontal(|ui| {
         let mut wireframe = overlay.wireframe;
         if ui
@@ -91,6 +91,16 @@ pub(crate) fn show_asset_viewport(
     });
 
     AssetViewportResponse { viewport, commands }
+}
+
+/// Convert shared viewport actions into Asset Modeling Lab commands.
+#[must_use]
+pub(crate) fn viewport_commands(actions: &[ViewportAction]) -> Vec<AssetAppCommand> {
+    actions
+        .iter()
+        .cloned()
+        .map(AssetAppCommand::Viewport)
+        .collect()
 }
 
 /// Build the wireframe toggle command only when changed.

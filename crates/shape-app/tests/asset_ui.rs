@@ -15,6 +15,8 @@ use asset::{
     AssetRevisionId, AssetUiJobKind, AssetUiState, AssetValidationState, GeneratedPartKind,
     ParameterId, PartDefinitionId, PartInstanceId,
 };
+use shape_render::OrbitCamera;
+use viewport::ViewportAction;
 
 #[test]
 fn asset_panel_helpers_emit_commands() {
@@ -45,6 +47,17 @@ fn asset_panel_helpers_emit_commands() {
     assert_eq!(
         asset_viewport::wireframe_command(false, true),
         Some(AssetAppCommand::SetWireframe(true))
+    );
+    let camera = OrbitCamera::default();
+    assert_eq!(
+        asset_viewport::viewport_commands(&[ViewportAction::Zoom {
+            factor: 0.5,
+            camera: camera.clone(),
+        }]),
+        vec![AssetAppCommand::Viewport(ViewportAction::Zoom {
+            factor: 0.5,
+            camera,
+        })]
     );
 }
 

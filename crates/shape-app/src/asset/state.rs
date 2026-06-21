@@ -21,6 +21,8 @@ use shape_compile::{
 };
 use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds};
 
+use crate::viewport::ViewportAction;
+
 use super::commands::{AssetAppCommand, AssetAppEffect, AssetLockTarget, AssetTemplate};
 use super::jobs::{
     AssetCandidate, AssetCandidateId, AssetCandidatePreview, AssetCompileOutput, AssetGenerationId,
@@ -338,6 +340,10 @@ impl AssetAppState {
                 Ok(Vec::new())
             }
             AssetAppCommand::SetWireframe(_) => Ok(Vec::new()),
+            AssetAppCommand::Viewport(action) => {
+                self.apply_viewport_action(action);
+                Ok(Vec::new())
+            }
         }
     }
 
@@ -695,6 +701,39 @@ impl AssetAppState {
             self.current_camera = fit_camera_to_bounds(mesh.bounds);
         } else {
             self.current_camera = OrbitCamera::default();
+        }
+    }
+
+    fn apply_viewport_action(&mut self, action: ViewportAction) {
+        match action {
+            ViewportAction::Orbit {
+                delta_yaw,
+                delta_pitch,
+                camera: _,
+            } => {
+                self.current_camera.orbit(delta_yaw, delta_pitch);
+            }
+            ViewportAction::Pan {
+                delta_right,
+                delta_up,
+                camera: _,
+            } => {
+                self.current_camera.pan(delta_right, delta_up);
+            }
+            ViewportAction::Zoom { factor, camera: _ } => {
+                self.current_camera.zoom(factor);
+            }
+            ViewportAction::SetCamera(camera) => {
+                self.current_camera = camera.clamped();
+            }
+            ViewportAction::FitToObject => self.fit_camera(),
+            ViewportAction::ResetCamera => {
+                self.current_camera = OrbitCamera::default();
+            }
+            ViewportAction::RequestInteractiveRender(request)
+            | ViewportAction::RequestFinalRender(request) => {
+                self.current_camera = request.camera.clamped();
+            }
         }
     }
 

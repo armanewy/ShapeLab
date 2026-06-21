@@ -19,8 +19,9 @@ use shape_asset::{
     Transform3, definition_scalar_path, get_scalar, instance_scalar_path,
 };
 use shape_modeling_assets::BenchmarkAsset;
-use shape_render::RenderSettings;
+use shape_render::{OrbitCamera, RenderSettings};
 use shape_search::asset::AssetCandidateEditKind;
+use viewport::{ViewportAction, ViewportRenderRequest, ViewportRenderSize};
 
 const BODY_DEFINITION: PartDefinitionId = PartDefinitionId(1);
 const ALT_BODY_DEFINITION: PartDefinitionId = PartDefinitionId(2);
@@ -94,6 +95,48 @@ fn lock_blocks_parameter_edits() {
         }),
         Err(AssetAppStateError::LockedParameter(THICKNESS))
     );
+}
+
+#[test]
+fn viewport_commands_update_camera_without_dirtying_recipe() {
+    let mut state = test_state();
+    let original_revision = state.revision_history.current;
+    let original_camera = state.current_camera.clone();
+
+    let effects = state
+        .handle_command(AssetAppCommand::Viewport(ViewportAction::Orbit {
+            delta_yaw: 12.0,
+            delta_pitch: -4.0,
+            camera: original_camera.clone(),
+        }))
+        .expect("orbit should update camera");
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        state.current_camera.yaw_degrees,
+        original_camera.yaw_degrees + 12.0
+    );
+    assert_eq!(
+        state.current_camera.pitch_degrees,
+        original_camera.pitch_degrees - 4.0
+    );
+    assert_eq!(state.revision_history.current, original_revision);
+    assert!(!state.dirty);
+
+    let mut requested_camera = OrbitCamera::default();
+    requested_camera.zoom(0.5);
+    state
+        .handle_command(AssetAppCommand::Viewport(
+            ViewportAction::RequestFinalRender(ViewportRenderRequest {
+                size: ViewportRenderSize::new(640, 480),
+                camera: requested_camera.clone(),
+            }),
+        ))
+        .expect("render request should accept camera");
+
+    assert_eq!(state.current_camera, requested_camera.clamped());
+    assert_eq!(state.revision_history.current, original_revision);
+    assert!(!state.dirty);
 }
 
 #[test]
