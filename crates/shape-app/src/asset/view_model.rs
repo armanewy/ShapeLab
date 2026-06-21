@@ -256,6 +256,7 @@ fn change_label(change: &super::jobs::AssetCandidateChange) -> String {
         AssetCandidateEditKind::OptionalPart => "presence".to_owned(),
         AssetCandidateEditKind::Replacement => "part choice".to_owned(),
         AssetCandidateEditKind::DetailDensity => "detail density".to_owned(),
+        AssetCandidateEditKind::ModelingOperation => "operation".to_owned(),
     }
 }
 

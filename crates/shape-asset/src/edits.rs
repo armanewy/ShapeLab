@@ -241,6 +241,10 @@ fn edit_type(edit: &AssetEdit) -> &'static str {
         AssetEdit::AddInstance { .. } => "AddInstance",
         AssetEdit::RemoveInstance { .. } => "RemoveInstance",
         AssetEdit::ReplaceDefinition { .. } => "ReplaceDefinition",
+        AssetEdit::InsertModelingOperation { .. } => "InsertModelingOperation",
+        AssetEdit::RemoveModelingOperation { .. } => "RemoveModelingOperation",
+        AssetEdit::DuplicateCutOperation { .. } => "DuplicateCutOperation",
+        AssetEdit::MoveModelingOperation { .. } => "MoveModelingOperation",
         AssetEdit::ReplaceInstanceDefinition { .. } => "ReplaceInstanceDefinition",
         AssetEdit::SetArrayCount { .. } => "SetArrayCount",
         AssetEdit::SetArraySpacing { .. } => "SetArraySpacing",
@@ -281,6 +285,10 @@ fn edit_subject(edit: &AssetEdit) -> Option<String> {
         | AssetEdit::SetSweepProfilePoint { definition, .. }
         | AssetEdit::SetSweepPathFrame { definition, .. }
         | AssetEdit::SetLatheProfilePoint { definition, .. }
+        | AssetEdit::InsertModelingOperation { definition, .. }
+        | AssetEdit::RemoveModelingOperation { definition, .. }
+        | AssetEdit::DuplicateCutOperation { definition, .. }
+        | AssetEdit::MoveModelingOperation { definition, .. }
         | AssetEdit::SetArrayCount { definition, .. }
         | AssetEdit::SetArraySpacing { definition, .. }
         | AssetEdit::SetTopologyLock { definition, .. } => {
@@ -309,6 +317,10 @@ fn edit_may_change_topology(recipe: &AssetRecipe, edit: &AssetEdit) -> bool {
         | AssetEdit::RemoveInstance { .. }
         | AssetEdit::SetOptionalPartEnabled { .. }
         | AssetEdit::ReplaceInstanceDefinition { .. }
+        | AssetEdit::InsertModelingOperation { .. }
+        | AssetEdit::RemoveModelingOperation { .. }
+        | AssetEdit::DuplicateCutOperation { .. }
+        | AssetEdit::MoveModelingOperation { .. }
         | AssetEdit::SetArrayCount { .. }
         | AssetEdit::DuplicateInstance { .. }
         | AssetEdit::MirrorInstance { .. }

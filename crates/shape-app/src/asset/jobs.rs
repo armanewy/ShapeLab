@@ -781,6 +781,10 @@ fn operation_changes_locked_scope(recipe: &AssetRecipe, operation: &AssetEdit) -
         | AssetEdit::SetLatheProfilePoint { definition, .. }
         | AssetEdit::SetArrayCount { definition, .. }
         | AssetEdit::SetArraySpacing { definition, .. }
+        | AssetEdit::InsertModelingOperation { definition, .. }
+        | AssetEdit::RemoveModelingOperation { definition, .. }
+        | AssetEdit::DuplicateCutOperation { definition, .. }
+        | AssetEdit::MoveModelingOperation { definition, .. }
         | AssetEdit::SetTopologyLock { definition, .. } => definition_locked(recipe, *definition),
         AssetEdit::ReplaceDefinition { definition } => definition_locked(recipe, definition.id),
         AssetEdit::AddInstance { instance } => instance
@@ -898,6 +902,7 @@ fn change_label(recipe: &AssetRecipe, diagnostic: &AssetChangeDiagnostic) -> Str
         AssetCandidateEditKind::OptionalPart => "optional part".to_owned(),
         AssetCandidateEditKind::Replacement => "replacement".to_owned(),
         AssetCandidateEditKind::DetailDensity => "detail density".to_owned(),
+        AssetCandidateEditKind::ModelingOperation => "modeling operation".to_owned(),
     }
 }
 

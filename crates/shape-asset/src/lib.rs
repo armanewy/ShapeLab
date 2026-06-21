@@ -1993,6 +1993,52 @@ pub enum AssetEdit {
         /// New definition payload.
         definition: PartDefinition,
     },
+    /// Insert one modeling operation into a definition's ordered local history.
+    InsertModelingOperation {
+        /// Definition receiving the operation.
+        definition: PartDefinitionId,
+        /// Insertion index in the ordered operation list.
+        index: usize,
+        /// Operation payload to insert.
+        operation: ModelingOperationSpec,
+    },
+    /// Remove one modeling operation from a definition's ordered local history.
+    RemoveModelingOperation {
+        /// Definition containing the operation.
+        definition: PartDefinitionId,
+        /// Operation to remove.
+        operation: OperationId,
+    },
+    /// Duplicate an authored cut operation with fresh semantic IDs.
+    DuplicateCutOperation {
+        /// Definition containing the source cut.
+        definition: PartDefinitionId,
+        /// Source cut operation.
+        source: OperationId,
+        /// Stable ID for the duplicated operation.
+        operation: OperationId,
+        /// Entry boundary loop for the duplicate.
+        entry_loop: BoundaryLoopId,
+        /// Floor or exit boundary loop for the duplicate.
+        secondary_loop: BoundaryLoopId,
+        /// Rim region for the duplicate.
+        rim_region: RegionId,
+        /// Wall region for the duplicate.
+        wall_region: RegionId,
+        /// Floor region for duplicated recessed cuts.
+        floor_region: Option<RegionId>,
+        /// Offset applied to the duplicate cut center in face-local coordinates.
+        center_offset: [f32; 2],
+    },
+    /// Move one modeling operation to a new ordered index.
+    MoveModelingOperation {
+        /// Definition containing the operation.
+        definition: PartDefinitionId,
+        /// Operation to move.
+        operation: OperationId,
+        /// Destination index after removing the operation from its old position.
+        new_index: usize,
+    },
     /// Replace an instance with another definition from a compatible variant group.
     ReplaceInstanceDefinition {
         /// Instance to retarget.
@@ -4933,6 +4979,44 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             bump_next_ids_for_definition(recipe, definition);
             Ok(())
         }
+        AssetEdit::InsertModelingOperation {
+            definition,
+            index,
+            operation,
+        } => insert_modeling_operation(recipe, *definition, *index, operation),
+        AssetEdit::RemoveModelingOperation {
+            definition,
+            operation,
+        } => remove_modeling_operation(recipe, *definition, *operation),
+        AssetEdit::DuplicateCutOperation {
+            definition,
+            source,
+            operation,
+            entry_loop,
+            secondary_loop,
+            rim_region,
+            wall_region,
+            floor_region,
+            center_offset,
+        } => duplicate_cut_operation(
+            recipe,
+            *definition,
+            *source,
+            DuplicateCutSpec {
+                operation: *operation,
+                entry_loop: *entry_loop,
+                secondary_loop: *secondary_loop,
+                rim_region: *rim_region,
+                wall_region: *wall_region,
+                floor_region: *floor_region,
+                center_offset: *center_offset,
+            },
+        ),
+        AssetEdit::MoveModelingOperation {
+            definition,
+            operation,
+            new_index,
+        } => move_modeling_operation(recipe, *definition, *operation, *new_index),
         AssetEdit::ReplaceInstanceDefinition {
             instance,
             definition,
@@ -5359,6 +5443,338 @@ fn set_array_spacing(
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+struct DuplicateCutSpec {
+    operation: OperationId,
+    entry_loop: BoundaryLoopId,
+    secondary_loop: BoundaryLoopId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+    floor_region: Option<RegionId>,
+    center_offset: [f32; 2],
+}
+
+fn insert_modeling_operation(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    index: usize,
+    operation: &ModelingOperationSpec,
+) -> Result<(), AssetError> {
+    edits::ensure_topology_editable(recipe, definition)?;
+    if operation_id_exists(recipe, operation.operation_id()) {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "duplicate operation {:?}",
+            operation.operation_id()
+        )));
+    }
+    ensure_new_boundary_loops_available(recipe, operation.boundary_loop_ids())?;
+    ensure_new_generated_regions_available(recipe, operation_detail_region_ids(operation))?;
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    if index > definition_ref.geometry.operations.len() {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "operation insertion index {index} is out of bounds"
+        )));
+    }
+    definition_ref
+        .geometry
+        .operations
+        .insert(index, operation.clone());
+    bump_next_ids_for_operation(recipe, operation);
+    Ok(())
+}
+
+fn remove_modeling_operation(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Result<(), AssetError> {
+    edits::ensure_topology_editable(recipe, definition)?;
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let index = definition_ref
+        .geometry
+        .operations
+        .iter()
+        .position(|candidate| candidate.operation_id() == operation)
+        .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {operation:?}")))?;
+    definition_ref.geometry.operations.remove(index);
+    Ok(())
+}
+
+fn duplicate_cut_operation(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    source: OperationId,
+    spec: DuplicateCutSpec,
+) -> Result<(), AssetError> {
+    edits::ensure_topology_editable(recipe, definition)?;
+    if operation_id_exists(recipe, spec.operation) {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "duplicate operation {:?}",
+            spec.operation
+        )));
+    }
+    let duplicate = {
+        let definition_ref = recipe
+            .definitions
+            .get(&definition)
+            .ok_or(AssetError::UnknownDefinition(definition))?;
+        let source_operation = definition_ref
+            .geometry
+            .operations
+            .iter()
+            .find(|candidate| candidate.operation_id() == source)
+            .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {source:?}")))?;
+        remap_cut_operation(source_operation, spec)?
+    };
+    ensure_new_boundary_loops_available(recipe, duplicate.boundary_loop_ids())?;
+    ensure_new_generated_regions_available(recipe, operation_detail_region_ids(&duplicate))?;
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let index = definition_ref
+        .geometry
+        .operations
+        .iter()
+        .position(|candidate| candidate.operation_id() == source)
+        .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {source:?}")))?
+        + 1;
+    definition_ref
+        .geometry
+        .operations
+        .insert(index, duplicate.clone());
+    bump_next_ids_for_operation(recipe, &duplicate);
+    Ok(())
+}
+
+fn move_modeling_operation(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    new_index: usize,
+) -> Result<(), AssetError> {
+    edits::ensure_topology_editable(recipe, definition)?;
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let old_index = definition_ref
+        .geometry
+        .operations
+        .iter()
+        .position(|candidate| candidate.operation_id() == operation)
+        .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {operation:?}")))?;
+    if new_index >= definition_ref.geometry.operations.len() {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "operation move index {new_index} is out of bounds"
+        )));
+    }
+    let operation = definition_ref.geometry.operations.remove(old_index);
+    definition_ref
+        .geometry
+        .operations
+        .insert(new_index, operation);
+    Ok(())
+}
+
+fn remap_cut_operation(
+    operation: &ModelingOperationSpec,
+    spec: DuplicateCutSpec,
+) -> Result<ModelingOperationSpec, AssetError> {
+    match operation {
+        ModelingOperationSpec::RecessedPanelCut {
+            region,
+            face,
+            center,
+            size,
+            depth,
+            corner_radius,
+            rim_width,
+            corner_segments,
+            outer_region,
+            edge_treatment,
+            ..
+        } => {
+            let floor_region = spec.floor_region.ok_or_else(|| {
+                AssetError::UnsupportedEdit(
+                    "duplicated recessed cuts require a floor region".to_owned(),
+                )
+            })?;
+            Ok(ModelingOperationSpec::RecessedPanelCut {
+                operation: spec.operation,
+                region: *region,
+                face: *face,
+                center: [
+                    center[0] + spec.center_offset[0],
+                    center[1] + spec.center_offset[1],
+                ],
+                size: *size,
+                depth: *depth,
+                corner_radius: *corner_radius,
+                rim_width: *rim_width,
+                corner_segments: *corner_segments,
+                entry_loop: spec.entry_loop,
+                floor_loop: spec.secondary_loop,
+                outer_region: *outer_region,
+                rim_region: spec.rim_region,
+                wall_region: spec.wall_region,
+                floor_region,
+                edge_treatment: *edge_treatment,
+            })
+        }
+        ModelingOperationSpec::RectangularThroughCut {
+            region,
+            face,
+            center,
+            size,
+            corner_radius,
+            rim_width,
+            corner_segments,
+            outer_region,
+            edge_treatment,
+            ..
+        } => Ok(ModelingOperationSpec::RectangularThroughCut {
+            operation: spec.operation,
+            region: *region,
+            face: *face,
+            center: [
+                center[0] + spec.center_offset[0],
+                center[1] + spec.center_offset[1],
+            ],
+            size: *size,
+            corner_radius: *corner_radius,
+            rim_width: *rim_width,
+            corner_segments: *corner_segments,
+            entry_loop: spec.entry_loop,
+            exit_loop: spec.secondary_loop,
+            outer_region: *outer_region,
+            rim_region: spec.rim_region,
+            wall_region: spec.wall_region,
+            edge_treatment: *edge_treatment,
+        }),
+        ModelingOperationSpec::CircularThroughCut {
+            region,
+            face,
+            center,
+            radius,
+            radial_segments,
+            rim_width,
+            outer_region,
+            edge_treatment,
+            ..
+        } => Ok(ModelingOperationSpec::CircularThroughCut {
+            operation: spec.operation,
+            region: *region,
+            face: *face,
+            center: [
+                center[0] + spec.center_offset[0],
+                center[1] + spec.center_offset[1],
+            ],
+            radius: *radius,
+            radial_segments: *radial_segments,
+            rim_width: *rim_width,
+            entry_loop: spec.entry_loop,
+            exit_loop: spec.secondary_loop,
+            outer_region: *outer_region,
+            rim_region: spec.rim_region,
+            wall_region: spec.wall_region,
+            edge_treatment: *edge_treatment,
+        }),
+        _ => Err(AssetError::UnsupportedEdit(format!(
+            "operation {:?} is not a cut",
+            operation.operation_id()
+        ))),
+    }
+}
+
+fn operation_id_exists(recipe: &AssetRecipe, operation: OperationId) -> bool {
+    recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .any(|candidate| candidate.operation_id() == operation)
+}
+
+fn ensure_new_boundary_loops_available(
+    recipe: &AssetRecipe,
+    boundary_loops: Vec<BoundaryLoopId>,
+) -> Result<(), AssetError> {
+    let mut used = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .flat_map(ModelingOperationSpec::boundary_loop_ids)
+        .collect::<BTreeSet<_>>();
+    let mut local = BTreeSet::new();
+    for boundary_loop in boundary_loops {
+        if boundary_loop == LEGACY_MISSING_BOUNDARY_LOOP
+            || !local.insert(boundary_loop)
+            || !used.insert(boundary_loop)
+        {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "duplicate boundary loop {boundary_loop:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_new_generated_regions_available(
+    recipe: &AssetRecipe,
+    regions: Vec<RegionId>,
+) -> Result<(), AssetError> {
+    let mut used = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| {
+            definition.regions.keys().copied().chain(
+                definition
+                    .geometry
+                    .operations
+                    .iter()
+                    .flat_map(ModelingOperationSpec::generated_region_ids),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let mut local = BTreeSet::new();
+    for region in regions {
+        if !local.insert(region) || !used.insert(region) {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "duplicate generated region {region:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn operation_detail_region_ids(operation: &ModelingOperationSpec) -> Vec<RegionId> {
+    match operation {
+        ModelingOperationSpec::RecessedPanelCut {
+            rim_region,
+            wall_region,
+            floor_region,
+            ..
+        } => vec![*rim_region, *wall_region, *floor_region],
+        ModelingOperationSpec::RectangularThroughCut {
+            rim_region,
+            wall_region,
+            ..
+        }
+        | ModelingOperationSpec::CircularThroughCut {
+            rim_region,
+            wall_region,
+            ..
+        } => vec![*rim_region, *wall_region],
+        _ => Vec::new(),
+    }
+}
+
 fn duplicate_instance(
     recipe: &mut AssetRecipe,
     source: PartInstanceId,
@@ -5476,19 +5892,23 @@ fn bump_next_ids_for_instance(recipe: &mut AssetRecipe, instance: &PartInstance)
 fn bump_next_ids_for_definition(recipe: &mut AssetRecipe, definition: &PartDefinition) {
     bump_counter(&mut recipe.next_ids.part_definition, definition.id.0);
     for operation in &definition.geometry.operations {
-        bump_counter(&mut recipe.next_ids.operation, operation.operation_id().0);
-        for boundary_loop in operation.boundary_loop_ids() {
-            bump_counter(&mut recipe.next_ids.boundary_loop, boundary_loop.0);
-        }
-        for region in operation.generated_region_ids() {
-            bump_counter(&mut recipe.next_ids.region, region.0);
-        }
+        bump_next_ids_for_operation(recipe, operation);
     }
     for region in definition.regions.keys() {
         bump_counter(&mut recipe.next_ids.region, region.0);
     }
     for socket in definition.sockets.keys() {
         bump_counter(&mut recipe.next_ids.socket, socket.0);
+    }
+}
+
+fn bump_next_ids_for_operation(recipe: &mut AssetRecipe, operation: &ModelingOperationSpec) {
+    bump_counter(&mut recipe.next_ids.operation, operation.operation_id().0);
+    for boundary_loop in operation.boundary_loop_ids() {
+        bump_counter(&mut recipe.next_ids.boundary_loop, boundary_loop.0);
+    }
+    for region in operation.generated_region_ids() {
+        bump_counter(&mut recipe.next_ids.region, region.0);
     }
 }
 

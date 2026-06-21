@@ -912,6 +912,139 @@ fn array_count_updates_operation_and_enforces_authored_range() {
 }
 
 #[test]
+fn structural_modeling_operation_edits_update_history_and_ids() {
+    let mut recipe = edit_recipe();
+    recipe
+        .definitions
+        .get_mut(&PLATE)
+        .expect("plate exists")
+        .regions
+        .insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(10),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.16, 0.08],
+        corner_radius: 0.0,
+        rim_width: 0.02,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(40),
+        wall_region: RegionId(41),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+
+    let outcome = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "operations".to_owned(),
+            seed: 80,
+            operations: vec![
+                AssetEdit::InsertModelingOperation {
+                    definition: PLATE,
+                    index: 0,
+                    operation: cut,
+                },
+                AssetEdit::DuplicateCutOperation {
+                    definition: PLATE,
+                    source: OperationId(10),
+                    operation: OperationId(13),
+                    entry_loop: BoundaryLoopId(14),
+                    secondary_loop: BoundaryLoopId(15),
+                    rim_region: RegionId(42),
+                    wall_region: RegionId(43),
+                    floor_region: None,
+                    center_offset: [0.24, 0.0],
+                },
+                AssetEdit::MoveModelingOperation {
+                    definition: PLATE,
+                    operation: OperationId(13),
+                    new_index: 0,
+                },
+                AssetEdit::RemoveModelingOperation {
+                    definition: PLATE,
+                    operation: OperationId(10),
+                },
+            ],
+        },
+    )
+    .expect("structural operation edits should apply");
+
+    let operations = &outcome.definitions[&PLATE].geometry.operations;
+    assert_eq!(operations.len(), 1);
+    let ModelingOperationSpec::RectangularThroughCut {
+        operation,
+        center,
+        entry_loop,
+        exit_loop,
+        rim_region,
+        wall_region,
+        ..
+    } = &operations[0]
+    else {
+        panic!("duplicate should preserve cut kind");
+    };
+    assert_eq!(*operation, OperationId(13));
+    assert_eq!(*center, [0.24, 0.0]);
+    assert_eq!(*entry_loop, BoundaryLoopId(14));
+    assert_eq!(*exit_loop, BoundaryLoopId(15));
+    assert_eq!(*rim_region, RegionId(42));
+    assert_eq!(*wall_region, RegionId(43));
+    assert_eq!(outcome.next_ids.operation, 14);
+    assert_eq!(outcome.next_ids.boundary_loop, 16);
+    assert_eq!(outcome.next_ids.region, 44);
+}
+
+#[test]
+fn structural_modeling_operation_edits_respect_topology_locks() {
+    let mut recipe = edit_recipe();
+    recipe.topology_locks.insert(PLATE);
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(10),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.16, 0.08],
+        corner_radius: 0.0,
+        rim_width: 0.02,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(40),
+        wall_region: RegionId(41),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "locked".to_owned(),
+                seed: 81,
+                operations: vec![AssetEdit::InsertModelingOperation {
+                    definition: PLATE,
+                    index: 0,
+                    operation: cut,
+                }],
+            },
+        ),
+        Err(AssetError::LockedTopology(PLATE))
+    ));
+}
+
+#[test]
 fn unrelated_parameter_edit_preserves_semantic_ids() {
     let recipe = edit_recipe();
     let definition_ids = recipe.definitions.keys().copied().collect::<Vec<_>>();

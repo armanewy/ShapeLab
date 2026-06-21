@@ -107,6 +107,8 @@ pub enum AssetCandidateEditKind {
     Replacement,
     /// Segment or other detail-density control.
     DetailDensity,
+    /// Ordered local modeling operation edit.
+    ModelingOperation,
 }
 
 /// Generation-level diagnostics.
@@ -959,15 +961,16 @@ impl EditOpportunity {
         match self.kind() {
             AssetCandidateEditKind::OptionalPart => 0,
             AssetCandidateEditKind::Replacement => 1,
-            AssetCandidateEditKind::ArrayCount => 2,
-            AssetCandidateEditKind::DetailDensity => 3,
-            AssetCandidateEditKind::ArraySpacing => 4,
-            AssetCandidateEditKind::Transform => 5,
-            AssetCandidateEditKind::GeneratorDimension => 6,
-            AssetCandidateEditKind::Bevel => 7,
-            AssetCandidateEditKind::Sweep => 8,
-            AssetCandidateEditKind::Lathe => 9,
-            AssetCandidateEditKind::Parameter => 10,
+            AssetCandidateEditKind::ModelingOperation => 2,
+            AssetCandidateEditKind::ArrayCount => 3,
+            AssetCandidateEditKind::DetailDensity => 4,
+            AssetCandidateEditKind::ArraySpacing => 5,
+            AssetCandidateEditKind::Transform => 6,
+            AssetCandidateEditKind::GeneratorDimension => 7,
+            AssetCandidateEditKind::Bevel => 8,
+            AssetCandidateEditKind::Sweep => 9,
+            AssetCandidateEditKind::Lathe => 10,
+            AssetCandidateEditKind::Parameter => 11,
         }
     }
 
@@ -983,7 +986,8 @@ impl EditOpportunity {
             AssetCandidateEditKind::ArrayCount
             | AssetCandidateEditKind::OptionalPart
             | AssetCandidateEditKind::Replacement
-            | AssetCandidateEditKind::DetailDensity => 7,
+            | AssetCandidateEditKind::DetailDensity
+            | AssetCandidateEditKind::ModelingOperation => 7,
         }
     }
 }
@@ -1532,6 +1536,41 @@ fn diagnose_change(
             array_spacing_summary(spacing),
             "changed array spacing".to_owned(),
         ),
+        AssetEdit::InsertModelingOperation {
+            operation, index, ..
+        } => (
+            "operation list".to_owned(),
+            format!("insert {} at {index}", operation_label(operation)),
+            "inserted a local modeling operation".to_owned(),
+        ),
+        AssetEdit::RemoveModelingOperation { operation, .. } => (
+            format!("operation.{}", operation.0),
+            "removed".to_owned(),
+            "removed a local modeling operation".to_owned(),
+        ),
+        AssetEdit::DuplicateCutOperation {
+            source,
+            operation,
+            center_offset,
+            ..
+        } => (
+            format!("operation.{}", source.0),
+            format!(
+                "duplicate operation.{} offset={}",
+                operation.0,
+                format_array2(*center_offset)
+            ),
+            "duplicated a semantic cut operation".to_owned(),
+        ),
+        AssetEdit::MoveModelingOperation {
+            operation,
+            new_index,
+            ..
+        } => (
+            format!("operation.{}", operation.0),
+            format!("index {new_index}"),
+            "moved a local modeling operation".to_owned(),
+        ),
         _ => (
             "semantic edit".to_owned(),
             format!("{operation:?}"),
@@ -1576,6 +1615,10 @@ fn diagnostic_kind(recipe: &AssetRecipe, operation: &AssetEdit) -> AssetCandidat
             AssetCandidateEditKind::OptionalPart
         }
         AssetEdit::ReplaceInstanceDefinition { .. } => AssetCandidateEditKind::Replacement,
+        AssetEdit::InsertModelingOperation { .. }
+        | AssetEdit::RemoveModelingOperation { .. }
+        | AssetEdit::DuplicateCutOperation { .. }
+        | AssetEdit::MoveModelingOperation { .. } => AssetCandidateEditKind::ModelingOperation,
         AssetEdit::ReplaceDefinition { definition } => {
             if recipe
                 .definitions
@@ -1604,6 +1647,10 @@ fn edit_is_topology_changing(recipe: &AssetRecipe, operation: &AssetEdit) -> boo
         | AssetEdit::AddInstance { .. }
         | AssetEdit::RemoveInstance { .. }
         | AssetEdit::ReplaceInstanceDefinition { .. }
+        | AssetEdit::InsertModelingOperation { .. }
+        | AssetEdit::RemoveModelingOperation { .. }
+        | AssetEdit::DuplicateCutOperation { .. }
+        | AssetEdit::MoveModelingOperation { .. }
         | AssetEdit::SetArrayCount { .. }
         | AssetEdit::DuplicateInstance { .. }
         | AssetEdit::MirrorInstance { .. }
@@ -1642,6 +1689,10 @@ fn edit_subject(operation: &AssetEdit) -> String {
         | AssetEdit::SetSweepProfilePoint { definition, .. }
         | AssetEdit::SetSweepPathFrame { definition, .. }
         | AssetEdit::SetLatheProfilePoint { definition, .. }
+        | AssetEdit::InsertModelingOperation { definition, .. }
+        | AssetEdit::RemoveModelingOperation { definition, .. }
+        | AssetEdit::DuplicateCutOperation { definition, .. }
+        | AssetEdit::MoveModelingOperation { definition, .. }
         | AssetEdit::SetArrayCount { definition, .. }
         | AssetEdit::SetArraySpacing { definition, .. } => format!("definition.{}", definition.0),
         AssetEdit::ReplaceDefinition { definition } => format!("definition.{}", definition.id.0),
@@ -1658,6 +1709,23 @@ fn edit_subject(operation: &AssetEdit) -> String {
         AssetEdit::ReorderChildInstances { parent, .. } => parent
             .map(|parent| format!("instance.{}", parent.0))
             .unwrap_or_else(|| "root_instances".to_owned()),
+    }
+}
+
+fn operation_label(operation: &ModelingOperationSpec) -> &'static str {
+    match operation {
+        ModelingOperationSpec::TransformGeometry { .. } => "transform",
+        ModelingOperationSpec::SetBevelProfile { .. } => "bevel",
+        ModelingOperationSpec::AddPanel { .. } => "panel",
+        ModelingOperationSpec::AddTrim { .. } => "trim",
+        ModelingOperationSpec::RecessedPanelCut { .. } => "recessed panel cut",
+        ModelingOperationSpec::RectangularThroughCut { .. } => "rectangular through cut",
+        ModelingOperationSpec::CircularThroughCut { .. } => "circular through cut",
+        ModelingOperationSpec::MirrorInstances { .. } => "mirror",
+        ModelingOperationSpec::LinearArray { .. } => "linear array",
+        ModelingOperationSpec::RadialArray { .. } => "radial array",
+        ModelingOperationSpec::ReservedBoolean { .. } => "reserved boolean",
+        ModelingOperationSpec::ReservedDeformationProgram { .. } => "reserved deformation",
     }
 }
 
