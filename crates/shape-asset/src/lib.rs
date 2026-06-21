@@ -703,6 +703,26 @@ pub enum CutEdgeTreatment {
     BevelEligible,
 }
 
+/// How a modeling operation depends on an existing boundary loop.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum BoundaryLoopDependencyMode {
+    /// The input loop remains live after the operation.
+    Reference,
+    /// The input loop is replaced by this operation's output loops.
+    Consume,
+}
+
+/// Boundary-loop lifecycle dependency declared by a modeling operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundaryLoopDependency {
+    /// Existing loop used by the operation.
+    pub input: BoundaryLoopId,
+    /// Whether the input remains live or is replaced.
+    pub mode: BoundaryLoopDependencyMode,
+    /// New loops emitted as replacements or related outputs.
+    pub outputs: Vec<BoundaryLoopId>,
+}
+
 /// Deterministic modeling operation specification.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ModelingOperationSpec {
@@ -924,9 +944,9 @@ impl ModelingOperationSpec {
         }
     }
 
-    /// Return generated boundary loops authored by this operation.
+    /// Return generated boundary loops directly authored by this operation.
     #[must_use]
-    pub fn boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
+    pub fn produced_boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
         match self {
             Self::RecessedPanelCut {
                 entry_loop,
@@ -953,6 +973,18 @@ impl ModelingOperationSpec {
             | Self::ReservedBoolean { .. }
             | Self::ReservedDeformationProgram { .. } => Vec::new(),
         }
+    }
+
+    /// Return generated boundary loops authored by this operation.
+    #[must_use]
+    pub fn boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
+        self.produced_boundary_loop_ids()
+    }
+
+    /// Return boundary-loop lifecycle dependencies declared by this operation.
+    #[must_use]
+    pub fn boundary_loop_dependencies(&self) -> Vec<BoundaryLoopDependency> {
+        Vec::new()
     }
 
     /// Return operation-emitted region IDs that are not necessarily declared as base regions.
@@ -2514,6 +2546,7 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
         }
         validate_geometry_source(*id, &definition.geometry.source, report);
         validate_operations(definition, report);
+        let mut boundary_loop_state = BoundaryLoopValidationState::new(&mut seen_boundary_loop_ids);
         for operation in &definition.geometry.operations {
             let operation_id = operation.operation_id();
             if let Some(previous_definition) = seen_operation_ids.insert(operation_id, *id) {
@@ -2531,30 +2564,111 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
                 );
             }
             for boundary_loop in operation.boundary_loop_ids() {
-                if boundary_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                boundary_loop_state.validate_new(
+                    report,
+                    Some(format!(
+                        "definition.{}.operation.{}.boundary_loop.{}",
+                        definition.id.0, operation_id.0, boundary_loop.0
+                    )),
+                    boundary_loop,
+                    *id,
+                    operation_id,
+                );
+            }
+            for dependency in operation.boundary_loop_dependencies() {
+                if dependency.input == LEGACY_MISSING_BOUNDARY_LOOP {
                     push_issue(
                         report,
                         Some(format!(
-                            "definition.{}.operation.{}.boundary_loop",
+                            "definition.{}.operation.{}.boundary_loop_dependency.input",
                             definition.id.0, operation_id.0
                         )),
                         "invalid_boundary_loop_id",
-                        "Generated boundary loop IDs must be non-zero.",
+                        "Boundary loop dependency input must be non-zero.",
                     );
-                } else if let Some((previous_definition, previous_operation)) =
-                    seen_boundary_loop_ids.insert(boundary_loop, (*id, operation_id))
+                } else if !boundary_loop_state
+                    .definition_boundary_loop_ids
+                    .contains_key(&dependency.input)
                 {
                     push_issue(
                         report,
                         Some(format!(
-                            "definition.{}.operation.{}.boundary_loop.{}",
-                            definition.id.0, operation_id.0, boundary_loop.0
+                            "definition.{}.operation.{}.boundary_loop_dependency.input.{}",
+                            definition.id.0, operation_id.0, dependency.input.0
                         )),
-                        "duplicate_boundary_loop_id",
+                        "unknown_boundary_loop_dependency",
+                        "Boundary loop dependency input must be produced earlier in the same definition.",
+                    );
+                } else if !boundary_loop_state
+                    .live_boundary_loop_ids
+                    .contains_key(&dependency.input)
+                {
+                    push_issue(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop_dependency.input.{}",
+                            definition.id.0, operation_id.0, dependency.input.0
+                        )),
+                        "consumed_boundary_loop_dependency",
+                        "Boundary loop dependency input must still be live.",
+                    );
+                }
+                if dependency.mode == BoundaryLoopDependencyMode::Consume
+                    && let Some(previous_operation) = boundary_loop_state
+                        .consumed_boundary_loop_ids
+                        .insert(dependency.input, operation_id)
+                {
+                    push_issue(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop_dependency.input.{}",
+                            definition.id.0, operation_id.0, dependency.input.0
+                        )),
+                        "duplicate_boundary_loop_consumption",
                         format!(
-                            "Boundary loop ID is already used by definition {} operation {}.",
-                            previous_definition.0, previous_operation.0
+                            "Boundary loop is already consumed by operation {}.",
+                            previous_operation.0
                         ),
+                    );
+                }
+                if dependency.mode == BoundaryLoopDependencyMode::Consume {
+                    boundary_loop_state
+                        .live_boundary_loop_ids
+                        .remove(&dependency.input);
+                }
+                let mut local_outputs = BTreeSet::new();
+                for (output_index, output) in dependency.outputs.into_iter().enumerate() {
+                    if output == dependency.input {
+                        push_issue(
+                            report,
+                            Some(format!(
+                                "definition.{}.operation.{}.boundary_loop_dependency.output.{}",
+                                definition.id.0, operation_id.0, output_index
+                            )),
+                            "boundary_loop_dependency_self_output",
+                            "Replacement boundary loop output must differ from the dependency input.",
+                        );
+                    }
+                    if !local_outputs.insert(output) {
+                        push_issue(
+                            report,
+                            Some(format!(
+                                "definition.{}.operation.{}.boundary_loop_dependency.output.{}",
+                                definition.id.0, operation_id.0, output_index
+                            )),
+                            "duplicate_boundary_loop_dependency_output",
+                            "Boundary loop dependency outputs must be distinct.",
+                        );
+                    }
+                    boundary_loop_state.validate_new(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop_dependency.output.{}",
+                            definition.id.0, operation_id.0, output_index
+                        )),
+                        output,
+                        *id,
+                        operation_id,
                     );
                 }
             }
@@ -2589,6 +2703,63 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
             Some(format!("definition.{}.pivot", id.0)),
             &definition.local_pivot,
         );
+    }
+}
+
+struct BoundaryLoopValidationState<'a> {
+    seen_boundary_loop_ids: &'a mut BTreeMap<BoundaryLoopId, (PartDefinitionId, OperationId)>,
+    definition_boundary_loop_ids: BTreeMap<BoundaryLoopId, OperationId>,
+    live_boundary_loop_ids: BTreeMap<BoundaryLoopId, OperationId>,
+    consumed_boundary_loop_ids: BTreeMap<BoundaryLoopId, OperationId>,
+}
+
+impl<'a> BoundaryLoopValidationState<'a> {
+    fn new(
+        seen_boundary_loop_ids: &'a mut BTreeMap<BoundaryLoopId, (PartDefinitionId, OperationId)>,
+    ) -> Self {
+        Self {
+            seen_boundary_loop_ids,
+            definition_boundary_loop_ids: BTreeMap::new(),
+            live_boundary_loop_ids: BTreeMap::new(),
+            consumed_boundary_loop_ids: BTreeMap::new(),
+        }
+    }
+
+    fn validate_new(
+        &mut self,
+        report: &mut AssetValidationReport,
+        subject: Option<String>,
+        boundary_loop: BoundaryLoopId,
+        definition: PartDefinitionId,
+        operation: OperationId,
+    ) {
+        if boundary_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+            push_issue(
+                report,
+                subject,
+                "invalid_boundary_loop_id",
+                "Generated boundary loop IDs must be non-zero.",
+            );
+            return;
+        }
+        if let Some((previous_definition, previous_operation)) = self
+            .seen_boundary_loop_ids
+            .insert(boundary_loop, (definition, operation))
+        {
+            push_issue(
+                report,
+                subject,
+                "duplicate_boundary_loop_id",
+                format!(
+                    "Boundary loop ID is already used by definition {} operation {}.",
+                    previous_definition.0, previous_operation.0
+                ),
+            );
+            return;
+        }
+        self.definition_boundary_loop_ids
+            .insert(boundary_loop, operation);
+        self.live_boundary_loop_ids.insert(boundary_loop, operation);
     }
 }
 

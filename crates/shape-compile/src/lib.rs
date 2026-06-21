@@ -9,8 +9,8 @@ pub mod validation;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetRecipe, BoundaryLoopId, ModelingOperationSpec, OperationId, PartDefinitionId,
-    PartInstanceId, RegionId, SocketId, SocketSpec, validate_asset_recipe,
+    AssetRecipe, BoundaryLoopDependencyMode, BoundaryLoopId, ModelingOperationSpec, OperationId,
+    PartDefinitionId, PartInstanceId, RegionId, SocketId, SocketSpec, validate_asset_recipe,
 };
 use shape_modeling::assembly::{AssemblyError, evaluate_assembly};
 use shape_poly::{
@@ -1080,80 +1080,143 @@ fn validate_declared_boundary_loops(
     recipe: &AssetRecipe,
     artifact: &AssetArtifact,
 ) {
-    let declared = declared_boundary_loops_by_definition(recipe);
+    let lifecycles = boundary_loop_lifecycle_by_definition(recipe);
     for part in &artifact.compiled_parts {
-        let expected = declared.get(&part.definition_id);
-        let mut observed = BTreeMap::<BoundaryLoopId, BTreeSet<Option<OperationId>>>::new();
-        for metadata in part.world_mesh.edge_metadata.values() {
-            if let Some(boundary_loop) = metadata.boundary_loop {
-                observed
-                    .entry(boundary_loop)
-                    .or_default()
-                    .insert(metadata.operation);
-            }
-        }
+        let observed = observed_boundary_loops(part);
+        validate_boundary_loop_lifecycle_emission(
+            report,
+            part.instance_id,
+            lifecycles.get(&part.definition_id),
+            &observed,
+        );
+    }
+}
 
-        if let Some(expected) = expected {
-            for (boundary_loop, operation) in expected {
-                let subject = Some(format!(
-                    "part.{}.boundary_loop.{}",
-                    part.instance_id.0, boundary_loop.0
-                ));
-                let Some(observed_operations) = observed.get(boundary_loop) else {
-                    push_issue(
-                        report,
-                        subject,
-                        "missing_declared_boundary_loop",
-                        "Declared boundary loop was not emitted by the compiled part.",
-                    );
-                    continue;
-                };
-                if !observed_operations.contains(&Some(*operation)) {
-                    push_issue(
-                        report,
-                        subject,
-                        "boundary_loop_operation_mismatch",
-                        "Declared boundary loop was emitted with the wrong operation provenance.",
-                    );
-                }
-            }
+fn observed_boundary_loops(
+    part: &CompiledPart,
+) -> BTreeMap<BoundaryLoopId, BTreeSet<Option<OperationId>>> {
+    let mut observed = BTreeMap::<BoundaryLoopId, BTreeSet<Option<OperationId>>>::new();
+    for metadata in part.world_mesh.edge_metadata.values() {
+        if let Some(boundary_loop) = metadata.boundary_loop {
+            observed
+                .entry(boundary_loop)
+                .or_default()
+                .insert(metadata.operation);
         }
+    }
+    observed
+}
 
-        for boundary_loop in observed.keys() {
-            if expected
-                .map(|expected| !expected.contains_key(boundary_loop))
-                .unwrap_or(true)
-            {
+fn validate_boundary_loop_lifecycle_emission(
+    report: &mut CompileValidationReport,
+    part: PartInstanceId,
+    lifecycle: Option<&BoundaryLoopLifecycle>,
+    observed: &BTreeMap<BoundaryLoopId, BTreeSet<Option<OperationId>>>,
+) {
+    if let Some(lifecycle) = lifecycle {
+        for (boundary_loop, operation) in &lifecycle.live {
+            let subject = Some(format!("part.{}.boundary_loop.{}", part.0, boundary_loop.0));
+            let Some(observed_operations) = observed.get(boundary_loop) else {
                 push_issue(
                     report,
-                    Some(format!(
-                        "part.{}.boundary_loop.{}",
-                        part.instance_id.0, boundary_loop.0
-                    )),
-                    "undeclared_boundary_loop",
-                    "Compiled part emitted a boundary loop not declared by its recipe definition.",
+                    subject,
+                    "missing_declared_boundary_loop",
+                    "Live boundary loop was not emitted by the compiled part.",
                 );
+                continue;
+            };
+            if !observed_operations.contains(&Some(*operation)) {
+                push_issue(
+                    report,
+                    subject,
+                    "boundary_loop_operation_mismatch",
+                    "Live boundary loop was emitted with the wrong operation provenance.",
+                );
+            }
+        }
+    }
+
+    for boundary_loop in observed.keys() {
+        let live = lifecycle.is_some_and(|lifecycle| lifecycle.live.contains_key(boundary_loop));
+        if live {
+            continue;
+        }
+        let consumed = lifecycle
+            .and_then(|lifecycle| lifecycle.consumed.get(boundary_loop))
+            .copied();
+        if consumed.is_some() {
+            push_issue(
+                report,
+                Some(format!("part.{}.boundary_loop.{}", part.0, boundary_loop.0)),
+                "consumed_boundary_loop_still_emitted",
+                "Consumed boundary loop was still emitted by the compiled part.",
+            );
+        } else {
+            push_issue(
+                report,
+                Some(format!("part.{}.boundary_loop.{}", part.0, boundary_loop.0)),
+                "undeclared_boundary_loop",
+                "Compiled part emitted a boundary loop not declared by its recipe definition.",
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct BoundaryLoopLifecycle {
+    historical: BTreeMap<BoundaryLoopId, OperationId>,
+    live: BTreeMap<BoundaryLoopId, OperationId>,
+    consumed: BTreeMap<BoundaryLoopId, OperationId>,
+    replacement_outputs: BTreeMap<BoundaryLoopId, OperationId>,
+}
+
+impl BoundaryLoopLifecycle {
+    fn is_empty(&self) -> bool {
+        self.historical.is_empty()
+            && self.live.is_empty()
+            && self.consumed.is_empty()
+            && self.replacement_outputs.is_empty()
+    }
+
+    fn add_produced(&mut self, boundary_loop: BoundaryLoopId, operation: OperationId) {
+        self.historical.insert(boundary_loop, operation);
+        self.live.insert(boundary_loop, operation);
+    }
+
+    fn apply_dependencies(&mut self, operation: &ModelingOperationSpec) {
+        let operation_id = operation.operation_id();
+        for dependency in operation.boundary_loop_dependencies() {
+            if dependency.mode == BoundaryLoopDependencyMode::Consume {
+                self.live.remove(&dependency.input);
+                self.consumed.insert(dependency.input, operation_id);
+            }
+            for output in dependency.outputs {
+                self.historical.insert(output, operation_id);
+                self.live.insert(output, operation_id);
+                self.replacement_outputs.insert(output, operation_id);
             }
         }
     }
 }
 
-fn declared_boundary_loops_by_definition(
+fn boundary_loop_lifecycle_by_definition(
     recipe: &AssetRecipe,
-) -> BTreeMap<PartDefinitionId, BTreeMap<BoundaryLoopId, OperationId>> {
-    let mut declared = BTreeMap::<PartDefinitionId, BTreeMap<BoundaryLoopId, OperationId>>::new();
+) -> BTreeMap<PartDefinitionId, BoundaryLoopLifecycle> {
+    let mut lifecycles = BTreeMap::<PartDefinitionId, BoundaryLoopLifecycle>::new();
     for definition in recipe.definitions.values() {
+        let mut lifecycle = BoundaryLoopLifecycle::default();
         for operation in &definition.geometry.operations {
             let operation_id = operation.operation_id();
-            for boundary_loop in operation.boundary_loop_ids() {
-                declared
-                    .entry(definition.id)
-                    .or_default()
-                    .insert(boundary_loop, operation_id);
+            for boundary_loop in operation.produced_boundary_loop_ids() {
+                lifecycle.add_produced(boundary_loop, operation_id);
             }
+            lifecycle.apply_dependencies(operation);
+        }
+        if !lifecycle.is_empty() {
+            lifecycles.insert(definition.id, lifecycle);
         }
     }
-    declared
+    lifecycles
 }
 
 fn append_poly_report(
@@ -1692,6 +1755,51 @@ mod tests {
         validate_declared_boundary_loops(&mut report, &recipe, &artifact);
 
         assert!(compile_issue_codes(&report).contains("missing_declared_boundary_loop"));
+    }
+
+    #[test]
+    fn consumed_boundary_loops_are_historical_not_live() {
+        let mut lifecycle = BoundaryLoopLifecycle::default();
+        lifecycle
+            .historical
+            .insert(BoundaryLoopId(7), OperationId(30));
+        lifecycle
+            .consumed
+            .insert(BoundaryLoopId(7), OperationId(40));
+        lifecycle
+            .historical
+            .insert(BoundaryLoopId(17), OperationId(40));
+        lifecycle.live.insert(BoundaryLoopId(17), OperationId(40));
+        lifecycle
+            .replacement_outputs
+            .insert(BoundaryLoopId(17), OperationId(40));
+        let mut observed = BTreeMap::new();
+        observed.insert(BoundaryLoopId(17), BTreeSet::from([Some(OperationId(40))]));
+
+        let mut report = CompileValidationReport::default();
+        validate_boundary_loop_lifecycle_emission(
+            &mut report,
+            PartInstanceId(1),
+            Some(&lifecycle),
+            &observed,
+        );
+
+        assert!(
+            report.is_valid(),
+            "replacement output without consumed input should validate: {:?}",
+            report.issues
+        );
+
+        observed.insert(BoundaryLoopId(7), BTreeSet::from([Some(OperationId(30))]));
+        let mut report = CompileValidationReport::default();
+        validate_boundary_loop_lifecycle_emission(
+            &mut report,
+            PartInstanceId(1),
+            Some(&lifecycle),
+            &observed,
+        );
+
+        assert!(compile_issue_codes(&report).contains("consumed_boundary_loop_still_emitted"));
     }
 
     #[test]

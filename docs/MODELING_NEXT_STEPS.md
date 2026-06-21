@@ -9,6 +9,7 @@
    - The first acceptance benchmark is one plate containing one recessed rectangular panel, four circular fastener holes, and three rectangular vents.
 
 2. Boundary-loop bevels
+   - Present: boundary-loop lifecycle metadata distinguishes historically produced loops, live loops required in the final mesh, consumed loops, and replacement outputs.
    - Add boundary-loop-targeted bevel operations for cut entry, exit, floor, and rim loops.
    - Propagate bevels through `bevel_eligible` boundary-loop metadata without overloading UV seam metadata.
    - Emit bevel-band regions, replacement loops, safe-width diagnostics, deterministic topology, and complete provenance.
