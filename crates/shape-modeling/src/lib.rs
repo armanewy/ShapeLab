@@ -18,6 +18,7 @@ use shape_poly::{FaceMetadata, MeshBounds, PolyError, PolygonMesh, polygon_mesh_
 use thiserror::Error;
 
 pub mod assembly;
+pub mod bevel;
 /// Semantic constructive detail features.
 pub mod features;
 
@@ -124,6 +125,7 @@ pub fn generate_geometry(
 ) -> Result<GeneratedPart, ModelingError> {
     ensure_context_matches(definition, context)?;
     ensure_operations_supported(definition)?;
+    bevel::validate_explicit_bevel(definition)?;
     match &definition.geometry.source {
         GeometrySource::RoundedBox { .. } => generate_rounded_box(definition, context),
         GeometrySource::Cylinder { .. } => generate_cylinder(definition, context),
@@ -175,13 +177,14 @@ pub fn generate_sweep(
     definition: &PartDefinition,
     context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    let GeometrySource::Sweep { profile, path } = &definition.geometry.source else {
+    let GeometrySource::Sweep { path, .. } = &definition.geometry.source else {
         return Err(ModelingError::InvalidInput(
             "sweep generator received a different geometry source".to_owned(),
         ));
     };
+    let profile = bevel::sweep_profile_for_definition(definition)?;
     let path = path.iter().map(|frame| frame.origin).collect::<Vec<_>>();
-    let spec = generators::profile::SweepSpec::new(profile.clone(), path, [1.0, 0.0, 0.0]);
+    let spec = generators::profile::SweepSpec::new(profile, path, [1.0, 0.0, 0.0]);
     generators::profile::generate_sweep(&spec, context)
 }
 
