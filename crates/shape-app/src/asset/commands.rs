@@ -54,9 +54,14 @@ pub(crate) enum AssetAppCommand {
         definition: PartDefinitionId,
     },
     ReplaceDefinition(PartDefinition),
+    ToggleOptionalPart {
+        instance: PartInstanceId,
+        enabled: bool,
+    },
     GenerateRefine,
     GenerateExplore,
     AcceptCandidate(AssetCandidateId),
+    RejectCandidate(AssetCandidateId),
     Undo,
     SwitchBranch(RevisionId),
     LoadTemplate(AssetTemplate),
@@ -65,6 +70,7 @@ pub(crate) enum AssetAppCommand {
     Load(PathBuf),
     ExportPackage(PathBuf),
     FitCamera,
+    SetWireframe(bool),
 }
 
 /// Side effects requested by the state reducer.

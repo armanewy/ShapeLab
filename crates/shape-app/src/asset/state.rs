@@ -271,9 +271,15 @@ impl AssetAppState {
                 vec![AssetEdit::ReplaceDefinition { definition }],
                 true,
             ),
+            AssetAppCommand::ToggleOptionalPart { instance, enabled } => self.apply_edit(
+                "Toggle optional part",
+                vec![AssetEdit::SetOptionalPartEnabled { instance, enabled }],
+                true,
+            ),
             AssetAppCommand::GenerateRefine => self.start_generation(AssetGenerationMode::Refine),
             AssetAppCommand::GenerateExplore => self.start_generation(AssetGenerationMode::Explore),
             AssetAppCommand::AcceptCandidate(candidate) => self.accept_candidate(candidate),
+            AssetAppCommand::RejectCandidate(_) => Ok(Vec::new()),
             AssetAppCommand::Undo => self.undo(),
             AssetAppCommand::SwitchBranch(revision) => self.switch_revision(revision, true),
             AssetAppCommand::LoadTemplate(template) => self.load_template(template),
@@ -288,6 +294,7 @@ impl AssetAppState {
                 self.fit_camera();
                 Ok(Vec::new())
             }
+            AssetAppCommand::SetWireframe(_) => Ok(Vec::new()),
         }
     }
 

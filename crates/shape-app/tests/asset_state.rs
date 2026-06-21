@@ -2,6 +2,8 @@
 
 #[path = "../src/asset/mod.rs"]
 mod asset;
+#[path = "../src/viewport.rs"]
+mod viewport;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
