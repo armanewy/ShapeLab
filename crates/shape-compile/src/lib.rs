@@ -2,19 +2,19 @@
 
 //! Asset recipe compilation for the explicit polygon production path.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 pub mod validation;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetRecipe, ModelingOperationSpec, OperationId, PartDefinitionId, PartInstanceId, RegionId,
-    SocketId, SocketSpec, validate_asset_recipe,
+    AssetRecipe, BoundaryLoopId, ModelingOperationSpec, OperationId, PartDefinitionId,
+    PartInstanceId, RegionId, SocketId, SocketSpec, validate_asset_recipe,
 };
 use shape_modeling::assembly::{AssemblyError, evaluate_assembly};
 use shape_poly::{
-    BoundaryRole, ElementId, MeshAdjacency, PolyError, PolygonMesh, TriangleMesh,
+    BoundaryRole, EdgeKey, ElementId, MeshAdjacency, PolyError, PolygonMesh, TriangleMesh,
     TriangulatedPolygonMesh, build_adjacency, triangulate_polygon_mesh, validate_polygon_mesh,
 };
 use thiserror::Error;
@@ -304,6 +304,12 @@ pub fn compile_asset(recipe: &AssetRecipe) -> Result<AssetArtifact, CompileError
         statistics,
     };
     artifact.validation_report = validate_compiled_asset(&artifact);
+    let mut declared_loop_report = CompileValidationReport::default();
+    validate_declared_boundary_loops(&mut declared_loop_report, recipe, &artifact);
+    artifact
+        .validation_report
+        .issues
+        .extend(declared_loop_report.issues);
     if !artifact.validation_report.is_valid() {
         return Ok(artifact);
     }
@@ -769,6 +775,12 @@ fn validate_compiled_part(part: &CompiledPart) -> CompileValidationReport {
         Some(format!("part.{}.world", part.instance_id.0)),
         &part.world_mesh,
     );
+    validate_boundary_loop_structure(
+        &mut report,
+        Some(format!("part.{}.world", part.instance_id.0)),
+        part,
+        &part.world_mesh,
+    );
     report
 }
 
@@ -860,6 +872,288 @@ fn validate_face_provenance(
             );
         }
     }
+}
+
+fn validate_boundary_loop_structure(
+    report: &mut CompileValidationReport,
+    subject: Option<String>,
+    part: &CompiledPart,
+    mesh: &PolygonMesh,
+) {
+    let Ok(adjacency) = build_adjacency(mesh) else {
+        return;
+    };
+    let mut loop_edges: BTreeMap<BoundaryLoopId, Vec<EdgeKey>> = BTreeMap::new();
+    for (edge, metadata) in &mesh.edge_metadata {
+        if let Some(boundary_loop) = metadata.boundary_loop {
+            loop_edges.entry(boundary_loop).or_default().push(*edge);
+        }
+    }
+
+    for (boundary_loop, edges) in loop_edges {
+        let loop_subject = boundary_loop_subject(&subject, boundary_loop);
+        if edges.len() < 3 {
+            push_issue(
+                report,
+                Some(loop_subject.clone()),
+                "boundary_loop_too_short",
+                "Boundary loop must contain at least three edges.",
+            );
+        }
+
+        let mut seen_edges = BTreeSet::new();
+        let mut vertex_degree = BTreeMap::<u32, u32>::new();
+        let mut loop_operation = None;
+        let mut loop_part_instance = None;
+        let mut reported_missing_operation = false;
+        let mut reported_mixed_operation = false;
+        let mut reported_mixed_part = false;
+        let mut reported_face_operation = false;
+
+        for edge in &edges {
+            if !seen_edges.insert(*edge) {
+                push_issue(
+                    report,
+                    Some(loop_subject.clone()),
+                    "duplicate_boundary_loop_edge",
+                    format!("Boundary loop repeats edge {}.{}.", edge.a, edge.b),
+                );
+            }
+            *vertex_degree.entry(edge.a).or_default() += 1;
+            *vertex_degree.entry(edge.b).or_default() += 1;
+
+            let Some(metadata) = mesh.edge_metadata.get(edge) else {
+                push_issue(
+                    report,
+                    Some(loop_subject.clone()),
+                    "missing_boundary_loop_edge",
+                    format!(
+                        "Boundary loop references missing edge {}.{}.",
+                        edge.a, edge.b
+                    ),
+                );
+                continue;
+            };
+            match metadata.operation {
+                Some(operation) => {
+                    if let Some(existing) = loop_operation {
+                        if existing != operation && !reported_mixed_operation {
+                            reported_mixed_operation = true;
+                            push_issue(
+                                report,
+                                Some(loop_subject.clone()),
+                                "mixed_boundary_loop_operation",
+                                "Boundary loop edges must all belong to one operation.",
+                            );
+                        }
+                    } else {
+                        loop_operation = Some(operation);
+                    }
+                }
+                None if !reported_missing_operation => {
+                    reported_missing_operation = true;
+                    push_issue(
+                        report,
+                        Some(loop_subject.clone()),
+                        "missing_boundary_loop_operation",
+                        "Boundary loop edges must carry operation provenance.",
+                    );
+                }
+                None => {}
+            }
+
+            let Some(face_indices) = adjacency.edge_faces.get(edge) else {
+                push_issue(
+                    report,
+                    Some(loop_subject.clone()),
+                    "boundary_loop_edge_not_in_mesh",
+                    format!(
+                        "Boundary loop edge {}.{} is not in mesh adjacency.",
+                        edge.a, edge.b
+                    ),
+                );
+                continue;
+            };
+            for face_index in face_indices {
+                let Some(face_metadata) = mesh.face_metadata.get(*face_index) else {
+                    continue;
+                };
+                if let Some(face_part) = face_metadata.part_instance {
+                    if face_part != part.instance_id && !reported_mixed_part {
+                        reported_mixed_part = true;
+                        push_issue(
+                            report,
+                            Some(loop_subject.clone()),
+                            "mixed_boundary_loop_part_instance",
+                            "Boundary loop incident faces must belong to the compiled part occurrence.",
+                        );
+                    }
+                    if let Some(existing) = loop_part_instance {
+                        if existing != face_part && !reported_mixed_part {
+                            reported_mixed_part = true;
+                            push_issue(
+                                report,
+                                Some(loop_subject.clone()),
+                                "mixed_boundary_loop_part_instance",
+                                "Boundary loop incident faces must share one part occurrence.",
+                            );
+                        }
+                    } else {
+                        loop_part_instance = Some(face_part);
+                    }
+                }
+                if let Some(edge_operation) = metadata.operation
+                    && face_metadata.operation != Some(edge_operation)
+                    && !reported_face_operation
+                {
+                    reported_face_operation = true;
+                    push_issue(
+                        report,
+                        Some(loop_subject.clone()),
+                        "boundary_loop_face_operation_mismatch",
+                        "Boundary loop incident faces must carry the same operation provenance as the loop edge.",
+                    );
+                }
+            }
+        }
+
+        for (vertex, degree) in &vertex_degree {
+            if *degree != 2 {
+                push_issue(
+                    report,
+                    Some(loop_subject.clone()),
+                    "invalid_boundary_loop_vertex_degree",
+                    format!("Boundary loop vertex {vertex} has degree {degree}; expected 2."),
+                );
+            }
+        }
+        if edges.len() != vertex_degree.len() {
+            push_issue(
+                report,
+                Some(loop_subject.clone()),
+                "boundary_loop_not_closed",
+                "Boundary loop edge and vertex counts must match for one closed cycle.",
+            );
+        }
+        if !boundary_loop_is_connected(&edges, &vertex_degree) {
+            push_issue(
+                report,
+                Some(loop_subject),
+                "disconnected_boundary_loop",
+                "Boundary loop must form exactly one connected cycle.",
+            );
+        }
+    }
+}
+
+fn boundary_loop_is_connected(edges: &[EdgeKey], vertex_degree: &BTreeMap<u32, u32>) -> bool {
+    let Some(first) = edges.first() else {
+        return false;
+    };
+    let mut graph = BTreeMap::<u32, Vec<u32>>::new();
+    for edge in edges {
+        graph.entry(edge.a).or_default().push(edge.b);
+        graph.entry(edge.b).or_default().push(edge.a);
+    }
+    let mut visited = BTreeSet::new();
+    let mut stack = vec![first.a];
+    while let Some(vertex) = stack.pop() {
+        if !visited.insert(vertex) {
+            continue;
+        }
+        if let Some(neighbors) = graph.get(&vertex) {
+            stack.extend(neighbors.iter().copied());
+        }
+    }
+    visited.len() == vertex_degree.len()
+}
+
+fn boundary_loop_subject(subject: &Option<String>, boundary_loop: BoundaryLoopId) -> String {
+    match subject {
+        Some(subject) => format!("{subject}.boundary_loop.{}", boundary_loop.0),
+        None => format!("boundary_loop.{}", boundary_loop.0),
+    }
+}
+
+fn validate_declared_boundary_loops(
+    report: &mut CompileValidationReport,
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) {
+    let declared = declared_boundary_loops_by_definition(recipe);
+    for part in &artifact.compiled_parts {
+        let expected = declared.get(&part.definition_id);
+        let mut observed = BTreeMap::<BoundaryLoopId, BTreeSet<Option<OperationId>>>::new();
+        for metadata in part.world_mesh.edge_metadata.values() {
+            if let Some(boundary_loop) = metadata.boundary_loop {
+                observed
+                    .entry(boundary_loop)
+                    .or_default()
+                    .insert(metadata.operation);
+            }
+        }
+
+        if let Some(expected) = expected {
+            for (boundary_loop, operation) in expected {
+                let subject = Some(format!(
+                    "part.{}.boundary_loop.{}",
+                    part.instance_id.0, boundary_loop.0
+                ));
+                let Some(observed_operations) = observed.get(boundary_loop) else {
+                    push_issue(
+                        report,
+                        subject,
+                        "missing_declared_boundary_loop",
+                        "Declared boundary loop was not emitted by the compiled part.",
+                    );
+                    continue;
+                };
+                if !observed_operations.contains(&Some(*operation)) {
+                    push_issue(
+                        report,
+                        subject,
+                        "boundary_loop_operation_mismatch",
+                        "Declared boundary loop was emitted with the wrong operation provenance.",
+                    );
+                }
+            }
+        }
+
+        for boundary_loop in observed.keys() {
+            if expected
+                .map(|expected| !expected.contains_key(boundary_loop))
+                .unwrap_or(true)
+            {
+                push_issue(
+                    report,
+                    Some(format!(
+                        "part.{}.boundary_loop.{}",
+                        part.instance_id.0, boundary_loop.0
+                    )),
+                    "undeclared_boundary_loop",
+                    "Compiled part emitted a boundary loop not declared by its recipe definition.",
+                );
+            }
+        }
+    }
+}
+
+fn declared_boundary_loops_by_definition(
+    recipe: &AssetRecipe,
+) -> BTreeMap<PartDefinitionId, BTreeMap<BoundaryLoopId, OperationId>> {
+    let mut declared = BTreeMap::<PartDefinitionId, BTreeMap<BoundaryLoopId, OperationId>>::new();
+    for definition in recipe.definitions.values() {
+        for operation in &definition.geometry.operations {
+            let operation_id = operation.operation_id();
+            for boundary_loop in operation.boundary_loop_ids() {
+                declared
+                    .entry(definition.id)
+                    .or_default()
+                    .insert(boundary_loop, operation_id);
+            }
+        }
+    }
+    declared
 }
 
 fn append_poly_report(
@@ -1078,8 +1372,9 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use shape_asset::{
-        AssetId, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId,
-        PartDefinition, PartInstance, Transform3,
+        AssetId, BoundaryLoopId, CutEdgeTreatment, Frame3, GeometryRecipe, GeometrySource,
+        ModelingOperationSpec, OperationId, PartDefinition, PartInstance, PlanarCutFace, RegionId,
+        SurfaceRegionSpec, SurfaceRole, Transform3,
     };
     use shape_poly::{FaceMetadata, combine_polygon_meshes, polygon_mesh_from_faces};
 
@@ -1129,6 +1424,93 @@ mod tests {
         recipe.next_ids.part_instance = 2;
         recipe.next_ids.operation = 2;
         recipe
+    }
+
+    fn cut_recipe() -> AssetRecipe {
+        let definition = PartDefinition {
+            id: PartDefinitionId(1),
+            name: "Cut Plate".to_owned(),
+            tags: BTreeSet::new(),
+            geometry: GeometryRecipe {
+                source: GeometrySource::Plate {
+                    size: [3.0, 2.0],
+                    thickness: 0.3,
+                },
+                operations: vec![ModelingOperationSpec::RecessedPanelCut {
+                    operation: OperationId(30),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.0, 0.0],
+                    size: [1.45, 0.72],
+                    depth: 0.08,
+                    corner_radius: 0.12,
+                    rim_width: 0.1152,
+                    corner_segments: 4,
+                    entry_loop: BoundaryLoopId(7),
+                    floor_loop: BoundaryLoopId(8),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(20),
+                    wall_region: RegionId(21),
+                    floor_region: RegionId(22),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                }],
+            },
+            regions: cut_regions(),
+            sockets: BTreeMap::new(),
+            local_pivot: Frame3::default(),
+            variant_group: None,
+            production_hints: None,
+        };
+        let instance = PartInstance {
+            id: PartInstanceId(1),
+            definition: PartDefinitionId(1),
+            name: "Cut Plate".to_owned(),
+            parent: None,
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::new(),
+            generated_by: None,
+        };
+        let mut recipe = AssetRecipe::new(AssetId(2), "Cut");
+        recipe.definitions.insert(definition.id, definition);
+        recipe.instances.insert(instance.id, instance);
+        recipe.root_instances.push(PartInstanceId(1));
+        recipe.next_ids.part_definition = 2;
+        recipe.next_ids.part_instance = 2;
+        recipe.next_ids.operation = 31;
+        recipe.next_ids.region = 23;
+        recipe.next_ids.boundary_loop = 9;
+        recipe
+    }
+
+    fn cut_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
+        [
+            (RegionId(1), "front", SurfaceRole::PrimarySurface),
+            (RegionId(2), "back", SurfaceRole::PrimarySurface),
+            (RegionId(3), "side", SurfaceRole::Side),
+        ]
+        .into_iter()
+        .map(|(id, name, role)| {
+            (
+                id,
+                SurfaceRegionSpec {
+                    id,
+                    name: name.to_owned(),
+                    role,
+                    tags: BTreeSet::new(),
+                },
+            )
+        })
+        .collect()
+    }
+
+    fn compile_issue_codes(report: &CompileValidationReport) -> BTreeSet<&str> {
+        report
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect()
     }
 
     fn manual_artifact() -> AssetArtifact {
@@ -1204,6 +1586,53 @@ mod tests {
             compile_asset(&reserved_recipe()),
             Err(CompileError::Assembly(AssemblyError::Modeling(_)))
         ));
+    }
+
+    #[test]
+    fn declared_boundary_loops_must_be_emitted() {
+        let recipe = cut_recipe();
+        let mut artifact = compile_asset(&recipe).expect("cut recipe should compile");
+        assert!(artifact.validation_report.is_valid());
+
+        let mut removed = 0;
+        for part in &mut artifact.compiled_parts {
+            for metadata in part.world_mesh.edge_metadata.values_mut() {
+                if metadata.boundary_loop == Some(BoundaryLoopId(7)) {
+                    metadata.boundary_loop = None;
+                    removed += 1;
+                }
+            }
+        }
+        assert!(removed > 0, "fixture should emit entry boundary loop");
+
+        let mut report = CompileValidationReport::default();
+        validate_declared_boundary_loops(&mut report, &recipe, &artifact);
+
+        assert!(compile_issue_codes(&report).contains("missing_declared_boundary_loop"));
+    }
+
+    #[test]
+    fn boundary_loop_structure_requires_one_closed_cycle() {
+        let recipe = cut_recipe();
+        let artifact = compile_asset(&recipe).expect("cut recipe should compile");
+        assert!(artifact.validation_report.is_valid());
+        let mut part = artifact.compiled_parts[0].clone();
+
+        let mut removed = false;
+        for metadata in part.world_mesh.edge_metadata.values_mut() {
+            if metadata.boundary_loop == Some(BoundaryLoopId(7)) {
+                metadata.boundary_loop = None;
+                removed = true;
+                break;
+            }
+        }
+        assert!(removed, "fixture should emit entry boundary loop");
+
+        let report = validate_compiled_part(&part);
+        let codes = compile_issue_codes(&report);
+
+        assert!(codes.contains("invalid_boundary_loop_vertex_degree"));
+        assert!(codes.contains("boundary_loop_not_closed"));
     }
 
     #[test]
