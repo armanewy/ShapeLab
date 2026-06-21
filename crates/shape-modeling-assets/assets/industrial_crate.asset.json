@@ -20,13 +20,6 @@
         },
         "operations": [
           {
-            "SetBevelProfile": {
-              "operation": 1,
-              "radius": 0.14,
-              "segments": 3
-            }
-          },
-          {
             "AddPanel": {
               "operation": 7,
               "region": 1,
@@ -40,6 +33,13 @@
               "region": 2,
               "width": 0.08,
               "height": 0.045
+            }
+          },
+          {
+            "SetBevelProfile": {
+              "operation": 1,
+              "radius": 0.14,
+              "segments": 3
             }
           }
         ]

@@ -86,11 +86,6 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                 radius: 0.14,
             },
             vec![
-                ModelingOperationSpec::SetBevelProfile {
-                    operation: OperationId(1),
-                    radius: 0.14,
-                    segments: 3,
-                },
                 ModelingOperationSpec::AddPanel {
                     operation: OperationId(7),
                     region: RegionId(1),
@@ -102,6 +97,11 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                     region: RegionId(2),
                     width: 0.08,
                     height: 0.045,
+                },
+                ModelingOperationSpec::SetBevelProfile {
+                    operation: OperationId(1),
+                    radius: 0.14,
+                    segments: 3,
                 },
             ],
             rounded_box_regions(),
@@ -1368,16 +1368,16 @@ pub fn stylized_stool_recipe() -> AssetRecipe {
                 radius: 0.12,
             },
             vec![
-                ModelingOperationSpec::SetBevelProfile {
-                    operation: OperationId(1),
-                    radius: 0.12,
-                    segments: 3,
-                },
                 ModelingOperationSpec::AddPanel {
                     operation: OperationId(2),
                     region: RegionId(1),
                     inset: 0.10,
                     depth: 0.025,
+                },
+                ModelingOperationSpec::SetBevelProfile {
+                    operation: OperationId(1),
+                    radius: 0.12,
+                    segments: 3,
                 },
             ],
             rounded_box_regions(),

@@ -547,6 +547,7 @@ fn explore_generates_structural_cut_duplication() {
                 wall_region,
                 floor_region,
                 center_offset,
+                group_membership: _,
             } => Some((
                 *definition,
                 *source,

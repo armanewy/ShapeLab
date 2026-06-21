@@ -4,14 +4,16 @@
    - Harden constrained semantic cuts before adding broader booleans.
    - Present: one boundary-loop ID per connected physical loop, target-region/host-face reconciliation, explicit rim width, explicit rectangular corner segments, separate bevel eligibility metadata, and structural recipe edits for inserting, removing, duplicating, and moving local modeling operations.
    - Present: duplicated cut operations are reflected in the inspector with descriptor-free controls for position, size/radius, rim width, depth, and segment counts.
-   - Present: semantic cut groups let recipes label repeated details such as mounting holes and vents, validate their member operations, and let search propose group-wide cut edits.
+   - Present: Plate-backed cut controls derive feasible ranges from host face bounds, plate thickness, strictly positive rim clearance, and topology locks.
+   - Present: semantic cut groups let recipes label repeated details such as mounting holes and vents, validate their member operations, preserve group membership when grouped cuts are duplicated, and let search propose group-wide cut edits.
    - Replace the current one-cut plate path with ordered local operation execution: generate a base source, apply operation stages in recipe order, validate each stage, then apply boundary treatments.
    - Present: multiple same-face plate cuts are composed when their frames are separated and their rectangular projections do not split another cut window.
+   - Present: loaded or hand-authored recipes validate modeling operation phase order.
    - Next: relax the aligned-projection constraint with a fuller local face subdivision composer.
    - The first acceptance benchmark is one plate containing one recessed rectangular panel, four circular fastener holes, and three rectangular vents.
 
 2. Boundary-loop bevels
-   - Present: boundary-loop lifecycle metadata distinguishes historically produced loops, live loops required in the final mesh, consumed loops, and replacement outputs.
+   - Present: boundary-loop lifecycle metadata distinguishes direct outputs, dependency replacement outputs, all declared outputs, historically produced loops, live loops required in the final mesh, consumed loops, and replacement outputs.
    - Add boundary-loop-targeted bevel operations for cut entry, exit, floor, and rim loops.
    - Propagate bevels through `bevel_eligible` boundary-loop metadata without overloading UV seam metadata.
    - Emit bevel-band regions, replacement loops, safe-width diagnostics, deterministic topology, and complete provenance.

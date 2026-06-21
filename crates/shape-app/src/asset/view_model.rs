@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use shape_asset::{
-    AssetRecipe, ModelingOperationSpec, ParameterDescriptor, enumerate_parameters, get_scalar,
+    AssetRecipe, GeometrySource, ModelingOperationSpec, ParameterDescriptor, enumerate_parameters,
+    get_scalar,
 };
 
 use crate::asset::{
@@ -101,18 +102,27 @@ fn cut_operations_for_recipe(
         .operations
         .iter()
         .filter_map(|operation| {
-            cut_operation_for_spec(definition.id, part_id, operation, selected_operation)
+            cut_operation_for_spec(
+                recipe,
+                definition.id,
+                part_id,
+                operation,
+                selected_operation,
+            )
         })
         .collect()
 }
 
 fn cut_operation_for_spec(
+    recipe: &AssetRecipe,
     definition: PartDefinitionId,
     part: PartInstanceId,
     operation: &ModelingOperationSpec,
     selected_operation: Option<OperationId>,
 ) -> Option<AssetCutOperation> {
     let operation_id = operation.operation_id();
+    let host = cut_host_bounds(recipe, definition);
+    let topology_locked = recipe.topology_locks.contains(&definition);
     let (kind, controls) = match operation {
         ModelingOperationSpec::RecessedPanelCut {
             center,
@@ -122,83 +132,94 @@ fn cut_operation_for_spec(
             rim_width,
             corner_segments,
             ..
-        } => (
-            AssetCutOperationKind::RecessedPanel,
-            vec![
-                cut_control(
-                    "recessed_panel_cut.center.x",
-                    "Position X",
-                    center[0],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.center.y",
-                    "Position Y",
-                    center[1],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.size.x",
-                    "Width",
-                    size[0],
-                    0.05,
-                    4.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.size.y",
-                    "Height",
-                    size[1],
-                    0.05,
-                    4.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.depth",
-                    "Depth",
-                    *depth,
-                    0.005,
-                    1.0,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.rim_width",
-                    "Rim Width",
-                    *rim_width,
-                    0.0,
-                    0.5,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.corner_radius",
-                    "Corner Radius",
-                    *corner_radius,
-                    0.0,
-                    1.0,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "recessed_panel_cut.corner_segments",
-                    "Corner Resolution",
-                    *corner_segments as f32,
-                    1.0,
-                    16.0,
-                    1.0,
-                    true,
-                ),
-            ],
-        ),
+        } => {
+            let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
+            (
+                AssetCutOperationKind::RecessedPanel,
+                vec![
+                    cut_control(
+                        "recessed_panel_cut.center.x",
+                        "Position X",
+                        center[0],
+                        ranges.center_x.0,
+                        ranges.center_x.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.center.y",
+                        "Position Y",
+                        center[1],
+                        ranges.center_y.0,
+                        ranges.center_y.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.size.x",
+                        "Width",
+                        size[0],
+                        0.05,
+                        ranges.size_x_max,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.size.y",
+                        "Height",
+                        size[1],
+                        0.05,
+                        ranges.size_y_max,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.depth",
+                        "Depth",
+                        *depth,
+                        0.005,
+                        host.map_or(1.0, |host| (host.thickness * 0.95).max(0.005)),
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.rim_width",
+                        "Rim Width",
+                        *rim_width,
+                        0.001,
+                        ranges.rim_width_max,
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.corner_radius",
+                        "Corner Radius",
+                        *corner_radius,
+                        0.0,
+                        (size[0].min(size[1]) * 0.5).max(0.0),
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "recessed_panel_cut.corner_segments",
+                        "Corner Resolution",
+                        *corner_segments as f32,
+                        if topology_locked {
+                            *corner_segments as f32
+                        } else {
+                            1.0
+                        },
+                        if topology_locked {
+                            *corner_segments as f32
+                        } else {
+                            16.0
+                        },
+                        1.0,
+                        true,
+                    ),
+                ],
+            )
+        }
         ModelingOperationSpec::RectangularThroughCut {
             center,
             size,
@@ -206,130 +227,152 @@ fn cut_operation_for_spec(
             rim_width,
             corner_segments,
             ..
-        } => (
-            AssetCutOperationKind::RectangularOpening,
-            vec![
-                cut_control(
-                    "rectangular_through_cut.center.x",
-                    "Position X",
-                    center[0],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.center.y",
-                    "Position Y",
-                    center[1],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.size.x",
-                    "Width",
-                    size[0],
-                    0.05,
-                    4.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.size.y",
-                    "Height",
-                    size[1],
-                    0.05,
-                    4.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.rim_width",
-                    "Rim Width",
-                    *rim_width,
-                    0.0,
-                    0.5,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.corner_radius",
-                    "Corner Radius",
-                    *corner_radius,
-                    0.0,
-                    1.0,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "rectangular_through_cut.corner_segments",
-                    "Corner Resolution",
-                    *corner_segments as f32,
-                    1.0,
-                    16.0,
-                    1.0,
-                    true,
-                ),
-            ],
-        ),
+        } => {
+            let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
+            (
+                AssetCutOperationKind::RectangularOpening,
+                vec![
+                    cut_control(
+                        "rectangular_through_cut.center.x",
+                        "Position X",
+                        center[0],
+                        ranges.center_x.0,
+                        ranges.center_x.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.center.y",
+                        "Position Y",
+                        center[1],
+                        ranges.center_y.0,
+                        ranges.center_y.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.size.x",
+                        "Width",
+                        size[0],
+                        0.05,
+                        ranges.size_x_max,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.size.y",
+                        "Height",
+                        size[1],
+                        0.05,
+                        ranges.size_y_max,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.rim_width",
+                        "Rim Width",
+                        *rim_width,
+                        0.001,
+                        ranges.rim_width_max,
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.corner_radius",
+                        "Corner Radius",
+                        *corner_radius,
+                        0.0,
+                        (size[0].min(size[1]) * 0.5).max(0.0),
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "rectangular_through_cut.corner_segments",
+                        "Corner Resolution",
+                        *corner_segments as f32,
+                        if topology_locked {
+                            *corner_segments as f32
+                        } else {
+                            1.0
+                        },
+                        if topology_locked {
+                            *corner_segments as f32
+                        } else {
+                            16.0
+                        },
+                        1.0,
+                        true,
+                    ),
+                ],
+            )
+        }
         ModelingOperationSpec::CircularThroughCut {
             center,
             radius,
             radial_segments,
             rim_width,
             ..
-        } => (
-            AssetCutOperationKind::CircularOpening,
-            vec![
-                cut_control(
-                    "circular_through_cut.center.x",
-                    "Position X",
-                    center[0],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "circular_through_cut.center.y",
-                    "Position Y",
-                    center[1],
-                    -2.0,
-                    2.0,
-                    0.01,
-                    false,
-                ),
-                cut_control(
-                    "circular_through_cut.radius",
-                    "Radius",
-                    *radius,
-                    0.01,
-                    2.0,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "circular_through_cut.rim_width",
-                    "Rim Width",
-                    *rim_width,
-                    0.0,
-                    0.5,
-                    0.005,
-                    false,
-                ),
-                cut_control(
-                    "circular_through_cut.radial_segments",
-                    "Roundness",
-                    *radial_segments as f32,
-                    6.0,
-                    48.0,
-                    1.0,
-                    true,
-                ),
-            ],
-        ),
+        } => {
+            let ranges = circular_cut_ranges(host, *center, *radius, *rim_width);
+            (
+                AssetCutOperationKind::CircularOpening,
+                vec![
+                    cut_control(
+                        "circular_through_cut.center.x",
+                        "Position X",
+                        center[0],
+                        ranges.center_x.0,
+                        ranges.center_x.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "circular_through_cut.center.y",
+                        "Position Y",
+                        center[1],
+                        ranges.center_y.0,
+                        ranges.center_y.1,
+                        0.01,
+                        false,
+                    ),
+                    cut_control(
+                        "circular_through_cut.radius",
+                        "Radius",
+                        *radius,
+                        0.01,
+                        ranges.radius_max,
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "circular_through_cut.rim_width",
+                        "Rim Width",
+                        *rim_width,
+                        0.001,
+                        ranges.rim_width_max,
+                        0.005,
+                        false,
+                    ),
+                    cut_control(
+                        "circular_through_cut.radial_segments",
+                        "Roundness",
+                        *radial_segments as f32,
+                        if topology_locked {
+                            *radial_segments as f32
+                        } else {
+                            6.0
+                        },
+                        if topology_locked {
+                            *radial_segments as f32
+                        } else {
+                            48.0
+                        },
+                        1.0,
+                        true,
+                    ),
+                ],
+            )
+        }
         _ => return None,
     };
 
@@ -342,6 +385,135 @@ fn cut_operation_for_spec(
         controls,
         selected: selected_operation == Some(operation_id),
     })
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CutHostBounds {
+    half_size: [f32; 2],
+    thickness: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct RectCutRanges {
+    center_x: (f32, f32),
+    center_y: (f32, f32),
+    size_x_max: f32,
+    size_y_max: f32,
+    rim_width_max: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CircularCutRanges {
+    center_x: (f32, f32),
+    center_y: (f32, f32),
+    radius_max: f32,
+    rim_width_max: f32,
+}
+
+fn cut_host_bounds(recipe: &AssetRecipe, definition: PartDefinitionId) -> Option<CutHostBounds> {
+    let definition = recipe.definitions.get(&definition)?;
+    match definition.geometry.source {
+        GeometrySource::Plate { size, thickness } => Some(CutHostBounds {
+            half_size: [size[0].abs() * 0.5, size[1].abs() * 0.5],
+            thickness: thickness.abs(),
+        }),
+        GeometrySource::RoundedBox { .. }
+        | GeometrySource::Cylinder { .. }
+        | GeometrySource::Frustum { .. }
+        | GeometrySource::Sweep { .. }
+        | GeometrySource::Lathe { .. }
+        | GeometrySource::LiteralMesh { .. }
+        | GeometrySource::ReservedBooleanResult { .. } => None,
+    }
+}
+
+fn rect_cut_ranges(
+    host: Option<CutHostBounds>,
+    center: [f32; 2],
+    size: [f32; 2],
+    rim_width: f32,
+) -> RectCutRanges {
+    let Some(host) = host else {
+        return RectCutRanges {
+            center_x: (-2.0, 2.0),
+            center_y: (-2.0, 2.0),
+            size_x_max: 4.0,
+            size_y_max: 4.0,
+            rim_width_max: 0.5,
+        };
+    };
+    let half_cut = [size[0].abs() * 0.5, size[1].abs() * 0.5];
+    let clearance_x = (host.half_size[0] - center[0].abs() - rim_width.max(0.0)).max(0.025);
+    let clearance_y = (host.half_size[1] - center[1].abs() - rim_width.max(0.0)).max(0.025);
+    let rim_clearance = [
+        (host.half_size[0] - center[0].abs() - half_cut[0]).max(0.001),
+        (host.half_size[1] - center[1].abs() - half_cut[1]).max(0.001),
+    ];
+    RectCutRanges {
+        center_x: ordered_range(
+            -host.half_size[0] + half_cut[0] + rim_width,
+            host.half_size[0] - half_cut[0] - rim_width,
+            center[0],
+        ),
+        center_y: ordered_range(
+            -host.half_size[1] + half_cut[1] + rim_width,
+            host.half_size[1] - half_cut[1] - rim_width,
+            center[1],
+        ),
+        size_x_max: (clearance_x * 2.0).max(size[0].abs()).max(0.05),
+        size_y_max: (clearance_y * 2.0).max(size[1].abs()).max(0.05),
+        rim_width_max: rim_clearance[0].min(rim_clearance[1]).clamp(0.001, 0.5),
+    }
+}
+
+fn circular_cut_ranges(
+    host: Option<CutHostBounds>,
+    center: [f32; 2],
+    radius: f32,
+    rim_width: f32,
+) -> CircularCutRanges {
+    let Some(host) = host else {
+        return CircularCutRanges {
+            center_x: (-2.0, 2.0),
+            center_y: (-2.0, 2.0),
+            radius_max: 2.0,
+            rim_width_max: 0.5,
+        };
+    };
+    let cut_radius = radius.abs();
+    let radius_clearance = [
+        (host.half_size[0] - center[0].abs() - rim_width.max(0.0)).max(0.01),
+        (host.half_size[1] - center[1].abs() - rim_width.max(0.0)).max(0.01),
+    ];
+    let rim_clearance = [
+        (host.half_size[0] - center[0].abs() - cut_radius).max(0.001),
+        (host.half_size[1] - center[1].abs() - cut_radius).max(0.001),
+    ];
+    CircularCutRanges {
+        center_x: ordered_range(
+            -host.half_size[0] + cut_radius + rim_width,
+            host.half_size[0] - cut_radius - rim_width,
+            center[0],
+        ),
+        center_y: ordered_range(
+            -host.half_size[1] + cut_radius + rim_width,
+            host.half_size[1] - cut_radius - rim_width,
+            center[1],
+        ),
+        radius_max: radius_clearance[0]
+            .min(radius_clearance[1])
+            .max(cut_radius)
+            .max(0.01),
+        rim_width_max: rim_clearance[0].min(rim_clearance[1]).clamp(0.001, 0.5),
+    }
+}
+
+fn ordered_range(minimum: f32, maximum: f32, current: f32) -> (f32, f32) {
+    if minimum <= maximum {
+        (minimum, maximum)
+    } else {
+        (current, current)
+    }
 }
 
 fn cut_control(

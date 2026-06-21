@@ -978,12 +978,37 @@ fn removing_cut_operation_cascades_semantic_cut_groups() {
     recipe.next_ids.region = 34;
     recipe.next_ids.boundary_loop = 7;
 
+    let duplicated = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "duplicate grouped cut".to_owned(),
+            seed: 76,
+            operations: vec![AssetEdit::DuplicateCutOperation {
+                definition: PLATE,
+                source: first_cut,
+                operation: OperationId(53),
+                entry_loop: BoundaryLoopId(7),
+                secondary_loop: BoundaryLoopId(8),
+                rim_region: RegionId(34),
+                wall_region: RegionId(35),
+                floor_region: None,
+                center_offset: [0.4, 0.0],
+                group_membership: DuplicateCutGroupMembership::PreserveSource,
+            }],
+        },
+    )
+    .expect("duplicated grouped cut should apply");
+    assert_eq!(
+        duplicated.variation.semantic_cut_groups["mount_holes"].operations,
+        vec![first_cut, second_cut, OperationId(53)]
+    );
+
     assert!(matches!(
         apply_edit_program(
-            &recipe,
+            &duplicated,
             &AssetEditProgram {
                 label: "reject referenced cut".to_owned(),
-                seed: 76,
+                seed: 77,
                 operations: vec![AssetEdit::RemoveModelingOperation {
                     definition: PLATE,
                     operation: first_cut,
@@ -995,10 +1020,10 @@ fn removing_cut_operation_cascades_semantic_cut_groups() {
     ));
 
     let edited = apply_edit_program(
-        &recipe,
+        &duplicated,
         &AssetEditProgram {
             label: "cascade referenced cut".to_owned(),
-            seed: 77,
+            seed: 78,
             operations: vec![AssetEdit::RemoveModelingOperation {
                 definition: PLATE,
                 operation: first_cut,
@@ -1010,7 +1035,7 @@ fn removing_cut_operation_cascades_semantic_cut_groups() {
 
     assert_eq!(
         edited.variation.semantic_cut_groups["mount_holes"].operations,
-        vec![second_cut]
+        vec![second_cut, OperationId(53)]
     );
 }
 
@@ -1145,6 +1170,7 @@ fn structural_modeling_operation_edits_update_history_and_ids() {
                     wall_region: RegionId(43),
                     floor_region: None,
                     center_offset: [0.24, 0.0],
+                    group_membership: DuplicateCutGroupMembership::PreserveSource,
                 },
                 AssetEdit::MoveModelingOperation {
                     definition: PLATE,

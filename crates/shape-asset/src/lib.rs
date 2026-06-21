@@ -976,9 +976,9 @@ impl ModelingOperationSpec {
         }
     }
 
-    /// Return generated boundary loops directly authored by this operation.
+    /// Return boundary loops directly authored by this operation.
     #[must_use]
-    pub fn produced_boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
+    pub fn direct_boundary_loop_outputs(&self) -> Vec<BoundaryLoopId> {
         match self {
             Self::RecessedPanelCut {
                 entry_loop,
@@ -1007,10 +1007,36 @@ impl ModelingOperationSpec {
         }
     }
 
+    /// Return generated boundary loops directly authored by this operation.
+    #[must_use]
+    pub fn produced_boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
+        self.direct_boundary_loop_outputs()
+    }
+
+    /// Return every boundary loop declared as an operation output.
+    #[must_use]
+    pub fn all_declared_boundary_loop_outputs(&self) -> Vec<BoundaryLoopId> {
+        let mut outputs = Vec::new();
+        let mut seen = BTreeSet::new();
+        for output in self.direct_boundary_loop_outputs() {
+            if seen.insert(output) {
+                outputs.push(output);
+            }
+        }
+        for dependency in self.boundary_loop_dependencies() {
+            for output in dependency.outputs {
+                if seen.insert(output) {
+                    outputs.push(output);
+                }
+            }
+        }
+        outputs
+    }
+
     /// Return generated boundary loops authored by this operation.
     #[must_use]
     pub fn boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
-        self.produced_boundary_loop_ids()
+        self.all_declared_boundary_loop_outputs()
     }
 
     /// Return boundary-loop lifecycle dependencies declared by this operation.
@@ -2127,6 +2153,9 @@ pub enum AssetEdit {
         floor_region: Option<RegionId>,
         /// Offset applied to the duplicate cut center in face-local coordinates.
         center_offset: [f32; 2],
+        /// How the duplicated operation joins authored semantic cut groups.
+        #[serde(default)]
+        group_membership: DuplicateCutGroupMembership,
     },
     /// Move one modeling operation to a new ordered index.
     MoveModelingOperation {
@@ -2241,6 +2270,18 @@ pub enum OperationRemovalPolicy {
     RejectIfReferenced,
     /// Remove metadata owned by the operation before deleting it.
     CascadeOwnedMetadata,
+}
+
+/// Policy for semantic cut-group membership when duplicating a cut operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DuplicateCutGroupMembership {
+    /// Add the duplicate to every semantic cut group containing the source operation.
+    #[default]
+    PreserveSource,
+    /// Leave the duplicate outside any semantic cut group.
+    Ungrouped,
+    /// Add the duplicate to one explicit semantic cut group.
+    AddTo(String),
 }
 
 /// Coarse execution phase for ordered modeling operations.
@@ -2606,7 +2647,40 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
                     ),
                 );
             }
-            for boundary_loop in operation.boundary_loop_ids() {
+            let mut local_declared_outputs = BTreeSet::new();
+            for (output_index, boundary_loop) in operation
+                .direct_boundary_loop_outputs()
+                .into_iter()
+                .enumerate()
+            {
+                if !local_declared_outputs.insert(boundary_loop) {
+                    push_issue(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop.{}",
+                            definition.id.0, operation_id.0, output_index
+                        )),
+                        "duplicate_direct_boundary_loop_output",
+                        "Direct boundary loop outputs must be distinct.",
+                    );
+                }
+            }
+            for dependency in operation.boundary_loop_dependencies() {
+                for (output_index, output) in dependency.outputs.iter().copied().enumerate() {
+                    if !local_declared_outputs.insert(output) {
+                        push_issue(
+                            report,
+                            Some(format!(
+                                "definition.{}.operation.{}.boundary_loop_dependency.output.{}",
+                                definition.id.0, operation_id.0, output_index
+                            )),
+                            "ambiguous_boundary_loop_output_ownership",
+                            "Boundary loop outputs must be owned by exactly one direct output or dependency output.",
+                        );
+                    }
+                }
+            }
+            for boundary_loop in operation.all_declared_boundary_loop_outputs() {
                 boundary_loop_state.validate_new(
                     report,
                     Some(format!(
@@ -2703,16 +2777,6 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
                             "Boundary loop dependency outputs must be distinct.",
                         );
                     }
-                    boundary_loop_state.validate_new(
-                        report,
-                        Some(format!(
-                            "definition.{}.operation.{}.boundary_loop_dependency.output.{}",
-                            definition.id.0, operation_id.0, output_index
-                        )),
-                        output,
-                        *id,
-                        operation_id,
-                    );
                 }
             }
         }
@@ -3628,7 +3692,19 @@ fn validate_variation_metadata(recipe: &AssetRecipe, report: &mut AssetValidatio
                 .iter()
                 .find(|candidate| candidate.operation_id() == *operation)
             {
-                Some(operation_spec) if operation_is_cut(operation_spec) => {}
+                Some(operation_spec) if operation_is_cut(operation_spec) => {
+                    if !cut_group_role_accepts_operation(&hint.role, operation_spec) {
+                        push_issue(
+                            report,
+                            Some(format!(
+                                "variation.semantic_cut_group.{group}.operation.{}",
+                                operation.0
+                            )),
+                            "semantic_cut_group_role_mismatch",
+                            "Semantic cut group role must match each member cut family.",
+                        );
+                    }
+                }
                 Some(_) => push_issue(
                     report,
                     Some(format!(
@@ -3664,6 +3740,15 @@ fn validate_variation_metadata(recipe: &AssetRecipe, report: &mut AssetValidatio
                     Some(format!("variation.semantic_cut_group.{group}.count_range")),
                     "semantic_cut_group_count_range_too_small",
                     "Semantic cut group count ranges must start at one or greater.",
+                );
+            }
+            let count = hint.operations.len() as u32;
+            if count < range.minimum || count > range.maximum {
+                push_issue(
+                    report,
+                    Some(format!("variation.semantic_cut_group.{group}.count_range")),
+                    "semantic_cut_group_count_out_of_range",
+                    "Semantic cut group member count must fit the authored count range.",
                 );
             }
         }
@@ -3796,6 +3881,27 @@ fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
             | ModelingOperationSpec::RectangularThroughCut { .. }
             | ModelingOperationSpec::CircularThroughCut { .. }
     )
+}
+
+fn cut_group_role_accepts_operation(
+    role: &CutGroupRole,
+    operation: &ModelingOperationSpec,
+) -> bool {
+    match role {
+        CutGroupRole::MountHoles => {
+            matches!(operation, ModelingOperationSpec::CircularThroughCut { .. })
+        }
+        CutGroupRole::Vents => {
+            matches!(
+                operation,
+                ModelingOperationSpec::RectangularThroughCut { .. }
+            )
+        }
+        CutGroupRole::Recesses => {
+            matches!(operation, ModelingOperationSpec::RecessedPanelCut { .. })
+        }
+        CutGroupRole::Custom(_) => true,
+    }
 }
 
 fn validate_geometry_source(
@@ -3975,8 +4081,27 @@ fn validate_geometry_source(
 
 fn validate_operations(definition: &PartDefinition, report: &mut AssetValidationReport) {
     let mut seen = BTreeSet::new();
+    let mut previous_phase: Option<(OperationId, OperationPhase)> = None;
     for operation in &definition.geometry.operations {
         let operation_id = operation.operation_id();
+        let phase = operation.phase();
+        if let Some((previous_operation, previous_phase)) = previous_phase
+            && previous_phase > phase
+        {
+            push_issue(
+                report,
+                Some(format!(
+                    "definition.{}.operation.{}",
+                    definition.id.0, operation_id.0
+                )),
+                "invalid_operation_phase_order",
+                format!(
+                    "Operation phase {:?} cannot follow operation {} phase {:?}.",
+                    phase, previous_operation.0, previous_phase
+                ),
+            );
+        }
+        previous_phase = Some((operation_id, phase));
         if !seen.insert(operation_id) {
             push_issue(
                 report,
@@ -5370,6 +5495,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             wall_region,
             floor_region,
             center_offset,
+            group_membership,
         } => duplicate_cut_operation(
             recipe,
             *definition,
@@ -5382,6 +5508,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                 wall_region: *wall_region,
                 floor_region: *floor_region,
                 center_offset: *center_offset,
+                group_membership: group_membership.clone(),
             },
         ),
         AssetEdit::MoveModelingOperation {
@@ -5852,7 +5979,7 @@ fn set_array_spacing(
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct DuplicateCutSpec {
     operation: OperationId,
     entry_loop: BoundaryLoopId,
@@ -5861,6 +5988,7 @@ struct DuplicateCutSpec {
     wall_region: RegionId,
     floor_region: Option<RegionId>,
     center_offset: [f32; 2],
+    group_membership: DuplicateCutGroupMembership,
 }
 
 fn insert_modeling_operation(
@@ -5954,6 +6082,7 @@ fn duplicate_cut_operation(
             spec.operation
         )));
     }
+    let group_membership = spec.group_membership.clone();
     let duplicate = {
         let definition_ref = recipe
             .definitions
@@ -5988,7 +6117,56 @@ fn duplicate_cut_operation(
         definition_ref.geometry.operations.remove(index);
     })?;
     bump_next_ids_for_operation(recipe, &duplicate);
+    apply_duplicate_cut_group_membership(
+        recipe,
+        definition,
+        source,
+        duplicate.operation_id(),
+        &group_membership,
+    )?;
     Ok(())
+}
+
+fn apply_duplicate_cut_group_membership(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    source: OperationId,
+    duplicate: OperationId,
+    membership: &DuplicateCutGroupMembership,
+) -> Result<(), AssetError> {
+    match membership {
+        DuplicateCutGroupMembership::PreserveSource => {
+            for group in recipe.variation.semantic_cut_groups.values_mut() {
+                if group.definition == definition
+                    && group.operations.contains(&source)
+                    && !group.operations.contains(&duplicate)
+                {
+                    group.operations.push(duplicate);
+                }
+            }
+            Ok(())
+        }
+        DuplicateCutGroupMembership::Ungrouped => Ok(()),
+        DuplicateCutGroupMembership::AddTo(group_id) => {
+            let group = recipe
+                .variation
+                .semantic_cut_groups
+                .get_mut(group_id)
+                .ok_or_else(|| {
+                    AssetError::UnsupportedEdit(format!("unknown semantic cut group {group_id}"))
+                })?;
+            if group.definition != definition {
+                return Err(AssetError::UnsupportedEdit(format!(
+                    "semantic cut group {group_id} belongs to definition {:?}",
+                    group.definition
+                )));
+            }
+            if !group.operations.contains(&duplicate) {
+                group.operations.push(duplicate);
+            }
+            Ok(())
+        }
+    }
 }
 
 fn move_modeling_operation(
@@ -6883,6 +7061,135 @@ mod tests {
         assert!(codes.contains("invalid_semantic_cut_group_operation"));
         assert!(codes.contains("unknown_semantic_cut_group_operation"));
         assert!(codes.contains("semantic_cut_group_count_range_too_small"));
+    }
+
+    #[test]
+    fn validation_rejects_phase_inverted_loaded_operations() {
+        let mut recipe = test_recipe();
+        recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist")
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::SetBevelProfile {
+                operation: OperationId(2),
+                radius: 0.02,
+                segments: 1,
+            });
+        recipe.next_ids.operation = 3;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(
+            issue_codes(&report).contains("invalid_operation_phase_order"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_duplicate_direct_boundary_loop_outputs() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.geometry.source = GeometrySource::Plate {
+            size: [1.0, 1.0],
+            thickness: 0.1,
+        };
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition.geometry.operations = vec![ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(2),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(1),
+            exit_loop: BoundaryLoopId(1),
+            outer_region: RegionId(1),
+            rim_region: RegionId(2),
+            wall_region: RegionId(3),
+            edge_treatment: CutEdgeTreatment::Hard,
+        }];
+        recipe.next_ids.operation = 3;
+        recipe.next_ids.region = 4;
+        recipe.next_ids.boundary_loop = 2;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(
+            issue_codes(&report).contains("duplicate_direct_boundary_loop_output"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_cut_group_role_and_count_mismatch() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::CircularThroughCut {
+                operation: OperationId(2),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveY,
+                center: [0.0, 0.0],
+                radius: 0.08,
+                radial_segments: 12,
+                rim_width: 0.03,
+                entry_loop: BoundaryLoopId(1),
+                exit_loop: BoundaryLoopId(2),
+                outer_region: RegionId(1),
+                rim_region: RegionId(2),
+                wall_region: RegionId(3),
+                edge_treatment: CutEdgeTreatment::Hard,
+            });
+        recipe.variation.semantic_cut_groups.insert(
+            "vents".to_owned(),
+            SemanticCutGroupHint {
+                label: "Vents".to_owned(),
+                definition: PartDefinitionId(1),
+                operations: vec![OperationId(2)],
+                role: CutGroupRole::Vents,
+                count_range: Some(CountRangeHint {
+                    minimum: 2,
+                    maximum: 4,
+                }),
+            },
+        );
+        recipe.next_ids.operation = 3;
+        recipe.next_ids.region = 4;
+        recipe.next_ids.boundary_loop = 3;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("semantic_cut_group_role_mismatch"));
+        assert!(codes.contains("semantic_cut_group_count_out_of_range"));
     }
 
     #[test]

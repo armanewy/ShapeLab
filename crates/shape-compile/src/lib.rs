@@ -1191,8 +1191,6 @@ impl BoundaryLoopLifecycle {
                 self.consumed.insert(dependency.input, operation_id);
             }
             for output in dependency.outputs {
-                self.historical.insert(output, operation_id);
-                self.live.insert(output, operation_id);
                 self.replacement_outputs.insert(output, operation_id);
             }
         }
@@ -1207,7 +1205,7 @@ fn boundary_loop_lifecycle_by_definition(
         let mut lifecycle = BoundaryLoopLifecycle::default();
         for operation in &definition.geometry.operations {
             let operation_id = operation.operation_id();
-            for boundary_loop in operation.produced_boundary_loop_ids() {
+            for boundary_loop in operation.all_declared_boundary_loop_outputs() {
                 lifecycle.add_produced(boundary_loop, operation_id);
             }
             lifecycle.apply_dependencies(operation);

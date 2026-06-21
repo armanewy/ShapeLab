@@ -389,7 +389,7 @@ fn collect_cut_group_opportunities(
                     opportunities,
                 );
             }
-            CutGroupRole::Recesses | CutGroupRole::Custom(_) => {
+            CutGroupRole::Recesses => {
                 collect_recessed_cut_group_opportunities(
                     group_id,
                     group.definition,
@@ -397,6 +397,7 @@ fn collect_cut_group_opportunities(
                     opportunities,
                 );
             }
+            CutGroupRole::Custom(_) => {}
         }
     }
 }
@@ -864,6 +865,7 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
+                            source_group: source_cut_group(recipe, *definition_id, *operation),
                             source: CutDuplicateSource::RecessedPanel {
                                 center: *center,
                                 size: *size,
@@ -886,6 +888,7 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
+                            source_group: source_cut_group(recipe, *definition_id, *operation),
                             source: CutDuplicateSource::RectangularThrough {
                                 center: *center,
                                 size: *size,
@@ -908,6 +911,7 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
+                            source_group: source_cut_group(recipe, *definition_id, *operation),
                             source: CutDuplicateSource::CircularThrough {
                                 center: *center,
                                 radius: *radius,
@@ -1016,6 +1020,19 @@ fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
     )
 }
 
+fn source_cut_group(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Option<String> {
+    recipe
+        .variation
+        .semantic_cut_groups
+        .iter()
+        .find(|(_, group)| group.definition == definition && group.operations.contains(&operation))
+        .map(|(group, _)| group.clone())
+}
+
 fn average(values: &[f32]) -> f32 {
     if values.is_empty() {
         return 0.0;
@@ -1098,6 +1115,16 @@ fn select_opportunities(
         if opportunity.is_cut_group() && selected.iter().any(EditOpportunity::is_cut_group) {
             continue;
         }
+        if opportunity.is_cut_group()
+            && selected.iter().any(EditOpportunity::duplicates_grouped_cut)
+        {
+            continue;
+        }
+        if opportunity.duplicates_grouped_cut()
+            && selected.iter().any(EditOpportunity::is_cut_group)
+        {
+            continue;
+        }
         selected.push(opportunity);
     }
     selected
@@ -1162,6 +1189,7 @@ enum EditOpportunity {
     DuplicateCut {
         definition: PartDefinitionId,
         operation: OperationId,
+        source_group: Option<String>,
         source: CutDuplicateSource,
     },
     CutGroupScalar {
@@ -1282,6 +1310,16 @@ impl ProposalIdAllocator {
 impl EditOpportunity {
     fn is_structural_cut_duplicate(&self) -> bool {
         matches!(self, Self::DuplicateCut { .. })
+    }
+
+    fn duplicates_grouped_cut(&self) -> bool {
+        matches!(
+            self,
+            Self::DuplicateCut {
+                source_group: Some(_),
+                ..
+            }
+        )
     }
 
     fn is_cut_group(&self) -> bool {
@@ -1434,6 +1472,7 @@ impl EditOpportunity {
                 definition,
                 operation,
                 source,
+                source_group: _,
             } => Some(vec![AssetEdit::DuplicateCutOperation {
                 definition: *definition,
                 source: *operation,
@@ -1444,6 +1483,7 @@ impl EditOpportunity {
                 wall_region: ids.region(),
                 floor_region: source.requires_floor_region().then(|| ids.region()),
                 center_offset: source.center_offset(mode, rng),
+                group_membership: shape_asset::DuplicateCutGroupMembership::PreserveSource,
             }]),
             Self::CutGroupScalar {
                 definition,
