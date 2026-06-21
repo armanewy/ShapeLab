@@ -3641,6 +3641,8 @@ dependencies = [
  "image",
  "log",
  "rfd",
+ "shape-asset",
+ "shape-compile",
  "shape-core",
  "shape-field",
  "shape-mesh",
@@ -3787,6 +3789,8 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "shape-asset",
+ "shape-compile",
  "shape-core",
  "shape-search",
  "thiserror 2.0.18",
@@ -3812,6 +3816,7 @@ dependencies = [
  "rand_distr",
  "rayon",
  "serde",
+ "shape-asset",
  "shape-core",
  "thiserror 2.0.18",
 ]

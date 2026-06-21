@@ -2,6 +2,8 @@
 
 //! Project history and persistence contracts.
 
+pub mod asset;
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};

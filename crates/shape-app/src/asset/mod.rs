@@ -9,6 +9,7 @@ pub(crate) use shape_asset::{
 };
 
 pub(crate) mod commands;
+pub(crate) mod io;
 pub(crate) mod jobs;
 pub(crate) mod panels;
 pub(crate) mod state;
