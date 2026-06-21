@@ -271,7 +271,7 @@ pub struct MeshVisualDescriptor {
     pub silhouette_perimeter: [f32; VISUAL_DESCRIPTOR_CAMERA_COUNT],
     /// One packed 64x64 binary silhouette mask per fixed view.
     pub silhouette_masks: [[u64; VISUAL_DESCRIPTOR_MASK_WORDS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
-    /// Flattened fixed-view depth histograms.
+    /// Fixed-view histograms derived from visible z-buffer depth samples.
     pub depth_histogram: [[f32; VISUAL_DESCRIPTOR_DEPTH_BINS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
 }
 
@@ -649,7 +649,8 @@ pub fn visual_descriptor_for_mesh(
         descriptor.silhouette_masks[view_index] = silhouette_mask(&image);
         descriptor.silhouette_occupancy[view_index] = silhouette_occupancy(&image);
         descriptor.silhouette_perimeter[view_index] = silhouette_perimeter(&image);
-        descriptor.depth_histogram[view_index] = depth_histogram(mesh, &camera);
+        descriptor.depth_histogram[view_index] =
+            visible_depth_histogram(&image, &workspace.depth, mesh.bounds, &camera);
     }
 
     Ok(descriptor)
@@ -814,36 +815,64 @@ fn is_foreground(image: &RenderedImage, x: i32, y: i32) -> bool {
     image.rgba8.get(index).copied().unwrap_or(0) != 0
 }
 
-fn depth_histogram(
-    mesh: &TriangleMesh,
+fn visible_depth_histogram(
+    image: &RenderedImage,
+    depth_buffer: &[f32],
+    bounds: Aabb,
     camera: &OrbitCamera,
 ) -> [f32; VISUAL_DESCRIPTOR_DEPTH_BINS] {
-    let view = camera.view_matrix();
-    let mut depths = Vec::new();
-    for position in &mesh.positions {
-        let depth = -view.transform_point3(vec3_from_array(*position)).z;
-        if depth.is_finite() && depth > 0.0 {
-            depths.push(depth);
-        }
-    }
     let mut histogram = [0.0_f32; VISUAL_DESCRIPTOR_DEPTH_BINS];
-    if depths.is_empty() {
+    let pixel_count = foreground_pixel_count(image).min(depth_buffer.len());
+    if pixel_count == 0 {
         return histogram;
     }
-    let minimum = depths.iter().copied().fold(f32::INFINITY, f32::min);
-    let maximum = depths.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let (minimum, maximum) = view_depth_range(bounds, camera);
     let span = (maximum - minimum).max(f32::EPSILON);
-    for depth in depths.iter().copied() {
+    let mut total = 0_usize;
+    for (index, depth) in depth_buffer.iter().copied().take(pixel_count).enumerate() {
+        if !visible_depth_sample(image, index, depth) {
+            continue;
+        }
         let normalized = ((depth - minimum) / span).clamp(0.0, 1.0);
-        let index = ((normalized * VISUAL_DESCRIPTOR_DEPTH_BINS as f32).floor() as usize)
+        let bin = ((normalized * VISUAL_DESCRIPTOR_DEPTH_BINS as f32).floor() as usize)
             .min(VISUAL_DESCRIPTOR_DEPTH_BINS - 1);
-        histogram[index] += 1.0;
+        histogram[bin] += 1.0;
+        total += 1;
     }
-    let total = depths.len() as f32;
+    if total == 0 {
+        return histogram;
+    }
+    let total = total as f32;
     for value in &mut histogram {
         *value /= total;
     }
     histogram
+}
+
+fn visible_depth_sample(image: &RenderedImage, index: usize, depth: f32) -> bool {
+    if !depth.is_finite() || depth <= 0.0 {
+        return false;
+    }
+    let alpha_index = index * 4 + 3;
+    image.rgba8.get(alpha_index).copied().unwrap_or(0) != 0
+}
+
+fn view_depth_range(bounds: Aabb, camera: &OrbitCamera) -> (f32, f32) {
+    let view = camera.view_matrix();
+    let mut minimum = f32::INFINITY;
+    let mut maximum = f32::NEG_INFINITY;
+    for corner in bounds_corners(bounds) {
+        let depth = -view.transform_point3(corner).z;
+        if depth.is_finite() && depth > 0.0 {
+            minimum = minimum.min(depth);
+            maximum = maximum.max(depth);
+        }
+    }
+    if minimum.is_finite() && maximum.is_finite() && maximum > minimum {
+        (minimum, maximum)
+    } else {
+        (NEAR_PLANE, FAR_PLANE)
+    }
 }
 
 fn fill_background(rgba8: &mut [u8], background: [u8; 4]) {
@@ -1472,6 +1501,32 @@ mod tests {
             first.depth_histogram[0]
                 .iter()
                 .all(|value| value.is_finite())
+        );
+    }
+
+    #[test]
+    fn visual_descriptor_depth_histogram_ignores_unreferenced_vertices() {
+        let base = triangle_mesh();
+        let mut topology_noise = base.clone();
+        topology_noise.positions.extend([
+            [-0.25, -0.25, 0.0],
+            [0.25, -0.25, 0.0],
+            [0.0, 0.25, 0.0],
+        ]);
+        topology_noise.normals.extend([[0.0, 0.0, 1.0]; 3]);
+
+        let base_descriptor =
+            visual_descriptor_for_mesh(&base).expect("base descriptor should render");
+        let noisy_descriptor =
+            visual_descriptor_for_mesh(&topology_noise).expect("noisy descriptor should render");
+
+        assert_eq!(
+            base_descriptor.depth_histogram,
+            noisy_descriptor.depth_histogram
+        );
+        assert_eq!(
+            base_descriptor.silhouette_masks,
+            noisy_descriptor.silhouette_masks
         );
     }
 

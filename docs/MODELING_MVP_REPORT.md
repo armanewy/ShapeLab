@@ -22,8 +22,9 @@ The MVP uses the explicit asset recipe path only. It compiles authored polygon p
   - current asset compile
   - current preview render
   - semantic candidate proposal generation
-  - bounded parallel candidate compile/scoring/diversity selection
+  - bounded parallel candidate compile/scoring/diversity selection through one reused worker pool
   - candidate preview render using selected compiled artifacts when recipe hashes match
+  - candidate acceptance promotes the selected compiled artifact into current state before rendering
   - OBJ export
   - canonical package export
 - Stale job handling:
@@ -36,7 +37,7 @@ The MVP uses the explicit asset recipe path only. It compiles authored polygon p
   - raw asset recipe load fallback for earlier asset JSON files
 - Export:
   - grouped OBJ with stable part object/group names
-  - canonical package with manifest, recipe, provenance, validation, Blender reconstruction script, and part meshbin payloads
+  - canonical package with manifest, recipe, provenance, compile/model validation, Blender reconstruction script, and part meshbin payloads
 
 ## Template Quality
 
@@ -55,7 +56,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - Bolt count: `Bolt count`
 - Optional trim disable: optional skid rail trim instances
 - Body lock: part instance lock filters semantic candidate programs that would modify the body, including definition-level body edits
-- Six variants: Refine/Explore over-generate semantic proposals, compile and score the pool, compare fixed-camera mesh silhouettes/depth/volume/recipe channels, collapse duplicates, and select six diverse survivors when available
+- Six variants: Refine/Explore over-generate semantic proposals, compile and score the pool, compare fixed-camera mesh silhouettes, visible z-buffer depth histograms, volume, and recipe channels, collapse duplicates, and select six diverse survivors when available
 - Accept/undo/branch: reducer revisions are branchable and serialized
 - Save/reload: Asset Modeling Lab snapshots preserve revision history
 - Export: OBJ and canonical model package jobs write files off the UI thread
@@ -64,7 +65,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 ## Known Caveats
 
 - Candidate generation is deterministic, lock-aware, semantic, and score-selected from mesh-derived visual descriptors, but the metrics remain heuristics rather than visual taste or artistic quality.
-- Authored relationship policies travel with recipes for concrete part instances. Generated occurrence relationship policies are still represented indirectly by baseline-relative intersection scoring.
+- Authored relationship policies travel with recipes and can target concrete instances, generated operation occurrences, prototype occurrence families, part tags, and definition role tags. Future Boolean boundary-loop relationships still need richer selectors.
 - The viewport overlay exposes selected-part context, validation, and wireframe hinting; direct viewport part picking is not in this MVP.
 - Current explicit generators avoid booleans; interlocking geometry is modeled as separate clean parts rather than fused constructive solids.
 

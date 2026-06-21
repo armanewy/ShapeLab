@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use shape_asset::{Frame3, PartDefinitionId, PartInstanceId, RegionId, SocketId, SocketSpec};
+use shape_asset::{
+    AssetId, AssetPartSelector, AssetRecipe, AssetRelationshipPolicy, Frame3, GeometryRecipe,
+    GeometrySource, ModelingOperationSpec, OperationId, PartDefinition, PartDefinitionId,
+    PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec, Transform3,
+};
 use shape_compile::validation::{
     ExpectedAttachment, ModelValidationConfig, ModelValidationReport, PartRelationship,
-    ValidationLimits, validate_model,
+    ValidationLimits, validate_model, validation_config_from_recipe,
 };
 use shape_compile::{
     AssetArtifact, CompileStatistics, CompileValidationReport, CompiledPart, ProvenanceReport,
@@ -282,6 +286,63 @@ fn attachment_config() -> ModelValidationConfig {
     }
 }
 
+fn selector_recipe() -> AssetRecipe {
+    let operation = OperationId(7);
+    let definition = PartDefinition {
+        id: definition_id(1),
+        name: "Panel".to_owned(),
+        tags: BTreeSet::from(["panel".to_owned()]),
+        geometry: GeometryRecipe {
+            source: GeometrySource::RoundedBox {
+                half_extents: [0.5, 0.5, 0.5],
+                radius: 0.02,
+            },
+            operations: vec![ModelingOperationSpec::LinearArray {
+                operation,
+                count: 3,
+                offset: [1.0, 0.0, 0.0],
+            }],
+        },
+        regions: BTreeMap::new(),
+        sockets: BTreeMap::new(),
+        local_pivot: Frame3::default(),
+        variant_group: None,
+        production_hints: None,
+    };
+    let instance = PartInstance {
+        id: part_id(1),
+        definition: definition_id(1),
+        name: "Panel prototype".to_owned(),
+        parent: None,
+        local_transform: Transform3::default(),
+        attachment: None,
+        enabled: true,
+        tags: BTreeSet::new(),
+        generated_by: None,
+    };
+    let mut recipe = AssetRecipe::new(AssetId(1), "Selector test");
+    recipe.definitions.insert(definition.id, definition);
+    recipe.instances.insert(instance.id, instance);
+    recipe.root_instances.push(part_id(1));
+    recipe
+        .relationships
+        .push(AssetRelationshipPolicy::MayOverlap {
+            first: AssetPartSelector::specific(part_id(1)),
+            second: AssetPartSelector::GeneratedByOperation { operation },
+            reason: "generated panels intentionally interlock".to_owned(),
+        });
+    recipe
+}
+
+fn generated_part(id: u64, prototype: PartInstanceId, operation: OperationId) -> CompiledPart {
+    let mut part = cube_part(id, "generated", [id as f32, 0.0, 0.0], [0.5, 0.5, 0.5]);
+    part.definition_id = definition_id(1);
+    part.prototype_instance_id = Some(prototype);
+    part.generated_by = Some(operation);
+    part.source_recipe_instance = false;
+    part
+}
+
 #[test]
 fn valid_crate_like_assembly_reports_clean_metrics() {
     let mut body = cube_part(1, "crate_body", [0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
@@ -302,6 +363,31 @@ fn valid_crate_like_assembly_reports_clean_metrics() {
     assert_eq!(report.metrics.quad_fraction, 1.0);
     assert_eq!(report.metrics.manifold_closed_part_fraction, 1.0);
     assert_eq!(report.metrics.provenance_coverage, 1.0);
+}
+
+#[test]
+fn recipe_validation_config_expands_generated_operation_selectors() {
+    let recipe = selector_recipe();
+    let artifact = artifact(vec![
+        cube_part(1, "prototype", [0.0, 0.0, 0.0], [0.5, 0.5, 0.5]),
+        generated_part(11, part_id(1), OperationId(7)),
+        generated_part(12, part_id(1), OperationId(7)),
+    ]);
+
+    let config = validation_config_from_recipe(&recipe, &artifact);
+
+    assert_eq!(config.required_parts, BTreeSet::from([part_id(1)]));
+    assert_eq!(config.relationships.len(), 2);
+    assert!(config.relationships.iter().any(|relationship| matches!(
+        relationship,
+        PartRelationship::IntentionalOverlap { first, second, .. }
+            if *first == part_id(1) && *second == part_id(11)
+    )));
+    assert!(config.relationships.iter().any(|relationship| matches!(
+        relationship,
+        PartRelationship::IntentionalOverlap { first, second, .. }
+            if *first == part_id(1) && *second == part_id(12)
+    )));
 }
 
 #[test]

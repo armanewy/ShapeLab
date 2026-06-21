@@ -699,58 +699,98 @@ pub enum AssetConstraint {
     },
 }
 
-/// Authored geometric relationship policy between two semantic part instances.
+/// A semantic endpoint used by authored relationship policies.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AssetPartSelector {
+    /// One concrete source recipe instance.
+    SpecificInstance {
+        /// Selected instance.
+        instance: PartInstanceId,
+    },
+    /// All generated occurrences produced by one modeling operation.
+    GeneratedByOperation {
+        /// Generator operation.
+        operation: OperationId,
+    },
+    /// A source instance and every generated occurrence that names it as prototype.
+    PrototypeAndGeneratedOccurrences {
+        /// Source prototype instance.
+        prototype: PartInstanceId,
+    },
+    /// Every occurrence whose part definition carries the tag.
+    PartTag {
+        /// Required definition tag.
+        tag: String,
+    },
+    /// Every occurrence whose part definition carries the role tag.
+    DefinitionRole {
+        /// Required definition role.
+        role: String,
+    },
+}
+
+impl AssetPartSelector {
+    /// Select one concrete source recipe instance.
+    #[must_use]
+    pub fn specific(instance: PartInstanceId) -> Self {
+        Self::SpecificInstance { instance }
+    }
+}
+
+/// Authored geometric relationship policy between semantic part selectors.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AssetRelationshipPolicy {
     /// This pair is intentionally allowed to overlap.
     MayOverlap {
-        /// First part instance.
-        first: PartInstanceId,
-        /// Second part instance.
-        second: PartInstanceId,
+        /// First selector.
+        first: AssetPartSelector,
+        /// Second selector.
+        second: AssetPartSelector,
         /// Human-facing reason for the relationship.
         reason: String,
     },
     /// This pair must not intersect.
     MustNotIntersect {
-        /// First part instance.
-        first: PartInstanceId,
-        /// Second part instance.
-        second: PartInstanceId,
+        /// First selector.
+        first: AssetPartSelector,
+        /// Second selector.
+        second: AssetPartSelector,
     },
     /// This pair must touch or remain within attachment clearance.
     MustTouch {
-        /// First part instance.
-        first: PartInstanceId,
-        /// Second part instance.
-        second: PartInstanceId,
+        /// First selector.
+        first: AssetPartSelector,
+        /// Second selector.
+        second: AssetPartSelector,
         /// Maximum accepted clearance in world units.
         max_clearance: f32,
     },
     /// The contained part must remain inside the container's authored bounds.
     MustContain {
-        /// Containing part instance.
-        container: PartInstanceId,
-        /// Contained part instance.
-        contained: PartInstanceId,
+        /// Containing selector.
+        container: AssetPartSelector,
+        /// Contained selector.
+        contained: AssetPartSelector,
     },
     /// This pair must maintain at least the authored clearance.
     MinimumClearance {
-        /// First part instance.
-        first: PartInstanceId,
-        /// Second part instance.
-        second: PartInstanceId,
+        /// First selector.
+        first: AssetPartSelector,
+        /// Second selector.
+        second: AssetPartSelector,
         /// Minimum clearance in world units.
         clearance: f32,
     },
-    /// The child instance must remain attached to the parent through the named socket.
+    /// The child selector must remain attached to the parent selector through named sockets.
     SocketAttached {
-        /// Parent part instance.
-        parent: PartInstanceId,
-        /// Child part instance.
-        child: PartInstanceId,
-        /// Socket that should be shared by parent and child.
-        socket: SocketId,
+        /// Parent selector.
+        parent: AssetPartSelector,
+        /// Child selector.
+        child: AssetPartSelector,
+        /// Socket on the parent part.
+        parent_socket: SocketId,
+        /// Socket on the child part.
+        child_socket: SocketId,
         /// Maximum accepted socket-origin distance in world units.
         max_origin_distance: f32,
         /// Maximum accepted axis angle in degrees.
@@ -769,8 +809,8 @@ impl AssetRelationshipPolicy {
         reason: impl Into<String>,
     ) -> Self {
         Self::MayOverlap {
-            first,
-            second,
+            first: AssetPartSelector::specific(first),
+            second: AssetPartSelector::specific(second),
             reason: reason.into(),
         }
     }
@@ -1731,7 +1771,7 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                 second,
                 reason,
             } => {
-                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_relationship_pair(recipe, report, index, first, second);
                 if reason.trim().is_empty() {
                     push_issue(
                         report,
@@ -1742,14 +1782,14 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                 }
             }
             AssetRelationshipPolicy::MustNotIntersect { first, second } => {
-                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_relationship_pair(recipe, report, index, first, second);
             }
             AssetRelationshipPolicy::MustTouch {
                 first,
                 second,
                 max_clearance,
             } => {
-                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_relationship_pair(recipe, report, index, first, second);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.max_clearance")),
@@ -1760,14 +1800,14 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                 container,
                 contained,
             } => {
-                validate_relationship_pair(recipe, report, index, *container, *contained);
+                validate_relationship_pair(recipe, report, index, container, contained);
             }
             AssetRelationshipPolicy::MinimumClearance {
                 first,
                 second,
                 clearance,
             } => {
-                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_relationship_pair(recipe, report, index, first, second);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.clearance")),
@@ -1777,12 +1817,13 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
             AssetRelationshipPolicy::SocketAttached {
                 parent,
                 child,
-                socket,
+                parent_socket,
+                child_socket,
                 max_origin_distance,
                 max_axis_angle_degrees,
                 max_clearance,
             } => {
-                validate_relationship_pair(recipe, report, index, *parent, *child);
+                validate_relationship_pair(recipe, report, index, parent, child);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.max_origin_distance")),
@@ -1800,7 +1841,15 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                         *clearance,
                     );
                 }
-                validate_relationship_socket(recipe, report, index, *parent, *child, *socket);
+                validate_relationship_socket(
+                    recipe,
+                    report,
+                    index,
+                    parent,
+                    child,
+                    *parent_socket,
+                    *child_socket,
+                );
             }
         }
     }
@@ -1810,8 +1859,8 @@ fn validate_relationship_pair(
     recipe: &AssetRecipe,
     report: &mut AssetValidationReport,
     index: usize,
-    first: PartInstanceId,
-    second: PartInstanceId,
+    first: &AssetPartSelector,
+    second: &AssetPartSelector,
 ) {
     if first == second {
         push_issue(
@@ -1821,59 +1870,163 @@ fn validate_relationship_pair(
             "Relationship endpoints must be different instances.",
         );
     }
-    if !recipe.instances.contains_key(&first) {
-        push_issue(
-            report,
-            Some(format!("relationship.{index}.first")),
-            "unknown_relationship_instance",
-            "Relationship references an unknown first instance.",
-        );
-    }
-    if !recipe.instances.contains_key(&second) {
-        push_issue(
-            report,
-            Some(format!("relationship.{index}.second")),
-            "unknown_relationship_instance",
-            "Relationship references an unknown second instance.",
-        );
-    }
+    validate_part_selector(recipe, report, format!("relationship.{index}.first"), first);
+    validate_part_selector(
+        recipe,
+        report,
+        format!("relationship.{index}.second"),
+        second,
+    );
 }
 
 fn validate_relationship_socket(
     recipe: &AssetRecipe,
     report: &mut AssetValidationReport,
     index: usize,
-    parent: PartInstanceId,
-    child: PartInstanceId,
-    socket: SocketId,
+    parent: &AssetPartSelector,
+    child: &AssetPartSelector,
+    parent_socket: SocketId,
+    child_socket: SocketId,
 ) {
-    let Some(parent_instance) = recipe.instances.get(&parent) else {
-        return;
-    };
-    let Some(child_instance) = recipe.instances.get(&child) else {
-        return;
-    };
-    let Some(parent_definition) = recipe.definitions.get(&parent_instance.definition) else {
-        return;
-    };
-    let Some(child_definition) = recipe.definitions.get(&child_instance.definition) else {
-        return;
-    };
-    if !parent_definition.sockets.contains_key(&socket) {
+    let parent_definitions = selector_definitions(recipe, parent);
+    let child_definitions = selector_definitions(recipe, child);
+    if parent_definitions
+        .iter()
+        .any(|definition| !definition.sockets.contains_key(&parent_socket))
+    {
         push_issue(
             report,
-            Some(format!("relationship.{index}.socket")),
+            Some(format!("relationship.{index}.parent_socket")),
             "unknown_relationship_parent_socket",
             "SocketAttached relationship references a missing parent socket.",
         );
     }
-    if !child_definition.sockets.contains_key(&socket) {
+    if child_definitions
+        .iter()
+        .any(|definition| !definition.sockets.contains_key(&child_socket))
+    {
         push_issue(
             report,
-            Some(format!("relationship.{index}.socket")),
+            Some(format!("relationship.{index}.child_socket")),
             "unknown_relationship_child_socket",
             "SocketAttached relationship references a missing child socket.",
         );
+    }
+}
+
+fn validate_part_selector(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    subject: String,
+    selector: &AssetPartSelector,
+) {
+    match selector {
+        AssetPartSelector::SpecificInstance { instance } => {
+            if !recipe.instances.contains_key(instance) {
+                push_issue(
+                    report,
+                    Some(subject),
+                    "unknown_relationship_instance",
+                    "Relationship selector references an unknown instance.",
+                );
+            }
+        }
+        AssetPartSelector::GeneratedByOperation { operation } => {
+            let exists = recipe
+                .definitions
+                .values()
+                .flat_map(|definition| &definition.geometry.operations)
+                .any(|candidate| candidate.operation_id() == *operation);
+            if !exists {
+                push_issue(
+                    report,
+                    Some(subject),
+                    "unknown_relationship_operation",
+                    "Relationship selector references an unknown generator operation.",
+                );
+            }
+        }
+        AssetPartSelector::PrototypeAndGeneratedOccurrences { prototype } => {
+            if !recipe.instances.contains_key(prototype) {
+                push_issue(
+                    report,
+                    Some(subject),
+                    "unknown_relationship_instance",
+                    "Relationship selector references an unknown prototype instance.",
+                );
+            }
+        }
+        AssetPartSelector::PartTag { tag } => {
+            validate_selector_tag(recipe, report, subject, tag, "part tag");
+        }
+        AssetPartSelector::DefinitionRole { role } => {
+            validate_selector_tag(recipe, report, subject, role, "definition role");
+        }
+    }
+}
+
+fn validate_selector_tag(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    subject: String,
+    tag: &str,
+    label: &'static str,
+) {
+    if tag.trim().is_empty() {
+        push_issue(
+            report,
+            Some(subject),
+            "empty_relationship_selector",
+            format!("Relationship selector {label} cannot be empty."),
+        );
+        return;
+    }
+    if !recipe
+        .definitions
+        .values()
+        .any(|definition| definition.tags.contains(tag))
+    {
+        push_issue(
+            report,
+            Some(subject),
+            "unknown_relationship_selector",
+            format!("Relationship selector references an unknown {label}."),
+        );
+    }
+}
+
+fn selector_definitions<'a>(
+    recipe: &'a AssetRecipe,
+    selector: &AssetPartSelector,
+) -> Vec<&'a PartDefinition> {
+    match selector {
+        AssetPartSelector::SpecificInstance { instance }
+        | AssetPartSelector::PrototypeAndGeneratedOccurrences {
+            prototype: instance,
+        } => recipe
+            .instances
+            .get(instance)
+            .and_then(|instance| recipe.definitions.get(&instance.definition))
+            .into_iter()
+            .collect(),
+        AssetPartSelector::GeneratedByOperation { operation } => recipe
+            .definitions
+            .values()
+            .filter(|definition| {
+                definition
+                    .geometry
+                    .operations
+                    .iter()
+                    .any(|candidate| candidate.operation_id() == *operation)
+            })
+            .collect(),
+        AssetPartSelector::PartTag { tag } | AssetPartSelector::DefinitionRole { role: tag } => {
+            recipe
+                .definitions
+                .values()
+                .filter(|definition| definition.tags.contains(tag))
+                .collect()
+        }
     }
 }
 
@@ -4105,6 +4258,85 @@ mod tests {
         let recipe = multipart_recipe();
 
         assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn validation_accepts_relationship_selectors_and_separate_sockets() {
+        let mut recipe = multipart_recipe();
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::SocketAttached {
+                parent: AssetPartSelector::specific(PartInstanceId(1)),
+                child: AssetPartSelector::specific(PartInstanceId(2)),
+                parent_socket: SocketId(1),
+                child_socket: SocketId(2),
+                max_origin_distance: 0.001,
+                max_axis_angle_degrees: 1.0,
+                max_clearance: Some(0.001),
+            });
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::MayOverlap {
+                first: AssetPartSelector::PrototypeAndGeneratedOccurrences {
+                    prototype: PartInstanceId(1),
+                },
+                second: AssetPartSelector::GeneratedByOperation {
+                    operation: OperationId(1),
+                },
+                reason: "arrayed prototype contacts are authored".to_owned(),
+            });
+        recipe
+            .definitions
+            .get_mut(&PartDefinitionId(2))
+            .expect("wheel definition should exist")
+            .tags
+            .insert("support".to_owned());
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::MustTouch {
+                first: AssetPartSelector::DefinitionRole {
+                    role: "support".to_owned(),
+                },
+                second: AssetPartSelector::specific(PartInstanceId(1)),
+                max_clearance: 0.02,
+            });
+
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn validation_reports_unknown_relationship_selectors_and_sockets() {
+        let mut recipe = multipart_recipe();
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::SocketAttached {
+                parent: AssetPartSelector::specific(PartInstanceId(1)),
+                child: AssetPartSelector::specific(PartInstanceId(2)),
+                parent_socket: SocketId(99),
+                child_socket: SocketId(98),
+                max_origin_distance: 0.001,
+                max_axis_angle_degrees: 1.0,
+                max_clearance: None,
+            });
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::MinimumClearance {
+                first: AssetPartSelector::GeneratedByOperation {
+                    operation: OperationId(99),
+                },
+                second: AssetPartSelector::PartTag {
+                    tag: "missing".to_owned(),
+                },
+                clearance: 0.01,
+            });
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("unknown_relationship_parent_socket"));
+        assert!(codes.contains("unknown_relationship_child_socket"));
+        assert!(codes.contains("unknown_relationship_operation"));
+        assert!(codes.contains("unknown_relationship_selector"));
     }
 
     #[test]

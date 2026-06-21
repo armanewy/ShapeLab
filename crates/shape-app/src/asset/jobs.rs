@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use rayon::prelude::*;
 use shape_asset::{
@@ -15,10 +16,11 @@ use shape_compile::export::{
     GroupedObjReport, ModelExportPackagePaths, recipe_hash, write_grouped_obj_export,
     write_model_package,
 };
-use shape_compile::validation::validate_artifact;
+use shape_compile::validation::{
+    ModelValidationReport, validate_model, validation_config_from_recipe,
+};
 use shape_compile::{
-    AssetArtifact, CompileValidationReport, ConstructionTimelineReport,
-    build_construction_timeline_report, compile_asset,
+    AssetArtifact, ConstructionTimelineReport, build_construction_timeline_report, compile_asset,
 };
 use shape_core::Aabb;
 use shape_mesh::TriangleMesh;
@@ -161,6 +163,7 @@ pub(crate) struct AssetPreview {
 pub(crate) struct AssetCompileOutput {
     pub recipe_revision: RevisionId,
     pub artifact: AssetArtifact,
+    pub model_validation: ModelValidationReport,
     pub timeline: ConstructionTimelineReport,
 }
 
@@ -190,6 +193,7 @@ impl AssetJobRequest {
 pub(crate) enum AssetJobKind {
     CompileCurrentAsset,
     RenderCurrentPreview {
+        artifact: Option<Box<AssetArtifact>>,
         camera: Option<OrbitCamera>,
         render_settings: RenderSettings,
     },
@@ -316,9 +320,15 @@ pub(crate) fn run_asset_job(request: AssetJobRequest) -> Vec<AssetJobEvent> {
     let final_event = match &request.kind {
         AssetJobKind::CompileCurrentAsset => compile_current(&request),
         AssetJobKind::RenderCurrentPreview {
+            artifact,
             camera,
             render_settings,
-        } => render_current(&request, camera.clone(), render_settings),
+        } => render_current(
+            &request,
+            artifact.as_deref(),
+            camera.clone(),
+            render_settings,
+        ),
         AssetJobKind::GenerateCandidates {
             generation_id,
             mode,
@@ -365,6 +375,8 @@ pub(crate) fn run_asset_job(request: AssetJobRequest) -> Vec<AssetJobEvent> {
 
 fn compile_current(request: &AssetJobRequest) -> Result<AssetJobEvent, String> {
     let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+    let config = validation_config_from_recipe(&request.recipe, &artifact);
+    let model_validation = validate_model(&artifact, &config);
     let timeline = build_construction_timeline_report(&request.recipe, &artifact);
     Ok(AssetJobEvent::CompileReady {
         job_id: request.job_id,
@@ -372,6 +384,7 @@ fn compile_current(request: &AssetJobRequest) -> Result<AssetJobEvent, String> {
         output: Box::new(AssetCompileOutput {
             recipe_revision: request.recipe_revision,
             artifact,
+            model_validation,
             timeline,
         }),
     })
@@ -379,11 +392,25 @@ fn compile_current(request: &AssetJobRequest) -> Result<AssetJobEvent, String> {
 
 fn render_current(
     request: &AssetJobRequest,
+    artifact: Option<&AssetArtifact>,
     camera: Option<OrbitCamera>,
     render_settings: &RenderSettings,
 ) -> Result<AssetJobEvent, String> {
-    let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
-    let mesh = preview_mesh_from_artifact(&artifact);
+    let compiled_artifact;
+    let artifact = if let Some(artifact) = artifact {
+        let hash = recipe_hash(&request.recipe).map_err(|error| error.to_string())?;
+        if artifact.source_recipe_hash == hash {
+            artifact
+        } else {
+            compiled_artifact =
+                compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+            &compiled_artifact
+        }
+    } else {
+        compiled_artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+        &compiled_artifact
+    };
+    let mesh = preview_mesh_from_artifact(artifact);
     let camera = camera.unwrap_or_else(|| fit_camera_to_bounds(mesh.bounds));
     let image = render_mesh(&mesh, &camera, render_settings).map_err(|error| error.to_string())?;
     Ok(AssetJobEvent::PreviewReady {
@@ -461,6 +488,7 @@ fn cached_candidate_artifact(candidate: &AssetCandidate) -> Result<Option<&Asset
 
 fn export_package(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobEvent, String> {
     let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+    validate_export_artifact(&request.recipe, &artifact)?;
     let package_paths =
         write_model_package(&request.recipe, &artifact, path).map_err(|error| error.to_string())?;
     Ok(AssetJobEvent::ExportPackageReady {
@@ -473,6 +501,7 @@ fn export_package(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobE
 
 fn export_obj(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobEvent, String> {
     let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+    validate_export_artifact(&request.recipe, &artifact)?;
     let export = write_grouped_obj_export(&artifact, Some(&request.recipe))
         .map_err(|error| error.to_string())?;
     fs::write(path, export.obj).map_err(|error| error.to_string())?;
@@ -482,6 +511,16 @@ fn export_obj(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobEvent
         path: path.clone(),
         report: export.report,
     })
+}
+
+fn validate_export_artifact(recipe: &AssetRecipe, artifact: &AssetArtifact) -> Result<(), String> {
+    let config = validation_config_from_recipe(recipe, artifact);
+    let report = validate_model(artifact, &config);
+    if artifact.validation_report.is_valid() && report.is_valid() {
+        Ok(())
+    } else {
+        Err("compiled asset failed recipe-derived validation".to_owned())
+    }
 }
 
 fn generate_candidates(
@@ -499,12 +538,13 @@ fn generate_candidates(
         mode: mode.into(),
     };
     let output = generate_asset_candidates(recipe, &request).map_err(|error| error.to_string())?;
-    // Generated occurrence policies are not yet represented, so compare the
-    // raw default-validator intersection count against the current template.
+    // Relationship selectors are expanded through the compiled artifact so
+    // baseline tolerance and candidates use the same recipe-derived policy.
     let (fallback_bounds, baseline_intersection_tolerance) = compile_asset(recipe)
         .map(|artifact| {
             let bounds = preview_mesh_from_artifact(&artifact).bounds;
-            let report = validate_artifact(&artifact);
+            let config = validation_config_from_recipe(recipe, &artifact);
+            let report = validate_model(&artifact, &config);
             (bounds, report.metrics.accidental_intersection_count as f32)
         })
         .unwrap_or_else(|_| (Aabb::empty(), 0.0));
@@ -561,11 +601,8 @@ fn compile_search_candidates(
     fallback_bounds: Aabb,
     baseline_intersection_tolerance: f32,
 ) -> Vec<CompiledSearchCandidate> {
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(MAX_PROPOSAL_COMPILE_THREADS)
-        .build();
-    match pool {
-        Ok(pool) => pool.install(|| {
+    match proposal_compile_pool() {
+        Some(pool) => pool.install(|| {
             candidates
                 .into_par_iter()
                 .map(|candidate| {
@@ -577,7 +614,7 @@ fn compile_search_candidates(
                 })
                 .collect()
         }),
-        Err(_) => candidates
+        None => candidates
             .into_iter()
             .map(|candidate| {
                 compile_search_candidate(
@@ -588,6 +625,18 @@ fn compile_search_candidates(
             })
             .collect(),
     }
+}
+
+fn proposal_compile_pool() -> Option<&'static rayon::ThreadPool> {
+    static PROPOSAL_COMPILE_POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    PROPOSAL_COMPILE_POOL
+        .get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(MAX_PROPOSAL_COMPILE_THREADS)
+                .build()
+                .ok()
+        })
+        .as_ref()
 }
 
 fn compile_search_candidate(
@@ -864,7 +913,8 @@ fn scoring_input(
     intersection_tolerance: f32,
 ) -> AssetCandidateInput {
     let mesh = preview_mesh_from_artifact(artifact);
-    let model_report = validate_artifact(artifact);
+    let validation_config = validation_config_from_recipe(recipe, artifact);
+    let model_report = validate_model(artifact, &validation_config);
     let mut input = AssetCandidateInput::new(
         id.to_owned(),
         artifact.source_recipe_hash.to_string(),
@@ -1146,7 +1196,7 @@ pub(crate) fn candidate_preview_from_artifact(
     camera: OrbitCamera,
 ) -> AssetCandidatePreview {
     let timeline = build_construction_timeline_report(&candidate.recipe, artifact);
-    let validation_summary = validation_summary(&artifact.validation_report);
+    let validation_summary = validation_summary(&candidate.recipe, artifact);
     AssetCandidatePreview {
         candidate_id: candidate.id,
         recipe_revision,
@@ -1185,9 +1235,11 @@ pub(crate) fn preview_mesh_from_artifact(artifact: &AssetArtifact) -> TriangleMe
     }
 }
 
-fn validation_summary(report: &CompileValidationReport) -> AssetValidationSummary {
+fn validation_summary(recipe: &AssetRecipe, artifact: &AssetArtifact) -> AssetValidationSummary {
+    let config = validation_config_from_recipe(recipe, artifact);
+    let report = validate_model(artifact, &config);
     AssetValidationSummary {
-        valid: report.is_valid(),
-        issue_count: report.issues.len(),
+        valid: artifact.validation_report.is_valid() && report.is_valid(),
+        issue_count: artifact.validation_report.issues.len() + report.issues.len(),
     }
 }

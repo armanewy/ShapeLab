@@ -99,7 +99,7 @@ cargo run -p shape-cli -- model-demo --asset explicit-desk-lamp --out-dir target
 cargo run -p shape-cli -- model-demo --asset stylized-stool --out-dir target/model-demo/stool
 ```
 
-Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`.
+Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `model-validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`. Package validation carries compile issues plus recipe-derived model validation issues.
 
 Render fixed-camera shaded and wireframe benchmark sheets for the Asset Modeling Lab search loop:
 
@@ -107,7 +107,7 @@ Render fixed-camera shaded and wireframe benchmark sheets for the Asset Modeling
 cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
 ```
 
-Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`. Candidate selection uses compiled mesh descriptors derived from fixed-camera silhouette masks, perimeter, depth histograms, mesh volume, and recipe structure.
+Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`. Candidate selection uses compiled mesh descriptors derived from fixed-camera silhouette masks, perimeter, visible z-buffer depth histograms, mesh volume, and recipe structure.
 
 Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 
@@ -129,7 +129,7 @@ The decompiler requires identical ordered topology and writes canonical binary m
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationships, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationship selectors, and revisions.
 
 The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
 

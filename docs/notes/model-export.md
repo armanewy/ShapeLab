@@ -37,7 +37,7 @@ little-endian `f32`, `u32`, and `u64` values.
 `asset-manifest.json` records deterministic part order, exact aggregate counts,
 part-local checksums, region names, parent instance IDs, and recipe pivot
 origins. `validation.json` records the same exact aggregate counts and carries
-compile validation issues without adding new model validation rules.
+compile validation issues plus recipe-derived model validation issues.
 
 ## Verification
 

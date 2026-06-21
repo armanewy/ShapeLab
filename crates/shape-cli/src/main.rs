@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -10,14 +11,11 @@ use glam::Vec3;
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use rayon::prelude::*;
 use serde::Serialize;
-use shape_asset::{
-    AssetRecipe, AssetRelationshipPolicy, ModelingOperationSpec, PartInstanceId,
-    validate_asset_recipe,
-};
+use shape_asset::{AssetRecipe, ModelingOperationSpec, PartInstanceId, validate_asset_recipe};
 use shape_compile::export::{verify_model_package, write_grouped_obj_export, write_model_package};
 use shape_compile::validation::{
-    ExpectedAttachment, ModelValidationConfig, PartRelationship, ValidationLimits,
-    validate_artifact, validate_model,
+    ModelValidationConfig, ValidationLimits, validate_model,
+    validation_config_from_recipe_with_limits,
 };
 use shape_compile::{
     build_construction_timeline_report, compile_asset, write_blender_reconstruction_script,
@@ -697,7 +695,7 @@ fn run_inspect_asset(args: InspectAssetArgs) -> anyhow::Result<()> {
     }
 
     let artifact = compile_asset(&loaded.recipe).context("compiling explicit asset recipe")?;
-    let config = model_validation_config(&loaded);
+    let config = model_validation_config(&loaded, &artifact);
     let model_report = validate_model(&artifact, &config);
     let timeline = build_construction_timeline_report(&loaded.recipe, &artifact);
 
@@ -729,7 +727,7 @@ fn run_compile_asset(args: CompileAssetArgs) -> anyhow::Result<()> {
     }
 
     let artifact = compile_asset(&loaded.recipe).context("compiling explicit asset recipe")?;
-    let config = model_validation_config(&loaded);
+    let config = model_validation_config(&loaded, &artifact);
     let model_report = validate_model(&artifact, &config);
     if !artifact.validation_report.is_valid() || !model_report.is_valid() {
         bail!("compiled asset failed validation");
@@ -797,12 +795,18 @@ fn select_visual_candidates(
     };
     let output = generate_asset_candidates(recipe, &request)
         .with_context(|| format!("generating {mode:?} semantic asset candidates"))?;
-    // Generated occurrence policies are not yet represented, so compare the
-    // raw default-validator intersection count against the current template.
+    // Relationship selectors are expanded through the compiled artifact so
+    // baseline tolerance and candidates use the same recipe-derived policy.
     let (fallback_bounds, baseline_intersection_tolerance) = compile_asset(recipe)
         .map(|artifact| {
             let bounds = render_mesh_from_triangles(&artifact.combined_preview).bounds;
-            let report = validate_artifact(&artifact);
+            let loaded = LoadedAsset {
+                label: String::new(),
+                benchmark: None,
+                recipe: recipe.clone(),
+            };
+            let config = model_validation_config(&loaded, &artifact);
+            let report = validate_model(&artifact, &config);
             (bounds, report.metrics.accidental_intersection_count as f32)
         })
         .unwrap_or_else(|_| (Aabb::empty(), 0.0));
@@ -860,11 +864,8 @@ fn compile_visual_candidates(
     fallback_bounds: Aabb,
     baseline_intersection_tolerance: f32,
 ) -> Vec<CompiledVisualCandidate> {
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(MAX_PROPOSAL_COMPILE_THREADS)
-        .build();
-    match pool {
-        Ok(pool) => pool.install(|| {
+    match proposal_compile_pool() {
+        Some(pool) => pool.install(|| {
             candidates
                 .into_par_iter()
                 .map(|candidate| {
@@ -876,7 +877,7 @@ fn compile_visual_candidates(
                 })
                 .collect()
         }),
-        Err(_) => candidates
+        None => candidates
             .into_iter()
             .map(|candidate| {
                 compile_visual_candidate(
@@ -887,6 +888,18 @@ fn compile_visual_candidates(
             })
             .collect(),
     }
+}
+
+fn proposal_compile_pool() -> Option<&'static rayon::ThreadPool> {
+    static PROPOSAL_COMPILE_POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    PROPOSAL_COMPILE_POOL
+        .get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(MAX_PROPOSAL_COMPILE_THREADS)
+                .build()
+                .ok()
+        })
+        .as_ref()
 }
 
 fn compile_visual_candidate(
@@ -997,7 +1010,13 @@ fn asset_scoring_input(
     intersection_tolerance: f32,
 ) -> AssetCandidateInput {
     let mesh = render_mesh_from_triangles(&artifact.combined_preview);
-    let model_report = validate_artifact(artifact);
+    let loaded = LoadedAsset {
+        label: String::new(),
+        benchmark: None,
+        recipe: recipe.clone(),
+    };
+    let config = model_validation_config(&loaded, artifact);
+    let model_report = validate_model(artifact, &config);
     let mut input = AssetCandidateInput::new(
         id.to_owned(),
         artifact.source_recipe_hash.to_string(),
@@ -1281,97 +1300,24 @@ fn load_asset_recipe(selector: &str) -> anyhow::Result<LoadedAsset> {
     })
 }
 
-fn model_validation_config(loaded: &LoadedAsset) -> ModelValidationConfig {
+fn model_validation_config(
+    loaded: &LoadedAsset,
+    artifact: &shape_compile::AssetArtifact,
+) -> ModelValidationConfig {
     let maximum_triangle_count = match loaded.benchmark {
         Some(BenchmarkAsset::IndustrialCrate) => 30_000,
         Some(BenchmarkAsset::ExplicitDeskLamp) => 25_000,
         Some(BenchmarkAsset::StylizedStool) => 20_000,
         None => u64::MAX,
     };
-    let relationships = relationship_policies(&loaded.recipe);
-    let expected_attachments = expected_attachment_policies(&loaded.recipe);
-    ModelValidationConfig {
-        limits: ValidationLimits {
+    validation_config_from_recipe_with_limits(
+        &loaded.recipe,
+        artifact,
+        ValidationLimits {
             maximum_triangle_count,
             ..ValidationLimits::default()
         },
-        required_parts: loaded
-            .recipe
-            .instances
-            .values()
-            .filter(|instance| instance.enabled)
-            .map(|instance| instance.id)
-            .collect(),
-        expected_attachments,
-        relationships,
-    }
-}
-
-fn relationship_policies(recipe: &AssetRecipe) -> Vec<PartRelationship> {
-    recipe
-        .relationships
-        .iter()
-        .filter_map(|relationship| match relationship {
-            AssetRelationshipPolicy::MayOverlap {
-                first,
-                second,
-                reason,
-            } => Some(PartRelationship::intentional_overlap(
-                *first,
-                *second,
-                reason.clone(),
-            )),
-            AssetRelationshipPolicy::MinimumClearance {
-                first,
-                second,
-                clearance,
-            } => Some(PartRelationship::MinimumClearance {
-                first: *first,
-                second: *second,
-                clearance: *clearance,
-            }),
-            AssetRelationshipPolicy::MustContain {
-                container,
-                contained,
-            } => Some(PartRelationship::Containment {
-                container: *container,
-                contained: *contained,
-            }),
-            AssetRelationshipPolicy::MustNotIntersect { .. }
-            | AssetRelationshipPolicy::MustTouch { .. }
-            | AssetRelationshipPolicy::SocketAttached { .. } => None,
-        })
-        .collect()
-}
-
-fn expected_attachment_policies(recipe: &AssetRecipe) -> Vec<ExpectedAttachment> {
-    recipe
-        .relationships
-        .iter()
-        .filter_map(|relationship| match relationship {
-            AssetRelationshipPolicy::SocketAttached {
-                parent,
-                child,
-                socket,
-                max_origin_distance,
-                max_axis_angle_degrees,
-                max_clearance,
-            } => Some(ExpectedAttachment {
-                parent: *parent,
-                child: *child,
-                parent_socket: *socket,
-                child_socket: *socket,
-                max_origin_distance: *max_origin_distance,
-                max_axis_angle_degrees: *max_axis_angle_degrees,
-                max_clearance: *max_clearance,
-            }),
-            AssetRelationshipPolicy::MayOverlap { .. }
-            | AssetRelationshipPolicy::MustNotIntersect { .. }
-            | AssetRelationshipPolicy::MustTouch { .. }
-            | AssetRelationshipPolicy::MustContain { .. }
-            | AssetRelationshipPolicy::MinimumClearance { .. } => None,
-        })
-        .collect()
+    )
 }
 
 fn print_part_tree(recipe: &AssetRecipe) {

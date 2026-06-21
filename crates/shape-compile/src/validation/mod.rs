@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use shape_asset::{OperationId, PartInstanceId, RegionId, SocketId};
+use shape_asset::{
+    AssetPartSelector, AssetRecipe, AssetRelationshipPolicy, OperationId, PartInstanceId, RegionId,
+    SocketId,
+};
 use shape_poly::{
     BoundaryRole, EdgeClassification, EdgeKey, MeshBounds, PolygonFace, PolygonMesh,
     TriangulatedPolygonMesh, validate_polygon_mesh,
@@ -177,6 +180,15 @@ pub enum PartRelationship {
         /// Minimum clearance in world units.
         clearance: f32,
     },
+    /// This pair must touch or remain within the authored clearance.
+    MustTouch {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+        /// Maximum accepted clearance in world units.
+        max_clearance: f32,
+    },
     /// The contained part must remain inside the container's authored bounds.
     Containment {
         /// Containing part instance.
@@ -204,7 +216,8 @@ impl PartRelationship {
     fn pair(&self) -> PartPair {
         match self {
             Self::IntentionalOverlap { first, second, .. }
-            | Self::MinimumClearance { first, second, .. } => PartPair::new(*first, *second),
+            | Self::MinimumClearance { first, second, .. }
+            | Self::MustTouch { first, second, .. } => PartPair::new(*first, *second),
             Self::Containment {
                 container,
                 contained,
@@ -237,6 +250,35 @@ pub struct ModelValidationConfig {
 #[must_use]
 pub fn validate_artifact(artifact: &AssetArtifact) -> ModelValidationReport {
     validate_model(artifact, &ModelValidationConfig::default())
+}
+
+/// Build model validation metadata from a recipe and the compiled artifact.
+#[must_use]
+pub fn validation_config_from_recipe(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) -> ModelValidationConfig {
+    validation_config_from_recipe_with_limits(recipe, artifact, ValidationLimits::default())
+}
+
+/// Build model validation metadata from a recipe, artifact, and caller limits.
+#[must_use]
+pub fn validation_config_from_recipe_with_limits(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+    limits: ValidationLimits,
+) -> ModelValidationConfig {
+    ModelValidationConfig {
+        limits,
+        required_parts: recipe
+            .instances
+            .values()
+            .filter(|instance| instance.enabled)
+            .map(|instance| instance.id)
+            .collect(),
+        expected_attachments: expected_attachments_from_recipe(recipe, artifact),
+        relationships: relationships_from_recipe(recipe, artifact),
+    }
 }
 
 /// Validate a compiled artifact with explicit validation metadata.
@@ -834,6 +876,32 @@ fn validate_part_pairs(
                     );
                 }
             }
+            PartRelationship::MustTouch {
+                first,
+                second,
+                max_clearance,
+            } => {
+                let Some(first_part) = part_lookup.get(first) else {
+                    continue;
+                };
+                let Some(second_part) = part_lookup.get(second) else {
+                    continue;
+                };
+                let actual = part_clearance(first_part, second_part, *max_clearance);
+                if actual > *max_clearance {
+                    push_issue(
+                        issues,
+                        ValidationSeverity::Error,
+                        "declared_touch_missing",
+                        [*first, *second],
+                        pair_operation(first_part, second_part),
+                        format!(
+                            "Part clearance {actual:.6} exceeds authored touch clearance {max_clearance:.6}."
+                        ),
+                        None,
+                    );
+                }
+            }
             PartRelationship::Containment {
                 container,
                 contained,
@@ -865,6 +933,172 @@ fn validate_part_pairs(
     }
 
     accidental_intersections
+}
+
+fn relationships_from_recipe(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) -> Vec<PartRelationship> {
+    let mut relationships = Vec::new();
+    for relationship in &recipe.relationships {
+        match relationship {
+            AssetRelationshipPolicy::MayOverlap {
+                first,
+                second,
+                reason,
+            } => {
+                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                    relationships.push(PartRelationship::intentional_overlap(
+                        first,
+                        second,
+                        reason.clone(),
+                    ));
+                }
+            }
+            AssetRelationshipPolicy::MinimumClearance {
+                first,
+                second,
+                clearance,
+            } => {
+                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                    relationships.push(PartRelationship::MinimumClearance {
+                        first,
+                        second,
+                        clearance: *clearance,
+                    });
+                }
+            }
+            AssetRelationshipPolicy::MustTouch {
+                first,
+                second,
+                max_clearance,
+            } => {
+                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                    relationships.push(PartRelationship::MustTouch {
+                        first,
+                        second,
+                        max_clearance: *max_clearance,
+                    });
+                }
+            }
+            AssetRelationshipPolicy::MustContain {
+                container,
+                contained,
+            } => {
+                for (container, contained) in
+                    directional_selector_pairs(recipe, artifact, container, contained)
+                {
+                    relationships.push(PartRelationship::Containment {
+                        container,
+                        contained,
+                    });
+                }
+            }
+            AssetRelationshipPolicy::MustNotIntersect { .. }
+            | AssetRelationshipPolicy::SocketAttached { .. } => {}
+        }
+    }
+    relationships
+}
+
+fn expected_attachments_from_recipe(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) -> Vec<ExpectedAttachment> {
+    let mut attachments = Vec::new();
+    for relationship in &recipe.relationships {
+        let AssetRelationshipPolicy::SocketAttached {
+            parent,
+            child,
+            parent_socket,
+            child_socket,
+            max_origin_distance,
+            max_axis_angle_degrees,
+            max_clearance,
+        } = relationship
+        else {
+            continue;
+        };
+        for (parent, child) in directional_selector_pairs(recipe, artifact, parent, child) {
+            attachments.push(ExpectedAttachment {
+                parent,
+                child,
+                parent_socket: *parent_socket,
+                child_socket: *child_socket,
+                max_origin_distance: *max_origin_distance,
+                max_axis_angle_degrees: *max_axis_angle_degrees,
+                max_clearance: *max_clearance,
+            });
+        }
+    }
+    attachments
+}
+
+fn unordered_selector_pairs(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+    first: &AssetPartSelector,
+    second: &AssetPartSelector,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    directional_selector_pairs(recipe, artifact, first, second)
+        .into_iter()
+        .map(|(first, second)| {
+            if first <= second {
+                (first, second)
+            } else {
+                (second, first)
+            }
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn directional_selector_pairs(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+    first: &AssetPartSelector,
+    second: &AssetPartSelector,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    let first_ids = resolve_selector(recipe, artifact, first);
+    let second_ids = resolve_selector(recipe, artifact, second);
+    first_ids
+        .iter()
+        .flat_map(|first| {
+            second_ids
+                .iter()
+                .filter(move |second| *second != first)
+                .map(move |second| (*first, *second))
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn resolve_selector(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+    selector: &AssetPartSelector,
+) -> BTreeSet<PartInstanceId> {
+    artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| match selector {
+            AssetPartSelector::SpecificInstance { instance } => part.instance_id == *instance,
+            AssetPartSelector::GeneratedByOperation { operation } => {
+                part.generated_by == Some(*operation)
+            }
+            AssetPartSelector::PrototypeAndGeneratedOccurrences { prototype } => {
+                part.instance_id == *prototype || part.prototype_instance_id == Some(*prototype)
+            }
+            AssetPartSelector::PartTag { tag }
+            | AssetPartSelector::DefinitionRole { role: tag } => recipe
+                .definitions
+                .get(&part.definition_id)
+                .is_some_and(|definition| definition.tags.contains(tag)),
+        })
+        .map(|part| part.instance_id)
+        .collect()
 }
 
 #[derive(Debug, Default)]

@@ -3,9 +3,9 @@
 ## Scope
 
 This branch adds additive model validation for generated static assets in
-`shape_compile::validation`. It does not change export package work, the
-implicit editor, schema-2 deformation decompiler behavior, or bend/deformation
-contracts.
+`shape_compile::validation`. Export packages carry model validation issues in
+their validation sidecar. The implicit editor, schema-2 deformation decompiler
+behavior, and bend/deformation contracts are unchanged.
 
 ## Reports
 
@@ -30,7 +30,8 @@ isolated face components inside a part.
 
 ## Assembly Validation
 
-Assembly checks use `ModelValidationConfig` metadata supplied by the caller.
+Assembly checks use `ModelValidationConfig` metadata supplied by the caller or
+derived from an `AssetRecipe` with `validation_config_from_recipe`.
 Required parts and expected socket attachments detect missing attachments,
 detached required parts, and invalid socket alignment. Pairwise AABB checks find
 suspicious part pairs; disallowed positive-overlap pairs then run narrow-phase
@@ -39,9 +40,10 @@ are checked where declared, and part/triangle budgets are enforced from the same
 config.
 
 Intentional overlaps are allowed through explicit `PartRelationship` metadata,
-currently `IntentionalOverlap` and `Containment`. These relationships suppress
-accidental overlap and triangle-intersection diagnostics for the declared pair
-without changing asset recipe schema.
+with `MinimumClearance`, `MustTouch`, and `Containment` checks available for
+declared pairs. Asset recipe relationship selectors can expand concrete
+instances, generated operation occurrences, prototype occurrence families, part
+tags, and definition role tags into concrete compiled part IDs.
 
 ## Limits
 

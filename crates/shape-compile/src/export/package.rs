@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use shape_asset::{AssetRecipe, OperationId, PartDefinitionId, PartInstanceId, RegionId};
 use shape_poly::ElementId;
 
-use crate::{AssetArtifact, CompileValidationIssue, CompiledPart, ProvenanceReport};
+use crate::{
+    AssetArtifact, CompileValidationIssue, CompiledPart, ProvenanceReport,
+    validation::{ValidationIssue, validate_model, validation_config_from_recipe},
+};
 
 use super::{
     ASSET_MANIFEST_FILE, BLENDER_RECONSTRUCT_FILE, ExportCounts, ExportError,
@@ -110,7 +113,7 @@ pub struct PartRegionManifest {
 }
 
 /// Exact validation sidecar for an export package.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelExportValidationReport {
     /// Package schema version.
     pub schema_version: u32,
@@ -120,6 +123,8 @@ pub struct ModelExportValidationReport {
     pub counts: ExportCounts,
     /// Compile validation issues carried into the package.
     pub compile_issues: Vec<CompileValidationIssue>,
+    /// Recipe-derived model validation issues carried into the package.
+    pub model_issues: Vec<ValidationIssue>,
 }
 
 /// Verification result returned by package readers.
@@ -381,7 +386,7 @@ pub fn write_model_package(
             "recipe hash does not match compiled artifact".to_owned(),
         ));
     }
-    let validation = model_export_validation_report(artifact);
+    let validation = model_export_validation_report(recipe, artifact);
     let manifest = AssetManifest {
         schema_version: MODEL_EXPORT_SCHEMA_VERSION,
         generator: "shape-compile model export".to_owned(),
@@ -676,12 +681,18 @@ pub fn decode_part_meshbin(
     Ok(mesh)
 }
 
-fn model_export_validation_report(artifact: &AssetArtifact) -> ModelExportValidationReport {
+fn model_export_validation_report(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) -> ModelExportValidationReport {
+    let model_config = validation_config_from_recipe(recipe, artifact);
+    let model_report = validate_model(artifact, &model_config);
     ModelExportValidationReport {
         schema_version: MODEL_EXPORT_SCHEMA_VERSION,
         source_recipe_hash: artifact.source_recipe_hash,
         counts: export_counts(artifact),
         compile_issues: artifact.validation_report.issues.clone(),
+        model_issues: model_report.issues,
     }
 }
 

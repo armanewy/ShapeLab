@@ -319,6 +319,7 @@ impl AssetModelingLabApp {
                 self.wireframe = wireframe;
                 continue;
             }
+            let render_after_accept = matches!(command, AssetAppCommand::AcceptCandidate(_));
             let Some(state) = &mut self.state else {
                 if let AssetAppCommand::LoadTemplate(template) = command {
                     self.load_template(template, ctx);
@@ -329,7 +330,15 @@ impl AssetModelingLabApp {
             };
             let result = state.handle_command(command);
             match result {
-                Ok(effects) => self.apply_effects(effects, ctx),
+                Ok(effects) => {
+                    self.apply_effects(effects, ctx);
+                    if render_after_accept && let Some(state) = &mut self.state {
+                        match state.request_render_current_preview(self.render_settings.clone()) {
+                            Ok(effects) => self.apply_effects(effects, ctx),
+                            Err(error) => self.push_status(error.to_string()),
+                        }
+                    }
+                }
                 Err(error) => self.push_status(error.to_string()),
             }
         }

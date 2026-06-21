@@ -13,7 +13,11 @@ use shape_asset::{
     PartInstance, PartInstanceId, RevisionId, apply_edit_program_with_report,
     validate_asset_recipe,
 };
-use shape_compile::{AssetArtifact, ConstructionTimelineReport};
+use shape_compile::export::recipe_hash;
+use shape_compile::validation::{ValidationIssue, validate_model, validation_config_from_recipe};
+use shape_compile::{
+    AssetArtifact, ConstructionTimelineReport, build_construction_timeline_report,
+};
 use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds};
 
 use super::commands::{AssetAppCommand, AssetAppEffect, AssetLockTarget, AssetTemplate};
@@ -43,6 +47,19 @@ impl From<AssetValidationIssue> for AssetAppIssue {
     fn from(issue: AssetValidationIssue) -> Self {
         Self {
             subject: issue.subject,
+            code: issue.code,
+            message: issue.message,
+        }
+    }
+}
+
+impl From<ValidationIssue> for AssetAppIssue {
+    fn from(issue: ValidationIssue) -> Self {
+        Self {
+            subject: issue
+                .part_instances
+                .first()
+                .map(|instance| format!("part.{}", instance.0)),
             code: issue.code,
             message: issue.message,
         }
@@ -437,6 +454,7 @@ impl AssetAppState {
         render_settings: RenderSettings,
     ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
         self.schedule_job(AssetJobKind::RenderCurrentPreview {
+            artifact: self.current_artifact.clone().map(Box::new),
             camera: self
                 .current_preview
                 .as_ref()
@@ -574,10 +592,25 @@ impl AssetAppState {
             .find(|slot| slot.candidate.id == candidate)
             .map(|slot| slot.candidate.clone())
             .ok_or(AssetAppStateError::UnknownCandidate(candidate))?;
+        let promoted_artifact = candidate.artifact.clone().filter(|artifact| {
+            recipe_hash(&candidate.recipe).ok() == Some(artifact.source_recipe_hash)
+        });
         self.commit_recipe("Accept candidate", candidate.recipe, true)?;
-        self.candidate_slots.clear();
-        self.active_generation = None;
-        self.schedule_compile_current()
+        if let Some(artifact) = promoted_artifact {
+            self.current_timeline =
+                Some(build_construction_timeline_report(&self.recipe, &artifact));
+            let config = validation_config_from_recipe(&self.recipe, &artifact);
+            let model_validation = validate_model(&artifact, &config);
+            self.validation_issues = model_validation
+                .issues
+                .into_iter()
+                .map(AssetAppIssue::from)
+                .collect();
+            self.current_artifact = Some(artifact);
+            Ok(Vec::new())
+        } else {
+            self.schedule_compile_current()
+        }
     }
 
     fn undo(&mut self) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
@@ -867,7 +900,12 @@ impl AssetAppState {
         }
         self.current_artifact = Some(output.artifact);
         self.current_timeline = Some(output.timeline);
-        self.validation_issues.clear();
+        self.validation_issues = output
+            .model_validation
+            .issues
+            .into_iter()
+            .map(AssetAppIssue::from)
+            .collect();
         self.finish_job(AssetJobSlot::CompileCurrentAsset, job_id);
         true
     }

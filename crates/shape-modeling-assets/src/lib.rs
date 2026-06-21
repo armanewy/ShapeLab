@@ -1093,6 +1093,7 @@ pub fn stylized_stool_recipe() -> AssetRecipe {
         .variation
         .optional_instances
         .insert(PartInstanceId(13));
+    recipe.relationships = stool_relationships();
 
     recipe.parameters.insert(
         ParameterId(1),
@@ -1194,6 +1195,38 @@ pub fn stylized_stool_recipe() -> AssetRecipe {
     recipe.root_instances.push(PartInstanceId(1));
     finish_ids(&mut recipe, 6, 14, 7, 3);
     recipe
+}
+
+fn stool_relationships() -> Vec<AssetRelationshipPolicy> {
+    [
+        (
+            1,
+            12,
+            "front trim is seated into the rounded stool seat edge",
+        ),
+        (
+            1,
+            13,
+            "back trim is seated into the rounded stool seat edge",
+        ),
+        (2, 11, "back support rail overlaps the back left leg tenon"),
+        (3, 11, "back support rail overlaps the back right leg tenon"),
+        (
+            4,
+            10,
+            "front support rail overlaps the front left leg tenon",
+        ),
+        (
+            5,
+            10,
+            "front support rail overlaps the front right leg tenon",
+        ),
+    ]
+    .into_iter()
+    .map(|(first, second, reason)| {
+        AssetRelationshipPolicy::may_overlap(PartInstanceId(first), PartInstanceId(second), reason)
+    })
+    .collect()
 }
 
 fn definition_with_regions(

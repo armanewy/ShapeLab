@@ -54,7 +54,7 @@ pub struct AssetCandidateInput {
     pub silhouette_masks: Vec<Vec<u64>>,
     /// Normalized silhouette boundary lengths from the fixed camera set.
     pub silhouette_perimeter: Vec<Scalar>,
-    /// Flattened fixed-camera depth histograms.
+    /// Flattened fixed-camera visible-depth histograms.
     pub depth_histogram: Vec<Scalar>,
     /// Per-part approximate volumes.
     pub part_volumes: Vec<Scalar>,
@@ -163,7 +163,7 @@ pub struct AssetDescriptor {
     pub silhouette_masks: Vec<Vec<u64>>,
     /// Normalized silhouette boundary lengths from the fixed camera set.
     pub silhouette_perimeter: Vec<Scalar>,
-    /// Flattened fixed-camera depth histograms.
+    /// Flattened fixed-camera visible-depth histograms.
     pub depth_histogram: Vec<Scalar>,
     /// Number of visual parts.
     pub part_count: usize,

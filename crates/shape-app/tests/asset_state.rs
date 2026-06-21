@@ -117,13 +117,16 @@ fn candidate_acceptance_replaces_current_recipe() {
         Some(AssetGenerationMode::Explore)
     );
     let candidate = state.candidate_slots[0].candidate.clone();
-    state
+    let effects = state
         .handle_command(AssetAppCommand::AcceptCandidate(candidate.id))
         .expect("candidate should apply");
 
+    assert!(effects.is_empty());
     assert_eq!(state.recipe, candidate.recipe);
     assert!(state.candidate_slots.is_empty());
     assert!(state.active_generation.is_none());
+    assert!(state.current_artifact.is_some());
+    assert!(state.current_timeline.is_some());
     assert!(state.dirty);
     assert_eq!(generation_id, asset::AssetGenerationId(1));
 }

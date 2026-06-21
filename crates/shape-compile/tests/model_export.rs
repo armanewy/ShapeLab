@@ -196,6 +196,7 @@ fn region_provenance_and_validation_sidecars_are_preserved() {
     );
     assert_eq!(package.validation.counts, export_counts(&artifact));
     assert!(package.validation.compile_issues.is_empty());
+    assert!(package.validation.model_issues.is_empty());
     assert!(
         package
             .provenance
