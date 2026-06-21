@@ -1,4 +1,5 @@
 //! Semantic candidate generation for explicit asset recipes.
+pub mod scoring;
 
 use std::collections::{BTreeMap, BTreeSet};
 
