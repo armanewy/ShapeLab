@@ -9,8 +9,14 @@ use clap::{Parser, Subcommand, ValueEnum};
 use glam::Vec3;
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
+use shape_asset::{AssetRecipe, ModelingOperationSpec, PartInstanceId, validate_asset_recipe};
+use shape_compile::export::{verify_model_package, write_grouped_obj_export, write_model_package};
+use shape_compile::validation::{
+    ModelValidationConfig, PartRelationship, ValidationLimits, validate_model,
+};
 use shape_compile::{
-    compile_asset, write_blender_reconstruction_script, write_grouped_obj, write_provenance_json,
+    build_construction_timeline_report, compile_asset, write_blender_reconstruction_script,
+    write_grouped_obj, write_provenance_json,
 };
 use shape_core::{Aabb, ParamGroup, ShapeDocument, validate_document};
 use shape_decompiler::v3::diagnostics::{
@@ -64,6 +70,10 @@ enum Command {
     Export(ExportArgs),
     /// Compile and export an explicit benchmark asset recipe.
     ModelDemo(ModelDemoArgs),
+    /// Inspect an explicit asset recipe or built-in benchmark slug.
+    InspectAsset(InspectAssetArgs),
+    /// Compile an explicit asset recipe or built-in benchmark slug.
+    CompileAsset(CompileAssetArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -127,6 +137,21 @@ struct ModelDemoArgs {
     /// Built-in explicit asset slug.
     #[arg(long)]
     asset: String,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct InspectAssetArgs {
+    /// Built-in asset slug or recipe JSON path.
+    recipe: String,
+}
+
+#[derive(Debug, clap::Args)]
+struct CompileAssetArgs {
+    /// Built-in asset slug or recipe JSON path.
+    recipe: String,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -240,6 +265,8 @@ fn main() -> anyhow::Result<()> {
         Command::Validate(args) => run_validate(args),
         Command::Export(args) => run_export(args),
         Command::ModelDemo(args) => run_model_demo(args),
+        Command::InspectAsset(args) => run_inspect_asset(args),
+        Command::CompileAsset(args) => run_compile_asset(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -454,6 +481,453 @@ fn run_model_demo(args: ModelDemoArgs) -> anyhow::Result<()> {
         artifact.statistics.triangle_count
     );
     Ok(())
+}
+
+fn run_inspect_asset(args: InspectAssetArgs) -> anyhow::Result<()> {
+    let loaded = load_asset_recipe(&args.recipe)?;
+    let recipe_report = validate_asset_recipe(&loaded.recipe);
+    println!("Asset: {}", loaded.recipe.title);
+    println!("Source: {}", loaded.label);
+    println!(
+        "Recipe validation: {}",
+        validity_label(recipe_report.is_valid())
+    );
+    if !recipe_report.is_valid() {
+        for issue in &recipe_report.issues {
+            println!("  - {}: {}", issue.code, issue.message);
+        }
+        bail!("asset recipe is invalid");
+    }
+
+    let artifact = compile_asset(&loaded.recipe).context("compiling explicit asset recipe")?;
+    let config = model_validation_config(&loaded);
+    let model_report = validate_model(&artifact, &config);
+    let timeline = build_construction_timeline_report(&loaded.recipe, &artifact);
+
+    print_part_tree(&loaded.recipe);
+    print_parameters(&loaded.recipe);
+    print_regions(&loaded.recipe);
+    print_sockets(&loaded.recipe);
+    print_operations(&loaded.recipe);
+    print_timeline(&timeline);
+    print_validation(&artifact, &model_report);
+    print_topology_statistics(&artifact, &model_report);
+
+    if !artifact.validation_report.is_valid() || !model_report.is_valid() {
+        bail!("compiled asset failed validation");
+    }
+    Ok(())
+}
+
+fn run_compile_asset(args: CompileAssetArgs) -> anyhow::Result<()> {
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    let loaded = load_asset_recipe(&args.recipe)?;
+    let recipe_report = validate_asset_recipe(&loaded.recipe);
+    if !recipe_report.is_valid() {
+        bail!(
+            "asset recipe validation failed with {} issue(s)",
+            recipe_report.issues.len()
+        );
+    }
+
+    let artifact = compile_asset(&loaded.recipe).context("compiling explicit asset recipe")?;
+    let config = model_validation_config(&loaded);
+    let model_report = validate_model(&artifact, &config);
+    if !artifact.validation_report.is_valid() || !model_report.is_valid() {
+        bail!("compiled asset failed validation");
+    }
+
+    let timeline = build_construction_timeline_report(&loaded.recipe, &artifact);
+    let package_paths = write_model_package(&loaded.recipe, &artifact, &args.out_dir)
+        .with_context(|| format!("writing model package to {}", args.out_dir.display()))?;
+    let package_verification = verify_model_package(&args.out_dir)
+        .with_context(|| format!("verifying model package {}", args.out_dir.display()))?;
+    let obj = write_grouped_obj_export(&artifact, Some(&loaded.recipe))
+        .context("writing grouped OBJ export")?;
+    fs::write(args.out_dir.join("asset.obj"), obj.obj)
+        .with_context(|| format!("writing asset.obj to {}", args.out_dir.display()))?;
+    write_json(args.out_dir.join("grouped-obj-report.json"), &obj.report)?;
+    write_json(args.out_dir.join("statistics.json"), &artifact.statistics)?;
+    write_json(args.out_dir.join("model-validation.json"), &model_report)?;
+    write_json(args.out_dir.join("construction-timeline.json"), &timeline)?;
+    write_json(
+        args.out_dir.join("package-verification.json"),
+        &package_verification,
+    )?;
+
+    let preview_mesh = render_mesh_from_triangles(&artifact.combined_preview);
+    let camera = fit_camera_to_bounds(preview_mesh.bounds);
+    let settings = RenderSettings {
+        width: CURRENT_IMAGE_SIZE,
+        height: CURRENT_IMAGE_SIZE,
+        ..RenderSettings::default()
+    };
+    let image = render_mesh(&preview_mesh, &camera, &settings).context("rendering preview")?;
+    save_png(&image, args.out_dir.join("preview.png"))?;
+
+    println!("Compiled {}", loaded.recipe.title);
+    println!("  source: {}", loaded.label);
+    println!("  output: {}", args.out_dir.display());
+    println!("  manifest: {}", package_paths.manifest.display());
+    println!(
+        "  blender script: {}",
+        package_paths.blender_reconstruct.display()
+    );
+    println!("  parts: {}", artifact.statistics.part_count);
+    println!("  triangles: {}", artifact.statistics.triangle_count);
+    println!(
+        "  package verification: checksums={} topology={} finite={}",
+        package_verification.checksums_match,
+        package_verification.topology_matches_manifest,
+        package_verification.finite_numeric_payloads
+    );
+    Ok(())
+}
+
+struct LoadedAsset {
+    label: String,
+    benchmark: Option<BenchmarkAsset>,
+    recipe: AssetRecipe,
+}
+
+fn load_asset_recipe(selector: &str) -> anyhow::Result<LoadedAsset> {
+    if let Some(asset) = BenchmarkAsset::parse(selector) {
+        return Ok(LoadedAsset {
+            label: format!("built-in:{}", asset.slug()),
+            benchmark: Some(asset),
+            recipe: asset.recipe(),
+        });
+    }
+
+    let path = Path::new(selector);
+    if !path.exists() {
+        bail!("unknown benchmark slug or recipe path '{selector}'");
+    }
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let recipe: AssetRecipe =
+        serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(LoadedAsset {
+        label: path.display().to_string(),
+        benchmark: None,
+        recipe,
+    })
+}
+
+fn model_validation_config(loaded: &LoadedAsset) -> ModelValidationConfig {
+    let maximum_triangle_count = match loaded.benchmark {
+        Some(BenchmarkAsset::IndustrialCrate) => 30_000,
+        Some(BenchmarkAsset::ExplicitDeskLamp) => 25_000,
+        None => u64::MAX,
+    };
+    let relationships = match loaded.benchmark {
+        Some(BenchmarkAsset::ExplicitDeskLamp) => lamp_relationships(),
+        _ => Vec::new(),
+    };
+    ModelValidationConfig {
+        limits: ValidationLimits {
+            maximum_triangle_count,
+            ..ValidationLimits::default()
+        },
+        required_parts: loaded
+            .recipe
+            .instances
+            .values()
+            .filter(|instance| instance.enabled)
+            .map(|instance| instance.id)
+            .collect(),
+        relationships,
+        ..ModelValidationConfig::default()
+    }
+}
+
+fn lamp_relationships() -> Vec<PartRelationship> {
+    [
+        (1, 7, "lower collar nests into base pivot boss"),
+        (1, 10, "base switch detail sits in the base surface"),
+        (1, 11, "generated switch detail sits in the base surface"),
+        (1, 12, "generated switch detail sits in the base surface"),
+        (2, 7, "lower pivot and collar share a socket"),
+        (3, 4, "stem terminates into upper pivot socket"),
+        (3, 5, "stem passes near shade neck under the shade"),
+        (3, 7, "stem lower end aligns with lower collar"),
+        (3, 8, "stem upper end aligns with upper collar"),
+        (3, 9, "stem routes under shade rim trim"),
+        (4, 5, "upper pivot seats shade socket"),
+        (4, 6, "support bracket attaches to upper pivot"),
+        (4, 8, "upper collar surrounds upper pivot"),
+        (4, 9, "shade rim trim surrounds upper pivot clearance"),
+        (5, 6, "support bracket attaches to shade neck"),
+        (5, 8, "shade clears through upper collar"),
+        (
+            5,
+            9,
+            "shade and rim trim are authored as nested shade parts",
+        ),
+        (6, 8, "bracket passes through upper collar"),
+        (6, 9, "bracket meets shade rim trim"),
+        (8, 9, "upper collar and shade rim trim meet at shade socket"),
+    ]
+    .into_iter()
+    .map(|(first, second, reason)| {
+        PartRelationship::intentional_overlap(PartInstanceId(first), PartInstanceId(second), reason)
+    })
+    .collect()
+}
+
+fn print_part_tree(recipe: &AssetRecipe) {
+    println!("Part tree:");
+    let mut children = BTreeMap::<Option<PartInstanceId>, Vec<PartInstanceId>>::new();
+    for instance in recipe
+        .instances
+        .values()
+        .filter(|instance| instance.enabled)
+    {
+        children
+            .entry(instance.parent)
+            .or_default()
+            .push(instance.id);
+    }
+    for child_ids in children.values_mut() {
+        child_ids.sort_unstable();
+    }
+    let roots = if recipe.root_instances.is_empty() {
+        children.get(&None).cloned().unwrap_or_default()
+    } else {
+        recipe.root_instances.clone()
+    };
+    for root in roots {
+        print_part_tree_node(recipe, &children, root, 0);
+    }
+}
+
+fn print_part_tree_node(
+    recipe: &AssetRecipe,
+    children: &BTreeMap<Option<PartInstanceId>, Vec<PartInstanceId>>,
+    instance_id: PartInstanceId,
+    depth: usize,
+) {
+    let Some(instance) = recipe.instances.get(&instance_id) else {
+        return;
+    };
+    let definition_name = recipe
+        .definitions
+        .get(&instance.definition)
+        .map(|definition| definition.name.as_str())
+        .unwrap_or("unknown definition");
+    let indent = "  ".repeat(depth);
+    println!(
+        "{indent}- instance {}: {} -> definition {} ({definition_name})",
+        instance.id.0, instance.name, instance.definition.0
+    );
+    if let Some(child_ids) = children.get(&Some(instance_id)) {
+        for child in child_ids {
+            print_part_tree_node(recipe, children, *child, depth + 1);
+        }
+    }
+}
+
+fn print_parameters(recipe: &AssetRecipe) {
+    println!("Parameters:");
+    if recipe.parameters.is_empty() {
+        println!("  none");
+        return;
+    }
+    for parameter in recipe.parameters.values() {
+        println!(
+            "  - {}: {} [{}] range {:.3}..{:.3} path {}",
+            parameter.id.0,
+            parameter.label,
+            parameter.group,
+            parameter.minimum,
+            parameter.maximum,
+            parameter.path
+        );
+    }
+}
+
+fn print_regions(recipe: &AssetRecipe) {
+    println!("Regions:");
+    for definition in recipe.definitions.values() {
+        if definition.regions.is_empty() {
+            println!(
+                "  - definition {} {}: none",
+                definition.id.0, definition.name
+            );
+            continue;
+        }
+        for region in definition.regions.values() {
+            println!(
+                "  - definition {} {} region {} {} {:?}",
+                definition.id.0, definition.name, region.id.0, region.name, region.role
+            );
+        }
+    }
+}
+
+fn print_sockets(recipe: &AssetRecipe) {
+    println!("Sockets:");
+    for definition in recipe.definitions.values() {
+        if definition.sockets.is_empty() {
+            println!(
+                "  - definition {} {}: none",
+                definition.id.0, definition.name
+            );
+            continue;
+        }
+        for socket in definition.sockets.values() {
+            println!(
+                "  - definition {} {} socket {} {} role {} origin {:?}",
+                definition.id.0,
+                definition.name,
+                socket.id.0,
+                socket.name,
+                socket.role,
+                socket.local_frame.origin
+            );
+        }
+    }
+}
+
+fn print_operations(recipe: &AssetRecipe) {
+    println!("Operations:");
+    for definition in recipe.definitions.values() {
+        if definition.geometry.operations.is_empty() {
+            println!(
+                "  - definition {} {}: none",
+                definition.id.0, definition.name
+            );
+            continue;
+        }
+        for operation in &definition.geometry.operations {
+            println!(
+                "  - operation {} on definition {} {}: {}",
+                operation.operation_id().0,
+                definition.id.0,
+                definition.name,
+                operation_label(operation)
+            );
+        }
+    }
+}
+
+fn print_timeline(timeline: &shape_compile::ConstructionTimelineReport) {
+    println!("Construction timeline:");
+    for stage in &timeline.stages {
+        println!("  {}. {}: {}", stage.index, stage.label, stage.summary);
+    }
+}
+
+fn print_validation(
+    artifact: &shape_compile::AssetArtifact,
+    model_report: &shape_compile::validation::ModelValidationReport,
+) {
+    println!("Validation:");
+    println!(
+        "  compile validation: {}",
+        validity_label(artifact.validation_report.is_valid())
+    );
+    for issue in &artifact.validation_report.issues {
+        println!("    - {}: {}", issue.code, issue.message);
+    }
+    println!(
+        "  model validation: {}",
+        validity_label(model_report.is_valid())
+    );
+    for issue in &model_report.issues {
+        println!(
+            "    - {:?} {} parts {:?}: {}",
+            issue.severity, issue.code, issue.part_instances, issue.message
+        );
+    }
+}
+
+fn print_topology_statistics(
+    artifact: &shape_compile::AssetArtifact,
+    model_report: &shape_compile::validation::ModelValidationReport,
+) {
+    println!("Topology statistics:");
+    println!("  parts: {}", artifact.statistics.part_count);
+    println!(
+        "  polygon vertices: {}",
+        artifact.statistics.polygon_vertex_count
+    );
+    println!(
+        "  polygon faces: {}",
+        artifact.statistics.polygon_face_count
+    );
+    println!("  triangles: {}", artifact.statistics.triangle_count);
+    println!(
+        "  SDF/remeshing used: {}",
+        artifact.statistics.used_sdf_or_remeshing
+    );
+    println!(
+        "  provenance coverage: {:.3}",
+        model_report.metrics.provenance_coverage
+    );
+    println!(
+        "  semantic region count: {}",
+        model_report.metrics.region_count
+    );
+    println!(
+        "  accidental intersections: {}",
+        model_report.metrics.accidental_intersection_count
+    );
+    println!(
+        "  hard/feature edge count: {}",
+        model_report.metrics.hard_edge_count
+    );
+}
+
+fn operation_label(operation: &ModelingOperationSpec) -> String {
+    match operation {
+        ModelingOperationSpec::TransformGeometry { .. } => "transform geometry".to_owned(),
+        ModelingOperationSpec::SetBevelProfile {
+            radius, segments, ..
+        } => format!("set bevel radius={radius:.4} segments={segments}"),
+        ModelingOperationSpec::AddPanel {
+            region,
+            inset,
+            depth,
+            ..
+        } => format!(
+            "add panel region={} inset={inset:.4} depth={depth:.4}",
+            region.0
+        ),
+        ModelingOperationSpec::AddTrim {
+            region,
+            width,
+            height,
+            ..
+        } => format!(
+            "add trim region={} width={width:.4} height={height:.4}",
+            region.0
+        ),
+        ModelingOperationSpec::MirrorInstances {
+            plane_normal,
+            plane_offset,
+            ..
+        } => format!("mirror instances normal={plane_normal:?} offset={plane_offset:.4}"),
+        ModelingOperationSpec::LinearArray { count, offset, .. } => {
+            format!("linear array count={count} offset={offset:?}")
+        }
+        ModelingOperationSpec::RadialArray {
+            count,
+            axis,
+            angle_degrees,
+            ..
+        } => format!("radial array count={count} axis={axis:?} angle={angle_degrees:.3}"),
+        ModelingOperationSpec::ReservedBoolean { label, .. } => {
+            format!("reserved boolean {label}")
+        }
+        ModelingOperationSpec::ReservedDeformationProgram { label, .. } => {
+            format!("reserved deformation {label}")
+        }
+    }
+}
+
+fn validity_label(valid: bool) -> &'static str {
+    if valid { "valid" } else { "invalid" }
 }
 
 fn run_decompile(args: DecompileArgs) -> anyhow::Result<()> {

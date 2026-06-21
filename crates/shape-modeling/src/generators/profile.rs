@@ -238,9 +238,9 @@ pub fn generate_sweep(
             let next_profile = (profile_index + 1) % profile_count;
             faces.push(vec![
                 sweep_vertex(segment, profile_index, profile_count)?,
-                sweep_vertex(next_ring, profile_index, profile_count)?,
-                sweep_vertex(next_ring, next_profile, profile_count)?,
                 sweep_vertex(segment, next_profile, profile_count)?,
+                sweep_vertex(next_ring, next_profile, profile_count)?,
+                sweep_vertex(next_ring, profile_index, profile_count)?,
             ]);
             face_metadata.push(face_metadata_for(
                 context.part_definition,
@@ -254,6 +254,7 @@ pub fn generate_sweep(
 
     if spec.cap_mode == CapMode::Ends && !spec.path_closed {
         let start_cap = (0..profile_count)
+            .rev()
             .map(|profile_index| sweep_vertex(0, profile_index, profile_count))
             .collect::<Result<Vec<_>, _>>()?;
         faces.push(start_cap);
@@ -266,7 +267,6 @@ pub fn generate_sweep(
         ));
 
         let end_cap = (0..profile_count)
-            .rev()
             .map(|profile_index| sweep_vertex(ring_count - 1, profile_index, profile_count))
             .collect::<Result<Vec<_>, _>>()?;
         faces.push(end_cap);
@@ -277,6 +277,10 @@ pub fn generate_sweep(
             SurfaceRole::Cap,
             None,
         ));
+    }
+
+    for face in &mut faces {
+        face.reverse();
     }
 
     let mut mesh = polygon_mesh_from_faces(positions, faces, face_metadata)?;

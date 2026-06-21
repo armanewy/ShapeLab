@@ -13,18 +13,26 @@
             "profile": [
               [
                 0.0,
-                -0.12
+                -0.14
               ],
               [
-                0.86,
-                -0.12
+                0.88,
+                -0.14
+              ],
+              [
+                0.88,
+                -0.08
               ],
               [
                 0.76,
-                0.08
+                0.02
               ],
               [
-                0.34,
+                0.58,
+                0.1
+              ],
+              [
+                0.28,
                 0.18
               ],
               [
@@ -37,7 +45,26 @@
         },
         "operations": []
       },
-      "regions": {},
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "lathed side",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "lower cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "upper cap",
+          "role": "Cap",
+          "tags": []
+        }
+      },
       "sockets": {
         "1": {
           "id": 1,
@@ -105,36 +132,36 @@
           "Sweep": {
             "profile": [
               [
-                0.065,
+                0.055,
                 0.0
               ],
               [
-                0.04596194,
-                0.04596194
+                0.038890872,
+                0.038890872
               ],
               [
-                -2.8412401e-9,
-                0.065
+                -2.4041265e-9,
+                0.055
               ],
               [
-                -0.04596194,
-                0.04596194
+                -0.038890872,
+                0.038890872
               ],
               [
-                -0.065,
-                -5.6824803e-9
+                -0.055,
+                -4.808253e-9
               ],
               [
-                -0.04596193,
-                -0.045961946
+                -0.038890865,
+                -0.03889088
               ],
               [
-                7.751172e-10,
-                -0.065
+                6.558684e-10,
+                -0.055
               ],
               [
-                0.045961954,
-                -0.045961924
+                0.038890887,
+                -0.038890857
               ]
             ],
             "path": [
@@ -163,7 +190,7 @@
               {
                 "origin": [
                   0.12,
-                  0.82,
+                  0.62,
                   0.0
                 ],
                 "x_axis": [
@@ -184,8 +211,8 @@
               },
               {
                 "origin": [
-                  0.62,
-                  1.55,
+                  0.56,
+                  1.3,
                   0.0
                 ],
                 "x_axis": [
@@ -207,9 +234,36 @@
             ]
           }
         },
-        "operations": []
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 2,
+              "radius": 0.006,
+              "segments": 1
+            }
+          }
+        ]
       },
-      "regions": {},
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "swept side",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "sweep start cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "sweep end cap",
+          "role": "Cap",
+          "tags": []
+        }
+      },
       "sockets": {
         "1": {
           "id": 1,
@@ -247,8 +301,8 @@
           "name": "stem upper pivot",
           "local_frame": {
             "origin": [
-              0.62,
-              1.55,
+              0.56,
+              1.3,
               0.0
             ],
             "x_axis": [
@@ -321,7 +375,38 @@
           }
         ]
       },
-      "regions": {},
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "side wall",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "top cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "bottom cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "4": {
+          "id": 4,
+          "name": "top bevel band",
+          "role": "BevelBand",
+          "tags": []
+        },
+        "5": {
+          "id": 5,
+          "name": "bottom bevel band",
+          "role": "BevelBand",
+          "tags": []
+        }
+      },
       "sockets": {
         "1": {
           "id": 1,
@@ -393,19 +478,23 @@
                 0.0
               ],
               [
-                0.34,
+                0.3,
                 0.0
               ],
               [
-                0.73,
-                0.24
+                0.52,
+                0.08
               ],
               [
-                0.62,
-                0.58
+                0.76,
+                0.3
               ],
               [
-                0.3,
+                0.69,
+                0.54
+              ],
+              [
+                0.35,
                 0.5
               ],
               [
@@ -418,7 +507,26 @@
         },
         "operations": []
       },
-      "regions": {},
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "lathed side",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "lower cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "upper cap",
+          "role": "Cap",
+          "tags": []
+        }
+      },
       "sockets": {
         "1": {
           "id": 1,
@@ -452,6 +560,489 @@
           ]
         }
       },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "5": {
+      "id": 5,
+      "name": "support bracket",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Sweep": {
+            "profile": [
+              [
+                0.035,
+                0.0
+              ],
+              [
+                0.024748737,
+                0.024748737
+              ],
+              [
+                -1.5298985e-9,
+                0.035
+              ],
+              [
+                -0.024748737,
+                0.024748737
+              ],
+              [
+                -0.035,
+                -3.059797e-9
+              ],
+              [
+                -0.024748733,
+                -0.02474874
+              ],
+              [
+                4.1737083e-10,
+                -0.035
+              ],
+              [
+                0.024748744,
+                -0.02474873
+              ]
+            ],
+            "path": [
+              {
+                "origin": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.14,
+                  -0.05,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.28,
+                  -0.19,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              }
+            ]
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 3,
+              "radius": 0.004,
+              "segments": 1
+            }
+          }
+        ]
+      },
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "swept side",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "sweep start cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "sweep end cap",
+          "role": "Cap",
+          "tags": []
+        }
+      },
+      "sockets": {
+        "1": {
+          "id": 1,
+          "name": "bracket pivot socket",
+          "local_frame": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        },
+        "2": {
+          "id": 2,
+          "name": "bracket shade socket",
+          "local_frame": {
+            "origin": [
+              0.28,
+              -0.19,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        }
+      },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "6": {
+      "id": 6,
+      "name": "pivot collar trim",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Cylinder": {
+            "radius": 0.205,
+            "height": 0.055,
+            "radial_segments": 32
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 4,
+              "radius": 0.012,
+              "segments": 1
+            }
+          }
+        ]
+      },
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "side wall",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "top cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "bottom cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "4": {
+          "id": 4,
+          "name": "top bevel band",
+          "role": "BevelBand",
+          "tags": []
+        },
+        "5": {
+          "id": 5,
+          "name": "bottom bevel band",
+          "role": "BevelBand",
+          "tags": []
+        }
+      },
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "7": {
+      "id": 7,
+      "name": "shade rim trim",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Frustum": {
+            "bottom_radius": 0.79,
+            "top_radius": 0.73,
+            "height": 0.055,
+            "radial_segments": 48
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 5,
+              "radius": 0.01,
+              "segments": 1
+            }
+          }
+        ]
+      },
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "side wall",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "top cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "bottom cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "4": {
+          "id": 4,
+          "name": "top bevel band",
+          "role": "BevelBand",
+          "tags": []
+        },
+        "5": {
+          "id": 5,
+          "name": "bottom bevel band",
+          "role": "BevelBand",
+          "tags": []
+        }
+      },
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "8": {
+      "id": 8,
+      "name": "base switch detail",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Cylinder": {
+            "radius": 0.055,
+            "height": 0.035,
+            "radial_segments": 16
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 6,
+              "radius": 0.006,
+              "segments": 1
+            }
+          },
+          {
+            "RadialArray": {
+              "operation": 7,
+              "count": 3,
+              "axis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "angle_degrees": 40.0
+            }
+          }
+        ]
+      },
+      "regions": {
+        "1": {
+          "id": 1,
+          "name": "side wall",
+          "role": "Side",
+          "tags": []
+        },
+        "2": {
+          "id": 2,
+          "name": "top cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "3": {
+          "id": 3,
+          "name": "bottom cap",
+          "role": "Cap",
+          "tags": []
+        },
+        "4": {
+          "id": 4,
+          "name": "top bevel band",
+          "role": "BevelBand",
+          "tags": []
+        },
+        "5": {
+          "id": 5,
+          "name": "bottom bevel band",
+          "role": "BevelBand",
+          "tags": []
+        }
+      },
+      "sockets": {},
       "local_pivot": {
         "origin": [
           0.0,
@@ -514,7 +1105,7 @@
       "local_transform": {
         "translation": [
           0.0,
-          0.28,
+          0.34,
           0.0
         ],
         "rotation_degrees": [
@@ -541,7 +1132,7 @@
       "local_transform": {
         "translation": [
           0.0,
-          0.3,
+          0.52,
           0.0
         ],
         "rotation_degrees": [
@@ -564,11 +1155,11 @@
       "id": 4,
       "definition": 3,
       "name": "upper cylinder pivot",
-      "parent": 3,
+      "parent": 1,
       "local_transform": {
         "translation": [
           0.62,
-          1.88,
+          1.9,
           0.0
         ],
         "rotation_degrees": [
@@ -591,17 +1182,152 @@
       "id": 5,
       "definition": 4,
       "name": "lathed shade",
-      "parent": 4,
+      "parent": 1,
       "local_transform": {
         "translation": [
-          0.92,
-          1.66,
+          1.04,
+          1.56,
           0.0
         ],
         "rotation_degrees": [
           0.0,
           0.0,
-          -23.0
+          -24.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "6": {
+      "id": 6,
+      "definition": 5,
+      "name": "support bracket from pivot to shade",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.66,
+          1.88,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          -10.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "7": {
+      "id": 7,
+      "definition": 6,
+      "name": "lower pivot collar trim",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.34,
+          -0.18
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          90.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "8": {
+      "id": 8,
+      "definition": 6,
+      "name": "upper pivot collar trim",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.62,
+          1.9,
+          -0.18
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          90.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "9": {
+      "id": 9,
+      "definition": 7,
+      "name": "shade rim trim",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          1.16,
+          1.5,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          -24.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "10": {
+      "id": 10,
+      "definition": 8,
+      "name": "optional base switch detail group",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.46,
+          0.215,
+          0.2
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          90.0
         ],
         "scale": [
           1.0,
@@ -618,22 +1344,45 @@
   "root_instances": [
     1
   ],
-  "parameters": {},
+  "parameters": {
+    "1": {
+      "id": 1,
+      "path": "definition.2.geometry.sweep.profile.0.x",
+      "label": "Stem sweep radius",
+      "group": "Form",
+      "minimum": 0.045,
+      "maximum": 0.075,
+      "step": 0.005,
+      "mutation_sigma": 0.005,
+      "topology_changing": false,
+      "beginner_description": "Adjust Stem sweep radius."
+    }
+  },
   "locks": [],
+  "instance_locks": [],
+  "subtree_locks": [],
+  "topology_locks": [],
   "constraints": [],
   "variation": {
-    "optional_instances": [],
+    "optional_instances": [
+      10
+    ],
     "replacement_groups": {},
-    "count_ranges": {},
+    "count_ranges": {
+      "7": {
+        "minimum": 1,
+        "maximum": 5
+      }
+    },
     "parameter_range_overrides": {}
   },
   "next_ids": {
-    "part_definition": 5,
-    "part_instance": 6,
-    "operation": 2,
-    "region": 1,
+    "part_definition": 9,
+    "part_instance": 11,
+    "operation": 8,
+    "region": 6,
     "socket": 3,
-    "parameter": 1,
+    "parameter": 2,
     "revision": 1
   }
 }

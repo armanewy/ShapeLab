@@ -535,7 +535,7 @@ fn validate_edges(
     }
 
     for edge in mesh.edge_metadata.iter().filter_map(|(edge, metadata)| {
-        edge_metadata_declares_open(metadata.boundary_role).then_some(edge)
+        (metadata.boundary_role == BoundaryRole::OpenBoundary).then_some(edge)
     }) {
         if edge_uses.get(edge).map(Vec::len) != Some(1) {
             push_issue(
@@ -562,7 +562,6 @@ fn validate_faces(
     issues: &mut Vec<ValidationIssue>,
     metrics: &mut MetricsBuilder,
 ) {
-    let mesh_center = finite_positions_center(&mesh.positions);
     for (index, face) in mesh.faces.iter().enumerate() {
         let Some(points) = face_points(mesh, face) else {
             continue;
@@ -600,22 +599,18 @@ fn validate_faces(
                 );
             }
         }
+    }
 
-        if closed_manifold
-            && let (Some(center), Some(normal), Some(mesh_center)) =
-                (face_center(mesh, face), face_normal(&points), mesh_center)
-            && dot(normal, sub(center, mesh_center)) < -EPSILON
-        {
-            push_issue(
-                issues,
-                ValidationSeverity::Error,
-                "inverted_normal",
-                [part.instance_id],
-                face_operation(part, mesh, index),
-                format!("Face {index} normal points inward."),
-                Some(center),
-            );
-        }
+    if closed_manifold && signed_mesh_volume(mesh) < -EPSILON {
+        push_issue(
+            issues,
+            ValidationSeverity::Error,
+            "inverted_normal",
+            [part.instance_id],
+            None,
+            "Closed part has negative signed volume; polygon winding appears inverted.",
+            finite_positions_center(&mesh.positions),
+        );
     }
 }
 
@@ -1136,10 +1131,6 @@ fn polygon_area(points: &[[f32; 3]]) -> f32 {
     normal_sum(points).map_or(0.0, |normal| 0.5 * length(normal))
 }
 
-fn face_normal(points: &[[f32; 3]]) -> Option<[f32; 3]> {
-    normalize(normal_sum(points)?)
-}
-
 fn normal_sum(points: &[[f32; 3]]) -> Option<[f32; 3]> {
     if points.len() < 3 || !points.iter().copied().all(point_is_finite) {
         return None;
@@ -1152,6 +1143,34 @@ fn normal_sum(points: &[[f32; 3]]) -> Option<[f32; 3]> {
         normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
     }
     Some(normal)
+}
+
+fn signed_mesh_volume(mesh: &PolygonMesh) -> f32 {
+    let mut volume = 0.0_f32;
+    for face in &mesh.faces {
+        if face.vertices.len() < 3 {
+            continue;
+        }
+        let Some(anchor) = mesh.positions.get(face.vertices[0] as usize).copied() else {
+            continue;
+        };
+        for index in 1..face.vertices.len() - 1 {
+            let Some(b) = mesh.positions.get(face.vertices[index] as usize).copied() else {
+                continue;
+            };
+            let Some(c) = mesh
+                .positions
+                .get(face.vertices[index + 1] as usize)
+                .copied()
+            else {
+                continue;
+            };
+            if point_is_finite(anchor) && point_is_finite(b) && point_is_finite(c) {
+                volume += dot(anchor, cross(b, c)) / 6.0;
+            }
+        }
+    }
+    volume
 }
 
 fn face_aspect_ratio(points: &[[f32; 3]]) -> Option<f32> {

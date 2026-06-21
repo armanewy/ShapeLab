@@ -105,6 +105,70 @@ fn model_demo_generates_explicit_asset_artifacts() {
 }
 
 #[test]
+fn inspect_and_compile_asset_use_canonical_model_package() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("lamp");
+
+    let inspect = Command::new(exe)
+        .args(["inspect-asset", "explicit-desk-lamp"])
+        .output()
+        .expect("run shape-cli inspect-asset");
+    assert!(
+        inspect.status.success(),
+        "inspect failed: {}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&inspect.stdout);
+    assert!(stdout.contains("Part tree:"));
+    assert!(stdout.contains("Construction timeline:"));
+    assert!(stdout.contains("model validation: valid"));
+    assert!(stdout.contains("accidental intersections: 0"));
+
+    let status = Command::new(exe)
+        .args(["compile-asset", "explicit-desk-lamp", "--out-dir"])
+        .arg(&out_dir)
+        .status()
+        .expect("run shape-cli compile-asset");
+    assert!(status.success());
+    for name in [
+        "asset-manifest.json",
+        "recipe.json",
+        "provenance.json",
+        "validation.json",
+        "blender_reconstruct.py",
+        "asset.obj",
+        "grouped-obj-report.json",
+        "statistics.json",
+        "model-validation.json",
+        "construction-timeline.json",
+        "package-verification.json",
+        "preview.png",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+    assert!(out_dir.join("parts").join("part-001.meshbin").exists());
+
+    let timeline: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("construction-timeline.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(timeline["stages"].as_array().unwrap().len(), 7);
+    let model_validation: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("model-validation.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        model_validation["metrics"]["accidental_intersection_count"],
+        0
+    );
+}
+
+#[test]
 fn decompile_generates_lossless_package() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");

@@ -9,8 +9,8 @@ pub mod validation;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetRecipe, OperationId, PartDefinitionId, PartInstanceId, RegionId, SocketId, SocketSpec,
-    validate_asset_recipe,
+    AssetRecipe, ModelingOperationSpec, OperationId, PartDefinitionId, PartInstanceId, RegionId,
+    SocketId, SocketSpec, validate_asset_recipe,
 };
 use shape_modeling::assembly::{AssemblyError, evaluate_assembly};
 use shape_poly::{
@@ -120,6 +120,32 @@ pub struct CompileStatistics {
     pub triangle_count: u64,
     /// Whether any reserved SDF/remeshing path was used.
     pub used_sdf_or_remeshing: bool,
+}
+
+/// Deterministic user-facing construction timeline for a compiled asset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstructionTimelineReport {
+    /// Ordered modeling stages.
+    pub stages: Vec<ConstructionTimelineStage>,
+}
+
+/// One stage in an authored construction timeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstructionTimelineStage {
+    /// One-based stage index.
+    pub index: u32,
+    /// Stable stage key.
+    pub key: String,
+    /// Human-facing stage label.
+    pub label: String,
+    /// Deterministic explanation derived from recipe and compile provenance.
+    pub summary: String,
+    /// Source part definitions involved in this stage.
+    pub part_definitions: Vec<PartDefinitionId>,
+    /// Compiled part occurrences involved in this stage.
+    pub part_instances: Vec<PartInstanceId>,
+    /// Authored or generated operations involved in this stage.
+    pub operations: Vec<OperationId>,
 }
 
 /// Validation issue for compiled artifacts.
@@ -282,6 +308,168 @@ pub fn compile_asset(recipe: &AssetRecipe) -> Result<AssetArtifact, CompileError
         return Ok(artifact);
     }
     Ok(artifact)
+}
+
+/// Build a deterministic, user-facing construction timeline from recipe and
+/// compiled operation provenance.
+#[must_use]
+pub fn build_construction_timeline_report(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+) -> ConstructionTimelineReport {
+    let source_instances = artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| part.source_recipe_instance)
+        .collect::<Vec<_>>();
+    let generated_instances = artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| part.generated_by.is_some())
+        .collect::<Vec<_>>();
+
+    let primary = source_instances
+        .iter()
+        .copied()
+        .filter(|part| part_name_matches(recipe, part, &["body", "base", "shade"]))
+        .collect::<Vec<_>>();
+    let panels = source_instances
+        .iter()
+        .copied()
+        .filter(|part| part_name_matches(recipe, part, &["panel", "inset", "face plate"]))
+        .collect::<Vec<_>>();
+    let trim = source_instances
+        .iter()
+        .copied()
+        .filter(|part| {
+            part_name_matches(
+                recipe,
+                part,
+                &[
+                    "trim",
+                    "rail",
+                    "reinforcement",
+                    "bracket",
+                    "rib",
+                    "collar",
+                    "bezel",
+                    "ring",
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    let repeated = artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| {
+            part.generated_by.is_some()
+                || part_name_matches(
+                    recipe,
+                    part,
+                    &["bolt", "fastener", "foot", "grille", "vent", "knurl"],
+                )
+        })
+        .collect::<Vec<_>>();
+    let supporting = source_instances
+        .iter()
+        .copied()
+        .filter(|part| {
+            !primary
+                .iter()
+                .any(|candidate| candidate.instance_id == part.instance_id)
+                && !panels
+                    .iter()
+                    .any(|candidate| candidate.instance_id == part.instance_id)
+                && !trim
+                    .iter()
+                    .any(|candidate| candidate.instance_id == part.instance_id)
+                && !repeated
+                    .iter()
+                    .any(|candidate| candidate.instance_id == part.instance_id)
+        })
+        .collect::<Vec<_>>();
+
+    let panel_operations = operation_ids_matching(recipe, |operation| {
+        matches!(operation, ModelingOperationSpec::AddPanel { .. })
+    });
+    let trim_operations = operation_ids_matching(recipe, |operation| {
+        matches!(operation, ModelingOperationSpec::AddTrim { .. })
+    });
+    let repeat_operations = operation_ids_matching(recipe, |operation| {
+        matches!(
+            operation,
+            ModelingOperationSpec::MirrorInstances { .. }
+                | ModelingOperationSpec::LinearArray { .. }
+                | ModelingOperationSpec::RadialArray { .. }
+        )
+    });
+    let bevel_operations = operation_ids_matching(recipe, |operation| {
+        matches!(operation, ModelingOperationSpec::SetBevelProfile { .. })
+    });
+
+    ConstructionTimelineReport {
+        stages: vec![
+            timeline_stage(
+                1,
+                "primary_body",
+                "primary body",
+                primary,
+                Vec::new(),
+                "Establishes the main authored mass and silhouette.",
+            ),
+            timeline_stage(
+                2,
+                "supporting_parts",
+                "supporting parts",
+                supporting,
+                Vec::new(),
+                "Adds separate mechanical support pieces and attachment hardware.",
+            ),
+            timeline_stage(
+                3,
+                "panels",
+                "panels",
+                panels,
+                panel_operations,
+                "Builds the inset and raised panel hierarchy.",
+            ),
+            timeline_stage(
+                4,
+                "trim",
+                "trim",
+                trim,
+                trim_operations,
+                "Adds reinforcement trim, collars, brackets, and boundary details.",
+            ),
+            timeline_stage(
+                5,
+                "repeated_details",
+                "repeated details",
+                repeated,
+                repeat_operations,
+                "Expands mirrored or arrayed fasteners, feet, vents, and other repeated detail.",
+            ),
+            timeline_stage(
+                6,
+                "edge_treatment",
+                "edge treatment",
+                artifact.compiled_parts.iter().collect(),
+                bevel_operations,
+                "Applies the asset bevel language and preserves hard feature loops.",
+            ),
+            timeline_stage(
+                7,
+                "final_assembly",
+                "final assembly",
+                artifact.compiled_parts.iter().collect(),
+                generated_instances
+                    .iter()
+                    .filter_map(|part| part.generated_by)
+                    .collect(),
+                "Combines compiled parts with semantic IDs, regions, sockets, and topology statistics.",
+            ),
+        ],
+    }
 }
 
 /// Validate a compiled asset artifact.
@@ -748,6 +936,86 @@ fn build_statistics(
     }
 }
 
+fn timeline_stage(
+    index: u32,
+    key: &str,
+    label: &str,
+    parts: Vec<&CompiledPart>,
+    operations: Vec<OperationId>,
+    summary: &str,
+) -> ConstructionTimelineStage {
+    let mut part_definitions = parts
+        .iter()
+        .map(|part| part.definition_id)
+        .collect::<Vec<_>>();
+    part_definitions.sort_unstable();
+    part_definitions.dedup();
+    let mut part_instances = parts
+        .iter()
+        .map(|part| part.instance_id)
+        .collect::<Vec<_>>();
+    part_instances.sort_unstable();
+    part_instances.dedup();
+    let mut operations = operations;
+    operations.sort_unstable();
+    operations.dedup();
+    let detail = if part_instances.is_empty() && operations.is_empty() {
+        "No authored entries were classified into this stage.".to_owned()
+    } else {
+        format!(
+            "{summary} Definitions: {}. Instances: {}. Operations: {}.",
+            id_list(part_definitions.iter().map(|id| id.0)),
+            id_list(part_instances.iter().map(|id| id.0)),
+            id_list(operations.iter().map(|id| id.0))
+        )
+    };
+
+    ConstructionTimelineStage {
+        index,
+        key: key.to_owned(),
+        label: label.to_owned(),
+        summary: detail,
+        part_definitions,
+        part_instances,
+        operations,
+    }
+}
+
+fn id_list(ids: impl IntoIterator<Item = u64>) -> String {
+    let values = ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    if values.is_empty() {
+        "none".to_owned()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn part_name_matches(recipe: &AssetRecipe, part: &CompiledPart, needles: &[&str]) -> bool {
+    let mut haystack = part.instance_name.to_ascii_lowercase();
+    if let Some(definition) = recipe.definitions.get(&part.definition_id) {
+        haystack.push(' ');
+        haystack.push_str(&definition.name.to_ascii_lowercase());
+        for tag in &definition.tags {
+            haystack.push(' ');
+            haystack.push_str(&tag.to_ascii_lowercase());
+        }
+    }
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn operation_ids_matching(
+    recipe: &AssetRecipe,
+    predicate: impl Fn(&ModelingOperationSpec) -> bool,
+) -> Vec<OperationId> {
+    recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .filter(|operation| predicate(operation))
+        .map(ModelingOperationSpec::operation_id)
+        .collect()
+}
+
 fn source_recipe_hash(recipe: &AssetRecipe) -> Result<u64, CompileError> {
     let bytes = serde_json::to_vec(recipe)?;
     let mut hash = FNV_OFFSET;
@@ -951,5 +1219,23 @@ mod tests {
 
         assert!(script.contains("PARTS ="));
         assert!(script.contains("shape_lab_instance_id"));
+    }
+
+    #[test]
+    fn construction_timeline_has_required_stages() {
+        let recipe = reserved_recipe();
+        let artifact = manual_artifact();
+
+        let timeline = build_construction_timeline_report(&recipe, &artifact);
+
+        assert_eq!(timeline.stages.len(), 7);
+        assert_eq!(timeline.stages[0].key, "primary_body");
+        assert_eq!(timeline.stages[6].key, "final_assembly");
+        assert!(
+            timeline
+                .stages
+                .iter()
+                .any(|stage| stage.summary.contains("Instances: 1"))
+        );
     }
 }
