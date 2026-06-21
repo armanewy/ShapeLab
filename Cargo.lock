@@ -3667,14 +3667,18 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "glam",
  "image",
  "log",
  "serde",
  "serde_json",
+ "shape-compile",
  "shape-core",
  "shape-decompiler",
  "shape-field",
  "shape-mesh",
+ "shape-modeling-assets",
+ "shape-poly",
  "shape-presets",
  "shape-project",
  "shape-render",
@@ -3746,6 +3750,14 @@ dependencies = [
  "shape-asset",
  "shape-poly",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-modeling-assets"
+version = "0.1.0"
+dependencies = [
+ "shape-asset",
+ "shape-compile",
 ]
 
 [[package]]

@@ -8,7 +8,8 @@ Shape Lab now has contracts for a second modeling lane alongside the existing im
 crates/shape-asset      serializable asset recipes, semantic IDs, parameters, sockets, attachments, edits, validation
 crates/shape-poly       explicit indexed polygon topology, semantic metadata, triangulation, normals, adjacency, validation
 crates/shape-modeling   deterministic generator dispatch and modeling operation contracts
-crates/shape-compile    recipe-to-artifact compilation, combined preview meshes, provenance, validation, export stubs
+crates/shape-compile    recipe-to-artifact compilation, validation, provenance, OBJ and Blender script export
+crates/shape-modeling-assets benchmark explicit AssetRecipe constructors and checked-in JSON recipes
 ```
 
 The existing `shape-core` `ShapeDocument` remains the implicit MVP editor model. The existing `shape-decompiler` package path remains the same-topology mesh-pair replay system. The explicit modeling lane is additive and does not change either behavior.
@@ -25,13 +26,16 @@ shape-modeling generator dispatch
 GeneratedPart polygon meshes
     |
     v
-shape-compile part transforms and combination
+shape-modeling assembly evaluation
     |
     v
-AssetArtifact with preview triangles and provenance
+shape-compile validation, triangulation, provenance, statistics
+    |
+    v
+AssetArtifact with grouped OBJ, preview triangles, and Blender reconstruction script
 ```
 
-Wave 0 defines compileable contracts only. Primitive generators, paneling, trim, arrays, and production exporters are intentionally stubbed with typed unsupported errors until later waves implement deterministic geometry.
+Wave 2 compiles the first complete explicit assets. `RoundedBox`, `Cylinder`, `Frustum`, `Plate`, `Sweep`, `Lathe`, and `LiteralMesh` sources dispatch to deterministic generators. Reserved boolean and deformation-program sources remain typed unsupported paths and are not used by the benchmark assets.
 
 ## Semantic Recipe Layer
 
@@ -59,6 +63,36 @@ Part instances declare:
 `shape-poly` owns explicit polygon topology. A `PolygonMesh` stores positions, stable vertex IDs, polygon faces, face metadata, edge metadata, a topology signature, and bounds. Face and edge metadata connect generated elements to part definitions, part instances, regions, operations, smoothing groups, boundary roles, and seam candidates.
 
 `TriangulatedPolygonMesh` is a derived preview/export form. It preserves maps from triangles back to polygon faces, regions, parts, and stable vertex IDs.
+
+## Compile Pipeline
+
+`compile_asset` now performs the explicit production path:
+
+1. validate the `AssetRecipe`
+2. generate one local mesh per referenced definition
+3. evaluate parent transforms, socket attachments, mirrored instances, and linear/radial arrays through the assembly runtime
+4. transform meshes into asset/world space
+5. validate local and world polygon topology
+6. triangulate every part and the combined preview mesh
+7. build face and triangle provenance
+8. compute deterministic statistics and source recipe hash
+9. return typed contextual errors from asset, modeling, assembly, polygon, and JSON layers
+
+The compiler rejects invalid indices, degenerate faces, nonmanifold topology, inconsistent winding, unexpected closed-part boundaries, non-finite split normals, and missing face provenance. Declared open boundaries are accepted only when edge metadata marks them as open or seam candidates.
+
+## Export Outputs
+
+`shape-cli model-demo` writes:
+
+- `recipe.json`
+- `asset.obj` with one named OBJ group per part occurrence
+- `provenance.json`
+- `validation.json`
+- `statistics.json`
+- `preview.png`
+- `blender_reconstruct.py`
+
+The Blender script creates one object per part occurrence from canonical arrays, preserves object/group names, writes semantic custom properties, assigns simple debug colors, verifies object topology and finite positions, saves `reconstructed.blend`, and supports `--verify-reopen`.
 
 ## ID Stability Contract
 

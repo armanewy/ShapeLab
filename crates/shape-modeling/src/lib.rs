@@ -14,7 +14,7 @@ use shape_asset::{
     GeometrySource, OperationId, PartDefinition, PartDefinitionId, PartInstanceId, RegionId,
     SocketId, SocketSpec, SurfaceRegionSpec,
 };
-use shape_poly::{MeshBounds, PolyError, PolygonMesh};
+use shape_poly::{FaceMetadata, MeshBounds, PolyError, PolygonMesh, polygon_mesh_from_faces};
 use thiserror::Error;
 
 pub mod assembly;
@@ -129,7 +129,7 @@ pub fn generate_geometry(
         GeometrySource::Plate { .. } => generate_plate(definition, context),
         GeometrySource::Sweep { .. } => generate_sweep(definition, context),
         GeometrySource::Lathe { .. } => generate_lathe(definition, context),
-        GeometrySource::LiteralMesh { .. } => unsupported_geometry("LiteralMesh"),
+        GeometrySource::LiteralMesh { .. } => generate_literal_mesh(definition, context),
         GeometrySource::ReservedBooleanResult { .. } => {
             unsupported_geometry("ReservedBooleanResult")
         }
@@ -168,20 +168,65 @@ pub fn generate_plate(
     generators::basic::generate_plate(definition, context)
 }
 
-/// Stub sweep generator.
+/// Sweep generator.
 pub fn generate_sweep(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("Sweep")
+    let GeometrySource::Sweep { profile, path } = &definition.geometry.source else {
+        return Err(ModelingError::InvalidInput(
+            "sweep generator received a different geometry source".to_owned(),
+        ));
+    };
+    let path = path.iter().map(|frame| frame.origin).collect::<Vec<_>>();
+    let spec = generators::profile::SweepSpec::new(profile.clone(), path, [1.0, 0.0, 0.0]);
+    generators::profile::generate_sweep(&spec, context)
 }
 
-/// Stub lathe generator.
+/// Lathe generator.
 pub fn generate_lathe(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("Lathe")
+    let GeometrySource::Lathe { profile, segments } = &definition.geometry.source else {
+        return Err(ModelingError::InvalidInput(
+            "lathe generator received a different geometry source".to_owned(),
+        ));
+    };
+    let spec = generators::profile::LatheSpec::new(profile.clone(), *segments);
+    generators::profile::generate_lathe(&spec, context)
+}
+
+/// Literal mesh generator.
+pub fn generate_literal_mesh(
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let GeometrySource::LiteralMesh { positions, faces } = &definition.geometry.source else {
+        return Err(ModelingError::InvalidInput(
+            "literal mesh generator received a different geometry source".to_owned(),
+        ));
+    };
+    let metadata = vec![
+        FaceMetadata {
+            part_definition: Some(context.part_definition),
+            part_instance: Some(context.part_instance),
+            ..FaceMetadata::default()
+        };
+        faces.len()
+    ];
+    let mesh = polygon_mesh_from_faces(positions.clone(), faces.clone(), metadata)?;
+    Ok(GeneratedPart {
+        local_bounds: mesh.bounds,
+        mesh,
+        sockets: definition.sockets.clone(),
+        regions: definition.regions.clone(),
+        generator_signature: format!(
+            "literal_mesh:v1:vertices={}:faces={}",
+            positions.len(),
+            faces.len()
+        ),
+    })
 }
 
 fn ensure_context_matches(

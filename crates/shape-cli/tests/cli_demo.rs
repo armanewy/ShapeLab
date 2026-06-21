@@ -64,6 +64,47 @@ fn demo_generates_headless_artifacts() {
 }
 
 #[test]
+fn model_demo_generates_explicit_asset_artifacts() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("crate");
+
+    let status = Command::new(exe)
+        .args(["model-demo", "--asset", "industrial-crate", "--out-dir"])
+        .arg(&out_dir)
+        .status()
+        .expect("run shape-cli model-demo");
+
+    assert!(status.success());
+    for name in [
+        "recipe.json",
+        "asset.obj",
+        "provenance.json",
+        "validation.json",
+        "statistics.json",
+        "preview.png",
+        "blender_reconstruct.py",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+
+    let validation: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("validation.json")).unwrap())
+            .unwrap();
+    assert_eq!(validation["issues"].as_array().unwrap().len(), 0);
+    let statistics: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("statistics.json")).unwrap())
+            .unwrap();
+    assert!(statistics["triangle_count"].as_u64().unwrap() < 25_000);
+    assert_eq!(statistics["used_sdf_or_remeshing"], false);
+}
+
+#[test]
 fn decompile_generates_lossless_package() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");

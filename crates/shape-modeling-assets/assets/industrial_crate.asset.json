@@ -1,0 +1,682 @@
+{
+  "schema_version": 1,
+  "id": 1001,
+  "title": "Industrial Crate",
+  "definitions": {
+    "1": {
+      "id": 1,
+      "name": "rounded crate body",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "RoundedBox": {
+            "half_extents": [
+              2.0,
+              1.0,
+              1.2
+            ],
+            "radius": 0.14
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 1,
+              "radius": 0.14,
+              "segments": 3
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "2": {
+      "id": 2,
+      "name": "rubber foot",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "RoundedBox": {
+            "half_extents": [
+              0.28,
+              0.18,
+              0.28
+            ],
+            "radius": 0.05
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 2,
+              "radius": 0.05,
+              "segments": 2
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "3": {
+      "id": 3,
+      "name": "raised crate panel",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Plate": {
+            "size": [
+              3.25,
+              0.78
+            ],
+            "thickness": 0.12
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 3,
+              "radius": 0.025,
+              "segments": 1
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "4": {
+      "id": 4,
+      "name": "side handle",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Sweep": {
+            "profile": [
+              [
+                0.085,
+                0.0
+              ],
+              [
+                0.060104076,
+                0.060104076
+              ],
+              [
+                -3.715468e-9,
+                0.085
+              ],
+              [
+                -0.060104076,
+                0.060104076
+              ],
+              [
+                -0.085,
+                -7.430936e-9
+              ],
+              [
+                -0.060104065,
+                -0.060104087
+              ],
+              [
+                1.0136149e-9,
+                -0.085
+              ],
+              [
+                0.060104094,
+                -0.060104057
+              ]
+            ],
+            "path": [
+              {
+                "origin": [
+                  0.0,
+                  -0.42,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.0,
+                  -0.16,
+                  0.22
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.0,
+                  0.16,
+                  0.22
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.0,
+                  0.42,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              }
+            ]
+          }
+        },
+        "operations": [
+          {
+            "MirrorInstances": {
+              "operation": 4,
+              "plane_normal": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "plane_offset": 0.0
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "5": {
+      "id": 5,
+      "name": "panel bolt",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Cylinder": {
+            "radius": 0.075,
+            "height": 0.14,
+            "radial_segments": 16
+          }
+        },
+        "operations": [
+          {
+            "LinearArray": {
+              "operation": 5,
+              "count": 6,
+              "offset": [
+                0.56,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    }
+  },
+  "instances": {
+    "1": {
+      "id": 1,
+      "definition": 1,
+      "name": "crate body",
+      "parent": null,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "2": {
+      "id": 2,
+      "definition": 2,
+      "name": "foot 2",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          -1.55,
+          -1.18,
+          -0.82
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "3": {
+      "id": 3,
+      "definition": 2,
+      "name": "foot 3",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          1.55,
+          -1.18,
+          -0.82
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "4": {
+      "id": 4,
+      "definition": 2,
+      "name": "foot 4",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          -1.55,
+          -1.18,
+          0.82
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "5": {
+      "id": 5,
+      "definition": 2,
+      "name": "foot 5",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          1.55,
+          -1.18,
+          0.82
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "6": {
+      "id": 6,
+      "definition": 3,
+      "name": "front raised panel",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.06,
+          1.255
+        ],
+        "rotation_degrees": [
+          90.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "7": {
+      "id": 7,
+      "definition": 3,
+      "name": "back raised panel",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.06,
+          -1.255
+        ],
+        "rotation_degrees": [
+          -90.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "8": {
+      "id": 8,
+      "definition": 4,
+      "name": "left swept side handle",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          -2.08,
+          0.06,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "9": {
+      "id": 9,
+      "definition": 5,
+      "name": "front bolt row",
+      "parent": 6,
+      "local_transform": {
+        "translation": [
+          -1.4,
+          0.55,
+          1.36
+        ],
+        "rotation_degrees": [
+          90.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "10": {
+      "id": 10,
+      "definition": 5,
+      "name": "back bolt row",
+      "parent": 7,
+      "local_transform": {
+        "translation": [
+          -1.4,
+          0.55,
+          -1.36
+        ],
+        "rotation_degrees": [
+          -90.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    }
+  },
+  "root_instances": [
+    1
+  ],
+  "parameters": {},
+  "locks": [],
+  "constraints": [],
+  "variation": {
+    "optional_instances": [],
+    "replacement_groups": {},
+    "count_ranges": {},
+    "parameter_range_overrides": {}
+  },
+  "next_ids": {
+    "part_definition": 6,
+    "part_instance": 11,
+    "operation": 6,
+    "region": 1,
+    "socket": 1,
+    "parameter": 1,
+    "revision": 1
+  }
+}

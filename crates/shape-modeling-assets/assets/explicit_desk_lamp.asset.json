@@ -1,0 +1,639 @@
+{
+  "schema_version": 1,
+  "id": 1002,
+  "title": "Explicit Desk Lamp",
+  "definitions": {
+    "1": {
+      "id": 1,
+      "name": "lathed weighted base",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Lathe": {
+            "profile": [
+              [
+                0.0,
+                -0.12
+              ],
+              [
+                0.86,
+                -0.12
+              ],
+              [
+                0.76,
+                0.08
+              ],
+              [
+                0.34,
+                0.18
+              ],
+              [
+                0.0,
+                0.18
+              ]
+            ],
+            "segments": 48
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {
+        "1": {
+          "id": 1,
+          "name": "base top pivot",
+          "local_frame": {
+            "origin": [
+              0.0,
+              0.18,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        }
+      },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "2": {
+      "id": 2,
+      "name": "swept angled stem",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Sweep": {
+            "profile": [
+              [
+                0.065,
+                0.0
+              ],
+              [
+                0.04596194,
+                0.04596194
+              ],
+              [
+                -2.8412401e-9,
+                0.065
+              ],
+              [
+                -0.04596194,
+                0.04596194
+              ],
+              [
+                -0.065,
+                -5.6824803e-9
+              ],
+              [
+                -0.04596193,
+                -0.045961946
+              ],
+              [
+                7.751172e-10,
+                -0.065
+              ],
+              [
+                0.045961954,
+                -0.045961924
+              ]
+            ],
+            "path": [
+              {
+                "origin": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.12,
+                  0.82,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              {
+                "origin": [
+                  0.62,
+                  1.55,
+                  0.0
+                ],
+                "x_axis": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "y_axis": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "z_axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              }
+            ]
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {
+        "1": {
+          "id": 1,
+          "name": "stem lower pivot",
+          "local_frame": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        },
+        "2": {
+          "id": 2,
+          "name": "stem upper pivot",
+          "local_frame": {
+            "origin": [
+              0.62,
+              1.55,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        }
+      },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "3": {
+      "id": 3,
+      "name": "pivot cylinder joint",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Cylinder": {
+            "radius": 0.16,
+            "height": 0.28,
+            "radial_segments": 24
+          }
+        },
+        "operations": [
+          {
+            "SetBevelProfile": {
+              "operation": 1,
+              "radius": 0.025,
+              "segments": 1
+            }
+          }
+        ]
+      },
+      "regions": {},
+      "sockets": {
+        "1": {
+          "id": 1,
+          "name": "joint axis pivot",
+          "local_frame": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        }
+      },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "4": {
+      "id": 4,
+      "name": "lathed shade",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Lathe": {
+            "profile": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                0.34,
+                0.0
+              ],
+              [
+                0.73,
+                0.24
+              ],
+              [
+                0.62,
+                0.58
+              ],
+              [
+                0.3,
+                0.5
+              ],
+              [
+                0.0,
+                0.5
+              ]
+            ],
+            "segments": 48
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {
+        "1": {
+          "id": 1,
+          "name": "shade neck socket",
+          "local_frame": {
+            "origin": [
+              0.0,
+              0.02,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "role": "pivot",
+          "tags": [
+            "pivot",
+            "socket"
+          ]
+        }
+      },
+      "local_pivot": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "z_axis": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variant_group": null,
+      "production_hints": null
+    }
+  },
+  "instances": {
+    "1": {
+      "id": 1,
+      "definition": 1,
+      "name": "lathed base",
+      "parent": null,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "2": {
+      "id": 2,
+      "definition": 3,
+      "name": "lower cylinder pivot",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.28,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          90.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "3": {
+      "id": 3,
+      "definition": 2,
+      "name": "swept angled stem",
+      "parent": 1,
+      "local_transform": {
+        "translation": [
+          0.0,
+          0.3,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "4": {
+      "id": 4,
+      "definition": 3,
+      "name": "upper cylinder pivot",
+      "parent": 3,
+      "local_transform": {
+        "translation": [
+          0.62,
+          1.88,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          90.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "5": {
+      "id": 5,
+      "definition": 4,
+      "name": "lathed shade",
+      "parent": 4,
+      "local_transform": {
+        "translation": [
+          0.92,
+          1.66,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          -23.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    }
+  },
+  "root_instances": [
+    1
+  ],
+  "parameters": {},
+  "locks": [],
+  "constraints": [],
+  "variation": {
+    "optional_instances": [],
+    "replacement_groups": {},
+    "count_ranges": {},
+    "parameter_range_overrides": {}
+  },
+  "next_ids": {
+    "part_definition": 5,
+    "part_instance": 6,
+    "operation": 2,
+    "region": 1,
+    "socket": 3,
+    "parameter": 1,
+    "revision": 1
+  }
+}

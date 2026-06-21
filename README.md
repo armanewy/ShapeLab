@@ -56,6 +56,14 @@ shape-project branchable revision history
 
 `shape-app` is the native `eframe`/`egui` desktop app. `shape-cli` is the headless integration driver.
 
+Shape Lab also includes an explicit polygon modeling lane for part-aware assets:
+
+```text
+AssetRecipe -> shape-modeling generators + assembly -> shape-compile exports
+```
+
+That lane is additive to the implicit editor and same-topology decompiler. Its first benchmark assets live in `crates/shape-modeling-assets`.
+
 ## CLI
 
 ```bash
@@ -73,6 +81,15 @@ pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets
 ```
 
 Each run writes project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON file.
+
+Compile and export explicit benchmark assets:
+
+```bash
+cargo run -p shape-cli -- model-demo --asset industrial-crate --out-dir target/model-demo/crate
+cargo run -p shape-cli -- model-demo --asset explicit-desk-lamp --out-dir target/model-demo/lamp
+```
+
+Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`.
 
 Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 

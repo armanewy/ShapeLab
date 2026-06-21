@@ -1,45 +1,66 @@
 # Modeling Benchmark
 
-This document defines reference assets for later explicit-topology generator work. Wave 0 only establishes contracts; these assets are not implemented yet.
+Wave 2 adds two explicit-topology benchmark assets in `crates/shape-modeling-assets`.
 
-## Reference Asset 1: Industrial Crate
+Checked-in recipe JSON:
 
-The Industrial Crate should eventually exercise deterministic part hierarchy, repeated details, mirrored components, hard and smooth boundaries, and semantic surface regions.
+- `crates/shape-modeling-assets/assets/industrial_crate.asset.json`
+- `crates/shape-modeling-assets/assets/explicit_desk_lamp.asset.json`
 
-Expected parts and features:
+The Rust constructors in `shape-modeling-assets` are the source of truth used by tests and `shape-cli model-demo`; the JSON files are the serialized benchmark recipes for inspection and external tooling.
 
-- rounded main body
-- feet
-- raised panels
-- corner trim
-- swept handles
-- repeated bolts
-- mirrored parts
+## Industrial Crate
 
-Useful contract checks:
+The Industrial Crate exercises deterministic part hierarchy, repeated details, mirrored components, hard and smooth boundaries, and semantic provenance.
 
-- panel and trim faces map to generic `Panel` and `Trim` regions
-- bevel bands remain distinct from primary surfaces
-- repeated bolts preserve per-instance provenance
-- mirrored parts preserve stable part and operation IDs
-- topology signatures change only when topology-changing parameters change
+Implemented parts and features:
 
-## Reference Asset 2: Explicit-Topology Desk Lamp
+- rounded-box body
+- four separate feet
+- separate raised front and back panels
+- swept side handle with mirrored generated counterpart
+- repeated cylinder bolt rows on front and back panels
+- no generic booleans
+- no SDF or remeshing path
 
-The Explicit-Topology Desk Lamp should eventually exercise lathe and sweep contracts, articulated part structure, sockets, and clean separated meshes.
+Current `model-demo` output:
 
-Expected parts and features:
+- parts: 21
+- exported triangles: 2684
+- budget: below 25,000 triangles
 
-- lathed base
-- swept articulated stem
-- cylindrical joints
-- lathed or swept shade
-- separate clean parts
+## Explicit Desk Lamp
 
-Useful contract checks:
+The Explicit Desk Lamp exercises lathe and sweep generators, articulated part structure, named sockets, pivots, and clean separated meshes.
 
-- sockets align base, stem, joints, and shade without requiring a DCC hierarchy
-- lathed and swept parts report deterministic topology signatures
-- joint surfaces carry attachment regions
-- shade caps, sides, and bevel bands retain semantic region metadata
-- provenance distinguishes generated operation families even after mesh combination
+Implemented parts and features:
+
+- lathed weighted base
+- swept angled stem
+- cylinder lower and upper joints
+- lathed shade
+- named socket and pivot definitions on base, stem, joints, and shade
+- all parts separate and intentional
+- no SDF or remeshing path
+
+Current `model-demo` output:
+
+- parts: 5
+- exported triangles: 1092
+- budget: below 20,000 triangles
+
+## Quality Checks
+
+Both assets are covered by `shape-modeling-assets` tests and `shape-cli model-demo` output validation. The compiler validates:
+
+- no invalid polygon indices
+- no degenerate faces
+- closed parts have no boundary loops
+- declared open parts only use expected boundary metadata
+- consistent manifold winding
+- finite split normals
+- face provenance for every polygon
+- deterministic statistics and source recipe hash
+- no SDF or remeshing usage
+
+The generated Blender reconstruction scripts are debug verification tools only. Their colors are simple per-object debug colors and are not an asset material system.

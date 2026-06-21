@@ -6,9 +6,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand, ValueEnum};
+use glam::Vec3;
 use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::Serialize;
-use shape_core::{ParamGroup, ShapeDocument, validate_document};
+use shape_compile::{
+    compile_asset, write_blender_reconstruction_script, write_grouped_obj, write_provenance_json,
+};
+use shape_core::{Aabb, ParamGroup, ShapeDocument, validate_document};
 use shape_decompiler::v3::diagnostics::{
     InferenceDiagnosticsV4, ProgramHypothesisDiagnosticsV4,
     ProgramOperatorDiagnostics as ProgramOperatorDiagnosticsV4,
@@ -23,6 +27,8 @@ use shape_decompiler::{
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
+use shape_modeling_assets::BenchmarkAsset;
+use shape_poly::TriangulatedPolygonMesh;
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::{RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
@@ -56,6 +62,8 @@ enum Command {
     Validate(ValidateArgs),
     /// Export the current revision from a project JSON file.
     Export(ExportArgs),
+    /// Compile and export an explicit benchmark asset recipe.
+    ModelDemo(ModelDemoArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -112,6 +120,16 @@ struct ExportArgs {
     /// Uniform mesh resolution.
     #[arg(long, default_value_t = DEFAULT_MESH_RESOLUTION)]
     mesh_resolution: usize,
+}
+
+#[derive(Debug, clap::Args)]
+struct ModelDemoArgs {
+    /// Built-in explicit asset slug.
+    #[arg(long)]
+    asset: String,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
 }
 
 #[derive(Debug, clap::Args)]
@@ -221,6 +239,7 @@ fn main() -> anyhow::Result<()> {
         Command::Demo(args) => run_demo(args),
         Command::Validate(args) => run_validate(args),
         Command::Export(args) => run_export(args),
+        Command::ModelDemo(args) => run_model_demo(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -368,6 +387,72 @@ fn run_export(args: ExportArgs) -> anyhow::Result<()> {
     if let Some(path) = args.png {
         save_png(&preview.image, path)?;
     }
+    Ok(())
+}
+
+fn run_model_demo(args: ModelDemoArgs) -> anyhow::Result<()> {
+    let asset = BenchmarkAsset::parse(&args.asset)
+        .with_context(|| format!("unknown model-demo asset '{}'", args.asset))?;
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+
+    let recipe = asset.recipe();
+    let artifact = compile_asset(&recipe).context("compiling explicit asset recipe")?;
+    if !artifact.validation_report.is_valid() {
+        bail!(
+            "compiled asset validation failed with {} issue(s)",
+            artifact.validation_report.issues.len()
+        );
+    }
+
+    fs::write(
+        args.out_dir.join("recipe.json"),
+        serde_json::to_string_pretty(&recipe)?,
+    )
+    .with_context(|| format!("writing recipe.json to {}", args.out_dir.display()))?;
+    fs::write(
+        args.out_dir.join("asset.obj"),
+        write_grouped_obj(&artifact).context("writing grouped OBJ")?,
+    )
+    .with_context(|| format!("writing asset.obj to {}", args.out_dir.display()))?;
+    fs::write(
+        args.out_dir.join("provenance.json"),
+        write_provenance_json(&artifact.provenance_report)?,
+    )
+    .with_context(|| format!("writing provenance.json to {}", args.out_dir.display()))?;
+    write_json(
+        args.out_dir.join("validation.json"),
+        &artifact.validation_report,
+    )?;
+    write_json(args.out_dir.join("statistics.json"), &artifact.statistics)?;
+    fs::write(
+        args.out_dir.join("blender_reconstruct.py"),
+        write_blender_reconstruction_script(&artifact).context("writing Blender script")?,
+    )
+    .with_context(|| {
+        format!(
+            "writing blender_reconstruct.py to {}",
+            args.out_dir.display()
+        )
+    })?;
+
+    let preview_mesh = render_mesh_from_triangles(&artifact.combined_preview);
+    let camera = fit_camera_to_bounds(preview_mesh.bounds);
+    let settings = RenderSettings {
+        width: CURRENT_IMAGE_SIZE,
+        height: CURRENT_IMAGE_SIZE,
+        ..RenderSettings::default()
+    };
+    let image = render_mesh(&preview_mesh, &camera, &settings).context("rendering preview")?;
+    save_png(&image, args.out_dir.join("preview.png"))?;
+
+    println!(
+        "Compiled {} to {} ({} parts, {} triangles)",
+        asset.slug(),
+        args.out_dir.display(),
+        artifact.statistics.part_count,
+        artifact.statistics.triangle_count
+    );
     Ok(())
 }
 
@@ -947,6 +1032,18 @@ fn mesh_summary(mesh: &TriangleMesh) -> MeshSummary {
     MeshSummary {
         vertices: mesh.positions.len(),
         triangles: mesh.indices.len() / 3,
+    }
+}
+
+fn render_mesh_from_triangles(mesh: &TriangulatedPolygonMesh) -> TriangleMesh {
+    TriangleMesh {
+        positions: mesh.mesh.positions.clone(),
+        normals: mesh.mesh.normals.clone(),
+        indices: mesh.mesh.indices.clone(),
+        bounds: Aabb {
+            min: Vec3::from_array(mesh.mesh.bounds.min),
+            max: Vec3::from_array(mesh.mesh.bounds.max),
+        },
     }
 }
 
