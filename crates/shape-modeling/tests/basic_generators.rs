@@ -267,6 +267,8 @@ fn plate_recessed_panel_cut_is_closed_semantic_and_loop_tagged() {
         size: [1.45, 0.72],
         depth: 0.08,
         corner_radius: 0.12,
+        rim_width: 0.1152,
+        corner_segments: 4,
         entry_loop: BoundaryLoopId(7),
         floor_loop: BoundaryLoopId(8),
         outer_region: RegionId(1),
@@ -299,6 +301,54 @@ fn plate_recessed_panel_cut_is_closed_semantic_and_loop_tagged() {
 }
 
 #[test]
+fn plate_cut_rim_width_is_shape_only_and_corner_segments_change_topology() {
+    let operation = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(36),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [1.45, 0.72],
+        depth: 0.08,
+        corner_radius: 0.12,
+        rim_width: 0.10,
+        corner_segments: 3,
+        entry_loop: BoundaryLoopId(19),
+        floor_loop: BoundaryLoopId(20),
+        outer_region: RegionId(1),
+        rim_region: RegionId(20),
+        wall_region: RegionId(21),
+        floor_region: RegionId(22),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let part = generate_cut_plate(operation.clone()).expect("cut should generate");
+
+    let mut rim_change = operation.clone();
+    if let ModelingOperationSpec::RecessedPanelCut { rim_width, .. } = &mut rim_change {
+        *rim_width = 0.12;
+    }
+    let rim_part = generate_cut_plate(rim_change).expect("rim-width change should generate");
+    assert_eq!(
+        part.mesh.topology_signature,
+        rim_part.mesh.topology_signature
+    );
+    assert_ne!(part.mesh.positions, rim_part.mesh.positions);
+
+    let mut segment_change = operation;
+    if let ModelingOperationSpec::RecessedPanelCut {
+        corner_segments, ..
+    } = &mut segment_change
+    {
+        *corner_segments = 5;
+    }
+    let segment_part =
+        generate_cut_plate(segment_change).expect("corner segment change should generate");
+    assert_ne!(
+        part.mesh.topology_signature,
+        segment_part.mesh.topology_signature
+    );
+}
+
+#[test]
 fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
     let operation = ModelingOperationSpec::RectangularThroughCut {
         operation: OperationId(31),
@@ -307,6 +357,8 @@ fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
         center: [0.08, -0.05],
         size: [1.18, 0.58],
         corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
         entry_loop: BoundaryLoopId(9),
         exit_loop: BoundaryLoopId(10),
         outer_region: RegionId(1),
@@ -344,6 +396,7 @@ fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
         center: [-0.12, 0.06],
         radius: 0.36,
         radial_segments: 12,
+        rim_width: 0.1152,
         entry_loop: BoundaryLoopId(11),
         exit_loop: BoundaryLoopId(12),
         outer_region: RegionId(2),
@@ -373,6 +426,8 @@ fn plate_cut_rejects_host_boundary_overlap() {
         center: [0.0, 0.0],
         size: [2.95, 1.85],
         corner_radius: 0.0,
+        rim_width: 0.296,
+        corner_segments: 1,
         entry_loop: BoundaryLoopId(13),
         exit_loop: BoundaryLoopId(14),
         outer_region: RegionId(1),
@@ -394,6 +449,8 @@ fn crate_recessed_panel_proportions_are_directed_closed() {
         size: [2.38, 0.48],
         depth: 0.045,
         corner_radius: 0.075,
+        rim_width: 0.0768,
+        corner_segments: 4,
         entry_loop: BoundaryLoopId(15),
         floor_loop: BoundaryLoopId(16),
         outer_region: RegionId(1),
@@ -418,6 +475,8 @@ fn crate_ventilation_slat_cut_proportions_are_directed_closed() {
         center: [0.0, 0.0],
         size: [0.42, 0.032],
         corner_radius: 0.006,
+        rim_width: 0.00512,
+        corner_segments: 4,
         entry_loop: BoundaryLoopId(17),
         exit_loop: BoundaryLoopId(18),
         outer_region: RegionId(1),

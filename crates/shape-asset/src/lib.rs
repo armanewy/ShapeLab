@@ -23,7 +23,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 4;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 5;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -64,6 +64,7 @@ id_type!(
     "Stable semantic identifier for a generated boundary loop."
 );
 const LEGACY_MISSING_BOUNDARY_LOOP: BoundaryLoopId = BoundaryLoopId(0);
+const DEFAULT_RECT_CUT_CORNER_SEGMENTS: u32 = 4;
 id_type!(
     SocketId,
     "Stable semantic identifier for an attachment socket."
@@ -270,7 +271,7 @@ impl<'de> Deserialize<'de> for AssetRecipe {
 }
 
 fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
-    if matches!(schema_version, 1..=3) {
+    if matches!(schema_version, 1..=4) {
         ASSET_RECIPE_SCHEMA_VERSION
     } else {
         schema_version
@@ -711,6 +712,10 @@ pub enum ModelingOperationSpec {
         depth: f32,
         /// Corner radius in the face plane.
         corner_radius: f32,
+        /// Rim width between the cut opening and surviving host face.
+        rim_width: f32,
+        /// Deterministic segment count per rounded corner.
+        corner_segments: u32,
         /// Generated boundary loop at the entry cut edge.
         entry_loop: BoundaryLoopId,
         /// Generated boundary loop around the recessed floor edge.
@@ -740,6 +745,10 @@ pub enum ModelingOperationSpec {
         size: [f32; 2],
         /// Corner radius in the face plane.
         corner_radius: f32,
+        /// Rim width between the opening and surviving host face.
+        rim_width: f32,
+        /// Deterministic segment count per rounded corner.
+        corner_segments: u32,
         /// Generated boundary loop at the entry cut edge.
         entry_loop: BoundaryLoopId,
         /// Generated boundary loop at the exit cut edge.
@@ -767,6 +776,8 @@ pub enum ModelingOperationSpec {
         radius: f32,
         /// Deterministic radial segment count.
         radial_segments: u32,
+        /// Rim width between the circular opening and surviving host face.
+        rim_width: f32,
         /// Generated boundary loop at the entry cut edge.
         entry_loop: BoundaryLoopId,
         /// Generated boundary loop at the exit cut edge.
@@ -974,6 +985,10 @@ struct RecessedPanelCutWire {
     depth: f32,
     corner_radius: f32,
     #[serde(default)]
+    rim_width: Option<f32>,
+    #[serde(default)]
+    corner_segments: Option<u32>,
+    #[serde(default)]
     boundary_loop: Option<BoundaryLoopId>,
     #[serde(default)]
     entry_loop: Option<BoundaryLoopId>,
@@ -995,6 +1010,10 @@ struct RectangularThroughCutWire {
     size: [f32; 2],
     corner_radius: f32,
     #[serde(default)]
+    rim_width: Option<f32>,
+    #[serde(default)]
+    corner_segments: Option<u32>,
+    #[serde(default)]
     boundary_loop: Option<BoundaryLoopId>,
     #[serde(default)]
     entry_loop: Option<BoundaryLoopId>,
@@ -1014,6 +1033,8 @@ struct CircularThroughCutWire {
     center: [f32; 2],
     radius: f32,
     radial_segments: u32,
+    #[serde(default)]
+    rim_width: Option<f32>,
     #[serde(default)]
     boundary_loop: Option<BoundaryLoopId>,
     #[serde(default)]
@@ -1079,6 +1100,12 @@ impl<'de> Deserialize<'de> for ModelingOperationSpec {
                     size: wire.size,
                     depth: wire.depth,
                     corner_radius: wire.corner_radius,
+                    rim_width: wire
+                        .rim_width
+                        .unwrap_or_else(|| default_rect_cut_rim_width(wire.size)),
+                    corner_segments: wire
+                        .corner_segments
+                        .unwrap_or(DEFAULT_RECT_CUT_CORNER_SEGMENTS),
                     entry_loop: required_or_legacy_loop::<D::Error>(
                         wire.entry_loop,
                         wire.boundary_loop,
@@ -1103,6 +1130,12 @@ impl<'de> Deserialize<'de> for ModelingOperationSpec {
                         center: wire.center,
                         size: wire.size,
                         corner_radius: wire.corner_radius,
+                        rim_width: wire
+                            .rim_width
+                            .unwrap_or_else(|| default_rect_cut_rim_width(wire.size)),
+                        corner_segments: wire
+                            .corner_segments
+                            .unwrap_or(DEFAULT_RECT_CUT_CORNER_SEGMENTS),
                         entry_loop: required_or_legacy_loop::<D::Error>(
                             wire.entry_loop,
                             wire.boundary_loop,
@@ -1126,6 +1159,9 @@ impl<'de> Deserialize<'de> for ModelingOperationSpec {
                     center: wire.center,
                     radius: wire.radius,
                     radial_segments: wire.radial_segments,
+                    rim_width: wire
+                        .rim_width
+                        .unwrap_or_else(|| default_circular_cut_rim_width(wire.radius)),
                     entry_loop: required_or_legacy_loop::<D::Error>(
                         wire.entry_loop,
                         wire.boundary_loop,
@@ -1203,6 +1239,14 @@ fn legacy_or_required_secondary_loop<E: de::Error>(
     } else {
         Err(E::custom(format!("{field} is missing")))
     }
+}
+
+fn default_rect_cut_rim_width(size: [f32; 2]) -> f32 {
+    size[0].min(size[1]).max(0.0) * 0.16
+}
+
+fn default_circular_cut_rim_width(radius: f32) -> f32 {
+    radius.max(0.0) * 2.0 * 0.16
 }
 
 /// Declared attachment socket on a part.
@@ -3468,6 +3512,8 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                 size,
                 depth,
                 corner_radius,
+                rim_width,
+                corner_segments,
                 entry_loop,
                 floor_loop,
                 outer_region,
@@ -3521,6 +3567,21 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     ),
                     *corner_radius,
                 );
+                validate_positive(
+                    report,
+                    operation_subject(definition.id, operation_id, "recessed_panel_cut.rim_width"),
+                    *rim_width,
+                );
+                validate_count(
+                    report,
+                    operation_subject(
+                        definition.id,
+                        operation_id,
+                        "recessed_panel_cut.corner_segments",
+                    ),
+                    *corner_segments,
+                    1,
+                );
                 validate_rect_cut_corner_radius(
                     definition.id,
                     operation_id,
@@ -3535,6 +3596,8 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                 center,
                 size,
                 corner_radius,
+                rim_width,
+                corner_segments,
                 entry_loop,
                 exit_loop,
                 outer_region,
@@ -3582,6 +3645,25 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     ),
                     *corner_radius,
                 );
+                validate_positive(
+                    report,
+                    operation_subject(
+                        definition.id,
+                        operation_id,
+                        "rectangular_through_cut.rim_width",
+                    ),
+                    *rim_width,
+                );
+                validate_count(
+                    report,
+                    operation_subject(
+                        definition.id,
+                        operation_id,
+                        "rectangular_through_cut.corner_segments",
+                    ),
+                    *corner_segments,
+                    1,
+                );
                 validate_rect_cut_corner_radius(
                     definition.id,
                     operation_id,
@@ -3596,6 +3678,7 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                 center,
                 radius,
                 radial_segments,
+                rim_width,
                 entry_loop,
                 exit_loop,
                 outer_region,
@@ -3641,6 +3724,15 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     ),
                     *radial_segments,
                     6,
+                );
+                validate_positive(
+                    report,
+                    operation_subject(
+                        definition.id,
+                        operation_id,
+                        "circular_through_cut.rim_width",
+                    ),
+                    *rim_width,
                 );
             }
             ModelingOperationSpec::MirrorInstances {
@@ -4125,6 +4217,16 @@ fn get_operation_scalar(
             ["recessed_panel_cut", "corner_radius"],
         ) => Ok(*corner_radius),
         (
+            ModelingOperationSpec::RecessedPanelCut { rim_width, .. },
+            ["recessed_panel_cut", "rim_width"],
+        ) => Ok(*rim_width),
+        (
+            ModelingOperationSpec::RecessedPanelCut {
+                corner_segments, ..
+            },
+            ["recessed_panel_cut", "corner_segments"],
+        ) => Ok(*corner_segments as f32),
+        (
             ModelingOperationSpec::RectangularThroughCut { size, .. },
             ["rectangular_through_cut", "size", component],
         ) => component_value(size, component, path),
@@ -4136,6 +4238,16 @@ fn get_operation_scalar(
             ModelingOperationSpec::RectangularThroughCut { corner_radius, .. },
             ["rectangular_through_cut", "corner_radius"],
         ) => Ok(*corner_radius),
+        (
+            ModelingOperationSpec::RectangularThroughCut { rim_width, .. },
+            ["rectangular_through_cut", "rim_width"],
+        ) => Ok(*rim_width),
+        (
+            ModelingOperationSpec::RectangularThroughCut {
+                corner_segments, ..
+            },
+            ["rectangular_through_cut", "corner_segments"],
+        ) => Ok(*corner_segments as f32),
         (
             ModelingOperationSpec::CircularThroughCut { center, .. },
             ["circular_through_cut", "center", component],
@@ -4150,6 +4262,10 @@ fn get_operation_scalar(
             },
             ["circular_through_cut", "radial_segments"],
         ) => Ok(*radial_segments as f32),
+        (
+            ModelingOperationSpec::CircularThroughCut { rim_width, .. },
+            ["circular_through_cut", "rim_width"],
+        ) => Ok(*rim_width),
         (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {
             Ok(*count as f32)
         }
@@ -4405,6 +4521,22 @@ fn set_operation_scalar(
             Ok(())
         }
         (
+            ModelingOperationSpec::RecessedPanelCut { rim_width, .. },
+            ["recessed_panel_cut", "rim_width"],
+        ) => {
+            *rim_width = value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::RecessedPanelCut {
+                corner_segments, ..
+            },
+            ["recessed_panel_cut", "corner_segments"],
+        ) => {
+            *corner_segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
+        (
             ModelingOperationSpec::RectangularThroughCut { size, .. },
             ["rectangular_through_cut", "size", component],
         ) => set_component_value(size, component, path, value),
@@ -4417,6 +4549,22 @@ fn set_operation_scalar(
             ["rectangular_through_cut", "corner_radius"],
         ) => {
             *corner_radius = value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::RectangularThroughCut { rim_width, .. },
+            ["rectangular_through_cut", "rim_width"],
+        ) => {
+            *rim_width = value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::RectangularThroughCut {
+                corner_segments, ..
+            },
+            ["rectangular_through_cut", "corner_segments"],
+        ) => {
+            *corner_segments = scalar_to_u32(path, value)?;
             Ok(())
         }
         (
@@ -4437,6 +4585,13 @@ fn set_operation_scalar(
             ["circular_through_cut", "radial_segments"],
         ) => {
             *radial_segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::CircularThroughCut { rim_width, .. },
+            ["circular_through_cut", "rim_width"],
+        ) => {
+            *rim_width = value;
             Ok(())
         }
         (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {

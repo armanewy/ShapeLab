@@ -2,9 +2,8 @@
 
 1. Semantic cut composition and boundary treatment
    - Harden constrained semantic cuts before adding broader booleans.
-   - Preserve one boundary-loop ID per connected physical loop, reconcile target regions with host faces, and keep entry, exit, floor, rim, and wall provenance inspectable.
+   - Present: one boundary-loop ID per connected physical loop, target-region/host-face reconciliation, explicit rim width, explicit rectangular corner segments, and separate bevel eligibility metadata.
    - Support multiple non-overlapping cuts on one plate with cut-to-cut clearance validation.
-   - Add explicit rim width and corner segment controls.
    - Extend the same controlled cut path to rounded-box primary faces.
    - Propagate bevels through `bevel_eligible` boundary-loop metadata without overloading UV seam metadata.
 

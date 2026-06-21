@@ -397,6 +397,8 @@ mod tests {
                 center: [0.0, 0.0],
                 size: [0.4, 0.3],
                 corner_radius: 0.0,
+                rim_width: 0.048,
+                corner_segments: 1,
                 entry_loop: BoundaryLoopId(1),
                 exit_loop: BoundaryLoopId(2),
                 outer_region: RegionId(1),

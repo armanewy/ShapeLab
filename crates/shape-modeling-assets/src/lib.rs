@@ -136,6 +136,8 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                 size: [2.38, 0.48],
                 depth: 0.045,
                 corner_radius: 0.075,
+                rim_width: 0.0768,
+                corner_segments: 4,
                 entry_loop: BoundaryLoopId(1),
                 floor_loop: BoundaryLoopId(2),
                 outer_region: RegionId(1),
@@ -235,6 +237,8 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                     center: [0.0, 0.0],
                     size: [0.42, 0.032],
                     corner_radius: 0.006,
+                    rim_width: 0.00512,
+                    corner_segments: 4,
                     entry_loop: BoundaryLoopId(3),
                     exit_loop: BoundaryLoopId(4),
                     outer_region: RegionId(1),
@@ -582,6 +586,54 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             0.022,
             0.045,
             0.003,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(17),
+        parameter(
+            17,
+            "Panel rim width",
+            "Panel Cuts",
+            "definition.3.operation.13.recessed_panel_cut.rim_width",
+            0.045,
+            0.12,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(18),
+        topology_parameter(
+            18,
+            "Panel corner segments",
+            "Detail Density",
+            "definition.3.operation.13.recessed_panel_cut.corner_segments",
+            1.0,
+            6.0,
+            1.0,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(19),
+        parameter(
+            19,
+            "Vent rim width",
+            "Vent Cuts",
+            "definition.7.operation.14.rectangular_through_cut.rim_width",
+            0.003,
+            0.012,
+            0.001,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(20),
+        topology_parameter(
+            20,
+            "Vent corner segments",
+            "Detail Density",
+            "definition.7.operation.14.rectangular_through_cut.corner_segments",
+            1.0,
+            6.0,
+            1.0,
         ),
     );
     recipe.root_instances.push(PartInstanceId(1));

@@ -679,7 +679,7 @@ fn build_cut_plate(
                 regions,
                 plate_sockets(half_y),
                 format!(
-                    "plate_cut:recessed:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:depth={:.6}:frame={:.6},{:.6},{:.6},{:.6}",
+                    "plate_cut:recessed:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:depth={:.6}:rim={:.6}:cs={}:frame={:.6},{:.6},{:.6},{:.6}",
                     width,
                     height,
                     thickness,
@@ -689,6 +689,8 @@ fn build_cut_plate(
                     cut.center[1],
                     cut.inner_points.len(),
                     depth,
+                    cut.rim_width,
+                    cut.corner_segments,
                     cut.frame.min_x,
                     cut.frame.max_x,
                     cut.frame.min_z,
@@ -791,7 +793,7 @@ fn build_cut_plate(
                 regions,
                 plate_sockets(half_y),
                 format!(
-                    "plate_cut:through:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:frame={:.6},{:.6},{:.6},{:.6}",
+                    "plate_cut:through:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:rim={:.6}:cs={}:frame={:.6},{:.6},{:.6},{:.6}",
                     width,
                     height,
                     thickness,
@@ -800,6 +802,8 @@ fn build_cut_plate(
                     cut.center[0],
                     cut.center[1],
                     cut.inner_points.len(),
+                    cut.rim_width,
+                    cut.corner_segments,
                     cut.frame.min_x,
                     cut.frame.max_x,
                     cut.frame.min_z,
@@ -1064,6 +1068,8 @@ struct PlateCutPlan {
     inner_points: Vec<[f32; 2]>,
     frame_points: Vec<[f32; 2]>,
     frame: Rect2,
+    rim_width: f32,
+    corner_segments: u32,
     target_region: RegionId,
     entry_loop: BoundaryLoopId,
     secondary_loop: BoundaryLoopId,
@@ -1088,6 +1094,8 @@ impl PlateCutPlan {
                 size,
                 depth,
                 corner_radius,
+                rim_width,
+                corner_segments,
                 entry_loop,
                 floor_loop,
                 region,
@@ -1104,10 +1112,18 @@ impl PlateCutPlan {
                         "recessed panel depth must leave material behind the cut".to_owned(),
                     ));
                 }
-                let inner_points =
-                    rounded_cut_points(*center, *size, *corner_radius, CutPointCount::RoundedRect)?;
-                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
-                let frame_points = rounded_frame_points(*center, *size, *corner_radius, frame)?;
+                let rim_width = finite_positive(*rim_width, "recessed_panel_cut.rim_width")?;
+                let corner_segments = (*corner_segments).max(1);
+                let inner_points = rounded_cut_points(
+                    *center,
+                    *size,
+                    *corner_radius,
+                    corner_segments,
+                    CutPointCount::RoundedRect,
+                )?;
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
+                let frame_points =
+                    rounded_frame_points(*center, *size, *corner_radius, corner_segments, frame)?;
                 Ok(Self {
                     kind: PlateCutKind::Recessed {
                         depth,
@@ -1119,6 +1135,8 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
+                    rim_width,
+                    corner_segments,
                     target_region: *region,
                     entry_loop: *entry_loop,
                     secondary_loop: *floor_loop,
@@ -1134,6 +1152,8 @@ impl PlateCutPlan {
                 center,
                 size,
                 corner_radius,
+                rim_width,
+                corner_segments,
                 entry_loop,
                 exit_loop,
                 region,
@@ -1143,10 +1163,18 @@ impl PlateCutPlan {
                 edge_treatment,
                 ..
             } => {
-                let inner_points =
-                    rounded_cut_points(*center, *size, *corner_radius, CutPointCount::RoundedRect)?;
-                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
-                let frame_points = rounded_frame_points(*center, *size, *corner_radius, frame)?;
+                let rim_width = finite_positive(*rim_width, "rectangular_through_cut.rim_width")?;
+                let corner_segments = (*corner_segments).max(1);
+                let inner_points = rounded_cut_points(
+                    *center,
+                    *size,
+                    *corner_radius,
+                    corner_segments,
+                    CutPointCount::RoundedRect,
+                )?;
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
+                let frame_points =
+                    rounded_frame_points(*center, *size, *corner_radius, corner_segments, frame)?;
                 Ok(Self {
                     kind: PlateCutKind::Through,
                     operation: *operation,
@@ -1155,6 +1183,8 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
+                    rim_width,
+                    corner_segments,
                     target_region: *region,
                     entry_loop: *entry_loop,
                     secondary_loop: *exit_loop,
@@ -1170,6 +1200,7 @@ impl PlateCutPlan {
                 center,
                 radius,
                 radial_segments,
+                rim_width,
                 entry_loop,
                 exit_loop,
                 region,
@@ -1180,6 +1211,7 @@ impl PlateCutPlan {
                 ..
             } => {
                 let radius = finite_positive(*radius, "circular_through_cut.radius")?;
+                let rim_width = finite_positive(*rim_width, "circular_through_cut.rim_width")?;
                 let segments = (*radial_segments).max(6);
                 let mut inner_points = Vec::with_capacity(segments as usize);
                 for index in 0..segments {
@@ -1187,7 +1219,7 @@ impl PlateCutPlan {
                     let (sin, cos) = angle.sin_cos();
                     inner_points.push([center[0] + radius * cos, center[1] + radius * sin]);
                 }
-                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
                 let frame_points = inner_points
                     .iter()
                     .map(|point| ray_to_rect(*center, *point, frame))
@@ -1200,6 +1232,8 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
+                    rim_width,
+                    corner_segments: segments,
                     target_region: *region,
                     entry_loop: *entry_loop,
                     secondary_loop: *exit_loop,
@@ -1241,6 +1275,7 @@ fn rounded_cut_points(
     center: [f32; 2],
     size: [f32; 2],
     corner_radius: f32,
+    corner_segments: u32,
     _count: CutPointCount,
 ) -> Result<Vec<[f32; 2]>, ModelingError> {
     let width = finite_positive(size[0], "cut.size.x")?;
@@ -1252,7 +1287,12 @@ fn rounded_cut_points(
             "cut corner radius must not exceed half the smaller cut dimension".to_owned(),
         ));
     }
-    let local = rounded_rect_points(width * 0.5, height * 0.5, radius.max(0.0), 4);
+    let segments = if radius > EPSILON {
+        corner_segments.max(1)
+    } else {
+        1
+    };
+    let local = rounded_rect_points(width * 0.5, height * 0.5, radius.max(0.0), segments);
     Ok(local
         .into_iter()
         .map(|point| [point[0] + center[0], point[1] + center[1]])
@@ -1263,6 +1303,7 @@ fn rounded_frame_points(
     center: [f32; 2],
     size: [f32; 2],
     corner_radius: f32,
+    corner_segments: u32,
     frame: Rect2,
 ) -> Result<Vec<[f32; 2]>, ModelingError> {
     let frame_half_x = (frame.max_x - frame.min_x) * 0.5;
@@ -1276,10 +1317,17 @@ fn rounded_frame_points(
         0.0
     }
     .min(frame_half_x.min(frame_half_z));
-    Ok(rounded_rect_points(frame_half_x, frame_half_z, radius, 4)
-        .into_iter()
-        .map(|point| [point[0] + center[0], point[1] + center[1]])
-        .collect())
+    let segments = if radius > EPSILON {
+        corner_segments.max(1)
+    } else {
+        1
+    };
+    Ok(
+        rounded_rect_points(frame_half_x, frame_half_z, radius, segments)
+            .into_iter()
+            .map(|point| [point[0] + center[0], point[1] + center[1]])
+            .collect(),
+    )
 }
 
 fn cut_frame_rect(
@@ -1287,6 +1335,7 @@ fn cut_frame_rect(
     inner_points: &[[f32; 2]],
     half_x: f32,
     half_z: f32,
+    rim_width: f32,
 ) -> Result<Rect2, ModelingError> {
     let inner_bounds = bounds_2d(inner_points)?;
     if inner_bounds.min_x <= -half_x + EPSILON
@@ -1311,21 +1360,17 @@ fn cut_frame_rect(
             "cut has no safe margin to the host boundary".to_owned(),
         ));
     }
-    let opening_span = (inner_bounds.max_x - inner_bounds.min_x)
-        .min(inner_bounds.max_z - inner_bounds.min_z)
-        .max(EPSILON);
-    let required_margin = opening_span * 0.12;
-    if clearance < required_margin {
+    let rim_width = finite_positive(rim_width, "cut.rim_width")?;
+    if rim_width >= clearance - EPSILON {
         return Err(ModelingError::InvalidInput(
-            "cut rim requires a safe margin from the host boundary".to_owned(),
+            "cut rim width exceeds the safe margin to the host boundary".to_owned(),
         ));
     }
-    let rim = (opening_span * 0.16).clamp(EPSILON * 10.0, clearance * 0.6);
     let frame = Rect2 {
-        min_x: inner_bounds.min_x - rim,
-        max_x: inner_bounds.max_x + rim,
-        min_z: inner_bounds.min_z - rim,
-        max_z: inner_bounds.max_z + rim,
+        min_x: inner_bounds.min_x - rim_width,
+        max_x: inner_bounds.max_x + rim_width,
+        min_z: inner_bounds.min_z - rim_width,
+        max_z: inner_bounds.max_z + rim_width,
     };
     if frame.min_x <= -half_x + EPSILON
         || frame.max_x >= half_x - EPSILON

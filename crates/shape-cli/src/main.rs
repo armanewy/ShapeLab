@@ -1633,27 +1633,32 @@ fn operation_label(operation: &ModelingOperationSpec) -> String {
             size,
             depth,
             corner_radius,
+            rim_width,
+            corner_segments,
             ..
         } => format!(
-            "recessed panel cut face={face:?} center={center:?} size={size:?} depth={depth:.4} radius={corner_radius:.4}"
+            "recessed panel cut face={face:?} center={center:?} size={size:?} depth={depth:.4} radius={corner_radius:.4} rim={rim_width:.4} corner_segments={corner_segments}"
         ),
         ModelingOperationSpec::RectangularThroughCut {
             face,
             center,
             size,
             corner_radius,
+            rim_width,
+            corner_segments,
             ..
         } => format!(
-            "rectangular through cut face={face:?} center={center:?} size={size:?} radius={corner_radius:.4}"
+            "rectangular through cut face={face:?} center={center:?} size={size:?} radius={corner_radius:.4} rim={rim_width:.4} corner_segments={corner_segments}"
         ),
         ModelingOperationSpec::CircularThroughCut {
             face,
             center,
             radius,
             radial_segments,
+            rim_width,
             ..
         } => format!(
-            "circular through cut face={face:?} center={center:?} radius={radius:.4} segments={radial_segments}"
+            "circular through cut face={face:?} center={center:?} radius={radius:.4} rim={rim_width:.4} segments={radial_segments}"
         ),
         ModelingOperationSpec::MirrorInstances {
             plane_normal,

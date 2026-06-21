@@ -394,21 +394,23 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
         ModelingOperationSpec::RecessedPanelCut {
             operation,
             corner_radius,
+            corner_segments,
             ..
         } => {
             signature.push_str(&format!(
-                "recessed_panel_cut:{}:{corner_radius:.6}",
-                operation.0
+                "recessed_panel_cut:{}:{corner_radius:.6}:{corner_segments}",
+                operation.0,
             ));
         }
         ModelingOperationSpec::RectangularThroughCut {
             operation,
             corner_radius,
+            corner_segments,
             ..
         } => {
             signature.push_str(&format!(
-                "rectangular_through_cut:{}:{corner_radius:.6}",
-                operation.0
+                "rectangular_through_cut:{}:{corner_radius:.6}:{corner_segments}",
+                operation.0,
             ));
         }
         ModelingOperationSpec::CircularThroughCut {
