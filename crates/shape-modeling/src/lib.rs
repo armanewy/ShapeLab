@@ -17,6 +17,12 @@ use shape_asset::{
 use shape_poly::{MeshBounds, PolyError, PolygonMesh};
 use thiserror::Error;
 
+/// Deterministic explicit-topology generators.
+pub mod generators {
+    /// Basic built-in generator families.
+    pub mod basic;
+}
+
 /// Generated local part payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeneratedPart {
@@ -126,36 +132,36 @@ pub fn generate_geometry(
     }
 }
 
-/// Stub rounded-box generator.
+/// Rounded-box generator.
 pub fn generate_rounded_box(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("RoundedBox")
+    generators::basic::generate_rounded_box(definition, context)
 }
 
-/// Stub cylinder generator.
+/// Cylinder generator.
 pub fn generate_cylinder(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("Cylinder")
+    generators::basic::generate_cylinder(definition, context)
 }
 
-/// Stub frustum generator.
+/// Frustum generator.
 pub fn generate_frustum(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("Frustum")
+    generators::basic::generate_frustum(definition, context)
 }
 
-/// Stub plate generator.
+/// Plate generator.
 pub fn generate_plate(
-    _definition: &PartDefinition,
-    _context: &mut GeneratorContext,
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
-    unsupported_geometry("Plate")
+    generators::basic::generate_plate(definition, context)
 }
 
 /// Stub sweep generator.
@@ -258,19 +264,18 @@ mod tests {
     }
 
     #[test]
-    fn rounded_box_generation_is_explicitly_unsupported() {
+    fn rounded_box_generation_returns_explicit_mesh() {
         let definition = definition(GeometrySource::RoundedBox {
             half_extents: [1.0, 1.0, 1.0],
             radius: 0.1,
         });
         let mut context = GeneratorContext::new(PartDefinitionId(1), PartInstanceId(1), 1, 0);
 
-        assert!(matches!(
-            generate_geometry(&definition, &mut context),
-            Err(ModelingError::UnsupportedGeometry {
-                geometry_source: "RoundedBox"
-            })
-        ));
+        let generated = generate_geometry(&definition, &mut context)
+            .expect("rounded box should generate explicit topology");
+
+        assert!(!generated.mesh.faces.is_empty());
+        assert_eq!(generated.sockets.len(), 6);
     }
 
     #[test]

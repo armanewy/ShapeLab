@@ -1,0 +1,1436 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::f32::consts::{FRAC_PI_2, PI};
+
+use shape_asset::{
+    Frame3, GeometrySource, ModelingOperationSpec, PartDefinition, RegionId, SocketId, SocketSpec,
+    SurfaceRegionSpec, SurfaceRole,
+};
+use shape_poly::{
+    BoundaryRole, EdgeClassification, EdgeKey, EdgeMetadata, ElementId, FaceMetadata, PolygonFace,
+    PolygonMesh, bounds_from_positions, compute_topology_signature,
+};
+
+use crate::{GeneratedPart, GeneratorContext, ModelingError};
+
+const EPSILON: f32 = 1.0e-6;
+
+const ROUNDED_PRIMARY_REGION: RegionId = RegionId(1);
+const ROUNDED_BEVEL_REGION: RegionId = RegionId(2);
+const ROUNDED_CORNER_REGION: RegionId = RegionId(3);
+
+const CYLINDER_SIDE_REGION: RegionId = RegionId(1);
+const CYLINDER_TOP_CAP_REGION: RegionId = RegionId(2);
+const CYLINDER_BOTTOM_CAP_REGION: RegionId = RegionId(3);
+const CYLINDER_TOP_BEVEL_REGION: RegionId = RegionId(4);
+const CYLINDER_BOTTOM_BEVEL_REGION: RegionId = RegionId(5);
+
+const PLATE_FRONT_REGION: RegionId = RegionId(1);
+const PLATE_BACK_REGION: RegionId = RegionId(2);
+const PLATE_SIDE_REGION: RegionId = RegionId(3);
+const PLATE_BEVEL_REGION: RegionId = RegionId(4);
+
+const SOCKET_TOP: SocketId = SocketId(1);
+const SOCKET_BOTTOM: SocketId = SocketId(2);
+const SOCKET_AXIS: SocketId = SocketId(3);
+
+type SocketTemplate = (
+    SocketId,
+    &'static str,
+    [f32; 3],
+    [f32; 3],
+    [f32; 3],
+    [f32; 3],
+);
+
+/// Six-sided rounded-box face inclusion mask.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct FaceMask {
+    /// Positive X face.
+    pub positive_x: bool,
+    /// Negative X face.
+    pub negative_x: bool,
+    /// Positive Y face.
+    pub positive_y: bool,
+    /// Negative Y face.
+    pub negative_y: bool,
+    /// Positive Z face.
+    pub positive_z: bool,
+    /// Negative Z face.
+    pub negative_z: bool,
+}
+
+impl FaceMask {
+    /// Return a closed six-face mask.
+    #[must_use]
+    pub fn all() -> Self {
+        Self {
+            positive_x: true,
+            negative_x: true,
+            positive_y: true,
+            negative_y: true,
+            positive_z: true,
+            negative_z: true,
+        }
+    }
+
+    /// Return true when the given side is enabled.
+    #[must_use]
+    fn includes(self, side: FaceSide) -> bool {
+        match side {
+            FaceSide::PositiveX => self.positive_x,
+            FaceSide::NegativeX => self.negative_x,
+            FaceSide::PositiveY => self.positive_y,
+            FaceSide::NegativeY => self.negative_y,
+            FaceSide::PositiveZ => self.positive_z,
+            FaceSide::NegativeZ => self.negative_z,
+        }
+    }
+}
+
+impl Default for FaceMask {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+/// Cap inclusion mode for cylinders and frusta.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CapMode {
+    /// No caps.
+    None,
+    /// Top cap only.
+    Top,
+    /// Bottom cap only.
+    Bottom,
+    /// Top and bottom caps.
+    Both,
+}
+
+impl CapMode {
+    #[must_use]
+    fn has_top(self) -> bool {
+        matches!(self, Self::Top | Self::Both)
+    }
+
+    #[must_use]
+    fn has_bottom(self) -> bool {
+        matches!(self, Self::Bottom | Self::Both)
+    }
+}
+
+/// Explicit rounded-box generator parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoundedBoxParams {
+    /// Half extents along local X, Y, and Z.
+    pub half_extents: [f32; 3],
+    /// Requested bevel radius. Clamped to valid half extents.
+    pub bevel_radius: f32,
+    /// Number of samples across bevel bands.
+    pub bevel_segments: u32,
+    /// Number of subdivisions across each primary face axis.
+    pub face_subdivisions: u32,
+    /// Closed/open side mask.
+    pub face_mask: FaceMask,
+}
+
+/// Explicit cylinder generator parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CylinderParams {
+    /// Cylinder radius.
+    pub radius: f32,
+    /// Half height along local Y.
+    pub half_height: f32,
+    /// Radial segment count.
+    pub radial_segments: u32,
+    /// Side height segment count.
+    pub height_segments: u32,
+    /// Cap inclusion mode.
+    pub cap_mode: CapMode,
+    /// Top bevel radius.
+    pub top_bevel_radius: f32,
+    /// Bottom bevel radius.
+    pub bottom_bevel_radius: f32,
+    /// Bevel segment count.
+    pub bevel_segments: u32,
+}
+
+/// Explicit frustum generator parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrustumParams {
+    /// Bottom radius.
+    pub bottom_radius: f32,
+    /// Top radius.
+    pub top_radius: f32,
+    /// Half height along local Y.
+    pub half_height: f32,
+    /// Radial segment count.
+    pub radial_segments: u32,
+    /// Side height segment count.
+    pub height_segments: u32,
+    /// Cap inclusion mode.
+    pub cap_mode: CapMode,
+    /// Top bevel radius.
+    pub top_bevel_radius: f32,
+    /// Bottom bevel radius.
+    pub bottom_bevel_radius: f32,
+    /// Bevel segment count.
+    pub bevel_segments: u32,
+}
+
+/// Explicit rectangular plate generator parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateParams {
+    /// Width along local X.
+    pub width: f32,
+    /// Height along local Z.
+    pub height: f32,
+    /// Thickness along local Y.
+    pub thickness: f32,
+    /// Rounded corner radius in the X/Z plane.
+    pub corner_radius: f32,
+    /// Corner arc segment count.
+    pub corner_segments: u32,
+    /// Symmetric front/back bevel amount.
+    pub front_back_bevel: f32,
+}
+
+/// Generate a rounded box from a `PartDefinition` using schema-1 fields.
+pub fn generate_rounded_box(
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let GeometrySource::RoundedBox {
+        half_extents,
+        radius,
+    } = definition.geometry.source
+    else {
+        return Err(ModelingError::InvalidInput(
+            "rounded-box generator received a different geometry source".to_owned(),
+        ));
+    };
+    let (bevel_radius, bevel_segments) = bevel_profile(definition, radius, 3);
+    let params = RoundedBoxParams {
+        half_extents,
+        bevel_radius,
+        bevel_segments,
+        face_subdivisions: 1,
+        face_mask: FaceMask::all(),
+    };
+    build_rounded_box(&params, context)
+}
+
+/// Generate a cylinder from a `PartDefinition` using schema-1 fields.
+pub fn generate_cylinder(
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let GeometrySource::Cylinder {
+        radius,
+        height,
+        radial_segments,
+    } = definition.geometry.source
+    else {
+        return Err(ModelingError::InvalidInput(
+            "cylinder generator received a different geometry source".to_owned(),
+        ));
+    };
+    let (bevel_radius, bevel_segments) = bevel_profile(definition, 0.0, 0);
+    let params = CylinderParams {
+        radius,
+        half_height: height * 0.5,
+        radial_segments,
+        height_segments: 1,
+        cap_mode: CapMode::Both,
+        top_bevel_radius: bevel_radius,
+        bottom_bevel_radius: bevel_radius,
+        bevel_segments,
+    };
+    build_cylinder(&params, context)
+}
+
+/// Generate a frustum from a `PartDefinition` using schema-1 fields.
+pub fn generate_frustum(
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let GeometrySource::Frustum {
+        bottom_radius,
+        top_radius,
+        height,
+        radial_segments,
+    } = definition.geometry.source
+    else {
+        return Err(ModelingError::InvalidInput(
+            "frustum generator received a different geometry source".to_owned(),
+        ));
+    };
+    let (bevel_radius, bevel_segments) = bevel_profile(definition, 0.0, 0);
+    let params = FrustumParams {
+        bottom_radius,
+        top_radius,
+        half_height: height * 0.5,
+        radial_segments,
+        height_segments: 1,
+        cap_mode: CapMode::Both,
+        top_bevel_radius: bevel_radius,
+        bottom_bevel_radius: bevel_radius,
+        bevel_segments,
+    };
+    build_frustum(&params, context)
+}
+
+/// Generate a plate from a `PartDefinition` using schema-1 fields.
+pub fn generate_plate(
+    definition: &PartDefinition,
+    context: &mut GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let GeometrySource::Plate { size, thickness } = definition.geometry.source else {
+        return Err(ModelingError::InvalidInput(
+            "plate generator received a different geometry source".to_owned(),
+        ));
+    };
+    let (bevel_radius, bevel_segments) = bevel_profile(definition, 0.0, 0);
+    let params = PlateParams {
+        width: size[0],
+        height: size[1],
+        thickness,
+        corner_radius: 0.0,
+        corner_segments: bevel_segments.max(1),
+        front_back_bevel: bevel_radius,
+    };
+    build_plate(&params, context)
+}
+
+/// Build a rounded-box mesh with explicit topology controls.
+pub fn build_rounded_box(
+    params: &RoundedBoxParams,
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let half = positive_triplet(params.half_extents, "rounded_box.half_extents")?;
+    let requested_radius = finite_non_negative(params.bevel_radius, "rounded_box.bevel_radius")?;
+    let radius = requested_radius.min(half[0].min(half[1]).min(half[2]));
+    let bevel_segments = if radius > EPSILON {
+        params.bevel_segments.max(1)
+    } else {
+        0
+    };
+    let face_subdivisions = params.face_subdivisions.max(1);
+    let inner = [
+        (half[0] - radius).max(0.0),
+        (half[1] - radius).max(0.0),
+        (half[2] - radius).max(0.0),
+    ];
+    let axis_samples = [
+        axis_samples(half[0], inner[0], radius, bevel_segments, face_subdivisions),
+        axis_samples(half[1], inner[1], radius, bevel_segments, face_subdivisions),
+        axis_samples(half[2], inner[2], radius, bevel_segments, face_subdivisions),
+    ];
+    let mut builder = MeshBuilder::new();
+
+    for side in FaceSide::ALL {
+        if !params.face_mask.includes(side) {
+            continue;
+        }
+        let [u_axis, v_axis] = side.tangent_axes();
+        let u_samples = &axis_samples[u_axis];
+        let v_samples = &axis_samples[v_axis];
+        for u in 0..u_samples.len() - 1 {
+            for v in 0..v_samples.len() - 1 {
+                let corners = [
+                    rounded_box_position(side, u_samples[u], v_samples[v], half, inner, radius),
+                    rounded_box_position(side, u_samples[u + 1], v_samples[v], half, inner, radius),
+                    rounded_box_position(
+                        side,
+                        u_samples[u + 1],
+                        v_samples[v + 1],
+                        half,
+                        inner,
+                        radius,
+                    ),
+                    rounded_box_position(side, u_samples[u], v_samples[v + 1], half, inner, radius),
+                ];
+                let vertices = builder.add_vertices(&corners)?;
+                let region = rounded_box_region(
+                    [u_axis, v_axis],
+                    [
+                        (u_samples[u] + u_samples[u + 1]) * 0.5,
+                        (v_samples[v] + v_samples[v + 1]) * 0.5,
+                    ],
+                    inner,
+                    radius,
+                );
+                builder.add_face(vertices, rounded_box_metadata(context, region));
+            }
+        }
+    }
+
+    let mesh = builder.finish()?;
+    let regions = rounded_box_regions();
+    let sockets = rounded_box_sockets(half);
+    Ok(part(
+        mesh,
+        regions,
+        sockets,
+        format!(
+            "rounded_box:h={:.6},{:.6},{:.6}:r={:.6}:bs={}:fs={}:mask={:?}",
+            half[0], half[1], half[2], radius, bevel_segments, face_subdivisions, params.face_mask
+        ),
+    ))
+}
+
+/// Build a cylinder mesh with explicit topology controls.
+pub fn build_cylinder(
+    params: &CylinderParams,
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let frustum = FrustumParams {
+        bottom_radius: params.radius,
+        top_radius: params.radius,
+        half_height: params.half_height,
+        radial_segments: params.radial_segments,
+        height_segments: params.height_segments,
+        cap_mode: params.cap_mode,
+        top_bevel_radius: params.top_bevel_radius,
+        bottom_bevel_radius: params.bottom_bevel_radius,
+        bevel_segments: params.bevel_segments,
+    };
+    build_frustum_like(&frustum, context, "cylinder")
+}
+
+/// Build a frustum mesh with explicit topology controls.
+pub fn build_frustum(
+    params: &FrustumParams,
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    build_frustum_like(params, context, "frustum")
+}
+
+/// Build a rounded rectangular plate mesh with explicit topology controls.
+pub fn build_plate(
+    params: &PlateParams,
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let width = finite_positive(params.width, "plate.width")?;
+    let height = finite_positive(params.height, "plate.height")?;
+    let thickness = finite_positive(params.thickness, "plate.thickness")?;
+    let half_x = width * 0.5;
+    let half_z = height * 0.5;
+    let half_y = thickness * 0.5;
+    let corner_radius =
+        finite_non_negative(params.corner_radius, "plate.corner_radius")?.min(half_x.min(half_z));
+    let mut bevel =
+        finite_non_negative(params.front_back_bevel, "plate.front_back_bevel")?.min(half_y);
+    if corner_radius > EPSILON {
+        bevel = bevel.min(corner_radius * 0.5);
+    }
+    bevel = bevel.min(half_x * 0.5).min(half_z * 0.5);
+    let corner_segments = if corner_radius > EPSILON {
+        params.corner_segments.max(1)
+    } else {
+        1
+    };
+
+    let outer = rounded_rect_points(half_x, half_z, corner_radius, corner_segments);
+    let inner_half_x = (half_x - bevel).max(EPSILON);
+    let inner_half_z = (half_z - bevel).max(EPSILON);
+    let inner_radius = if corner_radius > EPSILON {
+        (corner_radius - bevel).max(EPSILON)
+    } else {
+        0.0
+    };
+    let inner = rounded_rect_points(inner_half_x, inner_half_z, inner_radius, corner_segments);
+    let mut builder = MeshBuilder::new();
+
+    let back_face = if bevel > EPSILON { &inner } else { &outer };
+    let front_face = if bevel > EPSILON { &inner } else { &outer };
+    let back_face_ring = builder.add_plate_ring(-half_y, back_face)?;
+    let front_face_ring = if bevel > EPSILON {
+        let back_outer_ring = builder.add_plate_ring(-half_y + bevel, &outer)?;
+        let front_outer_ring = builder.add_plate_ring(half_y - bevel, &outer)?;
+        let front_inner_ring = builder.add_plate_ring(half_y, front_face)?;
+        add_plate_band(
+            &mut builder,
+            &back_face_ring,
+            &back_outer_ring,
+            context,
+            PLATE_BEVEL_REGION,
+        );
+        add_plate_band(
+            &mut builder,
+            &back_outer_ring,
+            &front_outer_ring,
+            context,
+            PLATE_SIDE_REGION,
+        );
+        add_plate_band(
+            &mut builder,
+            &front_outer_ring,
+            &front_inner_ring,
+            context,
+            PLATE_BEVEL_REGION,
+        );
+        front_inner_ring
+    } else {
+        let front_ring = builder.add_plate_ring(half_y, front_face)?;
+        add_plate_band(
+            &mut builder,
+            &back_face_ring,
+            &front_ring,
+            context,
+            PLATE_SIDE_REGION,
+        );
+        front_ring
+    };
+    let mut front_cap = front_face_ring.clone();
+    front_cap.reverse();
+    builder.add_face(front_cap, plate_metadata(context, PLATE_FRONT_REGION));
+    builder.add_face(back_face_ring, plate_metadata(context, PLATE_BACK_REGION));
+
+    let mesh = builder.finish()?;
+    let regions = plate_regions();
+    let sockets = plate_sockets(half_y);
+    Ok(part(
+        mesh,
+        regions,
+        sockets,
+        format!(
+            "plate:w={:.6}:h={:.6}:t={:.6}:r={:.6}:cs={}:b={:.6}",
+            width, height, thickness, corner_radius, corner_segments, bevel
+        ),
+    ))
+}
+
+fn build_frustum_like(
+    params: &FrustumParams,
+    context: &GeneratorContext,
+    label: &'static str,
+) -> Result<GeneratedPart, ModelingError> {
+    let bottom_radius = finite_non_negative(params.bottom_radius, "frustum.bottom_radius")?;
+    let top_radius = finite_non_negative(params.top_radius, "frustum.top_radius")?;
+    if bottom_radius <= EPSILON && top_radius <= EPSILON {
+        return Err(ModelingError::InvalidInput(
+            "frustum requires at least one positive radius".to_owned(),
+        ));
+    }
+    let half_height = finite_positive(params.half_height, "frustum.half_height")?;
+    let radial_segments = params.radial_segments.max(3);
+    let height_segments = params.height_segments.max(1);
+    let requested_top = finite_non_negative(params.top_bevel_radius, "frustum.top_bevel_radius")?;
+    let requested_bottom =
+        finite_non_negative(params.bottom_bevel_radius, "frustum.bottom_bevel_radius")?;
+    let (bottom_bevel, top_bevel) = clamp_frustum_bevels(
+        requested_bottom,
+        requested_top,
+        bottom_radius,
+        top_radius,
+        half_height * 2.0,
+    );
+    let bevel_segments = if bottom_bevel > EPSILON || top_bevel > EPSILON {
+        params.bevel_segments.max(1)
+    } else {
+        0
+    };
+    let mut builder = MeshBuilder::new();
+    let rings = frustum_rings(
+        &mut builder,
+        FrustumRingPlan {
+            bottom_radius,
+            top_radius,
+            half_height,
+            radial_segments,
+            height_segments,
+            bottom_bevel,
+            top_bevel,
+            bevel_segments,
+        },
+    )?;
+
+    for pair in rings.windows(2) {
+        let region = pair[1].incoming_region;
+        add_ring_band(&mut builder, &pair[0], &pair[1], context, region);
+    }
+    if params.cap_mode.has_bottom() {
+        add_cap(&mut builder, &rings[0], false, context);
+    }
+    if params.cap_mode.has_top() {
+        let last = rings
+            .last()
+            .expect("frustum ring generation should always produce a ring");
+        add_cap(&mut builder, last, true, context);
+    }
+
+    let mesh = builder.finish()?;
+    let regions = cylinder_regions();
+    let sockets = cylinder_sockets(half_height);
+    Ok(part(
+        mesh,
+        regions,
+        sockets,
+        format!(
+            "{label}:br={:.6}:tr={:.6}:hh={:.6}:rs={}:hs={}:cap={:?}:tb={:.6}:bb={:.6}:bs={}",
+            bottom_radius,
+            top_radius,
+            half_height,
+            radial_segments,
+            height_segments,
+            params.cap_mode,
+            top_bevel,
+            bottom_bevel,
+            bevel_segments
+        ),
+    ))
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FrustumRingPlan {
+    bottom_radius: f32,
+    top_radius: f32,
+    half_height: f32,
+    radial_segments: u32,
+    height_segments: u32,
+    bottom_bevel: f32,
+    top_bevel: f32,
+    bevel_segments: u32,
+}
+
+fn frustum_rings(
+    builder: &mut MeshBuilder,
+    plan: FrustumRingPlan,
+) -> Result<Vec<Ring>, ModelingError> {
+    let bottom_y = -plan.half_height;
+    let top_y = plan.half_height;
+    let bottom_cap_radius = (plan.bottom_radius - plan.bottom_bevel).max(0.0);
+    let top_cap_radius = (plan.top_radius - plan.top_bevel).max(0.0);
+    let bottom_side_y = bottom_y + plan.bottom_bevel;
+    let top_side_y = top_y - plan.top_bevel;
+    let mut rings = Vec::new();
+
+    if plan.bottom_bevel > EPSILON {
+        for index in 0..=plan.bevel_segments {
+            let t = index as f32 / plan.bevel_segments as f32;
+            let angle = t * FRAC_PI_2;
+            let radius = bottom_cap_radius + plan.bottom_bevel * (1.0 - angle.cos());
+            let y = bottom_y + plan.bottom_bevel * angle.sin();
+            rings.push(builder.add_ring(
+                y,
+                radius,
+                plan.radial_segments,
+                CYLINDER_BOTTOM_BEVEL_REGION,
+            )?);
+        }
+    } else {
+        rings.push(builder.add_ring(
+            bottom_y,
+            plan.bottom_radius,
+            plan.radial_segments,
+            CYLINDER_SIDE_REGION,
+        )?);
+    }
+
+    for index in 1..=plan.height_segments {
+        let t = index as f32 / plan.height_segments as f32;
+        let y = lerp(bottom_side_y, top_side_y, t);
+        let radius = lerp(plan.bottom_radius, plan.top_radius, t);
+        if index == plan.height_segments && plan.top_bevel > EPSILON {
+            continue;
+        }
+        rings.push(builder.add_ring(y, radius, plan.radial_segments, CYLINDER_SIDE_REGION)?);
+    }
+
+    if plan.top_bevel > EPSILON {
+        if rings
+            .last()
+            .is_none_or(|ring| (ring.y - top_side_y).abs() > EPSILON)
+        {
+            rings.push(builder.add_ring(
+                top_side_y,
+                plan.top_radius,
+                plan.radial_segments,
+                CYLINDER_SIDE_REGION,
+            )?);
+        }
+        for index in 1..=plan.bevel_segments {
+            let t = index as f32 / plan.bevel_segments as f32;
+            let angle = t * FRAC_PI_2;
+            let radius = top_cap_radius + plan.top_bevel * angle.cos();
+            let y = top_y - plan.top_bevel * (1.0 - angle.sin());
+            rings.push(builder.add_ring(
+                y,
+                radius,
+                plan.radial_segments,
+                CYLINDER_TOP_BEVEL_REGION,
+            )?);
+        }
+    }
+    Ok(rings)
+}
+
+fn add_ring_band(
+    builder: &mut MeshBuilder,
+    lower: &Ring,
+    upper: &Ring,
+    context: &GeneratorContext,
+    region: RegionId,
+) {
+    match (&lower.vertices, &upper.vertices) {
+        (RingVertices::Circle(lower_vertices), RingVertices::Circle(upper_vertices)) => {
+            for index in 0..lower_vertices.len() {
+                let next = (index + 1) % lower_vertices.len();
+                builder.add_face(
+                    vec![
+                        lower_vertices[index],
+                        upper_vertices[index],
+                        upper_vertices[next],
+                        lower_vertices[next],
+                    ],
+                    cylinder_metadata(context, region),
+                );
+            }
+        }
+        (RingVertices::Apex(apex), RingVertices::Circle(upper_vertices)) => {
+            for index in 0..upper_vertices.len() {
+                let next = (index + 1) % upper_vertices.len();
+                builder.add_face(
+                    vec![*apex, upper_vertices[index], upper_vertices[next]],
+                    cylinder_metadata(context, region),
+                );
+            }
+        }
+        (RingVertices::Circle(lower_vertices), RingVertices::Apex(apex)) => {
+            for index in 0..lower_vertices.len() {
+                let next = (index + 1) % lower_vertices.len();
+                builder.add_face(
+                    vec![lower_vertices[index], *apex, lower_vertices[next]],
+                    cylinder_metadata(context, region),
+                );
+            }
+        }
+        (RingVertices::Apex(_), RingVertices::Apex(_)) => {}
+    }
+}
+
+fn add_cap(builder: &mut MeshBuilder, ring: &Ring, top: bool, context: &GeneratorContext) {
+    let RingVertices::Circle(vertices) = &ring.vertices else {
+        return;
+    };
+    let mut face = vertices.clone();
+    let region = if top {
+        face.reverse();
+        CYLINDER_TOP_CAP_REGION
+    } else {
+        CYLINDER_BOTTOM_CAP_REGION
+    };
+    builder.add_face(face, cylinder_metadata(context, region));
+}
+
+fn add_plate_band(
+    builder: &mut MeshBuilder,
+    lower: &[u32],
+    upper: &[u32],
+    context: &GeneratorContext,
+    region: RegionId,
+) {
+    for index in 0..lower.len() {
+        let next = (index + 1) % lower.len();
+        builder.add_face(
+            vec![lower[index], upper[index], upper[next], lower[next]],
+            plate_metadata(context, region),
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Ring {
+    y: f32,
+    vertices: RingVertices,
+    incoming_region: RegionId,
+}
+
+#[derive(Debug, Clone)]
+enum RingVertices {
+    Apex(u32),
+    Circle(Vec<u32>),
+}
+
+#[derive(Debug, Copy, Clone)]
+enum FaceSide {
+    PositiveX,
+    NegativeX,
+    PositiveY,
+    NegativeY,
+    PositiveZ,
+    NegativeZ,
+}
+
+impl FaceSide {
+    const ALL: [Self; 6] = [
+        Self::PositiveX,
+        Self::NegativeX,
+        Self::PositiveY,
+        Self::NegativeY,
+        Self::PositiveZ,
+        Self::NegativeZ,
+    ];
+
+    #[must_use]
+    fn fixed_axis(self) -> usize {
+        match self {
+            Self::PositiveX | Self::NegativeX => 0,
+            Self::PositiveY | Self::NegativeY => 1,
+            Self::PositiveZ | Self::NegativeZ => 2,
+        }
+    }
+
+    #[must_use]
+    fn sign(self) -> f32 {
+        match self {
+            Self::PositiveX | Self::PositiveY | Self::PositiveZ => 1.0,
+            Self::NegativeX | Self::NegativeY | Self::NegativeZ => -1.0,
+        }
+    }
+
+    #[must_use]
+    fn tangent_axes(self) -> [usize; 2] {
+        match self {
+            Self::PositiveX => [1, 2],
+            Self::NegativeX => [2, 1],
+            Self::PositiveY => [2, 0],
+            Self::NegativeY => [0, 2],
+            Self::PositiveZ => [0, 1],
+            Self::NegativeZ => [1, 0],
+        }
+    }
+}
+
+struct MeshBuilder {
+    positions: Vec<[f32; 3]>,
+    vertex_ids: Vec<ElementId>,
+    vertex_lookup: BTreeMap<VertexKey, u32>,
+    faces: Vec<PolygonFace>,
+    face_metadata: Vec<FaceMetadata>,
+}
+
+impl MeshBuilder {
+    fn new() -> Self {
+        Self {
+            positions: Vec::new(),
+            vertex_ids: Vec::new(),
+            vertex_lookup: BTreeMap::new(),
+            faces: Vec::new(),
+            face_metadata: Vec::new(),
+        }
+    }
+
+    fn add_vertices(&mut self, positions: &[[f32; 3]]) -> Result<Vec<u32>, ModelingError> {
+        positions
+            .iter()
+            .copied()
+            .map(|position| self.add_vertex(position))
+            .collect()
+    }
+
+    fn add_vertex(&mut self, position: [f32; 3]) -> Result<u32, ModelingError> {
+        if !position.iter().copied().all(f32::is_finite) {
+            return Err(ModelingError::InvalidInput(
+                "generated non-finite vertex position".to_owned(),
+            ));
+        }
+        let key = VertexKey::from_position(position);
+        if let Some(index) = self.vertex_lookup.get(&key) {
+            return Ok(*index);
+        }
+        let index = u32::try_from(self.positions.len()).map_err(|_| {
+            ModelingError::InvalidInput("generated mesh exceeded u32 index range".to_owned())
+        })?;
+        self.positions.push(position);
+        self.vertex_ids.push(ElementId(u64::from(index)));
+        self.vertex_lookup.insert(key, index);
+        Ok(index)
+    }
+
+    fn add_ring(
+        &mut self,
+        y: f32,
+        radius: f32,
+        radial_segments: u32,
+        incoming_region: RegionId,
+    ) -> Result<Ring, ModelingError> {
+        if radius <= EPSILON {
+            let vertex = self.add_vertex([0.0, y, 0.0])?;
+            return Ok(Ring {
+                y,
+                vertices: RingVertices::Apex(vertex),
+                incoming_region,
+            });
+        }
+        let mut vertices = Vec::new();
+        for index in 0..radial_segments {
+            let angle = 2.0 * PI * index as f32 / radial_segments as f32;
+            let (sin, cos) = angle.sin_cos();
+            vertices.push(self.add_vertex([radius * cos, y, radius * sin])?);
+        }
+        Ok(Ring {
+            y,
+            vertices: RingVertices::Circle(vertices),
+            incoming_region,
+        })
+    }
+
+    fn add_plate_ring(&mut self, y: f32, points: &[[f32; 2]]) -> Result<Vec<u32>, ModelingError> {
+        points
+            .iter()
+            .map(|point| self.add_vertex([point[0], y, point[1]]))
+            .collect()
+    }
+
+    fn add_face(&mut self, vertices: Vec<u32>, metadata: FaceMetadata) {
+        if has_duplicate_indices(&vertices) || vertices.len() < 3 {
+            return;
+        }
+        let id = ElementId(self.faces.len() as u64);
+        self.faces.push(PolygonFace { id, vertices });
+        self.face_metadata.push(metadata);
+    }
+
+    fn finish(self) -> Result<PolygonMesh, ModelingError> {
+        let bounds = bounds_from_positions(&self.positions)?;
+        let mut mesh = PolygonMesh {
+            positions: self.positions,
+            vertex_ids: self.vertex_ids,
+            faces: self.faces,
+            face_metadata: self.face_metadata,
+            edge_metadata: BTreeMap::new(),
+            topology_signature: 0,
+            bounds,
+        };
+        mesh.topology_signature = compute_topology_signature(&mesh.positions, &mesh.faces);
+        mesh.edge_metadata = build_edge_metadata(&mesh);
+        Ok(mesh)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct VertexKey(i64, i64, i64);
+
+impl VertexKey {
+    fn from_position(position: [f32; 3]) -> Self {
+        Self(
+            quantize(position[0]),
+            quantize(position[1]),
+            quantize(position[2]),
+        )
+    }
+}
+
+fn build_edge_metadata(mesh: &PolygonMesh) -> BTreeMap<EdgeKey, EdgeMetadata> {
+    let mut edge_faces: BTreeMap<EdgeKey, Vec<usize>> = BTreeMap::new();
+    for (face_index, face) in mesh.faces.iter().enumerate() {
+        for index in 0..face.vertices.len() {
+            let next = (index + 1) % face.vertices.len();
+            edge_faces
+                .entry(EdgeKey::new(face.vertices[index], face.vertices[next]))
+                .or_default()
+                .push(face_index);
+        }
+    }
+
+    edge_faces
+        .into_iter()
+        .map(|(edge, faces)| {
+            let metadata = if faces.len() == 1 {
+                EdgeMetadata {
+                    boundary_role: BoundaryRole::OpenBoundary,
+                    classification: EdgeClassification::Hard,
+                    seam_candidate: false,
+                    operation: None,
+                    region_transition: None,
+                }
+            } else {
+                let first = &mesh.face_metadata[faces[0]];
+                let second = &mesh.face_metadata[faces[1]];
+                let smooth = first.smoothing_group.is_some()
+                    && first.smoothing_group == second.smoothing_group;
+                EdgeMetadata {
+                    boundary_role: if smooth {
+                        BoundaryRole::Smooth
+                    } else {
+                        BoundaryRole::Hard
+                    },
+                    classification: if smooth {
+                        EdgeClassification::Smooth
+                    } else {
+                        EdgeClassification::Hard
+                    },
+                    seam_candidate: false,
+                    operation: None,
+                    region_transition: region_transition(first.region, second.region),
+                }
+            };
+            (edge, metadata)
+        })
+        .collect()
+}
+
+fn rounded_box_position(
+    side: FaceSide,
+    u: f32,
+    v: f32,
+    half: [f32; 3],
+    inner: [f32; 3],
+    radius: f32,
+) -> [f32; 3] {
+    let mut base = [0.0; 3];
+    base[side.fixed_axis()] = side.sign() * half[side.fixed_axis()];
+    let [u_axis, v_axis] = side.tangent_axes();
+    base[u_axis] = u;
+    base[v_axis] = v;
+    if radius <= EPSILON {
+        return base;
+    }
+    let closest = [
+        base[0].clamp(-inner[0], inner[0]),
+        base[1].clamp(-inner[1], inner[1]),
+        base[2].clamp(-inner[2], inner[2]),
+    ];
+    let delta = [
+        base[0] - closest[0],
+        base[1] - closest[1],
+        base[2] - closest[2],
+    ];
+    let length = dot(delta, delta).sqrt();
+    if length <= EPSILON {
+        closest
+    } else {
+        [
+            closest[0] + delta[0] * radius / length,
+            closest[1] + delta[1] * radius / length,
+            closest[2] + delta[2] * radius / length,
+        ]
+    }
+}
+
+fn rounded_box_region(
+    axes: [usize; 2],
+    center: [f32; 2],
+    inner: [f32; 3],
+    radius: f32,
+) -> RegionId {
+    if radius <= EPSILON {
+        return ROUNDED_PRIMARY_REGION;
+    }
+    let outside = axes
+        .into_iter()
+        .zip(center)
+        .filter(|(axis, value)| value.abs() > inner[*axis] + EPSILON)
+        .count();
+    match outside {
+        0 => ROUNDED_PRIMARY_REGION,
+        1 => ROUNDED_BEVEL_REGION,
+        _ => ROUNDED_CORNER_REGION,
+    }
+}
+
+fn rounded_box_metadata(context: &GeneratorContext, region: RegionId) -> FaceMetadata {
+    let (surface_role, smoothing_group) = match region {
+        ROUNDED_PRIMARY_REGION => (SurfaceRole::PrimarySurface, None),
+        ROUNDED_BEVEL_REGION => (SurfaceRole::BevelBand, Some(1)),
+        ROUNDED_CORNER_REGION => (SurfaceRole::Detail, Some(1)),
+        _ => (SurfaceRole::Detail, None),
+    };
+    metadata(context, region, surface_role, smoothing_group)
+}
+
+fn cylinder_metadata(context: &GeneratorContext, region: RegionId) -> FaceMetadata {
+    let (surface_role, smoothing_group) = match region {
+        CYLINDER_SIDE_REGION => (SurfaceRole::Side, Some(2)),
+        CYLINDER_TOP_CAP_REGION | CYLINDER_BOTTOM_CAP_REGION => (SurfaceRole::Cap, None),
+        CYLINDER_TOP_BEVEL_REGION | CYLINDER_BOTTOM_BEVEL_REGION => {
+            (SurfaceRole::BevelBand, Some(1))
+        }
+        _ => (SurfaceRole::Detail, None),
+    };
+    metadata(context, region, surface_role, smoothing_group)
+}
+
+fn plate_metadata(context: &GeneratorContext, region: RegionId) -> FaceMetadata {
+    let (surface_role, smoothing_group) = match region {
+        PLATE_FRONT_REGION | PLATE_BACK_REGION => (SurfaceRole::PrimarySurface, None),
+        PLATE_SIDE_REGION => (SurfaceRole::Side, Some(2)),
+        PLATE_BEVEL_REGION => (SurfaceRole::BevelBand, Some(1)),
+        _ => (SurfaceRole::Detail, None),
+    };
+    metadata(context, region, surface_role, smoothing_group)
+}
+
+fn metadata(
+    context: &GeneratorContext,
+    region: RegionId,
+    surface_role: SurfaceRole,
+    smoothing_group: Option<u32>,
+) -> FaceMetadata {
+    FaceMetadata {
+        part_definition: Some(context.part_definition),
+        part_instance: Some(context.part_instance),
+        region: Some(region),
+        operation: None,
+        smoothing_group,
+        surface_role: Some(surface_role),
+    }
+}
+
+fn axis_samples(
+    half: f32,
+    inner: f32,
+    radius: f32,
+    bevel_segments: u32,
+    face_subdivisions: u32,
+) -> Vec<f32> {
+    let mut samples = Vec::new();
+    if radius <= EPSILON {
+        for index in 0..=face_subdivisions {
+            samples.push(lerp(-half, half, index as f32 / face_subdivisions as f32));
+        }
+    } else {
+        for index in 0..=bevel_segments {
+            samples.push(lerp(-half, -inner, index as f32 / bevel_segments as f32));
+        }
+        for index in 1..face_subdivisions {
+            samples.push(lerp(-inner, inner, index as f32 / face_subdivisions as f32));
+        }
+        for index in 0..=bevel_segments {
+            samples.push(lerp(inner, half, index as f32 / bevel_segments as f32));
+        }
+    }
+    dedup_sorted_f32(samples)
+}
+
+fn rounded_rect_points(
+    half_x: f32,
+    half_z: f32,
+    radius: f32,
+    corner_segments: u32,
+) -> Vec<[f32; 2]> {
+    if radius <= EPSILON {
+        return vec![
+            [half_x, half_z],
+            [-half_x, half_z],
+            [-half_x, -half_z],
+            [half_x, -half_z],
+        ];
+    }
+    let centers = [
+        [half_x - radius, half_z - radius],
+        [-half_x + radius, half_z - radius],
+        [-half_x + radius, -half_z + radius],
+        [half_x - radius, -half_z + radius],
+    ];
+    let starts = [0.0, FRAC_PI_2, PI, PI + FRAC_PI_2];
+    let mut points = Vec::new();
+    for (center, start) in centers.into_iter().zip(starts) {
+        for index in 0..=corner_segments {
+            let t = index as f32 / corner_segments as f32;
+            let angle = start + t * FRAC_PI_2;
+            let (sin, cos) = angle.sin_cos();
+            points.push([center[0] + radius * cos, center[1] + radius * sin]);
+        }
+    }
+    points
+}
+
+fn clamp_frustum_bevels(
+    bottom: f32,
+    top: f32,
+    bottom_radius: f32,
+    top_radius: f32,
+    height: f32,
+) -> (f32, f32) {
+    let mut bottom = bottom.min(bottom_radius);
+    let mut top = top.min(top_radius);
+    let sum = bottom + top;
+    if sum > height && sum > EPSILON {
+        let scale = height / sum;
+        bottom *= scale;
+        top *= scale;
+    }
+    (bottom, top)
+}
+
+fn rounded_box_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
+    regions([
+        (
+            ROUNDED_PRIMARY_REGION,
+            "primary_faces",
+            SurfaceRole::PrimarySurface,
+        ),
+        (ROUNDED_BEVEL_REGION, "bevel_bands", SurfaceRole::BevelBand),
+        (ROUNDED_CORNER_REGION, "corners", SurfaceRole::Detail),
+    ])
+}
+
+fn cylinder_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
+    regions([
+        (CYLINDER_SIDE_REGION, "side", SurfaceRole::Side),
+        (CYLINDER_TOP_CAP_REGION, "top_cap", SurfaceRole::Cap),
+        (CYLINDER_BOTTOM_CAP_REGION, "bottom_cap", SurfaceRole::Cap),
+        (
+            CYLINDER_TOP_BEVEL_REGION,
+            "top_bevel",
+            SurfaceRole::BevelBand,
+        ),
+        (
+            CYLINDER_BOTTOM_BEVEL_REGION,
+            "bottom_bevel",
+            SurfaceRole::BevelBand,
+        ),
+    ])
+}
+
+fn plate_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
+    regions([
+        (PLATE_FRONT_REGION, "front", SurfaceRole::PrimarySurface),
+        (PLATE_BACK_REGION, "back", SurfaceRole::PrimarySurface),
+        (PLATE_SIDE_REGION, "side", SurfaceRole::Side),
+        (PLATE_BEVEL_REGION, "bevel", SurfaceRole::BevelBand),
+    ])
+}
+
+fn regions<const N: usize>(
+    specs: [(RegionId, &'static str, SurfaceRole); N],
+) -> BTreeMap<RegionId, SurfaceRegionSpec> {
+    specs
+        .into_iter()
+        .map(|(id, name, role)| {
+            (
+                id,
+                SurfaceRegionSpec {
+                    id,
+                    name: name.to_owned(),
+                    role,
+                    tags: BTreeSet::new(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn rounded_box_sockets(half: [f32; 3]) -> BTreeMap<SocketId, SocketSpec> {
+    sockets([
+        (
+            SocketId(1),
+            "positive_x",
+            [half[0], 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ),
+        (
+            SocketId(2),
+            "negative_x",
+            [-half[0], 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [-1.0, 0.0, 0.0],
+        ),
+        (
+            SocketId(3),
+            "positive_y",
+            [0.0, half[1], 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            SocketId(4),
+            "negative_y",
+            [0.0, -half[1], 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, -1.0, 0.0],
+        ),
+        (
+            SocketId(5),
+            "positive_z",
+            [0.0, 0.0, half[2]],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ),
+        (
+            SocketId(6),
+            "negative_z",
+            [0.0, 0.0, -half[2]],
+            [1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, -1.0],
+        ),
+    ])
+}
+
+fn cylinder_sockets(half_height: f32) -> BTreeMap<SocketId, SocketSpec> {
+    sockets([
+        (
+            SOCKET_TOP,
+            "top_center",
+            [0.0, half_height, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            SOCKET_BOTTOM,
+            "bottom_center",
+            [0.0, -half_height, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, -1.0, 0.0],
+        ),
+        (
+            SOCKET_AXIS,
+            "axis_midpoint",
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ),
+    ])
+}
+
+fn plate_sockets(half_thickness: f32) -> BTreeMap<SocketId, SocketSpec> {
+    sockets([
+        (
+            SocketId(1),
+            "front_center",
+            [0.0, half_thickness, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            SocketId(2),
+            "back_center",
+            [0.0, -half_thickness, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, -1.0, 0.0],
+        ),
+    ])
+}
+
+fn sockets<const N: usize>(specs: [SocketTemplate; N]) -> BTreeMap<SocketId, SocketSpec> {
+    specs
+        .into_iter()
+        .map(|(id, name, origin, x_axis, y_axis, z_axis)| {
+            (
+                id,
+                SocketSpec {
+                    id,
+                    name: name.to_owned(),
+                    local_frame: Frame3 {
+                        origin,
+                        x_axis,
+                        y_axis,
+                        z_axis,
+                    },
+                    role: "attachment".to_owned(),
+                    tags: BTreeSet::new(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn part(
+    mesh: PolygonMesh,
+    regions: BTreeMap<RegionId, SurfaceRegionSpec>,
+    sockets: BTreeMap<SocketId, SocketSpec>,
+    generator_signature: String,
+) -> GeneratedPart {
+    let local_bounds = mesh.bounds;
+    GeneratedPart {
+        mesh,
+        sockets,
+        regions,
+        local_bounds,
+        generator_signature,
+    }
+}
+
+fn bevel_profile(
+    definition: &PartDefinition,
+    default_radius: f32,
+    default_segments: u32,
+) -> (f32, u32) {
+    definition.geometry.operations.iter().fold(
+        (default_radius, default_segments),
+        |profile, operation| match operation {
+            ModelingOperationSpec::SetBevelProfile {
+                radius, segments, ..
+            } => (*radius, *segments),
+            _ => profile,
+        },
+    )
+}
+
+fn positive_triplet(values: [f32; 3], label: &'static str) -> Result<[f32; 3], ModelingError> {
+    for value in values {
+        finite_positive(value, label)?;
+    }
+    Ok(values)
+}
+
+fn finite_positive(value: f32, label: &'static str) -> Result<f32, ModelingError> {
+    if value.is_finite() && value > EPSILON {
+        Ok(value)
+    } else {
+        Err(ModelingError::InvalidInput(format!(
+            "{label} must be finite and positive"
+        )))
+    }
+}
+
+fn finite_non_negative(value: f32, label: &'static str) -> Result<f32, ModelingError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(ModelingError::InvalidInput(format!(
+            "{label} must be finite and non-negative"
+        )))
+    }
+}
+
+fn dedup_sorted_f32(mut values: Vec<f32>) -> Vec<f32> {
+    values.sort_by(f32::total_cmp);
+    values.dedup_by(|left, right| (*left - *right).abs() <= EPSILON);
+    values
+}
+
+fn region_transition(
+    first: Option<RegionId>,
+    second: Option<RegionId>,
+) -> Option<(RegionId, RegionId)> {
+    match (first, second) {
+        (Some(first), Some(second)) if first != second => Some(if first <= second {
+            (first, second)
+        } else {
+            (second, first)
+        }),
+        _ => None,
+    }
+}
+
+fn has_duplicate_indices(vertices: &[u32]) -> bool {
+    let mut seen = BTreeSet::new();
+    vertices.iter().any(|vertex| !seen.insert(*vertex))
+}
+
+fn quantize(value: f32) -> i64 {
+    (value * 1_000_000.0).round() as i64
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn lerp(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t
+}
