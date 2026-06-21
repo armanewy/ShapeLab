@@ -178,6 +178,9 @@ pub struct AssetRecipe {
     pub locks: BTreeSet<ParameterId>,
     /// Asset-level constraints.
     pub constraints: Vec<AssetConstraint>,
+    /// Authored variation hints that do not affect hierarchy or generation semantics.
+    #[serde(default)]
+    pub variation: AuthoredVariationMetadata,
     /// Next semantic ID counters.
     pub next_ids: AssetIdCounters,
 }
@@ -196,6 +199,7 @@ impl AssetRecipe {
             parameters: BTreeMap::new(),
             locks: BTreeSet::new(),
             constraints: Vec::new(),
+            variation: AuthoredVariationMetadata::default(),
             next_ids: AssetIdCounters::default(),
         }
     }
@@ -267,6 +271,51 @@ impl Default for AssetIdCounters {
             revision: 1,
         }
     }
+}
+
+/// Non-authoritative variation metadata authored alongside a recipe.
+///
+/// These hints describe which choices are useful for search or UI tools. They
+/// do not generate geometry and do not change the instance hierarchy.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AuthoredVariationMetadata {
+    /// Instances that may be omitted by an authoring or search tool.
+    pub optional_instances: BTreeSet<PartInstanceId>,
+    /// Named groups of interchangeable part definitions.
+    pub replacement_groups: BTreeMap<String, ReplacementGroupHint>,
+    /// Valid authored count ranges for array operations.
+    pub count_ranges: BTreeMap<OperationId, CountRangeHint>,
+    /// Parameter-specific authored ranges that override descriptor UI ranges.
+    pub parameter_range_overrides: BTreeMap<ParameterId, ParameterRangeOverride>,
+}
+
+/// Replacement group for interchangeable part definitions.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ReplacementGroupHint {
+    /// Definitions that belong to this replacement group.
+    pub definitions: BTreeSet<PartDefinitionId>,
+}
+
+/// Authored count range for a deterministic array operation.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CountRangeHint {
+    /// Minimum authored count.
+    pub minimum: u32,
+    /// Maximum authored count.
+    pub maximum: u32,
+}
+
+/// Authored parameter range override.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterRangeOverride {
+    /// Minimum authored scalar value.
+    pub minimum: f32,
+    /// Maximum authored scalar value.
+    pub maximum: f32,
+    /// Optional UI step override.
+    pub step: Option<f32>,
+    /// Optional mutation sigma override.
+    pub mutation_sigma: Option<f32>,
 }
 
 /// Reusable definition of a semantic part.
@@ -757,6 +806,16 @@ pub enum AssetError {
         /// Supplied value.
         value: f32,
     },
+    /// The scalar cannot be represented by the target field.
+    #[error("invalid scalar for {path}: {value} ({reason})")]
+    InvalidScalarValue {
+        /// Target path.
+        path: String,
+        /// Supplied value.
+        value: f32,
+        /// Reason the value cannot be applied.
+        reason: &'static str,
+    },
     /// The edit attempted to mutate a locked parameter.
     #[error("parameter is locked {0:?}")]
     LockedParameter(ParameterId),
@@ -806,6 +865,7 @@ pub fn validate_asset_recipe(recipe: &AssetRecipe) -> AssetValidationReport {
     validate_instances(recipe, &mut report);
     validate_parameters(recipe, &mut report);
     validate_constraints(recipe, &mut report);
+    validate_variation_metadata(recipe, &mut report);
     validate_next_ids(recipe, &mut report);
 
     report
@@ -814,7 +874,15 @@ pub fn validate_asset_recipe(recipe: &AssetRecipe) -> AssetValidationReport {
 /// Return editable parameters in deterministic order.
 #[must_use]
 pub fn enumerate_parameters(recipe: &AssetRecipe) -> Vec<ParameterDescriptor> {
-    recipe.parameters.values().cloned().collect()
+    recipe
+        .parameters
+        .iter()
+        .filter(|entry| {
+            let (id, parameter) = *entry;
+            parameter_is_reflectable(recipe, *id, parameter)
+        })
+        .map(|(_, parameter)| parameter.clone())
+        .collect()
 }
 
 /// Read a scalar parameter by canonical path.
@@ -957,6 +1025,7 @@ pub fn instances_of_definition(
 }
 
 fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    let mut seen_operation_ids = BTreeMap::new();
     for (id, definition) in &recipe.definitions {
         if definition.id != *id {
             push_issue(
@@ -976,6 +1045,23 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
         }
         validate_geometry_source(*id, &definition.geometry.source, report);
         validate_operations(definition, report);
+        for operation in &definition.geometry.operations {
+            let operation_id = operation.operation_id();
+            if let Some(previous_definition) = seen_operation_ids.insert(operation_id, *id) {
+                push_issue(
+                    report,
+                    Some(format!(
+                        "definition.{}.operation.{}",
+                        definition.id.0, operation_id.0
+                    )),
+                    "duplicate_operation_id",
+                    format!(
+                        "Operation ID is already used by definition {}.",
+                        previous_definition.0
+                    ),
+                );
+            }
+        }
         for (region_id, region) in &definition.regions {
             if region.id != *region_id {
                 push_issue(
@@ -1010,7 +1096,28 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
 }
 
 fn validate_instances(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    let mut seen_roots = BTreeSet::new();
+    let mut previous_root = None;
     for root in &recipe.root_instances {
+        if !seen_roots.insert(*root) {
+            push_issue(
+                report,
+                Some(format!("instance.{}", root.0)),
+                "duplicate_root_instance",
+                "Root instances must not contain duplicates.",
+            );
+        }
+        if let Some(previous_root) = previous_root
+            && previous_root > *root
+        {
+            push_issue(
+                report,
+                Some("root_instances".to_owned()),
+                "unstable_root_order",
+                "Root instances must be ordered by semantic instance ID.",
+            );
+        }
+        previous_root = Some(*root);
         match recipe.instances.get(root) {
             Some(instance) if instance.parent.is_some() => push_issue(
                 report,
@@ -1043,6 +1150,14 @@ fn validate_instances(recipe: &AssetRecipe, report: &mut AssetValidationReport) 
                 Some(format!("instance.{}", id.0)),
                 "unknown_instance_definition",
                 "Instance references an unknown definition.",
+            );
+        }
+        if instance.parent.is_none() && !seen_roots.contains(id) {
+            push_issue(
+                report,
+                Some(format!("instance.{}", id.0)),
+                "missing_root_instance",
+                "Parentless instances must be listed as roots.",
             );
         }
         if let Some(parent) = instance.parent {
@@ -1092,6 +1207,22 @@ fn validate_attachment(
     let Some(child_instance) = recipe.instances.get(&child) else {
         return;
     };
+    if attachment.parent_instance == child {
+        push_issue(
+            report,
+            Some(format!("instance.{}", child.0)),
+            "self_attachment",
+            "Instance cannot attach to itself.",
+        );
+    }
+    if child_instance.parent != Some(attachment.parent_instance) {
+        push_issue(
+            report,
+            Some(format!("instance.{}", child.0)),
+            "attachment_parent_mismatch",
+            "Attachment parent must match the instance parent.",
+        );
+    }
     let Some(parent_definition) = recipe.definitions.get(&parent.definition) else {
         return;
     };
@@ -1137,21 +1268,26 @@ fn validate_parameters(recipe: &AssetRecipe, report: &mut AssetValidationReport)
                 "Parameter map key and payload ID differ.",
             );
         }
-        for (label, value) in [
-            ("minimum", parameter.minimum),
-            ("maximum", parameter.maximum),
-            ("step", parameter.step),
-            ("mutation_sigma", parameter.mutation_sigma),
-        ] {
-            if !value.is_finite() {
-                push_issue(
-                    report,
-                    Some(format!("parameter.{}.{}", id.0, label)),
-                    "non_finite_parameter_bound",
-                    "Parameter bounds must be finite.",
-                );
-            }
-        }
+        validate_finite(
+            report,
+            Some(format!("parameter.{}.minimum", id.0)),
+            parameter.minimum,
+        );
+        validate_finite(
+            report,
+            Some(format!("parameter.{}.maximum", id.0)),
+            parameter.maximum,
+        );
+        validate_positive(
+            report,
+            Some(format!("parameter.{}.step", id.0)),
+            parameter.step,
+        );
+        validate_non_negative(
+            report,
+            Some(format!("parameter.{}.mutation_sigma", id.0)),
+            parameter.mutation_sigma,
+        );
         if parameter.minimum > parameter.maximum {
             push_issue(
                 report,
@@ -1160,13 +1296,34 @@ fn validate_parameters(recipe: &AssetRecipe, report: &mut AssetValidationReport)
                 "Parameter minimum cannot exceed maximum.",
             );
         }
-        if get_scalar(recipe, &parameter.path).is_err() {
-            push_issue(
-                report,
-                Some(format!("parameter.{}", id.0)),
-                "unknown_parameter_path",
-                "Parameter path does not resolve to a scalar.",
-            );
+        match get_scalar(recipe, &parameter.path) {
+            Ok(value) => {
+                if !value.is_finite() {
+                    push_issue(
+                        report,
+                        Some(format!("parameter.{}", id.0)),
+                        "non_finite_parameter_value",
+                        "Parameter path resolves to a non-finite scalar.",
+                    );
+                } else if parameter_range_is_valid(parameter)
+                    && (value < parameter.minimum || value > parameter.maximum)
+                {
+                    push_issue(
+                        report,
+                        Some(format!("parameter.{}", id.0)),
+                        "parameter_value_out_of_range",
+                        "Parameter value is outside its descriptor range.",
+                    );
+                }
+            }
+            Err(_) => {
+                push_issue(
+                    report,
+                    Some(format!("parameter.{}", id.0)),
+                    "unknown_parameter_path",
+                    "Parameter path does not resolve to a scalar.",
+                );
+            }
         }
     }
     for lock in &recipe.locks {
@@ -1181,6 +1338,30 @@ fn validate_parameters(recipe: &AssetRecipe, report: &mut AssetValidationReport)
     }
 }
 
+fn parameter_is_reflectable(
+    recipe: &AssetRecipe,
+    id: ParameterId,
+    parameter: &ParameterDescriptor,
+) -> bool {
+    if parameter.id != id || !parameter_range_is_valid(parameter) {
+        return false;
+    }
+    let Ok(value) = get_scalar(recipe, &parameter.path) else {
+        return false;
+    };
+    value.is_finite() && value >= parameter.minimum && value <= parameter.maximum
+}
+
+fn parameter_range_is_valid(parameter: &ParameterDescriptor) -> bool {
+    parameter.minimum.is_finite()
+        && parameter.maximum.is_finite()
+        && parameter.step.is_finite()
+        && parameter.step > 0.0
+        && parameter.mutation_sigma.is_finite()
+        && parameter.mutation_sigma >= 0.0
+        && parameter.minimum <= parameter.maximum
+}
+
 fn validate_constraints(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
     for constraint in &recipe.constraints {
         if let AssetConstraint::RequireInstance { instance } = constraint
@@ -1191,6 +1372,131 @@ fn validate_constraints(recipe: &AssetRecipe, report: &mut AssetValidationReport
                 Some(format!("constraint.instance.{}", instance.0)),
                 "unknown_required_instance",
                 "Constraint references an unknown instance.",
+            );
+        }
+    }
+}
+
+fn validate_variation_metadata(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    for instance in &recipe.variation.optional_instances {
+        if !recipe.instances.contains_key(instance) {
+            push_issue(
+                report,
+                Some(format!("variation.optional_instance.{}", instance.0)),
+                "unknown_optional_instance",
+                "Optional instance hint references an unknown instance.",
+            );
+        }
+    }
+
+    for (group, hint) in &recipe.variation.replacement_groups {
+        if group.trim().is_empty() {
+            push_issue(
+                report,
+                Some("variation.replacement_group".to_owned()),
+                "empty_replacement_group",
+                "Replacement group names cannot be empty.",
+            );
+        }
+        if hint.definitions.is_empty() {
+            push_issue(
+                report,
+                Some(format!("variation.replacement_group.{group}")),
+                "empty_replacement_group_definitions",
+                "Replacement groups must reference at least one definition.",
+            );
+        }
+        for definition in &hint.definitions {
+            if !recipe.definitions.contains_key(definition) {
+                push_issue(
+                    report,
+                    Some(format!(
+                        "variation.replacement_group.{group}.definition.{}",
+                        definition.0
+                    )),
+                    "unknown_replacement_definition",
+                    "Replacement group references an unknown definition.",
+                );
+            }
+        }
+    }
+
+    for (operation, range) in &recipe.variation.count_ranges {
+        if range.minimum > range.maximum {
+            push_issue(
+                report,
+                Some(format!("variation.count_range.{}", operation.0)),
+                "invalid_count_range",
+                "Count range minimum cannot exceed maximum.",
+            );
+        }
+        if range.minimum == 0 {
+            push_issue(
+                report,
+                Some(format!("variation.count_range.{}", operation.0)),
+                "count_range_too_small",
+                "Array count ranges must start at one or greater.",
+            );
+        }
+        match operation_by_id(recipe, *operation) {
+            Some(operation_spec) if operation_is_array(operation_spec) => {}
+            Some(_) => push_issue(
+                report,
+                Some(format!("variation.count_range.{}", operation.0)),
+                "invalid_count_range_operation",
+                "Count range hint must target an array operation.",
+            ),
+            None => push_issue(
+                report,
+                Some(format!("variation.count_range.{}", operation.0)),
+                "unknown_count_range_operation",
+                "Count range hint references an unknown operation.",
+            ),
+        }
+    }
+
+    for (parameter, range) in &recipe.variation.parameter_range_overrides {
+        if !recipe.parameters.contains_key(parameter) {
+            push_issue(
+                report,
+                Some(format!("variation.parameter_range.{}", parameter.0)),
+                "unknown_parameter_range_override",
+                "Parameter range override references an unknown parameter.",
+            );
+        }
+        validate_finite(
+            report,
+            Some(format!("variation.parameter_range.{}.minimum", parameter.0)),
+            range.minimum,
+        );
+        validate_finite(
+            report,
+            Some(format!("variation.parameter_range.{}.maximum", parameter.0)),
+            range.maximum,
+        );
+        if range.minimum > range.maximum {
+            push_issue(
+                report,
+                Some(format!("variation.parameter_range.{}", parameter.0)),
+                "invalid_parameter_range_override",
+                "Parameter range override minimum cannot exceed maximum.",
+            );
+        }
+        if let Some(step) = range.step {
+            validate_positive(
+                report,
+                Some(format!("variation.parameter_range.{}.step", parameter.0)),
+                step,
+            );
+        }
+        if let Some(mutation_sigma) = range.mutation_sigma {
+            validate_non_negative(
+                report,
+                Some(format!(
+                    "variation.parameter_range.{}.mutation_sigma",
+                    parameter.0
+                )),
+                mutation_sigma,
             );
         }
     }
@@ -1276,6 +1582,21 @@ fn max_socket_id(recipe: &AssetRecipe) -> Option<u64> {
         .values()
         .flat_map(|definition| definition.sockets.keys().map(|id| id.0))
         .max()
+}
+
+fn operation_by_id(recipe: &AssetRecipe, operation: OperationId) -> Option<&ModelingOperationSpec> {
+    recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .find(|candidate| candidate.operation_id() == operation)
+}
+
+fn operation_is_array(operation: &ModelingOperationSpec) -> bool {
+    matches!(
+        operation,
+        ModelingOperationSpec::LinearArray { .. } | ModelingOperationSpec::RadialArray { .. }
+    )
 }
 
 fn validate_geometry_source(
@@ -1369,6 +1690,16 @@ fn validate_geometry_source(
                     "Sweep requires at least two profile points and two path frames.",
                 );
             }
+            for point in profile {
+                if !array_is_finite(point) {
+                    push_issue(
+                        report,
+                        definition_subject(definition, "sweep.profile"),
+                        "non_finite",
+                        "Sweep profile points must be finite.",
+                    );
+                }
+            }
             for frame in path {
                 validate_frame(report, definition_subject(definition, "sweep.path"), frame);
             }
@@ -1381,6 +1712,16 @@ fn validate_geometry_source(
                     "insufficient_lathe_profile",
                     "Lathe requires at least two profile points.",
                 );
+            }
+            for point in profile {
+                if !array_is_finite(point) {
+                    push_issue(
+                        report,
+                        definition_subject(definition, "lathe.profile"),
+                        "non_finite",
+                        "Lathe profile points must be finite.",
+                    );
+                }
             }
             validate_count(
                 report,
@@ -1406,6 +1747,26 @@ fn validate_geometry_source(
                         "non_finite_literal_position",
                         "Literal mesh positions must be finite.",
                     );
+                }
+            }
+            for face in faces {
+                if face.len() < 3 {
+                    push_issue(
+                        report,
+                        definition_subject(definition, "literal_mesh.faces"),
+                        "invalid_literal_face",
+                        "Literal mesh faces must contain at least three vertices.",
+                    );
+                }
+                for index in face {
+                    if (*index as usize) >= positions.len() {
+                        push_issue(
+                            report,
+                            definition_subject(definition, "literal_mesh.faces"),
+                            "literal_face_index_out_of_bounds",
+                            "Literal mesh face indices must reference positions.",
+                        );
+                    }
                 }
             }
         }
@@ -1608,7 +1969,24 @@ fn validate_transform(
         append_subject(subject.clone(), "rotation_degrees"),
         &transform.rotation_degrees,
     );
-    validate_finite_array(report, append_subject(subject, "scale"), &transform.scale);
+    validate_finite_array(
+        report,
+        append_subject(subject.clone(), "scale"),
+        &transform.scale,
+    );
+    if transform
+        .scale
+        .iter()
+        .copied()
+        .any(|value| value.is_finite() && value == 0.0)
+    {
+        push_issue(
+            report,
+            append_subject(subject, "scale"),
+            "zero_scale",
+            "Transform scale axes must be non-zero.",
+        );
+    }
 }
 
 fn validate_frame(report: &mut AssetValidationReport, subject: Option<String>, frame: &Frame3) {
@@ -1887,6 +2265,16 @@ fn set_geometry_source_scalar(
             *height = value;
             Ok(())
         }
+        (
+            GeometrySource::Cylinder {
+                radial_segments, ..
+            },
+            "cylinder",
+            ["radial_segments"],
+        ) => {
+            *radial_segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
         (GeometrySource::Frustum { bottom_radius, .. }, "frustum", ["bottom_radius"]) => {
             *bottom_radius = value;
             Ok(())
@@ -1899,11 +2287,25 @@ fn set_geometry_source_scalar(
             *height = value;
             Ok(())
         }
+        (
+            GeometrySource::Frustum {
+                radial_segments, ..
+            },
+            "frustum",
+            ["radial_segments"],
+        ) => {
+            *radial_segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
         (GeometrySource::Plate { size, .. }, "plate", ["size", component]) => {
             set_component_value(size, component, path, value)
         }
         (GeometrySource::Plate { thickness, .. }, "plate", ["thickness"]) => {
             *thickness = value;
+            Ok(())
+        }
+        (GeometrySource::Lathe { segments, .. }, "lathe", ["segments"]) => {
+            *segments = scalar_to_u32(path, value)?;
             Ok(())
         }
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
@@ -1921,6 +2323,10 @@ fn set_operation_scalar(
             *radius = value;
             Ok(())
         }
+        (ModelingOperationSpec::SetBevelProfile { segments, .. }, ["bevel", "segments"]) => {
+            *segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
         (ModelingOperationSpec::AddPanel { inset, .. }, ["panel", "inset"]) => {
             *inset = value;
             Ok(())
@@ -1935,6 +2341,14 @@ fn set_operation_scalar(
         }
         (ModelingOperationSpec::AddTrim { height, .. }, ["trim", "height"]) => {
             *height = value;
+            Ok(())
+        }
+        (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {
+            *count = scalar_to_u32(path, value)?;
+            Ok(())
+        }
+        (ModelingOperationSpec::RadialArray { count, .. }, ["radial_array", "count"]) => {
+            *count = scalar_to_u32(path, value)?;
             Ok(())
         }
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
@@ -1971,6 +2385,18 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                 .parameters
                 .get(parameter)
                 .ok_or(AssetError::UnknownParameter(*parameter))?;
+            if !parameter_range_is_valid(descriptor) {
+                return Err(AssetError::UnsupportedEdit(format!(
+                    "invalid parameter descriptor {parameter:?}"
+                )));
+            }
+            if *value < descriptor.minimum || *value > descriptor.maximum {
+                return Err(AssetError::InvalidScalarValue {
+                    path: descriptor.path.clone(),
+                    value: *value,
+                    reason: "value is outside the parameter range",
+                });
+            }
             let path = descriptor.path.clone();
             set_scalar(recipe, path, *value)
         }
@@ -2001,18 +2427,30 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                 )));
             }
             recipe.instances.insert(instance.id, instance.clone());
+            if instance.parent.is_none() {
+                insert_root_instance(recipe, instance.id);
+            }
+            bump_next_ids_for_instance(recipe, instance);
             Ok(())
         }
         AssetEdit::RemoveInstance { instance } => {
+            let descendants = descendants_of(recipe, *instance)?;
+            if !descendants.is_empty() {
+                return Err(AssetError::UnsupportedEdit(format!(
+                    "cannot remove {instance:?} while descendants exist"
+                )));
+            }
             recipe
                 .instances
                 .remove(instance)
                 .ok_or(AssetError::UnknownInstance(*instance))?;
             recipe.root_instances.retain(|root| root != instance);
+            recipe.variation.optional_instances.remove(instance);
             Ok(())
         }
         AssetEdit::ReplaceDefinition { definition } => {
             recipe.definitions.insert(definition.id, definition.clone());
+            bump_next_ids_for_definition(recipe, definition);
             Ok(())
         }
         AssetEdit::SetArrayCount {
@@ -2030,14 +2468,19 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                 .ok_or(AssetError::UnknownInstance(*instance))?;
             target.attachment = Some(attachment.clone());
             target.parent = Some(attachment.parent_instance);
+            recipe.root_instances.retain(|root| root != instance);
             Ok(())
         }
         AssetEdit::Detach { instance } => {
-            let target = recipe
-                .instances
-                .get_mut(instance)
-                .ok_or(AssetError::UnknownInstance(*instance))?;
-            target.attachment = None;
+            {
+                let target = recipe
+                    .instances
+                    .get_mut(instance)
+                    .ok_or(AssetError::UnknownInstance(*instance))?;
+                target.attachment = None;
+                target.parent = None;
+            }
+            insert_root_instance(recipe, *instance);
             Ok(())
         }
         AssetEdit::SetLock { parameter, locked } => {
@@ -2084,6 +2527,34 @@ fn set_array_count(
     }
 }
 
+fn insert_root_instance(recipe: &mut AssetRecipe, instance: PartInstanceId) {
+    if !recipe.root_instances.contains(&instance) {
+        recipe.root_instances.push(instance);
+        recipe.root_instances.sort_unstable();
+    }
+}
+
+fn bump_next_ids_for_instance(recipe: &mut AssetRecipe, instance: &PartInstance) {
+    bump_counter(&mut recipe.next_ids.part_instance, instance.id.0);
+}
+
+fn bump_next_ids_for_definition(recipe: &mut AssetRecipe, definition: &PartDefinition) {
+    bump_counter(&mut recipe.next_ids.part_definition, definition.id.0);
+    for operation in &definition.geometry.operations {
+        bump_counter(&mut recipe.next_ids.operation, operation.operation_id().0);
+    }
+    for region in definition.regions.keys() {
+        bump_counter(&mut recipe.next_ids.region, region.0);
+    }
+    for socket in definition.sockets.keys() {
+        bump_counter(&mut recipe.next_ids.socket, socket.0);
+    }
+}
+
+fn bump_counter(counter: &mut u64, used: u64) {
+    *counter = (*counter).max(used.saturating_add(1));
+}
+
 fn collect_descendants(
     recipe: &AssetRecipe,
     instance: PartInstanceId,
@@ -2120,6 +2591,37 @@ fn set_component_value(
     };
     *target = value;
     Ok(())
+}
+
+fn scalar_to_u32(path: &str, value: f32) -> Result<u32, AssetError> {
+    if !value.is_finite() {
+        return Err(AssetError::NonFiniteScalar {
+            path: path.to_owned(),
+            value,
+        });
+    }
+    if value < 0.0 {
+        return Err(AssetError::InvalidScalarValue {
+            path: path.to_owned(),
+            value,
+            reason: "value must not be negative",
+        });
+    }
+    if value.fract() != 0.0 {
+        return Err(AssetError::InvalidScalarValue {
+            path: path.to_owned(),
+            value,
+            reason: "value must be an integer",
+        });
+    }
+    if value > u32::MAX as f32 {
+        return Err(AssetError::InvalidScalarValue {
+            path: path.to_owned(),
+            value,
+            reason: "value exceeds u32 range",
+        });
+    }
+    Ok(value as u32)
 }
 
 fn component_index(component: &str, length: usize, path: &str) -> Result<usize, AssetError> {
@@ -2242,6 +2744,107 @@ mod tests {
         recipe
     }
 
+    fn socket(id: SocketId, name: &str) -> SocketSpec {
+        SocketSpec {
+            id,
+            name: name.to_owned(),
+            local_frame: Frame3::default(),
+            role: "mount".to_owned(),
+            tags: BTreeSet::new(),
+        }
+    }
+
+    fn multipart_recipe() -> AssetRecipe {
+        let mut recipe = test_recipe();
+        recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("body definition should exist")
+            .sockets
+            .insert(SocketId(1), socket(SocketId(1), "body_mount"));
+
+        let mut wheel_sockets = BTreeMap::new();
+        wheel_sockets.insert(SocketId(2), socket(SocketId(2), "wheel_mount"));
+        let wheel_definition = PartDefinition {
+            id: PartDefinitionId(2),
+            name: "Wheel".to_owned(),
+            tags: BTreeSet::new(),
+            geometry: GeometryRecipe {
+                source: GeometrySource::Cylinder {
+                    radius: 0.25,
+                    height: 0.2,
+                    radial_segments: 16,
+                },
+                operations: Vec::new(),
+            },
+            regions: BTreeMap::new(),
+            sockets: wheel_sockets,
+            local_pivot: Frame3::default(),
+            variant_group: Some("wheel".to_owned()),
+            production_hints: None,
+        };
+        let wheel_instance = PartInstance {
+            id: PartInstanceId(2),
+            definition: PartDefinitionId(2),
+            name: "Wheel L".to_owned(),
+            parent: Some(PartInstanceId(1)),
+            local_transform: Transform3::default(),
+            attachment: Some(AttachmentSpec {
+                parent_instance: PartInstanceId(1),
+                parent_socket: SocketId(1),
+                child_socket: SocketId(2),
+                local_offset: Transform3::default(),
+                mode: AttachmentMode::RigidSeparate,
+            }),
+            enabled: true,
+            tags: BTreeSet::new(),
+            generated_by: None,
+        };
+
+        recipe
+            .definitions
+            .insert(wheel_definition.id, wheel_definition);
+        recipe.instances.insert(wheel_instance.id, wheel_instance);
+        recipe.next_ids.part_definition = 3;
+        recipe.next_ids.part_instance = 3;
+        recipe.next_ids.socket = 3;
+        recipe
+            .variation
+            .optional_instances
+            .insert(PartInstanceId(2));
+        recipe.variation.replacement_groups.insert(
+            "wheel".to_owned(),
+            ReplacementGroupHint {
+                definitions: BTreeSet::from([PartDefinitionId(2)]),
+            },
+        );
+        recipe.variation.count_ranges.insert(
+            OperationId(1),
+            CountRangeHint {
+                minimum: 1,
+                maximum: 6,
+            },
+        );
+        recipe.variation.parameter_range_overrides.insert(
+            ParameterId(1),
+            ParameterRangeOverride {
+                minimum: 0.0,
+                maximum: 0.5,
+                step: Some(0.01),
+                mutation_sigma: None,
+            },
+        );
+        recipe
+    }
+
+    fn issue_codes(report: &AssetValidationReport) -> BTreeSet<&str> {
+        report
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect()
+    }
+
     #[test]
     fn serde_json_round_trip_preserves_ordered_recipe() {
         let recipe = test_recipe();
@@ -2361,5 +2964,427 @@ mod tests {
             definition.geometry.operations.as_slice(),
             [ModelingOperationSpec::LinearArray { count: 4, .. }]
         ));
+    }
+
+    #[test]
+    fn validation_accepts_valid_multipart_assembly() {
+        let recipe = multipart_recipe();
+
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn validation_accepts_reused_part_definition() {
+        let mut recipe = test_recipe();
+        recipe.instances.insert(
+            PartInstanceId(2),
+            PartInstance {
+                id: PartInstanceId(2),
+                definition: PartDefinitionId(1),
+                name: "Body copy".to_owned(),
+                parent: Some(PartInstanceId(1)),
+                local_transform: Transform3::default(),
+                attachment: None,
+                enabled: true,
+                tags: BTreeSet::new(),
+                generated_by: None,
+            },
+        );
+        recipe.next_ids.part_instance = 3;
+
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn validation_reports_hierarchy_cycle() {
+        let mut recipe = test_recipe();
+        recipe.root_instances.clear();
+        recipe
+            .instances
+            .get_mut(&PartInstanceId(1))
+            .expect("root should exist")
+            .parent = Some(PartInstanceId(2));
+        recipe.instances.insert(
+            PartInstanceId(2),
+            PartInstance {
+                id: PartInstanceId(2),
+                definition: PartDefinitionId(1),
+                name: "Cycle".to_owned(),
+                parent: Some(PartInstanceId(1)),
+                local_transform: Transform3::default(),
+                attachment: None,
+                enabled: true,
+                tags: BTreeSet::new(),
+                generated_by: None,
+            },
+        );
+        recipe.next_ids.part_instance = 3;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(issue_codes(&report).contains("parent_cycle"));
+    }
+
+    #[test]
+    fn validation_reports_dangling_socket() {
+        let mut recipe = multipart_recipe();
+        recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("body definition should exist")
+            .sockets
+            .remove(&SocketId(1));
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(issue_codes(&report).contains("unknown_parent_socket"));
+    }
+
+    #[test]
+    fn validation_reports_invalid_attachment() {
+        let mut recipe = multipart_recipe();
+        let wheel = recipe
+            .instances
+            .get_mut(&PartInstanceId(2))
+            .expect("wheel instance should exist");
+        wheel.parent = None;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("attachment_parent_mismatch"));
+        assert!(codes.contains("missing_root_instance"));
+    }
+
+    #[test]
+    fn scalar_get_set_round_trip() {
+        let mut recipe = test_recipe();
+        let path = definition_scalar_path(PartDefinitionId(1), "geometry.rounded_box.radius");
+
+        set_scalar(&mut recipe, &path, 0.4).expect("scalar edit should apply");
+
+        assert_eq!(
+            get_scalar(&recipe, &path).expect("scalar should exist"),
+            0.4
+        );
+    }
+
+    #[test]
+    fn failed_validation_keeps_edit_program_atomic() {
+        let recipe = test_recipe();
+        let program = AssetEditProgram {
+            label: "bad transform".to_owned(),
+            seed: 3,
+            operations: vec![
+                AssetEdit::SetScalar {
+                    parameter: ParameterId(1),
+                    value: 0.2,
+                },
+                AssetEdit::SetTransform {
+                    instance: PartInstanceId(1),
+                    transform: Transform3 {
+                        scale: [0.0, 1.0, 1.0],
+                        ..Transform3::default()
+                    },
+                },
+            ],
+        };
+
+        assert!(matches!(
+            apply_edit_program(&recipe, &program),
+            Err(AssetError::ValidationFailed(report))
+                if issue_codes(&report).contains("zero_scale")
+        ));
+        assert_eq!(
+            get_scalar(
+                &recipe,
+                definition_scalar_path(PartDefinitionId(1), "geometry.rounded_box.radius")
+            )
+            .expect("radius should exist"),
+            0.1
+        );
+    }
+
+    #[test]
+    fn add_and_remove_instance_updates_roots_deterministically() {
+        let recipe = test_recipe();
+        let added = PartInstance {
+            id: PartInstanceId(3),
+            definition: PartDefinitionId(1),
+            name: "Accessory".to_owned(),
+            parent: None,
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::new(),
+            generated_by: None,
+        };
+        let edited = apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "add".to_owned(),
+                seed: 4,
+                operations: vec![AssetEdit::AddInstance { instance: added }],
+            },
+        )
+        .expect("add should apply");
+
+        assert_eq!(
+            edited.root_instances,
+            vec![PartInstanceId(1), PartInstanceId(3)]
+        );
+        assert_eq!(edited.next_ids.part_instance, 4);
+
+        let removed = apply_edit_program(
+            &edited,
+            &AssetEditProgram {
+                label: "remove".to_owned(),
+                seed: 5,
+                operations: vec![AssetEdit::RemoveInstance {
+                    instance: PartInstanceId(3),
+                }],
+            },
+        )
+        .expect("remove should apply");
+
+        assert_eq!(removed.root_instances, vec![PartInstanceId(1)]);
+        assert!(!removed.instances.contains_key(&PartInstanceId(3)));
+    }
+
+    #[test]
+    fn removing_instance_with_descendants_is_rejected() {
+        let recipe = multipart_recipe();
+
+        assert!(matches!(
+            apply_edit_program(
+                &recipe,
+                &AssetEditProgram {
+                    label: "remove parent".to_owned(),
+                    seed: 6,
+                    operations: vec![AssetEdit::RemoveInstance {
+                        instance: PartInstanceId(1),
+                    }],
+                },
+            ),
+            Err(AssetError::UnsupportedEdit(message))
+                if message.contains("descendants")
+        ));
+    }
+
+    #[test]
+    fn replace_definition_preserves_instances() {
+        let recipe = test_recipe();
+        let mut replacement = recipe
+            .definitions
+            .get(&PartDefinitionId(1))
+            .expect("definition should exist")
+            .clone();
+        replacement.name = "Replacement Body".to_owned();
+        if let GeometrySource::RoundedBox { radius, .. } = &mut replacement.geometry.source {
+            *radius = 0.2;
+        }
+
+        let edited = apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "replace".to_owned(),
+                seed: 8,
+                operations: vec![AssetEdit::ReplaceDefinition {
+                    definition: replacement,
+                }],
+            },
+        )
+        .expect("replace should apply");
+
+        assert_eq!(
+            edited
+                .instances
+                .get(&PartInstanceId(1))
+                .expect("instance should exist")
+                .definition,
+            PartDefinitionId(1)
+        );
+        assert_eq!(
+            get_scalar(
+                &edited,
+                definition_scalar_path(PartDefinitionId(1), "geometry.rounded_box.radius")
+            )
+            .expect("radius should exist"),
+            0.2
+        );
+    }
+
+    #[test]
+    fn locked_parameters_remain_inspectable() {
+        let mut recipe = test_recipe();
+        recipe.locks.insert(ParameterId(1));
+
+        assert_eq!(enumerate_parameters(&recipe).len(), 1);
+        assert_eq!(
+            get_scalar(
+                &recipe,
+                definition_scalar_path(PartDefinitionId(1), "geometry.rounded_box.radius")
+            )
+            .expect("locked parameter should remain readable"),
+            0.1
+        );
+    }
+
+    #[test]
+    fn deterministic_serialization_orders_semantic_ids() {
+        let mut recipe = test_recipe();
+        let mut second = recipe
+            .definitions
+            .get(&PartDefinitionId(1))
+            .expect("definition should exist")
+            .clone();
+        second.id = PartDefinitionId(2);
+        second.name = "Second".to_owned();
+        recipe.definitions.insert(second.id, second);
+        recipe.next_ids.part_definition = 3;
+
+        let json = serde_json::to_string(&recipe).expect("recipe should serialize");
+        let first_position = json.find("\"1\"").expect("id 1 key should serialize");
+        let second_position = json.find("\"2\"").expect("id 2 key should serialize");
+
+        assert!(first_position < second_position);
+        assert_eq!(
+            json,
+            serde_json::to_string(&recipe).expect("recipe should serialize deterministically")
+        );
+    }
+
+    #[test]
+    fn unrelated_parameter_edit_preserves_semantic_ids() {
+        let recipe = multipart_recipe();
+        let definition_ids = recipe.definitions.keys().copied().collect::<Vec<_>>();
+        let instance_ids = recipe.instances.keys().copied().collect::<Vec<_>>();
+        let operation_ids = recipe.definitions[&PartDefinitionId(1)]
+            .geometry
+            .operations
+            .iter()
+            .map(ModelingOperationSpec::operation_id)
+            .collect::<Vec<_>>();
+        let next_ids = recipe.next_ids.clone();
+
+        let edited = apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "radius".to_owned(),
+                seed: 9,
+                operations: vec![AssetEdit::SetScalar {
+                    parameter: ParameterId(1),
+                    value: 0.2,
+                }],
+            },
+        )
+        .expect("edit should apply");
+
+        assert_eq!(
+            edited.definitions.keys().copied().collect::<Vec<_>>(),
+            definition_ids
+        );
+        assert_eq!(
+            edited.instances.keys().copied().collect::<Vec<_>>(),
+            instance_ids
+        );
+        assert_eq!(
+            edited.definitions[&PartDefinitionId(1)]
+                .geometry
+                .operations
+                .iter()
+                .map(ModelingOperationSpec::operation_id)
+                .collect::<Vec<_>>(),
+            operation_ids
+        );
+        assert_eq!(edited.next_ids, next_ids);
+    }
+
+    #[test]
+    fn validation_reports_multiple_issues() {
+        let mut recipe = test_recipe();
+        recipe.root_instances.push(PartInstanceId(1));
+        recipe.instances.insert(
+            PartInstanceId(2),
+            PartInstance {
+                id: PartInstanceId(2),
+                definition: PartDefinitionId(99),
+                name: "Invalid".to_owned(),
+                parent: Some(PartInstanceId(42)),
+                local_transform: Transform3 {
+                    translation: [f32::NAN, 0.0, 0.0],
+                    ..Transform3::default()
+                },
+                attachment: None,
+                enabled: true,
+                tags: BTreeSet::new(),
+                generated_by: None,
+            },
+        );
+        recipe.parameters.insert(
+            ParameterId(2),
+            ParameterDescriptor {
+                id: ParameterId(2),
+                path: "definition.1.geometry.rounded_box.nope".to_owned(),
+                label: "Bad".to_owned(),
+                group: "Bad".to_owned(),
+                minimum: 1.0,
+                maximum: 0.0,
+                step: 0.0,
+                mutation_sigma: -1.0,
+                topology_changing: false,
+                beginner_description: "Bad".to_owned(),
+            },
+        );
+        recipe
+            .variation
+            .optional_instances
+            .insert(PartInstanceId(404));
+        recipe.next_ids.part_instance = 3;
+        recipe.next_ids.parameter = 3;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(report.issues.len() >= 7);
+        assert!(codes.contains("duplicate_root_instance"));
+        assert!(codes.contains("unknown_instance_definition"));
+        assert!(codes.contains("unknown_parent_instance"));
+        assert!(codes.contains("non_finite"));
+        assert!(codes.contains("invalid_parameter_range"));
+        assert!(codes.contains("unknown_parameter_path"));
+        assert!(codes.contains("unknown_optional_instance"));
+    }
+
+    #[test]
+    fn parameter_reflection_filters_invalid_descriptors_but_not_locks() {
+        let mut recipe = test_recipe();
+        recipe.parameters.insert(
+            ParameterId(2),
+            ParameterDescriptor {
+                id: ParameterId(2),
+                path: "definition.1.geometry.rounded_box.nope".to_owned(),
+                label: "Invalid".to_owned(),
+                group: "Form".to_owned(),
+                minimum: 0.0,
+                maximum: 1.0,
+                step: 0.01,
+                mutation_sigma: 0.05,
+                topology_changing: false,
+                beginner_description: "Invalid".to_owned(),
+            },
+        );
+        recipe.locks.insert(ParameterId(1));
+        recipe.next_ids.parameter = 3;
+
+        let reflected = enumerate_parameters(&recipe);
+
+        assert_eq!(
+            reflected
+                .iter()
+                .map(|parameter| parameter.id)
+                .collect::<Vec<_>>(),
+            vec![ParameterId(1)]
+        );
     }
 }
