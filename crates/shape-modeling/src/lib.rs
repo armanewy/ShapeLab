@@ -21,6 +21,8 @@ use thiserror::Error;
 pub mod generators {
     /// Basic built-in generator families.
     pub mod basic;
+    /// Sweep and lathe profile generators.
+    pub mod profile;
 }
 
 /// Generated local part payload.
