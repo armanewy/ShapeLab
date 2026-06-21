@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use shape_asset::{
     AssetId, AssetPartSelector, AssetRecipe, AssetRelationshipPolicy, Frame3, GeometryRecipe,
     GeometrySource, ModelingOperationSpec, OperationId, PartDefinition, PartDefinitionId,
-    PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec, Transform3,
+    PartInstance, PartInstanceId, RegionId, RelationshipPairing, SocketId, SocketSpec, Transform3,
 };
 use shape_compile::validation::{
     ExpectedAttachment, ModelValidationConfig, ModelValidationReport, PartRelationship,
@@ -329,6 +329,7 @@ fn selector_recipe() -> AssetRecipe {
         .push(AssetRelationshipPolicy::MayOverlap {
             first: AssetPartSelector::specific(part_id(1)),
             second: AssetPartSelector::GeneratedByOperation { operation },
+            pairing: RelationshipPairing::AllPairs,
             reason: "generated panels intentionally interlock".to_owned(),
         });
     recipe
@@ -341,6 +342,40 @@ fn generated_part(id: u64, prototype: PartInstanceId, operation: OperationId) ->
     part.generated_by = Some(operation);
     part.source_recipe_instance = false;
     part
+}
+
+fn instance(id: u64, definition: u64) -> PartInstance {
+    PartInstance {
+        id: part_id(id),
+        definition: definition_id(definition),
+        name: format!("part_{id}"),
+        parent: None,
+        local_transform: Transform3::default(),
+        attachment: None,
+        enabled: true,
+        tags: BTreeSet::new(),
+        generated_by: None,
+    }
+}
+
+fn tagged_definition(id: u64, tag: &str) -> PartDefinition {
+    PartDefinition {
+        id: definition_id(id),
+        name: format!("definition_{id}"),
+        tags: BTreeSet::from([tag.to_owned()]),
+        geometry: GeometryRecipe {
+            source: GeometrySource::RoundedBox {
+                half_extents: [0.5, 0.5, 0.5],
+                radius: 0.02,
+            },
+            operations: Vec::new(),
+        },
+        regions: BTreeMap::new(),
+        sockets: BTreeMap::new(),
+        local_pivot: Frame3::default(),
+        variant_group: None,
+        production_hints: None,
+    }
 }
 
 #[test]
@@ -388,6 +423,91 @@ fn recipe_validation_config_expands_generated_operation_selectors() {
         PartRelationship::IntentionalOverlap { first, second, .. }
             if *first == part_id(1) && *second == part_id(12)
     )));
+}
+
+#[test]
+fn relationship_pairing_by_occurrence_index_avoids_cartesian_expansion() {
+    let mut recipe = AssetRecipe::new(AssetId(2), "Pairing test");
+    recipe
+        .definitions
+        .insert(definition_id(1), tagged_definition(1, "parent"));
+    recipe
+        .definitions
+        .insert(definition_id(2), tagged_definition(2, "child"));
+    for instance in [
+        instance(11, 1),
+        instance(12, 1),
+        instance(21, 2),
+        instance(22, 2),
+    ] {
+        recipe.root_instances.push(instance.id);
+        recipe.instances.insert(instance.id, instance);
+    }
+    recipe
+        .relationships
+        .push(AssetRelationshipPolicy::MustTouch {
+            first: AssetPartSelector::PartTag {
+                tag: "parent".to_owned(),
+            },
+            second: AssetPartSelector::PartTag {
+                tag: "child".to_owned(),
+            },
+            pairing: RelationshipPairing::ByOccurrenceIndex,
+            max_clearance: 0.05,
+        });
+    let mut parent_a = cube_part(11, "parent_a", [0.0, 0.0, 0.0], [0.5, 0.5, 0.5]);
+    let mut parent_b = cube_part(12, "parent_b", [2.0, 0.0, 0.0], [0.5, 0.5, 0.5]);
+    let mut child_a = cube_part(21, "child_a", [0.5, 0.0, 0.0], [0.5, 0.5, 0.5]);
+    let mut child_b = cube_part(22, "child_b", [2.5, 0.0, 0.0], [0.5, 0.5, 0.5]);
+    parent_a.definition_id = definition_id(1);
+    parent_b.definition_id = definition_id(1);
+    child_a.definition_id = definition_id(2);
+    child_b.definition_id = definition_id(2);
+    let artifact = artifact(vec![parent_a, parent_b, child_a, child_b]);
+
+    let config = validation_config_from_recipe(&recipe, &artifact);
+
+    assert_eq!(config.relationships.len(), 2);
+    assert!(config.relationships.iter().any(|relationship| matches!(
+        relationship,
+        PartRelationship::MustTouch { first, second, .. }
+            if *first == part_id(11) && *second == part_id(21)
+    )));
+    assert!(config.relationships.iter().any(|relationship| matches!(
+        relationship,
+        PartRelationship::MustTouch { first, second, .. }
+            if *first == part_id(12) && *second == part_id(22)
+    )));
+}
+
+#[test]
+fn conflicting_overlap_and_must_not_intersect_policies_report_error() {
+    let mut recipe = AssetRecipe::new(AssetId(3), "Conflict test");
+    recipe
+        .relationships
+        .push(AssetRelationshipPolicy::MayOverlap {
+            first: AssetPartSelector::specific(part_id(1)),
+            second: AssetPartSelector::specific(part_id(2)),
+            pairing: RelationshipPairing::AllPairs,
+            reason: "legacy contact".to_owned(),
+        });
+    recipe
+        .relationships
+        .push(AssetRelationshipPolicy::MustNotIntersect {
+            first: AssetPartSelector::specific(part_id(1)),
+            second: AssetPartSelector::specific(part_id(2)),
+            pairing: RelationshipPairing::AllPairs,
+        });
+    let artifact = artifact(vec![
+        cube_part(1, "body", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
+        cube_part(2, "bolt", [0.25, 0.0, 0.0], [1.0, 1.0, 1.0]),
+    ]);
+
+    let config = validation_config_from_recipe(&recipe, &artifact);
+    let report = validate_model(&artifact, &config);
+
+    assert!(has_code(&report, "conflicting_relationship_policy"));
+    assert!(has_code(&report, "triangle_intersection"));
 }
 
 #[test]

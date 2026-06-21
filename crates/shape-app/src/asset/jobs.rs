@@ -921,7 +921,7 @@ fn scoring_input(
         mesh.bounds,
     );
     input.recipe_valid = validate_asset_recipe(recipe).is_valid();
-    input.compile_succeeded = true;
+    input.compile_succeeded = artifact.validation_report.is_valid() && model_report.is_valid();
     input.requires_closed_part = true;
     input.closed_manifold = model_report.metrics.manifold_closed_part_fraction >= 0.999;
     input.accidental_intersection = model_report.metrics.accidental_intersection_count as f32;

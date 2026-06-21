@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetPartSelector, AssetRecipe, AssetRelationshipPolicy, OperationId, PartInstanceId, RegionId,
-    SocketId,
+    RelationshipPairing, SocketId,
 };
 use shape_poly::{
     BoundaryRole, EdgeClassification, EdgeKey, MeshBounds, PolygonFace, PolygonMesh,
@@ -171,6 +171,13 @@ pub enum PartRelationship {
         /// Human-facing reason for the relationship.
         reason: String,
     },
+    /// This pair must not intersect, even if another policy permits overlap.
+    MustNotIntersect {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+    },
     /// This pair must maintain at least the authored clearance.
     MinimumClearance {
         /// First part instance.
@@ -216,6 +223,7 @@ impl PartRelationship {
     fn pair(&self) -> PartPair {
         match self {
             Self::IntentionalOverlap { first, second, .. }
+            | Self::MustNotIntersect { first, second }
             | Self::MinimumClearance { first, second, .. }
             | Self::MustTouch { first, second, .. } => PartPair::new(*first, *second),
             Self::Containment {
@@ -230,6 +238,10 @@ impl PartRelationship {
             self,
             Self::IntentionalOverlap { .. } | Self::Containment { .. }
         )
+    }
+
+    fn requires_no_intersection(&self) -> bool {
+        matches!(self, Self::MustNotIntersect { .. })
     }
 }
 
@@ -801,10 +813,24 @@ fn validate_part_pairs(
     part_lookup: &BTreeMap<PartInstanceId, &CompiledPart>,
     issues: &mut Vec<ValidationIssue>,
 ) -> u64 {
+    let must_not_intersect = config
+        .relationships
+        .iter()
+        .filter(|relationship| relationship.requires_no_intersection())
+        .map(PartRelationship::pair)
+        .collect::<BTreeSet<_>>();
     let mut permitted_overlaps = BTreeSet::new();
+    let mut reported_conflicts = BTreeSet::new();
     for relationship in &config.relationships {
         if relationship.permits_overlap() {
-            permitted_overlaps.insert(relationship.pair());
+            let pair = relationship.pair();
+            if must_not_intersect.contains(&pair) {
+                if reported_conflicts.insert(pair) {
+                    push_conflicting_relationship_policy(pair, part_lookup, issues);
+                }
+            } else {
+                permitted_overlaps.insert(pair);
+            }
         }
     }
 
@@ -928,11 +954,45 @@ fn validate_part_pairs(
                     );
                 }
             }
-            PartRelationship::IntentionalOverlap { .. } => {}
+            PartRelationship::IntentionalOverlap { .. }
+            | PartRelationship::MustNotIntersect { .. } => {}
         }
     }
 
     accidental_intersections
+}
+
+fn push_conflicting_relationship_policy(
+    pair: PartPair,
+    part_lookup: &BTreeMap<PartInstanceId, &CompiledPart>,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let operation = part_lookup
+        .get(&pair.first)
+        .zip(part_lookup.get(&pair.second))
+        .and_then(|(first, second)| pair_operation(first, second));
+    let location = part_lookup
+        .get(&pair.first)
+        .zip(part_lookup.get(&pair.second))
+        .and_then(|(first, second)| {
+            bounds_overlap_center(&first.world_mesh.bounds, &second.world_mesh.bounds).or_else(
+                || {
+                    Some(midpoint(
+                        bounds_center(&first.world_mesh.bounds),
+                        bounds_center(&second.world_mesh.bounds),
+                    ))
+                },
+            )
+        });
+    push_issue(
+        issues,
+        ValidationSeverity::Error,
+        "conflicting_relationship_policy",
+        pair.instances(),
+        operation,
+        "Relationship policies both permit and forbid overlap for this part pair.",
+        location,
+    );
 }
 
 fn relationships_from_recipe(
@@ -945,9 +1005,12 @@ fn relationships_from_recipe(
             AssetRelationshipPolicy::MayOverlap {
                 first,
                 second,
+                pairing,
                 reason,
             } => {
-                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                for (first, second) in
+                    unordered_selector_pairs(recipe, artifact, first, second, pairing)
+                {
                     relationships.push(PartRelationship::intentional_overlap(
                         first,
                         second,
@@ -958,9 +1021,12 @@ fn relationships_from_recipe(
             AssetRelationshipPolicy::MinimumClearance {
                 first,
                 second,
+                pairing,
                 clearance,
             } => {
-                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                for (first, second) in
+                    unordered_selector_pairs(recipe, artifact, first, second, pairing)
+                {
                     relationships.push(PartRelationship::MinimumClearance {
                         first,
                         second,
@@ -971,9 +1037,12 @@ fn relationships_from_recipe(
             AssetRelationshipPolicy::MustTouch {
                 first,
                 second,
+                pairing,
                 max_clearance,
             } => {
-                for (first, second) in unordered_selector_pairs(recipe, artifact, first, second) {
+                for (first, second) in
+                    unordered_selector_pairs(recipe, artifact, first, second, pairing)
+                {
                     relationships.push(PartRelationship::MustTouch {
                         first,
                         second,
@@ -984,9 +1053,10 @@ fn relationships_from_recipe(
             AssetRelationshipPolicy::MustContain {
                 container,
                 contained,
+                pairing,
             } => {
                 for (container, contained) in
-                    directional_selector_pairs(recipe, artifact, container, contained)
+                    directional_selector_pairs(recipe, artifact, container, contained, pairing)
                 {
                     relationships.push(PartRelationship::Containment {
                         container,
@@ -994,8 +1064,18 @@ fn relationships_from_recipe(
                     });
                 }
             }
-            AssetRelationshipPolicy::MustNotIntersect { .. }
-            | AssetRelationshipPolicy::SocketAttached { .. } => {}
+            AssetRelationshipPolicy::MustNotIntersect {
+                first,
+                second,
+                pairing,
+            } => {
+                for (first, second) in
+                    unordered_selector_pairs(recipe, artifact, first, second, pairing)
+                {
+                    relationships.push(PartRelationship::MustNotIntersect { first, second });
+                }
+            }
+            AssetRelationshipPolicy::SocketAttached { .. } => {}
         }
     }
     relationships
@@ -1010,6 +1090,7 @@ fn expected_attachments_from_recipe(
         let AssetRelationshipPolicy::SocketAttached {
             parent,
             child,
+            pairing,
             parent_socket,
             child_socket,
             max_origin_distance,
@@ -1019,7 +1100,8 @@ fn expected_attachments_from_recipe(
         else {
             continue;
         };
-        for (parent, child) in directional_selector_pairs(recipe, artifact, parent, child) {
+        for (parent, child) in directional_selector_pairs(recipe, artifact, parent, child, pairing)
+        {
             attachments.push(ExpectedAttachment {
                 parent,
                 child,
@@ -1039,8 +1121,9 @@ fn unordered_selector_pairs(
     artifact: &AssetArtifact,
     first: &AssetPartSelector,
     second: &AssetPartSelector,
+    pairing: &RelationshipPairing,
 ) -> Vec<(PartInstanceId, PartInstanceId)> {
-    directional_selector_pairs(recipe, artifact, first, second)
+    directional_selector_pairs(recipe, artifact, first, second, pairing)
         .into_iter()
         .map(|(first, second)| {
             if first <= second {
@@ -1059,9 +1142,43 @@ fn directional_selector_pairs(
     artifact: &AssetArtifact,
     first: &AssetPartSelector,
     second: &AssetPartSelector,
+    pairing: &RelationshipPairing,
 ) -> Vec<(PartInstanceId, PartInstanceId)> {
     let first_ids = resolve_selector(recipe, artifact, first);
     let second_ids = resolve_selector(recipe, artifact, second);
+    selector_pairs(artifact, &first_ids, &second_ids, pairing)
+}
+
+fn selector_pairs(
+    artifact: &AssetArtifact,
+    first_ids: &BTreeSet<PartInstanceId>,
+    second_ids: &BTreeSet<PartInstanceId>,
+    pairing: &RelationshipPairing,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    match pairing {
+        RelationshipPairing::AllPairs => all_selector_pairs(first_ids, second_ids),
+        RelationshipPairing::ByOccurrenceIndex => occurrence_index_pairs(first_ids, second_ids),
+        RelationshipPairing::ByPrototypeLineage => {
+            prototype_lineage_pairs(artifact, first_ids, second_ids)
+        }
+        RelationshipPairing::NearestOneToOne => {
+            nearest_one_to_one_pairs(artifact, first_ids, second_ids)
+        }
+        RelationshipPairing::Explicit(pairs) => pairs
+            .iter()
+            .copied()
+            .filter(|(first, second)| first != second)
+            .filter(|(first, second)| first_ids.contains(first) && second_ids.contains(second))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn all_selector_pairs(
+    first_ids: &BTreeSet<PartInstanceId>,
+    second_ids: &BTreeSet<PartInstanceId>,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
     first_ids
         .iter()
         .flat_map(|first| {
@@ -1073,6 +1190,86 @@ fn directional_selector_pairs(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+fn occurrence_index_pairs(
+    first_ids: &BTreeSet<PartInstanceId>,
+    second_ids: &BTreeSet<PartInstanceId>,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    first_ids
+        .iter()
+        .zip(second_ids.iter())
+        .filter(|(first, second)| first != second)
+        .map(|(first, second)| (*first, *second))
+        .collect()
+}
+
+fn prototype_lineage_pairs(
+    artifact: &AssetArtifact,
+    first_ids: &BTreeSet<PartInstanceId>,
+    second_ids: &BTreeSet<PartInstanceId>,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    first_ids
+        .iter()
+        .flat_map(|first| {
+            second_ids.iter().filter_map(move |second| {
+                (first != second
+                    && part_lineage(artifact, *first).is_some()
+                    && part_lineage(artifact, *first) == part_lineage(artifact, *second))
+                .then_some((*first, *second))
+            })
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn nearest_one_to_one_pairs(
+    artifact: &AssetArtifact,
+    first_ids: &BTreeSet<PartInstanceId>,
+    second_ids: &BTreeSet<PartInstanceId>,
+) -> Vec<(PartInstanceId, PartInstanceId)> {
+    let mut remaining = second_ids.clone();
+    let mut pairs = Vec::new();
+    for first in first_ids {
+        let Some(first_part) = compiled_part(artifact, *first) else {
+            continue;
+        };
+        let first_center = bounds_center(&first_part.world_mesh.bounds);
+        let nearest = remaining
+            .iter()
+            .filter(|second| *second != first)
+            .filter_map(|second| {
+                compiled_part(artifact, *second).map(|part| {
+                    let center = bounds_center(&part.world_mesh.bounds);
+                    (*second, distance_squared(first_center, center))
+                })
+            })
+            .filter(|(_, distance)| distance.is_finite())
+            .min_by(|(left_id, left_distance), (right_id, right_distance)| {
+                left_distance
+                    .total_cmp(right_distance)
+                    .then_with(|| left_id.cmp(right_id))
+            })
+            .map(|(second, _)| second);
+        if let Some(second) = nearest {
+            remaining.remove(&second);
+            pairs.push((*first, second));
+        }
+    }
+    pairs
+}
+
+fn part_lineage(artifact: &AssetArtifact, instance: PartInstanceId) -> Option<PartInstanceId> {
+    compiled_part(artifact, instance)
+        .map(|part| part.prototype_instance_id.unwrap_or(part.instance_id))
+}
+
+fn compiled_part(artifact: &AssetArtifact, instance: PartInstanceId) -> Option<&CompiledPart> {
+    artifact
+        .compiled_parts
+        .iter()
+        .find(|part| part.instance_id == instance)
 }
 
 fn resolve_selector(

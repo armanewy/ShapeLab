@@ -16,7 +16,8 @@ use shape_asset::{
 use shape_compile::export::recipe_hash;
 use shape_compile::validation::{ValidationIssue, validate_model, validation_config_from_recipe};
 use shape_compile::{
-    AssetArtifact, ConstructionTimelineReport, build_construction_timeline_report,
+    AssetArtifact, CompileValidationIssue, ConstructionTimelineReport,
+    build_construction_timeline_report,
 };
 use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds};
 
@@ -60,6 +61,16 @@ impl From<ValidationIssue> for AssetAppIssue {
                 .part_instances
                 .first()
                 .map(|instance| format!("part.{}", instance.0)),
+            code: issue.code,
+            message: issue.message,
+        }
+    }
+}
+
+impl From<CompileValidationIssue> for AssetAppIssue {
+    fn from(issue: CompileValidationIssue) -> Self {
+        Self {
+            subject: issue.subject,
             code: issue.code,
             message: issue.message,
         }
@@ -601,11 +612,7 @@ impl AssetAppState {
                 Some(build_construction_timeline_report(&self.recipe, &artifact));
             let config = validation_config_from_recipe(&self.recipe, &artifact);
             let model_validation = validate_model(&artifact, &config);
-            self.validation_issues = model_validation
-                .issues
-                .into_iter()
-                .map(AssetAppIssue::from)
-                .collect();
+            self.validation_issues = compiled_asset_issues(&artifact, model_validation);
             self.current_artifact = Some(artifact);
             Ok(Vec::new())
         } else {
@@ -898,14 +905,9 @@ impl AssetAppState {
         ) {
             return false;
         }
+        self.validation_issues = compiled_asset_issues(&output.artifact, output.model_validation);
         self.current_artifact = Some(output.artifact);
         self.current_timeline = Some(output.timeline);
-        self.validation_issues = output
-            .model_validation
-            .issues
-            .into_iter()
-            .map(AssetAppIssue::from)
-            .collect();
         self.finish_job(AssetJobSlot::CompileCurrentAsset, job_id);
         true
     }
@@ -1186,5 +1188,19 @@ fn recipe_issues(recipe: &AssetRecipe) -> Vec<AssetAppIssue> {
         .issues
         .into_iter()
         .map(AssetAppIssue::from)
+        .collect()
+}
+
+fn compiled_asset_issues(
+    artifact: &AssetArtifact,
+    model_validation: shape_compile::validation::ModelValidationReport,
+) -> Vec<AssetAppIssue> {
+    artifact
+        .validation_report
+        .issues
+        .iter()
+        .cloned()
+        .map(AssetAppIssue::from)
+        .chain(model_validation.issues.into_iter().map(AssetAppIssue::from))
         .collect()
 }

@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
 pub mod edits;
@@ -22,7 +22,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 1;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 2;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -164,7 +164,7 @@ impl Frame3 {
 }
 
 /// Serializable recipe for one asset and its part hierarchy.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AssetRecipe {
     /// Schema version for compatibility checks.
     pub schema_version: u32,
@@ -201,6 +201,69 @@ pub struct AssetRecipe {
     pub variation: AuthoredVariationMetadata,
     /// Next semantic ID counters.
     pub next_ids: AssetIdCounters,
+}
+
+#[derive(Deserialize)]
+struct AssetRecipeWire {
+    schema_version: u32,
+    id: AssetId,
+    title: String,
+    definitions: BTreeMap<PartDefinitionId, PartDefinition>,
+    instances: BTreeMap<PartInstanceId, PartInstance>,
+    root_instances: Vec<PartInstanceId>,
+    parameters: BTreeMap<ParameterId, ParameterDescriptor>,
+    locks: BTreeSet<ParameterId>,
+    #[serde(default)]
+    instance_locks: BTreeSet<PartInstanceId>,
+    #[serde(default)]
+    subtree_locks: BTreeSet<PartInstanceId>,
+    #[serde(default)]
+    topology_locks: BTreeSet<PartDefinitionId>,
+    constraints: Vec<AssetConstraint>,
+    #[serde(default)]
+    relationships: Vec<AssetRelationshipPolicy>,
+    #[serde(default)]
+    variation: AuthoredVariationMetadata,
+    next_ids: AssetIdCounters,
+}
+
+impl From<AssetRecipeWire> for AssetRecipe {
+    fn from(wire: AssetRecipeWire) -> Self {
+        Self {
+            schema_version: migrated_asset_recipe_schema_version(wire.schema_version),
+            id: wire.id,
+            title: wire.title,
+            definitions: wire.definitions,
+            instances: wire.instances,
+            root_instances: wire.root_instances,
+            parameters: wire.parameters,
+            locks: wire.locks,
+            instance_locks: wire.instance_locks,
+            subtree_locks: wire.subtree_locks,
+            topology_locks: wire.topology_locks,
+            constraints: wire.constraints,
+            relationships: wire.relationships,
+            variation: wire.variation,
+            next_ids: wire.next_ids,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetRecipe {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        AssetRecipeWire::deserialize(deserializer).map(Into::into)
+    }
+}
+
+fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
+    if schema_version == 1 {
+        ASSET_RECIPE_SCHEMA_VERSION
+    } else {
+        schema_version
+    }
 }
 
 impl AssetRecipe {
@@ -737,8 +800,48 @@ impl AssetPartSelector {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AssetPartSelectorWire {
+    Selector(AssetPartSelector),
+    LegacyInstance(PartInstanceId),
+}
+
+impl From<AssetPartSelectorWire> for AssetPartSelector {
+    fn from(value: AssetPartSelectorWire) -> Self {
+        match value {
+            AssetPartSelectorWire::Selector(selector) => selector,
+            AssetPartSelectorWire::LegacyInstance(instance) => {
+                AssetPartSelector::specific(instance)
+            }
+        }
+    }
+}
+
+/// How relationship selector results should be paired before validation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelationshipPairing {
+    /// Apply the relationship to every resolved pair.
+    #[default]
+    AllPairs,
+    /// Pair resolved selectors by deterministic occurrence order.
+    ByOccurrenceIndex,
+    /// Pair occurrences that share the same source prototype lineage.
+    ByPrototypeLineage,
+    /// Greedily pair each left occurrence with the nearest unpaired right occurrence.
+    NearestOneToOne,
+    /// Use explicitly authored concrete occurrence pairs.
+    Explicit(Vec<(PartInstanceId, PartInstanceId)>),
+}
+
+impl RelationshipPairing {
+    fn is_all_pairs(&self) -> bool {
+        matches!(self, Self::AllPairs)
+    }
+}
+
 /// Authored geometric relationship policy between semantic part selectors.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum AssetRelationshipPolicy {
     /// This pair is intentionally allowed to overlap.
     MayOverlap {
@@ -746,6 +849,9 @@ pub enum AssetRelationshipPolicy {
         first: AssetPartSelector,
         /// Second selector.
         second: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
         /// Human-facing reason for the relationship.
         reason: String,
     },
@@ -755,6 +861,9 @@ pub enum AssetRelationshipPolicy {
         first: AssetPartSelector,
         /// Second selector.
         second: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
     },
     /// This pair must touch or remain within attachment clearance.
     MustTouch {
@@ -762,6 +871,9 @@ pub enum AssetRelationshipPolicy {
         first: AssetPartSelector,
         /// Second selector.
         second: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
         /// Maximum accepted clearance in world units.
         max_clearance: f32,
     },
@@ -771,6 +883,9 @@ pub enum AssetRelationshipPolicy {
         container: AssetPartSelector,
         /// Contained selector.
         contained: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
     },
     /// This pair must maintain at least the authored clearance.
     MinimumClearance {
@@ -778,6 +893,9 @@ pub enum AssetRelationshipPolicy {
         first: AssetPartSelector,
         /// Second selector.
         second: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
         /// Minimum clearance in world units.
         clearance: f32,
     },
@@ -787,6 +905,9 @@ pub enum AssetRelationshipPolicy {
         parent: AssetPartSelector,
         /// Child selector.
         child: AssetPartSelector,
+        /// Pairing mode for selector results.
+        #[serde(default, skip_serializing_if = "RelationshipPairing::is_all_pairs")]
+        pairing: RelationshipPairing,
         /// Socket on the parent part.
         parent_socket: SocketId,
         /// Socket on the child part.
@@ -811,8 +932,156 @@ impl AssetRelationshipPolicy {
         Self::MayOverlap {
             first: AssetPartSelector::specific(first),
             second: AssetPartSelector::specific(second),
+            pairing: RelationshipPairing::AllPairs,
             reason: reason.into(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+enum AssetRelationshipPolicyWire {
+    MayOverlap {
+        first: AssetPartSelectorWire,
+        second: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+        reason: String,
+    },
+    MustNotIntersect {
+        first: AssetPartSelectorWire,
+        second: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+    },
+    MustTouch {
+        first: AssetPartSelectorWire,
+        second: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+        max_clearance: f32,
+    },
+    MustContain {
+        container: AssetPartSelectorWire,
+        contained: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+    },
+    MinimumClearance {
+        first: AssetPartSelectorWire,
+        second: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+        clearance: f32,
+    },
+    SocketAttached {
+        parent: AssetPartSelectorWire,
+        child: AssetPartSelectorWire,
+        #[serde(default)]
+        pairing: RelationshipPairing,
+        parent_socket: Option<SocketId>,
+        child_socket: Option<SocketId>,
+        socket: Option<SocketId>,
+        max_origin_distance: f32,
+        max_axis_angle_degrees: f32,
+        max_clearance: Option<f32>,
+    },
+}
+
+impl AssetRelationshipPolicyWire {
+    fn into_policy<E>(self) -> Result<AssetRelationshipPolicy, E>
+    where
+        E: de::Error,
+    {
+        Ok(match self {
+            Self::MayOverlap {
+                first,
+                second,
+                pairing,
+                reason,
+            } => AssetRelationshipPolicy::MayOverlap {
+                first: first.into(),
+                second: second.into(),
+                pairing,
+                reason,
+            },
+            Self::MustNotIntersect {
+                first,
+                second,
+                pairing,
+            } => AssetRelationshipPolicy::MustNotIntersect {
+                first: first.into(),
+                second: second.into(),
+                pairing,
+            },
+            Self::MustTouch {
+                first,
+                second,
+                pairing,
+                max_clearance,
+            } => AssetRelationshipPolicy::MustTouch {
+                first: first.into(),
+                second: second.into(),
+                pairing,
+                max_clearance,
+            },
+            Self::MustContain {
+                container,
+                contained,
+                pairing,
+            } => AssetRelationshipPolicy::MustContain {
+                container: container.into(),
+                contained: contained.into(),
+                pairing,
+            },
+            Self::MinimumClearance {
+                first,
+                second,
+                pairing,
+                clearance,
+            } => AssetRelationshipPolicy::MinimumClearance {
+                first: first.into(),
+                second: second.into(),
+                pairing,
+                clearance,
+            },
+            Self::SocketAttached {
+                parent,
+                child,
+                pairing,
+                parent_socket,
+                child_socket,
+                socket,
+                max_origin_distance,
+                max_axis_angle_degrees,
+                max_clearance,
+            } => {
+                let parent_socket = parent_socket.or(socket).ok_or_else(|| {
+                    E::custom("SocketAttached relationship is missing parent_socket")
+                })?;
+                let child_socket = child_socket.or(socket).ok_or_else(|| {
+                    E::custom("SocketAttached relationship is missing child_socket")
+                })?;
+                AssetRelationshipPolicy::SocketAttached {
+                    parent: parent.into(),
+                    child: child.into(),
+                    pairing,
+                    parent_socket,
+                    child_socket,
+                    max_origin_distance,
+                    max_axis_angle_degrees,
+                    max_clearance,
+                }
+            }
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetRelationshipPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        AssetRelationshipPolicyWire::deserialize(deserializer)?.into_policy()
     }
 }
 
@@ -1769,9 +2038,11 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
             AssetRelationshipPolicy::MayOverlap {
                 first,
                 second,
+                pairing,
                 reason,
             } => {
                 validate_relationship_pair(recipe, report, index, first, second);
+                validate_relationship_pairing(recipe, report, index, pairing);
                 if reason.trim().is_empty() {
                     push_issue(
                         report,
@@ -1781,15 +2052,22 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                     );
                 }
             }
-            AssetRelationshipPolicy::MustNotIntersect { first, second } => {
+            AssetRelationshipPolicy::MustNotIntersect {
+                first,
+                second,
+                pairing,
+            } => {
                 validate_relationship_pair(recipe, report, index, first, second);
+                validate_relationship_pairing(recipe, report, index, pairing);
             }
             AssetRelationshipPolicy::MustTouch {
                 first,
                 second,
+                pairing,
                 max_clearance,
             } => {
                 validate_relationship_pair(recipe, report, index, first, second);
+                validate_relationship_pairing(recipe, report, index, pairing);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.max_clearance")),
@@ -1799,15 +2077,19 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
             AssetRelationshipPolicy::MustContain {
                 container,
                 contained,
+                pairing,
             } => {
                 validate_relationship_pair(recipe, report, index, container, contained);
+                validate_relationship_pairing(recipe, report, index, pairing);
             }
             AssetRelationshipPolicy::MinimumClearance {
                 first,
                 second,
+                pairing,
                 clearance,
             } => {
                 validate_relationship_pair(recipe, report, index, first, second);
+                validate_relationship_pairing(recipe, report, index, pairing);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.clearance")),
@@ -1817,6 +2099,7 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
             AssetRelationshipPolicy::SocketAttached {
                 parent,
                 child,
+                pairing,
                 parent_socket,
                 child_socket,
                 max_origin_distance,
@@ -1824,6 +2107,7 @@ fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationRepo
                 max_clearance,
             } => {
                 validate_relationship_pair(recipe, report, index, parent, child);
+                validate_relationship_pairing(recipe, report, index, pairing);
                 validate_non_negative(
                     report,
                     Some(format!("relationship.{index}.max_origin_distance")),
@@ -1877,6 +2161,51 @@ fn validate_relationship_pair(
         format!("relationship.{index}.second"),
         second,
     );
+}
+
+fn validate_relationship_pairing(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    index: usize,
+    pairing: &RelationshipPairing,
+) {
+    let RelationshipPairing::Explicit(pairs) = pairing else {
+        return;
+    };
+    if pairs.is_empty() {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}.pairing")),
+            "empty_relationship_pairing",
+            "Explicit relationship pairing must include at least one pair.",
+        );
+    }
+    for (pair_index, (first, second)) in pairs.iter().enumerate() {
+        if first == second {
+            push_issue(
+                report,
+                Some(format!("relationship.{index}.pairing.{pair_index}")),
+                "self_relationship_pairing",
+                "Explicit relationship pairing endpoints must be different instances.",
+            );
+        }
+        if !recipe.instances.contains_key(first) {
+            push_issue(
+                report,
+                Some(format!("relationship.{index}.pairing.{pair_index}.first")),
+                "unknown_relationship_pairing_instance",
+                "Explicit relationship pairing references an unknown first instance.",
+            );
+        }
+        if !recipe.instances.contains_key(second) {
+            push_issue(
+                report,
+                Some(format!("relationship.{index}.pairing.{pair_index}.second")),
+                "unknown_relationship_pairing_instance",
+                "Explicit relationship pairing references an unknown second instance.",
+            );
+        }
+    }
 }
 
 fn validate_relationship_socket(
@@ -4144,6 +4473,95 @@ mod tests {
     }
 
     #[test]
+    fn schema_one_relationships_migrate_to_schema_two() {
+        let mut recipe = multipart_recipe();
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::SocketAttached {
+                parent: AssetPartSelector::specific(PartInstanceId(1)),
+                child: AssetPartSelector::specific(PartInstanceId(2)),
+                pairing: RelationshipPairing::AllPairs,
+                parent_socket: SocketId(1),
+                child_socket: SocketId(2),
+                max_origin_distance: 0.001,
+                max_axis_angle_degrees: 1.0,
+                max_clearance: Some(0.001),
+            });
+        recipe
+            .relationships
+            .push(AssetRelationshipPolicy::MayOverlap {
+                first: AssetPartSelector::specific(PartInstanceId(1)),
+                second: AssetPartSelector::specific(PartInstanceId(2)),
+                pairing: RelationshipPairing::AllPairs,
+                reason: "legacy authored contact".to_owned(),
+            });
+        let mut value = serde_json::to_value(&recipe).expect("recipe should serialize");
+        value["schema_version"] = serde_json::json!(1);
+        value["relationships"] = serde_json::json!([
+            {
+                "SocketAttached": {
+                    "parent": 1,
+                    "child": 2,
+                    "socket": 7,
+                    "max_origin_distance": 0.001,
+                    "max_axis_angle_degrees": 1.0,
+                    "max_clearance": 0.001
+                }
+            },
+            {
+                "MayOverlap": {
+                    "first": 1,
+                    "second": 2,
+                    "reason": "legacy authored contact"
+                }
+            }
+        ]);
+
+        let migrated: AssetRecipe =
+            serde_json::from_value(value).expect("schema one recipe should migrate");
+
+        assert_eq!(migrated.schema_version, ASSET_RECIPE_SCHEMA_VERSION);
+        assert!(matches!(
+            &migrated.relationships[0],
+            AssetRelationshipPolicy::SocketAttached {
+                parent: AssetPartSelector::SpecificInstance {
+                    instance: PartInstanceId(1)
+                },
+                child: AssetPartSelector::SpecificInstance {
+                    instance: PartInstanceId(2)
+                },
+                pairing: RelationshipPairing::AllPairs,
+                parent_socket: SocketId(7),
+                child_socket: SocketId(7),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &migrated.relationships[1],
+            AssetRelationshipPolicy::MayOverlap {
+                first: AssetPartSelector::SpecificInstance {
+                    instance: PartInstanceId(1)
+                },
+                second: AssetPartSelector::SpecificInstance {
+                    instance: PartInstanceId(2)
+                },
+                pairing: RelationshipPairing::AllPairs,
+                ..
+            }
+        ));
+        let saved = serde_json::to_value(&migrated).expect("migrated recipe should serialize");
+        assert_eq!(
+            saved["schema_version"],
+            serde_json::json!(ASSET_RECIPE_SCHEMA_VERSION)
+        );
+        assert!(
+            saved["relationships"][0]["SocketAttached"]
+                .get("socket")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn validation_accepts_minimal_valid_recipe() {
         let recipe = test_recipe();
 
@@ -4268,6 +4686,7 @@ mod tests {
             .push(AssetRelationshipPolicy::SocketAttached {
                 parent: AssetPartSelector::specific(PartInstanceId(1)),
                 child: AssetPartSelector::specific(PartInstanceId(2)),
+                pairing: RelationshipPairing::AllPairs,
                 parent_socket: SocketId(1),
                 child_socket: SocketId(2),
                 max_origin_distance: 0.001,
@@ -4283,6 +4702,7 @@ mod tests {
                 second: AssetPartSelector::GeneratedByOperation {
                     operation: OperationId(1),
                 },
+                pairing: RelationshipPairing::AllPairs,
                 reason: "arrayed prototype contacts are authored".to_owned(),
             });
         recipe
@@ -4298,6 +4718,7 @@ mod tests {
                     role: "support".to_owned(),
                 },
                 second: AssetPartSelector::specific(PartInstanceId(1)),
+                pairing: RelationshipPairing::AllPairs,
                 max_clearance: 0.02,
             });
 
@@ -4312,6 +4733,7 @@ mod tests {
             .push(AssetRelationshipPolicy::SocketAttached {
                 parent: AssetPartSelector::specific(PartInstanceId(1)),
                 child: AssetPartSelector::specific(PartInstanceId(2)),
+                pairing: RelationshipPairing::AllPairs,
                 parent_socket: SocketId(99),
                 child_socket: SocketId(98),
                 max_origin_distance: 0.001,
@@ -4327,6 +4749,7 @@ mod tests {
                 second: AssetPartSelector::PartTag {
                     tag: "missing".to_owned(),
                 },
+                pairing: RelationshipPairing::AllPairs,
                 clearance: 0.01,
             });
 
