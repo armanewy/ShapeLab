@@ -17,6 +17,8 @@ use shape_asset::{
 use shape_poly::{MeshBounds, PolyError, PolygonMesh};
 use thiserror::Error;
 
+pub mod assembly;
+
 /// Generated local part payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeneratedPart {
