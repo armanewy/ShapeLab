@@ -1484,6 +1484,34 @@ mod tests {
         recipe
     }
 
+    fn through_cut_recipe() -> AssetRecipe {
+        let mut recipe = cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        definition.geometry.operations = vec![ModelingOperationSpec::RectangularThroughCut {
+            operation: OperationId(31),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            size: [1.1, 0.52],
+            corner_radius: 0.08,
+            rim_width: 0.08,
+            corner_segments: 4,
+            entry_loop: BoundaryLoopId(9),
+            exit_loop: BoundaryLoopId(10),
+            outer_region: RegionId(1),
+            rim_region: RegionId(23),
+            wall_region: RegionId(24),
+            edge_treatment: CutEdgeTreatment::Hard,
+        }];
+        recipe.next_ids.operation = 32;
+        recipe.next_ids.region = 25;
+        recipe.next_ids.boundary_loop = 11;
+        recipe
+    }
+
     fn cut_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
         [
             (RegionId(1), "front", SurfaceRole::PrimarySurface),
@@ -1511,6 +1539,61 @@ mod tests {
             .iter()
             .map(|issue| issue.code.as_str())
             .collect()
+    }
+
+    fn assert_compiled_boundary_loop(
+        part: &CompiledPart,
+        boundary_loop: BoundaryLoopId,
+        operation: OperationId,
+    ) {
+        let edges = part
+            .world_mesh
+            .edge_metadata
+            .iter()
+            .filter_map(|(edge, metadata)| {
+                (metadata.boundary_loop == Some(boundary_loop)).then_some((*edge, metadata))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            edges.len() >= 3,
+            "boundary loop {boundary_loop:?} should have at least three edges"
+        );
+        assert!(
+            edges
+                .iter()
+                .all(|(_, metadata)| metadata.operation == Some(operation)),
+            "boundary loop {boundary_loop:?} should carry one operation"
+        );
+
+        let mut vertex_degree = BTreeMap::<u32, u32>::new();
+        let mut adjacency = BTreeMap::<u32, Vec<u32>>::new();
+        for (edge, _) in &edges {
+            *vertex_degree.entry(edge.a).or_default() += 1;
+            *vertex_degree.entry(edge.b).or_default() += 1;
+            adjacency.entry(edge.a).or_default().push(edge.b);
+            adjacency.entry(edge.b).or_default().push(edge.a);
+        }
+        assert!(
+            vertex_degree.values().all(|degree| *degree == 2),
+            "boundary loop {boundary_loop:?} should have vertex degree two throughout"
+        );
+
+        let start = edges[0].0.a;
+        let mut stack = vec![start];
+        let mut visited = BTreeSet::new();
+        while let Some(vertex) = stack.pop() {
+            if !visited.insert(vertex) {
+                continue;
+            }
+            if let Some(neighbors) = adjacency.get(&vertex) {
+                stack.extend(neighbors.iter().copied());
+            }
+        }
+        assert_eq!(
+            visited.len(),
+            vertex_degree.len(),
+            "boundary loop {boundary_loop:?} should be one connected cycle"
+        );
     }
 
     fn manual_artifact() -> AssetArtifact {
@@ -1633,6 +1716,53 @@ mod tests {
 
         assert!(codes.contains("invalid_boundary_loop_vertex_degree"));
         assert!(codes.contains("boundary_loop_not_closed"));
+    }
+
+    #[test]
+    fn recessed_cut_entry_and_floor_loops_compile_as_closed_cycles() {
+        let artifact = compile_asset(&cut_recipe()).expect("cut recipe should compile");
+        assert!(artifact.validation_report.is_valid());
+        let part = &artifact.compiled_parts[0];
+
+        assert_compiled_boundary_loop(part, BoundaryLoopId(7), OperationId(30));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(8), OperationId(30));
+    }
+
+    #[test]
+    fn through_cut_entry_and_exit_loops_compile_as_closed_cycles() {
+        let artifact = compile_asset(&through_cut_recipe()).expect("through cut should compile");
+        assert!(artifact.validation_report.is_valid());
+        let part = &artifact.compiled_parts[0];
+
+        assert_compiled_boundary_loop(part, BoundaryLoopId(9), OperationId(31));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(10), OperationId(31));
+    }
+
+    #[test]
+    fn repeated_cut_compilation_preserves_mesh_and_boundary_metadata() {
+        let recipe = through_cut_recipe();
+        let first = compile_asset(&recipe).expect("first compile should succeed");
+        let second = compile_asset(&recipe).expect("second compile should succeed");
+        let first_part = &first.compiled_parts[0];
+        let second_part = &second.compiled_parts[0];
+
+        assert_eq!(
+            first_part.world_mesh.positions,
+            second_part.world_mesh.positions
+        );
+        assert_eq!(first_part.world_mesh.faces, second_part.world_mesh.faces);
+        assert_eq!(
+            first_part.world_mesh.face_metadata,
+            second_part.world_mesh.face_metadata
+        );
+        assert_eq!(
+            first_part.world_mesh.edge_metadata,
+            second_part.world_mesh.edge_metadata
+        );
+        assert_eq!(
+            first_part.world_mesh.topology_signature,
+            second_part.world_mesh.topology_signature
+        );
     }
 
     #[test]
