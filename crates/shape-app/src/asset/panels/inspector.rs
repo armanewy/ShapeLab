@@ -5,8 +5,9 @@
 use egui::{RichText, Slider};
 
 use crate::asset::{
-    AssetAppCommand, AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart, AssetUiState,
-    ParameterId, PartDefinitionId, PartInstanceId,
+    AssetAppCommand, AssetCutControl, AssetCutOperation, AssetLockTarget, AssetParameter,
+    AssetParameterGroup, AssetPart, AssetUiState, OperationId, ParameterId, PartDefinitionId,
+    PartInstanceId,
 };
 
 /// One reflected beginner parameter group.
@@ -30,6 +31,7 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &AssetUiState) -> Vec<AssetAppComma
     ui.small(format!("Definition: {}", selected.definition_name))
         .on_hover_text(format!("definition.{}", selected.definition.0));
     commands.extend(render_part_locks(ui, state, selected));
+    commands.extend(render_cut_operations(ui, state, selected));
 
     for section in grouped_parameter_sections(&state.parameters) {
         let has_selected_parameters = section
@@ -79,6 +81,44 @@ pub(crate) fn grouped_parameter_sections(
             }
         })
         .collect()
+}
+
+/// Emit a cut operation selection only when it changes.
+#[must_use]
+pub(crate) fn cut_operation_select_command(
+    current: Option<OperationId>,
+    selected: OperationId,
+) -> Option<AssetAppCommand> {
+    (current != Some(selected)).then_some(AssetAppCommand::SelectCutOperation(Some(selected)))
+}
+
+/// Emit a cut scalar command only for finite, changed values.
+#[must_use]
+pub(crate) fn cut_operation_scalar_command(
+    operation: &AssetCutOperation,
+    control: &AssetCutControl,
+    proposed: f32,
+    locked: bool,
+) -> Option<AssetAppCommand> {
+    if locked || !proposed.is_finite() {
+        return None;
+    }
+    let clamped = proposed.clamp(control.minimum, control.maximum);
+    cut_control_value_changed(control, clamped).then_some(AssetAppCommand::SetCutOperationScalar {
+        definition: operation.definition,
+        operation: operation.operation,
+        field: control.field.clone(),
+        value: clamped,
+    })
+}
+
+/// Emit a cut removal command.
+#[must_use]
+pub(crate) fn cut_operation_remove_command(operation: &AssetCutOperation) -> AssetAppCommand {
+    AssetAppCommand::RemoveCutOperation {
+        definition: operation.definition,
+        operation: operation.operation,
+    }
 }
 
 /// Emit a scalar command only for unlocked, finite, meaningfully changed values.
@@ -206,6 +246,89 @@ fn render_parameter_row(ui: &mut egui::Ui, parameter: &AssetParameter) -> Vec<As
     commands
 }
 
+fn render_cut_operations(
+    ui: &mut egui::Ui,
+    state: &AssetUiState,
+    selected: &AssetPart,
+) -> Vec<AssetAppCommand> {
+    let mut commands = Vec::new();
+    let operations = state
+        .cut_operations
+        .iter()
+        .filter(|operation| operation.part == selected.id)
+        .collect::<Vec<_>>();
+    if operations.is_empty() {
+        return commands;
+    }
+
+    ui.collapsing("Cuts", |ui| {
+        for operation in operations {
+            ui.horizontal(|ui| {
+                let response = ui
+                    .selectable_label(operation.selected, &operation.label)
+                    .on_hover_text(format!(
+                        "{} | operation.{}",
+                        operation.kind.label(),
+                        operation.operation.0
+                    ));
+                if response.clicked() {
+                    commands.extend(cut_operation_select_command(
+                        state.selected_cut_operation,
+                        operation.operation,
+                    ));
+                }
+                if operation.selected && ui.button("Remove").clicked() {
+                    commands.push(cut_operation_remove_command(operation));
+                }
+            });
+
+            if operation.selected {
+                for control in &operation.controls {
+                    commands.extend(render_cut_control_row(ui, state, operation, control));
+                }
+            }
+        }
+    });
+    commands
+}
+
+fn render_cut_control_row(
+    ui: &mut egui::Ui,
+    state: &AssetUiState,
+    operation: &AssetCutOperation,
+    control: &AssetCutControl,
+) -> Vec<AssetAppCommand> {
+    let mut commands = Vec::new();
+    let mut value = control.value;
+    let locked = control.topology_changing && state.topology_locks.contains(&operation.definition);
+
+    ui.horizontal(|ui| {
+        ui.label(&control.label).on_hover_text(format!(
+            "definition.{}.operation.{}.{}",
+            operation.definition.0, operation.operation.0, control.field
+        ));
+        ui.add_space(4.0);
+        ui.monospace(format!("{:.3}", control.value));
+        let response = ui.add_enabled(
+            !locked,
+            Slider::new(&mut value, control.minimum..=control.maximum)
+                .step_by(f64::from(control.step.max(f32::EPSILON)))
+                .show_value(false),
+        );
+        if response.changed() {
+            commands.extend(cut_operation_scalar_command(
+                operation, control, value, locked,
+            ));
+        }
+        if control.topology_changing {
+            ui.small("Topology")
+                .on_hover_text("This control can change generated topology.");
+        }
+    });
+
+    commands
+}
+
 fn render_optional_presence(
     ui: &mut egui::Ui,
     state: &AssetUiState,
@@ -288,6 +411,11 @@ fn render_part_locks(
 fn parameter_value_changed(parameter: &AssetParameter, proposed: f32) -> bool {
     let tolerance = parameter.step.max(1.0e-5) * 1.0e-3;
     (parameter.value - proposed).abs() > tolerance
+}
+
+fn cut_control_value_changed(control: &AssetCutControl, proposed: f32) -> bool {
+    let tolerance = control.step.max(1.0e-5) * 1.0e-3;
+    (control.value - proposed).abs() > tolerance
 }
 
 #[must_use]

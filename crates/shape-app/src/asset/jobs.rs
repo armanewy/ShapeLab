@@ -774,6 +774,7 @@ fn operation_changes_locked_scope(recipe: &AssetRecipe, operation: &AssetEdit) -
         | AssetEdit::Attach { instance, .. }
         | AssetEdit::Detach { instance } => instance_locked(recipe, *instance),
         AssetEdit::SetGeneratorDimension { definition, .. }
+        | AssetEdit::SetOperationScalar { definition, .. }
         | AssetEdit::ReplaceGeometrySource { definition, .. }
         | AssetEdit::SetBevelSettings { definition, .. }
         | AssetEdit::SetSweepProfilePoint { definition, .. }

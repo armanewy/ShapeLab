@@ -5,7 +5,8 @@ use thiserror::Error;
 
 use crate::{
     AssetEdit, AssetEditProgram, AssetError, AssetRecipe, AssetValidationReport, GeometrySource,
-    ModelingOperationSpec, PartDefinition, PartDefinitionId, PartInstanceId, validate_asset_recipe,
+    ModelingOperationSpec, OperationId, PartDefinition, PartDefinitionId, PartInstanceId,
+    validate_asset_recipe,
 };
 
 /// Result of a successfully applied edit program.
@@ -229,6 +230,7 @@ fn report_entry(recipe: &AssetRecipe, index: usize, edit: &AssetEdit) -> AssetEd
 fn edit_type(edit: &AssetEdit) -> &'static str {
     match edit {
         AssetEdit::SetScalar { .. } => "SetScalar",
+        AssetEdit::SetOperationScalar { .. } => "SetOperationScalar",
         AssetEdit::SetTransform { .. } => "SetTransform",
         AssetEdit::SetEnabled { .. } => "SetEnabled",
         AssetEdit::SetOptionalPartEnabled { .. } => "SetOptionalPartEnabled",
@@ -280,6 +282,7 @@ fn edit_subject(edit: &AssetEdit) -> Option<String> {
             instance: crate::PartInstance { id: instance, .. },
         } => Some(format!("instance.{}", instance.0)),
         AssetEdit::SetGeneratorDimension { definition, .. }
+        | AssetEdit::SetOperationScalar { definition, .. }
         | AssetEdit::ReplaceGeometrySource { definition, .. }
         | AssetEdit::SetBevelSettings { definition, .. }
         | AssetEdit::SetSweepProfilePoint { definition, .. }
@@ -311,6 +314,18 @@ fn edit_may_change_topology(recipe: &AssetRecipe, edit: &AssetEdit) -> bool {
             .parameters
             .get(parameter)
             .is_some_and(|descriptor| descriptor.topology_changing),
+        AssetEdit::SetOperationScalar {
+            definition,
+            operation,
+            field,
+            value,
+        } => operation_scalar_edit_may_change_topology(
+            recipe,
+            *definition,
+            *operation,
+            field,
+            *value,
+        ),
         AssetEdit::SetGeneratorDimension { dimension, .. } => dimension.topology_changing(),
         AssetEdit::ReplaceGeometrySource { .. }
         | AssetEdit::AddInstance { .. }
@@ -346,6 +361,30 @@ fn edit_may_change_topology(recipe: &AssetRecipe, edit: &AssetEdit) -> bool {
         | AssetEdit::SetTopologyLock { .. }
         | AssetEdit::ReorderChildInstances { .. } => false,
     }
+}
+
+fn operation_scalar_edit_may_change_topology(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    field: &str,
+    value: f32,
+) -> bool {
+    let Some(existing) = recipe.definitions.get(&definition) else {
+        return true;
+    };
+    let before = definition_topology_signature(existing);
+    let mut edited = recipe.clone();
+    let path =
+        crate::definition_scalar_path(definition, format!("operation.{}.{}", operation.0, field));
+    if crate::set_scalar(&mut edited, path, value).is_err() {
+        return true;
+    }
+    edited
+        .definitions
+        .get(&definition)
+        .map(|definition| definition_topology_signature(definition) != before)
+        .unwrap_or(true)
 }
 
 fn instance_is_descendant_of(

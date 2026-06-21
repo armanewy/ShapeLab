@@ -11,12 +11,14 @@ use std::path::PathBuf;
 
 use asset::{
     AssetAppCommand, AssetAppEffect, AssetAppState, AssetAppStateError, AssetGenerationMode,
-    AssetJobEvent, AssetJobKind, AssetJobRequest, AssetLockTarget, AssetTemplate, run_asset_job,
+    AssetJobEvent, AssetJobKind, AssetJobRequest, AssetLockTarget, AssetTemplate, OperationId,
+    run_asset_job,
 };
 use shape_asset::{
-    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ParameterDescriptor, ParameterId,
-    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, ReplacementGroupHint,
-    Transform3, definition_scalar_path, get_scalar, instance_scalar_path,
+    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
+    ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
+    PartInstanceId, ReplacementGroupHint, Transform3, definition_scalar_path, get_scalar,
+    instance_scalar_path,
 };
 use shape_modeling_assets::BenchmarkAsset;
 use shape_render::{OrbitCamera, RenderSettings};
@@ -512,6 +514,55 @@ fn multi_cut_panel_benchmark_generates_structural_explore_variants() {
 }
 
 #[test]
+fn descriptor_free_cut_operation_edit_schedules_compile() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let (definition, operation) = first_circular_cut(&state.recipe);
+    let radius_path = definition_scalar_path(
+        definition,
+        format!("operation.{}.circular_through_cut.radius", operation.0),
+    );
+
+    let effects = state
+        .handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation,
+            field: "circular_through_cut.radius".to_owned(),
+            value: 0.095,
+        })
+        .expect("cut radius edit should apply");
+
+    assert_eq!(state.selected_cut_operation, Some(operation));
+    assert_eq!(
+        get_scalar(&state.recipe, &radius_path).expect("radius should be readable"),
+        0.095
+    );
+    assert!(state.dirty);
+    assert!(matches!(
+        start_job(effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+
+    state
+        .handle_command(AssetAppCommand::SetLock {
+            target: AssetLockTarget::Topology(definition),
+            locked: true,
+        })
+        .expect("topology lock should apply");
+
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation,
+            field: "circular_through_cut.radial_segments".to_owned(),
+            value: 24.0,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("topology is locked")
+    ));
+}
+
+#[test]
 fn project_snapshot_round_trip_preserves_branch_history() {
     let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
         .expect("stool template should load");
@@ -613,6 +664,19 @@ fn benchmark_template(asset: BenchmarkAsset) -> AssetTemplate {
         title: recipe.title.clone(),
         recipe,
     }
+}
+
+fn first_circular_cut(recipe: &AssetRecipe) -> (PartDefinitionId, OperationId) {
+    recipe
+        .definitions
+        .iter()
+        .find_map(|(definition, spec)| {
+            spec.geometry.operations.iter().find_map(|operation| {
+                matches!(operation, ModelingOperationSpec::CircularThroughCut { .. })
+                    .then_some((*definition, operation.operation_id()))
+            })
+        })
+        .expect("benchmark should include a circular cut")
 }
 
 fn unique_test_dir(stem: &str) -> PathBuf {

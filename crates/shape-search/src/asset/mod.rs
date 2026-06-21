@@ -1832,7 +1832,8 @@ fn diagnostic_kind(recipe: &AssetRecipe, operation: &AssetEdit) -> AssetCandidat
         AssetEdit::InsertModelingOperation { .. }
         | AssetEdit::RemoveModelingOperation { .. }
         | AssetEdit::DuplicateCutOperation { .. }
-        | AssetEdit::MoveModelingOperation { .. } => AssetCandidateEditKind::ModelingOperation,
+        | AssetEdit::MoveModelingOperation { .. }
+        | AssetEdit::SetOperationScalar { .. } => AssetCandidateEditKind::ModelingOperation,
         AssetEdit::ReplaceDefinition { definition } => {
             if recipe
                 .definitions
@@ -1854,6 +1855,7 @@ fn edit_is_topology_changing(recipe: &AssetRecipe, operation: &AssetEdit) -> boo
             .parameters
             .get(parameter)
             .is_some_and(|parameter| parameter.topology_changing),
+        AssetEdit::SetOperationScalar { .. } => true,
         AssetEdit::SetGeneratorDimension { dimension, .. } => dimension.topology_changing(),
         AssetEdit::SetBevelSettings { segments, .. } => segments.is_some(),
         AssetEdit::SetOptionalPartEnabled { .. }
@@ -1898,6 +1900,7 @@ fn edit_subject(operation: &AssetEdit) -> String {
             format!("instance.{}", instance.0)
         }
         AssetEdit::SetGeneratorDimension { definition, .. }
+        | AssetEdit::SetOperationScalar { definition, .. }
         | AssetEdit::ReplaceGeometrySource { definition, .. }
         | AssetEdit::SetBevelSettings { definition, .. }
         | AssetEdit::SetSweepProfilePoint { definition, .. }

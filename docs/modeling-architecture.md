@@ -50,6 +50,8 @@ Part definitions declare:
 
 Modeling operations are grouped into coarse phases: source configuration, local topology, boundary treatment, local transform, and assembly generation. Structural edits may reorder operations only within phase-compatible positions until the runtime supports true cross-phase sequential execution. Operation removal is explicit: callers either reject removal while parameter descriptors or authored variation hints still reference the operation, or request cascade cleanup of operation-owned metadata.
 
+Cut operations are also reflected directly in the Asset Modeling Lab inspector. This lets generated or duplicated cuts expose editable controls without permanently authoring a `ParameterDescriptor` for every operation field. Descriptor-free operation edits still flow through the recipe reducer, topology-lock checks, validation, history, and compile jobs.
+
 Boundary-loop metadata has an explicit lifecycle. Cut operations produce live loops, while future boundary-treatment operations may reference a loop or consume it and emit replacement loops. Compile validation checks the final mesh against the live loop set while still retaining consumed loops as historical provenance, so a bevel can replace an entry loop with outer/inner replacement loops without making the original cut invalid.
 
 Part instances declare:

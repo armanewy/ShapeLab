@@ -3,6 +3,7 @@
 1. Ordered local operation execution and multi-cut composition
    - Harden constrained semantic cuts before adding broader booleans.
    - Present: one boundary-loop ID per connected physical loop, target-region/host-face reconciliation, explicit rim width, explicit rectangular corner segments, separate bevel eligibility metadata, and structural recipe edits for inserting, removing, duplicating, and moving local modeling operations.
+   - Present: duplicated cut operations are reflected in the inspector with descriptor-free controls for position, size/radius, rim width, depth, and segment counts.
    - Replace the current one-cut plate path with ordered local operation execution: generate a base source, apply operation stages in recipe order, validate each stage, then apply boundary treatments.
    - Present: multiple same-face plate cuts are composed when their frames are separated and their rectangular projections do not split another cut window.
    - Next: relax the aligned-projection constraint with a fuller local face subdivision composer.

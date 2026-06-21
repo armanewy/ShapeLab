@@ -836,6 +836,87 @@ fn cut_corner_radius_positive_changes_preserve_topology_lock() {
 }
 
 #[test]
+fn descriptor_free_cut_operation_scalar_edits_are_lock_aware() {
+    let mut recipe = edit_recipe();
+    let cut_operation = OperationId(51);
+    let mut plate = recipe.definitions[&PLATE].clone();
+    plate.regions.insert(
+        RegionId(1),
+        SurfaceRegionSpec {
+            id: RegionId(1),
+            name: "front".to_owned(),
+            role: SurfaceRole::PrimarySurface,
+            tags: BTreeSet::new(),
+        },
+    );
+    plate.geometry.operations = vec![ModelingOperationSpec::CircularThroughCut {
+        operation: cut_operation,
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        radius: 0.08,
+        radial_segments: 12,
+        rim_width: 0.03,
+        entry_loop: BoundaryLoopId(3),
+        exit_loop: BoundaryLoopId(4),
+        outer_region: RegionId(1),
+        rim_region: RegionId(30),
+        wall_region: RegionId(31),
+        edge_treatment: CutEdgeTreatment::Hard,
+    }];
+    recipe.definitions.insert(PLATE, plate);
+    recipe.next_ids.operation = 52;
+    recipe.next_ids.region = 32;
+    recipe.next_ids.boundary_loop = 5;
+
+    let edited = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "radius".to_owned(),
+            seed: 74,
+            operations: vec![AssetEdit::SetOperationScalar {
+                definition: PLATE,
+                operation: cut_operation,
+                field: "circular_through_cut.radius".to_owned(),
+                value: 0.11,
+            }],
+        },
+    )
+    .expect("descriptor-free cut scalar should apply");
+
+    assert_eq!(
+        get_scalar(
+            &edited,
+            definition_scalar_path(
+                PLATE,
+                format!("operation.{}.circular_through_cut.radius", cut_operation.0)
+            )
+        )
+        .expect("edited radius should be readable"),
+        0.11
+    );
+
+    let mut locked = edited.clone();
+    locked.topology_locks.insert(PLATE);
+    assert!(matches!(
+        apply_edit_program(
+            &locked,
+            &AssetEditProgram {
+                label: "segments".to_owned(),
+                seed: 75,
+                operations: vec![AssetEdit::SetOperationScalar {
+                    definition: PLATE,
+                    operation: cut_operation,
+                    field: "circular_through_cut.radial_segments".to_owned(),
+                    value: 18.0,
+                }],
+            },
+        ),
+        Err(AssetError::LockedTopology(PLATE))
+    ));
+}
+
+#[test]
 fn compatible_and_incompatible_replacements_are_distinct() {
     let recipe = edit_recipe();
 

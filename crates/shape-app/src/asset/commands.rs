@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use shape_asset::{
-    AssetRecipe, ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId,
-    RevisionId, Transform3,
+    AssetRecipe, OperationId, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
+    PartInstanceId, RevisionId, Transform3,
 };
 
 use crate::viewport::ViewportAction;
@@ -36,9 +36,20 @@ pub(crate) enum AssetLockTarget {
 pub(crate) enum AssetAppCommand {
     SelectPart(Option<PartInstanceId>),
     SelectParameter(Option<ParameterId>),
+    SelectCutOperation(Option<OperationId>),
     SetParameter {
         parameter: ParameterId,
         value: f32,
+    },
+    SetCutOperationScalar {
+        definition: PartDefinitionId,
+        operation: OperationId,
+        field: String,
+        value: f32,
+    },
+    RemoveCutOperation {
+        definition: PartDefinitionId,
+        operation: OperationId,
     },
     SetTransform {
         instance: PartInstanceId,

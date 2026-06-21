@@ -1957,6 +1957,17 @@ pub enum AssetEdit {
         /// New scalar value.
         value: f32,
     },
+    /// Set one scalar field on a modeling operation without a parameter descriptor.
+    SetOperationScalar {
+        /// Definition containing the operation.
+        definition: PartDefinitionId,
+        /// Operation to mutate.
+        operation: OperationId,
+        /// Operation-relative scalar field path, such as `circular_through_cut.radius`.
+        field: String,
+        /// New scalar value.
+        value: f32,
+    },
     /// Replace an instance transform.
     SetTransform {
         /// Target instance.
@@ -5085,6 +5096,12 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             let path = descriptor.path.clone();
             set_scalar(recipe, path, *value)
         }
+        AssetEdit::SetOperationScalar {
+            definition,
+            operation,
+            field,
+            value,
+        } => set_modeling_operation_scalar(recipe, *definition, *operation, field, *value),
         AssetEdit::SetTransform {
             instance,
             transform,
@@ -5618,6 +5635,43 @@ fn set_array_count(
             "operation {operation:?} is not an array"
         ))),
     }
+}
+
+fn set_modeling_operation_scalar(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    field: &str,
+    value: f32,
+) -> Result<(), AssetError> {
+    let path = definition_scalar_path(definition, format!("operation.{}.{}", operation.0, field));
+    if !value.is_finite() {
+        return Err(AssetError::NonFiniteScalar { path, value });
+    }
+    let definition_spec = recipe
+        .definitions
+        .get(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let operation_spec = definition_spec
+        .geometry
+        .operations
+        .iter()
+        .find(|candidate| candidate.operation_id() == operation)
+        .ok_or_else(|| AssetError::UnknownScalarPath(path.clone()))?;
+    let field_parts = field.split('.').collect::<Vec<_>>();
+    get_operation_scalar(operation_spec, &field_parts, &path)?;
+    let before_signature = edits::definition_topology_signature(definition_spec);
+    let mut edited = recipe.clone();
+    set_scalar_in_place(&mut edited, &path, value)?;
+    let after_definition = edited
+        .definitions
+        .get(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    if edits::definition_topology_signature(after_definition) != before_signature {
+        edits::ensure_topology_editable(recipe, definition)?;
+    }
+    *recipe = edited;
+    Ok(())
 }
 
 fn set_array_spacing(

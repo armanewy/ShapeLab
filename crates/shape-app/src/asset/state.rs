@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationIssue, ParameterId, PartDefinitionId,
-    PartInstance, PartInstanceId, RevisionId, apply_edit_program_with_report,
-    validate_asset_recipe,
+    AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationIssue, ModelingOperationSpec,
+    OperationId, OperationRemovalPolicy, ParameterId, PartDefinitionId, PartInstance,
+    PartInstanceId, RevisionId, apply_edit_program_with_report, validate_asset_recipe,
 };
 use shape_compile::export::recipe_hash;
 use shape_compile::validation::{ValidationIssue, validate_model, validation_config_from_recipe};
@@ -205,6 +205,7 @@ pub(crate) struct AssetAppState {
     pub recipe: AssetRecipe,
     pub selected_part_instance: Option<PartInstanceId>,
     pub selected_parameter: Option<ParameterId>,
+    pub selected_cut_operation: Option<OperationId>,
     pub locks: AssetLockSnapshot,
     pub current_artifact: Option<AssetArtifact>,
     pub current_timeline: Option<ConstructionTimelineReport>,
@@ -229,6 +230,7 @@ impl AssetAppState {
         ensure_valid_recipe(&recipe)?;
         let selected_part_instance = first_part(&recipe);
         let selected_parameter = first_parameter(&recipe);
+        let selected_cut_operation = first_cut_operation_for_part(&recipe, selected_part_instance);
         let locks = AssetLockSnapshot::from_recipe(&recipe);
         let validation_issues = recipe_issues(&recipe);
         Ok(Self {
@@ -236,6 +238,7 @@ impl AssetAppState {
             recipe,
             selected_part_instance,
             selected_parameter,
+            selected_cut_operation,
             locks,
             current_artifact: None,
             current_timeline: None,
@@ -275,9 +278,23 @@ impl AssetAppState {
                 self.select_parameter(parameter)?;
                 Ok(Vec::new())
             }
+            AssetAppCommand::SelectCutOperation(operation) => {
+                self.select_cut_operation(operation)?;
+                Ok(Vec::new())
+            }
             AssetAppCommand::SetParameter { parameter, value } => {
                 self.set_parameter(parameter, value)
             }
+            AssetAppCommand::SetCutOperationScalar {
+                definition,
+                operation,
+                field,
+                value,
+            } => self.set_cut_operation_scalar(definition, operation, field, value),
+            AssetAppCommand::RemoveCutOperation {
+                definition,
+                operation,
+            } => self.remove_cut_operation(definition, operation),
             AssetAppCommand::SetTransform {
                 instance,
                 transform,
@@ -528,6 +545,7 @@ impl AssetAppState {
             return Err(AssetAppStateError::UnknownPartInstance(instance));
         }
         self.selected_part_instance = instance;
+        self.selected_cut_operation = first_cut_operation_for_part(&self.recipe, instance);
         Ok(())
     }
 
@@ -541,6 +559,19 @@ impl AssetAppState {
             return Err(AssetAppStateError::UnknownParameter(parameter));
         }
         self.selected_parameter = parameter;
+        Ok(())
+    }
+
+    fn select_cut_operation(
+        &mut self,
+        operation: Option<OperationId>,
+    ) -> Result<(), AssetAppStateError> {
+        if let Some(operation) = operation
+            && !cut_operation_exists(&self.recipe, operation)
+        {
+            return Err(AssetAppStateError::UnknownOperation(operation));
+        }
+        self.selected_cut_operation = operation;
         Ok(())
     }
 
@@ -562,6 +593,45 @@ impl AssetAppState {
         self.apply_edit(
             "Set parameter",
             vec![AssetEdit::SetScalar { parameter, value }],
+            true,
+        )
+    }
+
+    fn set_cut_operation_scalar(
+        &mut self,
+        definition: PartDefinitionId,
+        operation: OperationId,
+        field: String,
+        value: f32,
+    ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        if !value.is_finite() {
+            return Err(AssetAppStateError::NonFiniteOperationScalar(operation));
+        }
+        self.selected_cut_operation = Some(operation);
+        self.apply_edit(
+            "Set cut operation",
+            vec![AssetEdit::SetOperationScalar {
+                definition,
+                operation,
+                field,
+                value,
+            }],
+            true,
+        )
+    }
+
+    fn remove_cut_operation(
+        &mut self,
+        definition: PartDefinitionId,
+        operation: OperationId,
+    ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        self.apply_edit(
+            "Remove cut operation",
+            vec![AssetEdit::RemoveModelingOperation {
+                definition,
+                operation,
+                policy: OperationRemovalPolicy::CascadeOwnedMetadata,
+            }],
             true,
         )
     }
@@ -808,6 +878,12 @@ impl AssetAppState {
             .is_some_and(|selected| !self.recipe.parameters.contains_key(&selected))
         {
             self.selected_parameter = first_parameter(&self.recipe);
+        }
+        if self.selected_cut_operation.is_some_and(|selected| {
+            !cut_operation_belongs_to_part(&self.recipe, self.selected_part_instance, selected)
+        }) {
+            self.selected_cut_operation =
+                first_cut_operation_for_part(&self.recipe, self.selected_part_instance);
         }
     }
 
@@ -1091,10 +1167,12 @@ impl AssetAppState {
 pub(crate) enum AssetAppStateError {
     UnknownPartInstance(PartInstanceId),
     UnknownParameter(ParameterId),
+    UnknownOperation(OperationId),
     UnknownCandidate(AssetCandidateId),
     UnknownRevision(RevisionId),
     LockedParameter(ParameterId),
     NonFiniteParameter(ParameterId),
+    NonFiniteOperationScalar(OperationId),
     MissingSavePath,
     NoParentRevision,
     JobIdOverflow,
@@ -1113,6 +1191,9 @@ impl fmt::Display for AssetAppStateError {
             Self::UnknownParameter(parameter) => {
                 write!(formatter, "unknown parameter {parameter:?}")
             }
+            Self::UnknownOperation(operation) => {
+                write!(formatter, "unknown operation {operation:?}")
+            }
             Self::UnknownCandidate(candidate) => {
                 write!(formatter, "unknown candidate {candidate:?}")
             }
@@ -1120,6 +1201,9 @@ impl fmt::Display for AssetAppStateError {
             Self::LockedParameter(parameter) => write!(formatter, "locked parameter {parameter:?}"),
             Self::NonFiniteParameter(parameter) => {
                 write!(formatter, "non-finite value for parameter {parameter:?}")
+            }
+            Self::NonFiniteOperationScalar(operation) => {
+                write!(formatter, "non-finite value for operation {operation:?}")
             }
             Self::MissingSavePath => formatter.write_str("save requires a file path"),
             Self::NoParentRevision => formatter.write_str("current revision has no parent"),
@@ -1150,6 +1234,61 @@ fn first_part(recipe: &AssetRecipe) -> Option<PartInstanceId> {
 
 fn first_parameter(recipe: &AssetRecipe) -> Option<ParameterId> {
     recipe.parameters.keys().next().copied()
+}
+
+fn first_cut_operation_for_part(
+    recipe: &AssetRecipe,
+    part: Option<PartInstanceId>,
+) -> Option<OperationId> {
+    let definition = part
+        .and_then(|part| recipe.instances.get(&part))
+        .map(|part| part.definition)?;
+    recipe
+        .definitions
+        .get(&definition)?
+        .geometry
+        .operations
+        .iter()
+        .find(|operation| operation_is_cut(operation))
+        .map(ModelingOperationSpec::operation_id)
+}
+
+fn cut_operation_exists(recipe: &AssetRecipe, operation: OperationId) -> bool {
+    recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .any(|candidate| candidate.operation_id() == operation && operation_is_cut(candidate))
+}
+
+fn cut_operation_belongs_to_part(
+    recipe: &AssetRecipe,
+    part: Option<PartInstanceId>,
+    operation: OperationId,
+) -> bool {
+    let Some(definition) = part
+        .and_then(|part| recipe.instances.get(&part))
+        .map(|part| part.definition)
+    else {
+        return false;
+    };
+    recipe
+        .definitions
+        .get(&definition)
+        .is_some_and(|definition| {
+            definition.geometry.operations.iter().any(|candidate| {
+                candidate.operation_id() == operation && operation_is_cut(candidate)
+            })
+        })
+}
+
+fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
+    matches!(
+        operation,
+        ModelingOperationSpec::RecessedPanelCut { .. }
+            | ModelingOperationSpec::RectangularThroughCut { .. }
+            | ModelingOperationSpec::CircularThroughCut { .. }
+    )
 }
 
 fn ensure_valid_recipe(recipe: &AssetRecipe) -> Result<(), AssetAppStateError> {

@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) use shape_asset::{
-    ParameterId, PartDefinitionId, PartInstanceId, RevisionId as AssetRevisionId,
+    OperationId, ParameterId, PartDefinitionId, PartInstanceId, RevisionId as AssetRevisionId,
 };
 
 pub(crate) mod app;
@@ -100,6 +100,8 @@ pub(crate) struct AssetUiState {
     pub selected_part: Option<PartInstanceId>,
     pub parts: Vec<AssetPart>,
     pub parameters: Vec<AssetParameter>,
+    pub cut_operations: Vec<AssetCutOperation>,
+    pub selected_cut_operation: Option<OperationId>,
     pub candidates: Vec<AssetCandidate>,
     pub history: Vec<AssetHistoryRevision>,
     pub active_job: Option<AssetJobProgress>,
@@ -119,6 +121,8 @@ impl AssetUiState {
             selected_part: None,
             parts: Vec::new(),
             parameters: Vec::new(),
+            cut_operations: Vec::new(),
+            selected_cut_operation: None,
             candidates: Vec::new(),
             history: Vec::new(),
             active_job: None,
@@ -145,6 +149,49 @@ impl AssetUiState {
         }
         counts
     }
+}
+
+/// Reflected modeling cut operation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AssetCutOperation {
+    pub definition: PartDefinitionId,
+    pub part: PartInstanceId,
+    pub operation: OperationId,
+    pub label: String,
+    pub kind: AssetCutOperationKind,
+    pub controls: Vec<AssetCutControl>,
+    pub selected: bool,
+}
+
+/// Beginner-facing cut operation kind.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum AssetCutOperationKind {
+    RecessedPanel,
+    RectangularOpening,
+    CircularOpening,
+}
+
+impl AssetCutOperationKind {
+    #[must_use]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::RecessedPanel => "Recessed panel",
+            Self::RectangularOpening => "Rectangular opening",
+            Self::CircularOpening => "Circular opening",
+        }
+    }
+}
+
+/// One dynamic control reflected from a cut operation field.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AssetCutControl {
+    pub field: String,
+    pub label: String,
+    pub value: f32,
+    pub minimum: f32,
+    pub maximum: f32,
+    pub step: f32,
+    pub topology_changing: bool,
 }
 
 /// One visible part instance.

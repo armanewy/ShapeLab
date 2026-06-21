@@ -10,9 +10,10 @@ use std::collections::BTreeSet;
 use asset::panels::{candidate_gallery, history, inspector, part_tree};
 use asset::viewport as asset_viewport;
 use asset::{
-    AssetAppCommand, AssetCandidate, AssetCandidateEdit, AssetCandidateId, AssetHistoryRevision,
-    AssetJobId, AssetJobProgress, AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart,
-    AssetRevisionId, AssetUiJobKind, AssetUiState, AssetValidationState, GeneratedPartKind,
+    AssetAppCommand, AssetCandidate, AssetCandidateEdit, AssetCandidateId, AssetCutControl,
+    AssetCutOperation, AssetCutOperationKind, AssetHistoryRevision, AssetJobId, AssetJobProgress,
+    AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart, AssetRevisionId,
+    AssetUiJobKind, AssetUiState, AssetValidationState, GeneratedPartKind, OperationId,
     ParameterId, PartDefinitionId, PartInstanceId,
 };
 use shape_render::OrbitCamera;
@@ -273,6 +274,52 @@ fn lock_behavior_blocks_edits_and_deduplicates_lock_commands() {
 }
 
 #[test]
+fn cut_operation_helpers_emit_descriptor_free_commands() {
+    let operation = cut_operation();
+    let control = operation.controls[0].clone();
+
+    assert_eq!(
+        inspector::cut_operation_select_command(None, operation.operation),
+        Some(AssetAppCommand::SelectCutOperation(Some(
+            operation.operation
+        )))
+    );
+    assert_eq!(
+        inspector::cut_operation_select_command(Some(operation.operation), operation.operation),
+        None
+    );
+    assert_eq!(
+        inspector::cut_operation_scalar_command(&operation, &control, 0.12, false),
+        Some(AssetAppCommand::SetCutOperationScalar {
+            definition: operation.definition,
+            operation: operation.operation,
+            field: "circular_through_cut.radius".to_owned(),
+            value: 0.12,
+        })
+    );
+    assert_eq!(
+        inspector::cut_operation_scalar_command(&operation, &control, 3.5, false),
+        Some(AssetAppCommand::SetCutOperationScalar {
+            definition: operation.definition,
+            operation: operation.operation,
+            field: "circular_through_cut.radius".to_owned(),
+            value: 2.0,
+        })
+    );
+    assert_eq!(
+        inspector::cut_operation_scalar_command(&operation, &control, 0.12, true),
+        None
+    );
+    assert_eq!(
+        inspector::cut_operation_remove_command(&operation),
+        AssetAppCommand::RemoveCutOperation {
+            definition: operation.definition,
+            operation: operation.operation,
+        }
+    );
+}
+
+#[test]
 fn viewport_overlay_labels_include_modeling_overlays_only() {
     let overlay = asset_viewport::AssetViewportOverlay {
         selected_part_name: Some("Shade".to_owned()),
@@ -364,6 +411,26 @@ fn optional_part(
         socket_count: 0,
         region_count: 1,
         warning_count,
+    }
+}
+
+fn cut_operation() -> AssetCutOperation {
+    AssetCutOperation {
+        definition: PartDefinitionId(2),
+        part: PartInstanceId(2),
+        operation: OperationId(42),
+        label: "Circular opening 42".to_owned(),
+        kind: AssetCutOperationKind::CircularOpening,
+        controls: vec![AssetCutControl {
+            field: "circular_through_cut.radius".to_owned(),
+            label: "Radius".to_owned(),
+            value: 0.08,
+            minimum: 0.01,
+            maximum: 2.0,
+            step: 0.005,
+            topology_changing: false,
+        }],
+        selected: true,
     }
 }
 

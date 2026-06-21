@@ -2,12 +2,15 @@
 
 use std::collections::BTreeMap;
 
-use shape_asset::{AssetRecipe, ParameterDescriptor, enumerate_parameters, get_scalar};
+use shape_asset::{
+    AssetRecipe, ModelingOperationSpec, ParameterDescriptor, enumerate_parameters, get_scalar,
+};
 
 use crate::asset::{
-    AssetAppState, AssetCandidate, AssetCandidateEdit, AssetHistoryRevision, AssetJobProgress,
-    AssetParameter, AssetParameterGroup, AssetPart, AssetUiJobKind, AssetUiState,
-    AssetValidationMessage, AssetValidationState, GeneratedPartKind, ParameterId, PartDefinitionId,
+    AssetAppState, AssetCandidate, AssetCandidateEdit, AssetCutControl, AssetCutOperation,
+    AssetCutOperationKind, AssetHistoryRevision, AssetJobProgress, AssetParameter,
+    AssetParameterGroup, AssetPart, AssetUiJobKind, AssetUiState, AssetValidationMessage,
+    AssetValidationState, GeneratedPartKind, OperationId, ParameterId, PartDefinitionId,
     PartInstanceId,
 };
 use shape_search::asset::AssetCandidateEditKind;
@@ -19,8 +22,14 @@ use super::state::{AssetAppIssue, AssetCandidateSlot};
 pub(crate) fn build_asset_ui_state(state: &AssetAppState, wireframe: bool) -> AssetUiState {
     let mut ui_state = AssetUiState::empty(state.recipe.title.clone());
     ui_state.selected_part = state.selected_part_instance;
+    ui_state.selected_cut_operation = state.selected_cut_operation;
     ui_state.parts = parts_for_recipe(&state.recipe, &state.validation_issues);
     ui_state.parameters = parameters_for_recipe(&state.recipe);
+    ui_state.cut_operations = cut_operations_for_recipe(
+        &state.recipe,
+        state.selected_part_instance,
+        state.selected_cut_operation,
+    );
     ui_state.candidates = candidates_for_state(state);
     ui_state.history = history_for_state(state);
     ui_state.active_job = active_job_for_state(state);
@@ -70,6 +79,289 @@ fn parameters_for_recipe(recipe: &AssetRecipe) -> Vec<AssetParameter> {
         .into_iter()
         .filter_map(|parameter| parameter_for_recipe(recipe, parameter))
         .collect()
+}
+
+fn cut_operations_for_recipe(
+    recipe: &AssetRecipe,
+    selected_part: Option<PartInstanceId>,
+    selected_operation: Option<OperationId>,
+) -> Vec<AssetCutOperation> {
+    let Some(part_id) = selected_part else {
+        return Vec::new();
+    };
+    let Some(part) = recipe.instances.get(&part_id) else {
+        return Vec::new();
+    };
+    let Some(definition) = recipe.definitions.get(&part.definition) else {
+        return Vec::new();
+    };
+
+    definition
+        .geometry
+        .operations
+        .iter()
+        .filter_map(|operation| {
+            cut_operation_for_spec(definition.id, part_id, operation, selected_operation)
+        })
+        .collect()
+}
+
+fn cut_operation_for_spec(
+    definition: PartDefinitionId,
+    part: PartInstanceId,
+    operation: &ModelingOperationSpec,
+    selected_operation: Option<OperationId>,
+) -> Option<AssetCutOperation> {
+    let operation_id = operation.operation_id();
+    let (kind, controls) = match operation {
+        ModelingOperationSpec::RecessedPanelCut {
+            center,
+            size,
+            depth,
+            corner_radius,
+            rim_width,
+            corner_segments,
+            ..
+        } => (
+            AssetCutOperationKind::RecessedPanel,
+            vec![
+                cut_control(
+                    "recessed_panel_cut.center.x",
+                    "Position X",
+                    center[0],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.center.y",
+                    "Position Y",
+                    center[1],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.size.x",
+                    "Width",
+                    size[0],
+                    0.05,
+                    4.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.size.y",
+                    "Height",
+                    size[1],
+                    0.05,
+                    4.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.depth",
+                    "Depth",
+                    *depth,
+                    0.005,
+                    1.0,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.rim_width",
+                    "Rim Width",
+                    *rim_width,
+                    0.0,
+                    0.5,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.corner_radius",
+                    "Corner Radius",
+                    *corner_radius,
+                    0.0,
+                    1.0,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "recessed_panel_cut.corner_segments",
+                    "Corner Resolution",
+                    *corner_segments as f32,
+                    1.0,
+                    16.0,
+                    1.0,
+                    true,
+                ),
+            ],
+        ),
+        ModelingOperationSpec::RectangularThroughCut {
+            center,
+            size,
+            corner_radius,
+            rim_width,
+            corner_segments,
+            ..
+        } => (
+            AssetCutOperationKind::RectangularOpening,
+            vec![
+                cut_control(
+                    "rectangular_through_cut.center.x",
+                    "Position X",
+                    center[0],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.center.y",
+                    "Position Y",
+                    center[1],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.size.x",
+                    "Width",
+                    size[0],
+                    0.05,
+                    4.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.size.y",
+                    "Height",
+                    size[1],
+                    0.05,
+                    4.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.rim_width",
+                    "Rim Width",
+                    *rim_width,
+                    0.0,
+                    0.5,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.corner_radius",
+                    "Corner Radius",
+                    *corner_radius,
+                    0.0,
+                    1.0,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "rectangular_through_cut.corner_segments",
+                    "Corner Resolution",
+                    *corner_segments as f32,
+                    1.0,
+                    16.0,
+                    1.0,
+                    true,
+                ),
+            ],
+        ),
+        ModelingOperationSpec::CircularThroughCut {
+            center,
+            radius,
+            radial_segments,
+            rim_width,
+            ..
+        } => (
+            AssetCutOperationKind::CircularOpening,
+            vec![
+                cut_control(
+                    "circular_through_cut.center.x",
+                    "Position X",
+                    center[0],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "circular_through_cut.center.y",
+                    "Position Y",
+                    center[1],
+                    -2.0,
+                    2.0,
+                    0.01,
+                    false,
+                ),
+                cut_control(
+                    "circular_through_cut.radius",
+                    "Radius",
+                    *radius,
+                    0.01,
+                    2.0,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "circular_through_cut.rim_width",
+                    "Rim Width",
+                    *rim_width,
+                    0.0,
+                    0.5,
+                    0.005,
+                    false,
+                ),
+                cut_control(
+                    "circular_through_cut.radial_segments",
+                    "Roundness",
+                    *radial_segments as f32,
+                    6.0,
+                    48.0,
+                    1.0,
+                    true,
+                ),
+            ],
+        ),
+        _ => return None,
+    };
+
+    Some(AssetCutOperation {
+        definition,
+        part,
+        operation: operation_id,
+        label: format!("{} {}", kind.label(), operation_id.0),
+        kind,
+        controls,
+        selected: selected_operation == Some(operation_id),
+    })
+}
+
+fn cut_control(
+    field: &str,
+    label: &str,
+    value: f32,
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+    topology_changing: bool,
+) -> AssetCutControl {
+    AssetCutControl {
+        field: field.to_owned(),
+        label: label.to_owned(),
+        value,
+        minimum,
+        maximum,
+        step,
+        topology_changing,
+    }
 }
 
 fn parameter_for_recipe(
