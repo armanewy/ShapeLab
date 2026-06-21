@@ -10,9 +10,10 @@ use crate::asset::{
     AssetValidationMessage, AssetValidationState, GeneratedPartKind, ParameterId, PartDefinitionId,
     PartInstanceId,
 };
+use shape_search::asset::AssetCandidateEditKind;
 
 use super::jobs::AssetJobSlot;
-use super::state::AssetAppIssue;
+use super::state::{AssetAppIssue, AssetCandidateSlot};
 
 /// Build the complete UI DTO consumed by asset panels.
 pub(crate) fn build_asset_ui_state(state: &AssetAppState, wireframe: bool) -> AssetUiState {
@@ -101,48 +102,51 @@ fn candidates_for_state(state: &AssetAppState) -> Vec<AssetCandidate> {
     state
         .candidate_slots
         .iter()
-        .map(|slot| {
-            let edits = slot
-                .candidate
-                .changes
-                .iter()
-                .map(candidate_edit_from_change)
-                .collect::<Vec<_>>();
-            let structural_changes = slot
-                .candidate
-                .changes
-                .iter()
-                .filter(|change| change.structural)
-                .count();
-            let numeric_changes = edits.len().saturating_sub(structural_changes);
-            AssetCandidate {
-                id: slot.candidate.id,
-                title: slot.candidate.label.clone(),
-                structural_changes,
-                numeric_changes,
-                edits,
-                validation: slot
-                    .preview
-                    .as_ref()
-                    .map(|preview| {
-                        if preview.validation_summary.valid {
-                            AssetValidationState::Valid
-                        } else {
-                            AssetValidationState::Error(format!(
-                                "{} validation issue(s)",
-                                preview.validation_summary.issue_count
-                            ))
-                        }
-                    })
-                    .or_else(|| {
-                        slot.preview_failure
-                            .as_ref()
-                            .map(|message| AssetValidationState::Error(message.clone()))
-                    })
-                    .unwrap_or(AssetValidationState::Pending),
-            }
-        })
+        .map(candidate_for_slot)
         .collect()
+}
+
+#[must_use]
+pub(crate) fn candidate_for_slot(slot: &AssetCandidateSlot) -> AssetCandidate {
+    let edits = slot
+        .candidate
+        .changes
+        .iter()
+        .map(candidate_edit_from_change)
+        .collect::<Vec<_>>();
+    let structural_changes = slot
+        .candidate
+        .changes
+        .iter()
+        .filter(|change| change.structural)
+        .count();
+    let numeric_changes = edits.len().saturating_sub(structural_changes);
+    AssetCandidate {
+        id: slot.candidate.id,
+        title: slot.candidate.label.clone(),
+        structural_changes,
+        numeric_changes,
+        edits,
+        validation: slot
+            .preview
+            .as_ref()
+            .map(|preview| {
+                if preview.validation_summary.valid {
+                    AssetValidationState::Valid
+                } else {
+                    AssetValidationState::Error(format!(
+                        "{} validation issue(s)",
+                        preview.validation_summary.issue_count
+                    ))
+                }
+            })
+            .or_else(|| {
+                slot.preview_failure
+                    .as_ref()
+                    .map(|message| AssetValidationState::Error(message.clone()))
+            })
+            .unwrap_or(AssetValidationState::Pending),
+    }
 }
 
 fn history_for_state(state: &AssetAppState) -> Vec<AssetHistoryRevision> {
@@ -226,12 +230,32 @@ fn candidate_edit_from_change(change: &super::jobs::AssetCandidateChange) -> Ass
 }
 
 fn change_label(change: &super::jobs::AssetCandidateChange) -> String {
-    match (&change.before, &change.after) {
-        (Some(before), Some(after)) if parse_scalar_summary(before).is_none() => {
-            format!("{}: {before} -> {after}", change.label)
-        }
-        (None, Some(after)) => format!("{}: {after}", change.label),
-        _ => change.label.clone(),
+    if change
+        .before
+        .as_deref()
+        .and_then(parse_scalar_summary)
+        .is_some()
+        || change
+            .after
+            .as_deref()
+            .and_then(parse_scalar_summary)
+            .is_some()
+    {
+        return change.label.clone();
+    }
+
+    match change.kind {
+        AssetCandidateEditKind::Parameter => change.label.clone(),
+        AssetCandidateEditKind::Transform => "placement".to_owned(),
+        AssetCandidateEditKind::GeneratorDimension => "proportions".to_owned(),
+        AssetCandidateEditKind::Bevel => "edge softness".to_owned(),
+        AssetCandidateEditKind::Sweep => "profile curve".to_owned(),
+        AssetCandidateEditKind::Lathe => "turned profile".to_owned(),
+        AssetCandidateEditKind::ArrayCount => "repeat count".to_owned(),
+        AssetCandidateEditKind::ArraySpacing => "spacing".to_owned(),
+        AssetCandidateEditKind::OptionalPart => "presence".to_owned(),
+        AssetCandidateEditKind::Replacement => "part choice".to_owned(),
+        AssetCandidateEditKind::DetailDensity => "detail density".to_owned(),
     }
 }
 

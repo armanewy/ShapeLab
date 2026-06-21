@@ -16,7 +16,7 @@ const MIN_ZOOM_FACTOR: f32 = 0.2;
 const MAX_ZOOM_FACTOR: f32 = 5.0;
 const MIN_RENDER_SIDE: u32 = 32;
 const MAX_FULL_RENDER_SIDE: u32 = 2048;
-const MAX_INTERACTIVE_RENDER_SIDE: u32 = 384;
+const MAX_INTERACTIVE_RENDER_SIDE: u32 = 768;
 const DEFAULT_INTERACTIVE_INTERVAL: Duration = Duration::from_millis(90);
 const DEFAULT_RESIZE_DEBOUNCE: Duration = Duration::from_millis(180);
 

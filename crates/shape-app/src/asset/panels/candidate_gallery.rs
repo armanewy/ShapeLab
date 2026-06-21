@@ -209,7 +209,7 @@ fn edit_line(edit: &AssetCandidateEdit) -> String {
                 "decreases"
             };
             format!(
-                "{} {} {}: {} -> {}",
+                "{}: {} {} {} -> {}",
                 edit.subject,
                 edit.label,
                 direction,
@@ -217,8 +217,8 @@ fn edit_line(edit: &AssetCandidateEdit) -> String {
                 format_scalar(after)
             )
         }
-        _ if edit.structural => format!("{} {}", edit.subject, edit.label),
-        _ => format!("{} {}", edit.subject, edit.label),
+        _ if edit.structural => format!("{}: {}", edit.subject, edit.label),
+        _ => format!("{}: {} changed", edit.subject, edit.label),
     }
 }
 

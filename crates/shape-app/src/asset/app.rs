@@ -15,7 +15,7 @@ use shape_render::{RenderSettings, RenderedImage};
 use crate::asset::io::{ASSET_PROJECT_DIALOG_LABEL, suggested_asset_project_file_name};
 use crate::asset::panels::{candidate_gallery, history, inspector, part_tree};
 use crate::asset::view_model::build_asset_ui_state;
-use crate::asset::viewport::{AssetViewportOverlay, show_asset_viewport};
+use crate::asset::viewport::{AssetViewportOverlay, NormalizedRect, show_asset_viewport};
 use crate::asset::{
     AssetAppCommand, AssetAppEffect, AssetAppState, AssetCandidateId, AssetJobEvent,
     AssetJobRequest, AssetTemplate, run_asset_job,
@@ -52,7 +52,7 @@ impl Default for AssetModelingLabApp {
             current_texture: None,
             candidate_textures: BTreeMap::new(),
             viewport_state: ViewportInteractionState::default(),
-            render_settings: RenderSettings::default(),
+            render_settings: asset_render_settings(),
             wireframe: false,
             show_template_picker: true,
             status: VecDeque::from(["Choose a template to begin Asset Modeling Lab.".to_owned()]),
@@ -81,8 +81,7 @@ impl AssetModelingLabApp {
             .show_inside(ui, |ui| {
                 if let Some(state) = &self.state {
                     let ui_state = build_asset_ui_state(state, self.wireframe);
-                    commands.extend(candidate_gallery::show(ui, &ui_state));
-                    self.show_candidate_thumbnail_strip(ui, state);
+                    commands.extend(self.show_candidate_directions(ui, state, &ui_state));
                 } else {
                     ui.heading("Directions");
                     ui.weak("Template required");
@@ -272,31 +271,114 @@ impl AssetModelingLabApp {
         ui.small(format!("{} topology lock(s)", state.topology_locks.len()));
     }
 
-    fn show_candidate_thumbnail_strip(&self, ui: &mut egui::Ui, state: &AssetAppState) {
-        if state.candidate_slots.is_empty() {
-            return;
+    fn show_candidate_directions(
+        &self,
+        ui: &mut egui::Ui,
+        state: &AssetAppState,
+        ui_state: &crate::asset::AssetUiState,
+    ) -> Vec<AssetAppCommand> {
+        let mut commands = Vec::new();
+        ui.heading("Directions");
+        if let Some(progress) = candidate_gallery::generation_progress_label(ui_state) {
+            ui.label(progress);
         }
-        ui.separator();
         egui::ScrollArea::horizontal()
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    self.render_current_direction_card(ui, ui_state);
                     for slot in &state.candidate_slots {
-                        ui.vertical(|ui| {
-                            ui.small(format!("Candidate {}", slot.slot + 1));
-                            if let Some(texture) = self.candidate_textures.get(&slot.candidate.id) {
-                                ui.image((texture.id(), egui::vec2(160.0, 110.0)));
-                            } else {
-                                ui.allocate_ui(egui::vec2(160.0, 110.0), |ui| {
-                                    ui.centered_and_justified(|ui| {
-                                        ui.weak("Rendering");
-                                    });
-                                });
-                            }
-                        });
+                        commands.extend(self.render_candidate_direction_card(ui, slot));
+                    }
+                    for index in
+                        state.candidate_slots.len()..candidate_gallery::VISIBLE_CANDIDATE_SLOTS
+                    {
+                        Self::render_empty_direction_card(ui, index, ui_state.active_job.is_some());
                     }
                 });
             });
+        commands
+    }
+
+    fn render_current_direction_card(&self, ui: &mut egui::Ui, state: &crate::asset::AssetUiState) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_width(250.0);
+            ui.label(egui::RichText::new("Current asset").strong());
+            if let Some(texture) = &self.current_texture {
+                ui.image((texture.id(), egui::vec2(230.0, 150.0)));
+            }
+            ui.small(format!("{} part(s)", state.parts.len()));
+            if state.validation.is_empty() {
+                ui.small("No validation warnings");
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(226, 164, 72),
+                    format!("{} validation note(s)", state.validation.len()),
+                );
+            }
+        });
+    }
+
+    fn render_candidate_direction_card(
+        &self,
+        ui: &mut egui::Ui,
+        slot: &crate::asset::state::AssetCandidateSlot,
+    ) -> Vec<AssetAppCommand> {
+        let mut commands = Vec::new();
+        let candidate = crate::asset::view_model::candidate_for_slot(slot);
+        let summary = candidate_gallery::candidate_summary(&candidate);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_width(270.0);
+            ui.label(egui::RichText::new(format!("Direction {}", slot.slot + 1)).strong());
+            if let Some(texture) = self.candidate_textures.get(&slot.candidate.id) {
+                ui.image((texture.id(), egui::vec2(250.0, 160.0)));
+            } else {
+                ui.allocate_ui(egui::vec2(250.0, 160.0), |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.weak("Rendering preview");
+                    });
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.small(summary.structural_summary);
+                ui.small("·");
+                ui.small(summary.numeric_summary);
+                ui.small("·");
+                ui.small(format!("Validation: {}", summary.validation));
+            });
+            for line in candidate_gallery::candidate_edit_lines(&candidate, 3) {
+                ui.small(line);
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Choose").clicked() {
+                    commands.push(candidate_gallery::accept_candidate_command(
+                        slot.candidate.id,
+                    ));
+                }
+                if ui.small_button("Dismiss").clicked() {
+                    commands.push(candidate_gallery::reject_candidate_command(
+                        slot.candidate.id,
+                    ));
+                }
+            });
+        });
+        commands
+    }
+
+    fn render_empty_direction_card(ui: &mut egui::Ui, index: usize, active: bool) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_width(220.0);
+            ui.label(egui::RichText::new(format!("Direction {}", index + 1)).strong());
+            ui.allocate_ui(egui::vec2(200.0, 120.0), |ui| {
+                ui.centered_and_justified(|ui| {
+                    if active {
+                        ui.weak("Generating");
+                    } else {
+                        ui.weak("No direction yet");
+                    }
+                });
+            });
+        });
     }
 
     fn show_status(&self, ui: &mut egui::Ui) {
@@ -563,6 +645,7 @@ impl AssetModelingLabApp {
         AssetViewportOverlay {
             title: state.recipe.title.clone(),
             selected_part_name,
+            selected_part_bounds: selected_part_bounds_overlay(state),
             validation_marker: if ui_state.validation.is_empty() {
                 Some(crate::asset::AssetValidationState::Valid)
             } else {
@@ -730,9 +813,125 @@ fn export_status_message(event: &AssetJobEvent) -> Option<String> {
 
 fn candidate_render_settings(settings: &RenderSettings) -> RenderSettings {
     let mut candidate = settings.clone();
-    candidate.width = candidate.width.clamp(180, 320);
-    candidate.height = candidate.height.clamp(140, 240);
+    candidate.width = candidate.width.clamp(260, 420);
+    candidate.height = candidate.height.clamp(180, 300);
     candidate
+}
+
+fn asset_render_settings() -> RenderSettings {
+    RenderSettings {
+        background: [0, 0, 0, 0],
+        ..RenderSettings::default()
+    }
+}
+
+fn selected_part_bounds_overlay(state: &AssetAppState) -> Option<NormalizedRect> {
+    let selected = state.selected_part_instance?;
+    let artifact = state.current_artifact.as_ref()?;
+    let part = artifact
+        .compiled_parts
+        .iter()
+        .find(|part| part.instance_id == selected)
+        .or_else(|| {
+            artifact
+                .compiled_parts
+                .iter()
+                .find(|part| part.prototype_instance_id == Some(selected))
+        })?;
+    if part.triangulated_world.mesh.positions.is_empty() {
+        return None;
+    }
+
+    let aspect_ratio = state
+        .current_preview
+        .as_ref()
+        .and_then(|preview| {
+            (preview.image.height > 0)
+                .then(|| preview.image.width as f32 / preview.image.height as f32)
+        })
+        .filter(|aspect| aspect.is_finite() && *aspect > 0.0)
+        .unwrap_or(1.0);
+    let camera = state.current_camera.clamped();
+    let yaw = camera.yaw_degrees.to_radians();
+    let pitch = camera.pitch_degrees.to_radians();
+    let pitch_cos = pitch.cos();
+    let target = [camera.target.x, camera.target.y, camera.target.z];
+    let eye = [
+        target[0] + pitch_cos * yaw.sin() * camera.distance,
+        target[1] + pitch.sin() * camera.distance,
+        target[2] + pitch_cos * yaw.cos() * camera.distance,
+    ];
+    let forward = normalize3(sub3(target, eye), [0.0, 0.0, -1.0]);
+    let right = normalize3(cross3(forward, [0.0, 1.0, 0.0]), [1.0, 0.0, 0.0]);
+    let up = normalize3(cross3(right, forward), [0.0, 1.0, 0.0]);
+    let half_fov_tan = (camera.vertical_fov_degrees.to_radians() * 0.5).tan();
+
+    let mut min = [f32::INFINITY, f32::INFINITY];
+    let mut max = [f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let mut projected_any = false;
+    for position in &part.triangulated_world.mesh.positions {
+        let point = [position[0], position[1], position[2]];
+        let delta = sub3(point, eye);
+        let depth = dot3(delta, forward);
+        if !depth.is_finite() || depth <= 0.01 {
+            continue;
+        }
+        let half_height = depth * half_fov_tan;
+        let half_width = half_height * aspect_ratio;
+        if half_height <= f32::EPSILON || half_width <= f32::EPSILON {
+            continue;
+        }
+        let x = 0.5 + dot3(delta, right) / (half_width * 2.0);
+        let y = 0.5 - dot3(delta, up) / (half_height * 2.0);
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        min[0] = min[0].min(x);
+        min[1] = min[1].min(y);
+        max[0] = max[0].max(x);
+        max[1] = max[1].max(y);
+        projected_any = true;
+    }
+    if !projected_any {
+        return None;
+    }
+
+    let padding = 0.018;
+    Some(NormalizedRect {
+        min: [
+            (min[0] - padding).clamp(0.0, 1.0),
+            (min[1] - padding).clamp(0.0, 1.0),
+        ],
+        max: [
+            (max[0] + padding).clamp(0.0, 1.0),
+            (max[1] + padding).clamp(0.0, 1.0),
+        ],
+    })
+}
+
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize3(value: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {
+    let length_squared = dot3(value, value);
+    if !length_squared.is_finite() || length_squared <= f32::EPSILON {
+        return fallback;
+    }
+    let scale = length_squared.sqrt().recip();
+    [value[0] * scale, value[1] * scale, value[2] * scale]
 }
 
 fn apply_viewport_render_size(settings: &mut RenderSettings, request: &ViewportRenderRequest) {

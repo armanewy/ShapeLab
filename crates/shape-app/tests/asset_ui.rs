@@ -148,9 +148,9 @@ fn candidate_summary_and_progress_are_stable() {
     assert_eq!(
         summary.edit_lines,
         vec![
-            "Shade width increases: 1.00 -> 1.25",
-            "Switch on",
-            "Socket move decreases: 3.00 -> 2.00"
+            "Shade: width increases 1.00 -> 1.25",
+            "Switch: on",
+            "Socket: move decreases 3.00 -> 2.00"
         ]
     );
     assert_eq!(
