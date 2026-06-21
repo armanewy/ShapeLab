@@ -8,6 +8,8 @@ rust-version.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+shape-asset.workspace = true
+shape-compile.workspace = true
 shape-core.workspace = true
 shape-search.workspace = true
 thiserror.workspace = true

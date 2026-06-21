@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod asset;
 mod commands;
 mod jobs;
 mod panels;
