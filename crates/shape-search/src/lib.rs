@@ -2,6 +2,8 @@
 
 //! Deterministic candidate search.
 
+pub mod asset;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use rand::{RngExt, SeedableRng};
