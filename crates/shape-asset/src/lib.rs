@@ -15,6 +15,12 @@ use glam::{EulerRot, Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod edits;
+pub mod parameters;
+
+pub use edits::*;
+pub use parameters::*;
+
 /// Current schema version for asset recipes.
 pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 1;
 
@@ -176,6 +182,15 @@ pub struct AssetRecipe {
     pub parameters: BTreeMap<ParameterId, ParameterDescriptor>,
     /// Locked parameters that mutation programs must not edit.
     pub locks: BTreeSet<ParameterId>,
+    /// Locked instances that mutation programs must not edit directly.
+    #[serde(default)]
+    pub instance_locks: BTreeSet<PartInstanceId>,
+    /// Locked instance subtrees. The root and every descendant are protected.
+    #[serde(default)]
+    pub subtree_locks: BTreeSet<PartInstanceId>,
+    /// Locked part definition topology. Shape-preserving value edits remain valid.
+    #[serde(default)]
+    pub topology_locks: BTreeSet<PartDefinitionId>,
     /// Asset-level constraints.
     pub constraints: Vec<AssetConstraint>,
     /// Authored variation hints that do not affect hierarchy or generation semantics.
@@ -198,6 +213,9 @@ impl AssetRecipe {
             root_instances: Vec::new(),
             parameters: BTreeMap::new(),
             locks: BTreeSet::new(),
+            instance_locks: BTreeSet::new(),
+            subtree_locks: BTreeSet::new(),
+            topology_locks: BTreeSet::new(),
             constraints: Vec::new(),
             variation: AuthoredVariationMetadata::default(),
             next_ids: AssetIdCounters::default(),
@@ -677,6 +695,68 @@ pub enum AssetConstraint {
     },
 }
 
+/// Editable generator dimensions and segment counts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GeneratorDimensionEdit {
+    /// Replace rounded-box half extents.
+    RoundedBoxHalfExtents([f32; 3]),
+    /// Replace rounded-box corner radius.
+    RoundedBoxRadius(f32),
+    /// Replace cylinder radius.
+    CylinderRadius(f32),
+    /// Replace cylinder height.
+    CylinderHeight(f32),
+    /// Replace cylinder radial segment count.
+    CylinderRadialSegments(u32),
+    /// Replace frustum bottom radius.
+    FrustumBottomRadius(f32),
+    /// Replace frustum top radius.
+    FrustumTopRadius(f32),
+    /// Replace frustum height.
+    FrustumHeight(f32),
+    /// Replace frustum radial segment count.
+    FrustumRadialSegments(u32),
+    /// Replace plate size.
+    PlateSize([f32; 2]),
+    /// Replace plate thickness.
+    PlateThickness(f32),
+    /// Replace lathe segment count.
+    LatheSegments(u32),
+}
+
+impl GeneratorDimensionEdit {
+    /// Return true when this edit can change generated topology.
+    #[must_use]
+    pub fn topology_changing(&self) -> bool {
+        matches!(
+            self,
+            Self::CylinderRadialSegments(_)
+                | Self::FrustumRadialSegments(_)
+                | Self::LatheSegments(_)
+        )
+    }
+}
+
+/// Editable spacing fields on array operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ArraySpacingEdit {
+    /// Replace linear array offset.
+    LinearOffset([f32; 3]),
+    /// Replace radial array axis.
+    RadialAxis([f32; 3]),
+    /// Replace radial array total angle in degrees.
+    RadialAngleDegrees(f32),
+}
+
+/// Plane used when mirroring an instance into a new instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MirrorInstanceSpec {
+    /// Mirror plane normal.
+    pub plane_normal: [f32; 3],
+    /// Signed offset from the asset origin along the normal.
+    pub plane_offset: f32,
+}
+
 /// Structural or scalar asset edit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AssetEdit {
@@ -701,6 +781,65 @@ pub enum AssetEdit {
         /// New enabled state.
         enabled: bool,
     },
+    /// Enable or disable an authored optional part instance.
+    SetOptionalPartEnabled {
+        /// Target optional instance.
+        instance: PartInstanceId,
+        /// New enabled state.
+        enabled: bool,
+    },
+    /// Set a generator dimension or segment count.
+    SetGeneratorDimension {
+        /// Definition containing the generator.
+        definition: PartDefinitionId,
+        /// Dimension edit.
+        dimension: GeneratorDimensionEdit,
+    },
+    /// Replace a definition's base geometry source.
+    ReplaceGeometrySource {
+        /// Definition containing the generator.
+        definition: PartDefinitionId,
+        /// Replacement source.
+        source: GeometrySource,
+    },
+    /// Set radius and/or segment count on a bevel operation.
+    SetBevelSettings {
+        /// Definition containing the bevel operation.
+        definition: PartDefinitionId,
+        /// Bevel operation.
+        operation: OperationId,
+        /// Optional radius replacement.
+        radius: Option<f32>,
+        /// Optional segment-count replacement.
+        segments: Option<u32>,
+    },
+    /// Replace one sweep profile point.
+    SetSweepProfilePoint {
+        /// Definition containing the sweep source.
+        definition: PartDefinitionId,
+        /// Profile point index.
+        index: usize,
+        /// Replacement profile point.
+        point: [f32; 2],
+    },
+    /// Replace one sweep path frame.
+    SetSweepPathFrame {
+        /// Definition containing the sweep source.
+        definition: PartDefinitionId,
+        /// Path frame index.
+        index: usize,
+        /// Replacement frame.
+        frame: Frame3,
+    },
+    /// Replace one lathe profile point.
+    SetLatheProfilePoint {
+        /// Definition containing the lathe source.
+        definition: PartDefinitionId,
+        /// Profile point index.
+        index: usize,
+        /// Replacement profile point.
+        point: [f32; 2],
+    },
     /// Add a new instance.
     AddInstance {
         /// Instance to add.
@@ -716,6 +855,13 @@ pub enum AssetEdit {
         /// New definition payload.
         definition: PartDefinition,
     },
+    /// Replace an instance with another definition from a compatible variant group.
+    ReplaceInstanceDefinition {
+        /// Instance to retarget.
+        instance: PartInstanceId,
+        /// Replacement definition.
+        definition: PartDefinitionId,
+    },
     /// Set the count on a deterministic array operation.
     SetArrayCount {
         /// Definition containing the operation.
@@ -724,6 +870,37 @@ pub enum AssetEdit {
         operation: OperationId,
         /// New count.
         count: u32,
+    },
+    /// Set spacing fields on a deterministic array operation.
+    SetArraySpacing {
+        /// Definition containing the operation.
+        definition: PartDefinitionId,
+        /// Array operation.
+        operation: OperationId,
+        /// New spacing field.
+        spacing: ArraySpacingEdit,
+    },
+    /// Duplicate one leaf instance under the same parent.
+    DuplicateInstance {
+        /// Source instance.
+        source: PartInstanceId,
+        /// Stable ID for the duplicated instance.
+        instance: PartInstanceId,
+        /// Optional replacement name.
+        name: Option<String>,
+        /// Optional replacement transform.
+        transform: Option<Transform3>,
+    },
+    /// Mirror one leaf instance into a new instance.
+    MirrorInstance {
+        /// Source instance.
+        source: PartInstanceId,
+        /// Stable ID for the mirrored instance.
+        instance: PartInstanceId,
+        /// Mirror plane.
+        plane: MirrorInstanceSpec,
+        /// Optional replacement name.
+        name: Option<String>,
     },
     /// Attach an instance to a parent socket.
     Attach {
@@ -743,6 +920,34 @@ pub enum AssetEdit {
         parameter: ParameterId,
         /// New lock state.
         locked: bool,
+    },
+    /// Change a part instance lock.
+    SetInstanceLock {
+        /// Target instance.
+        instance: PartInstanceId,
+        /// New lock state.
+        locked: bool,
+    },
+    /// Change a subtree lock.
+    SetSubtreeLock {
+        /// Target subtree root.
+        instance: PartInstanceId,
+        /// New lock state.
+        locked: bool,
+    },
+    /// Change a definition topology lock.
+    SetTopologyLock {
+        /// Target definition.
+        definition: PartDefinitionId,
+        /// New lock state.
+        locked: bool,
+    },
+    /// Request a harmless child order change.
+    ReorderChildInstances {
+        /// Parent instance, or `None` for roots.
+        parent: Option<PartInstanceId>,
+        /// Requested child order.
+        ordered_children: Vec<PartInstanceId>,
     },
 }
 
@@ -819,6 +1024,28 @@ pub enum AssetError {
     /// The edit attempted to mutate a locked parameter.
     #[error("parameter is locked {0:?}")]
     LockedParameter(ParameterId),
+    /// The edit attempted to mutate a locked part instance.
+    #[error("part instance is locked {0:?}")]
+    LockedInstance(PartInstanceId),
+    /// The edit attempted to mutate a part instance inside a locked subtree.
+    #[error("part instance {instance:?} is inside locked subtree {root:?}")]
+    LockedSubtree {
+        /// Locked subtree root.
+        root: PartInstanceId,
+        /// Mutated instance.
+        instance: PartInstanceId,
+    },
+    /// The edit attempted to change locked topology.
+    #[error("topology is locked for definition {0:?}")]
+    LockedTopology(PartDefinitionId),
+    /// The replacement definition is outside the compatible variant group.
+    #[error("incompatible replacement from {from:?} to {to:?}")]
+    IncompatibleReplacement {
+        /// Existing definition.
+        from: PartDefinitionId,
+        /// Requested replacement definition.
+        to: PartDefinitionId,
+    },
     /// An edit cannot be applied to the target.
     #[error("unsupported edit: {0}")]
     UnsupportedEdit(String),
@@ -864,6 +1091,7 @@ pub fn validate_asset_recipe(recipe: &AssetRecipe) -> AssetValidationReport {
     validate_definitions(recipe, &mut report);
     validate_instances(recipe, &mut report);
     validate_parameters(recipe, &mut report);
+    validate_locks(recipe, &mut report);
     validate_constraints(recipe, &mut report);
     validate_variation_metadata(recipe, &mut report);
     validate_next_ids(recipe, &mut report);
@@ -1346,6 +1574,9 @@ fn parameter_is_reflectable(
     if parameter.id != id || !parameter_range_is_valid(parameter) {
         return false;
     }
+    if !parameters::is_beginner_safe_parameter_path(&parameter.path) {
+        return false;
+    }
     let Ok(value) = get_scalar(recipe, &parameter.path) else {
         return false;
     };
@@ -1360,6 +1591,39 @@ fn parameter_range_is_valid(parameter: &ParameterDescriptor) -> bool {
         && parameter.mutation_sigma.is_finite()
         && parameter.mutation_sigma >= 0.0
         && parameter.minimum <= parameter.maximum
+}
+
+fn validate_locks(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    for instance in &recipe.instance_locks {
+        if !recipe.instances.contains_key(instance) {
+            push_issue(
+                report,
+                Some(format!("lock.instance.{}", instance.0)),
+                "unknown_locked_instance",
+                "Locked instance does not exist.",
+            );
+        }
+    }
+    for instance in &recipe.subtree_locks {
+        if !recipe.instances.contains_key(instance) {
+            push_issue(
+                report,
+                Some(format!("lock.subtree.{}", instance.0)),
+                "unknown_locked_subtree",
+                "Locked subtree root does not exist.",
+            );
+        }
+    }
+    for definition in &recipe.topology_locks {
+        if !recipe.definitions.contains_key(definition) {
+            push_issue(
+                report,
+                Some(format!("lock.topology.{}", definition.0)),
+                "unknown_locked_topology",
+                "Locked topology definition does not exist.",
+            );
+        }
+    }
 }
 
 fn validate_constraints(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
@@ -2143,6 +2407,31 @@ fn get_geometry_source_scalar(
             component_value(size, component, path)
         }
         (GeometrySource::Plate { thickness, .. }, "plate", ["thickness"]) => Ok(*thickness),
+        (GeometrySource::Sweep { profile, .. }, "sweep", ["profile", index, component]) => {
+            let index = parse_index(index, path)?;
+            let point = profile
+                .get(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            component_value(point, component, path)
+        }
+        (
+            GeometrySource::Sweep { path: frames, .. },
+            "sweep",
+            ["path", index, frame_field, component],
+        ) => {
+            let index = parse_index(index, path)?;
+            let frame = frames
+                .get(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            get_frame_scalar(frame, frame_field, component, path)
+        }
+        (GeometrySource::Lathe { profile, .. }, "lathe", ["profile", index, component]) => {
+            let index = parse_index(index, path)?;
+            let point = profile
+                .get(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            component_value(point, component, path)
+        }
         (GeometrySource::Lathe { segments, .. }, "lathe", ["segments"]) => Ok(*segments as f32),
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
     }
@@ -2165,9 +2454,20 @@ fn get_operation_scalar(
         (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {
             Ok(*count as f32)
         }
+        (
+            ModelingOperationSpec::LinearArray { offset, .. },
+            ["linear_array", "offset", component],
+        ) => component_value(offset, component, path),
         (ModelingOperationSpec::RadialArray { count, .. }, ["radial_array", "count"]) => {
             Ok(*count as f32)
         }
+        (ModelingOperationSpec::RadialArray { axis, .. }, ["radial_array", "axis", component]) => {
+            component_value(axis, component, path)
+        }
+        (
+            ModelingOperationSpec::RadialArray { angle_degrees, .. },
+            ["radial_array", "angle_degrees"],
+        ) => Ok(*angle_degrees),
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
     }
 }
@@ -2185,6 +2485,21 @@ fn get_transform_scalar(
             component_value(&transform.rotation_degrees, component, path)
         }
         ["transform", "scale", component] => component_value(&transform.scale, component, path),
+        _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
+    }
+}
+
+fn get_frame_scalar(
+    frame: &Frame3,
+    frame_field: &str,
+    component: &str,
+    path: &str,
+) -> Result<f32, AssetError> {
+    match frame_field {
+        "origin" => component_value(&frame.origin, component, path),
+        "x_axis" => component_value(&frame.x_axis, component, path),
+        "y_axis" => component_value(&frame.y_axis, component, path),
+        "z_axis" => component_value(&frame.z_axis, component, path),
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
     }
 }
@@ -2304,6 +2619,31 @@ fn set_geometry_source_scalar(
             *thickness = value;
             Ok(())
         }
+        (GeometrySource::Sweep { profile, .. }, "sweep", ["profile", index, component]) => {
+            let index = parse_index(index, path)?;
+            let point = profile
+                .get_mut(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            set_component_value(point, component, path, value)
+        }
+        (
+            GeometrySource::Sweep { path: frames, .. },
+            "sweep",
+            ["path", index, frame_field, component],
+        ) => {
+            let index = parse_index(index, path)?;
+            let frame = frames
+                .get_mut(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            set_frame_scalar(frame, frame_field, component, path, value)
+        }
+        (GeometrySource::Lathe { profile, .. }, "lathe", ["profile", index, component]) => {
+            let index = parse_index(index, path)?;
+            let point = profile
+                .get_mut(index)
+                .ok_or_else(|| AssetError::UnknownScalarPath(path.to_owned()))?;
+            set_component_value(point, component, path, value)
+        }
         (GeometrySource::Lathe { segments, .. }, "lathe", ["segments"]) => {
             *segments = scalar_to_u32(path, value)?;
             Ok(())
@@ -2347,8 +2687,22 @@ fn set_operation_scalar(
             *count = scalar_to_u32(path, value)?;
             Ok(())
         }
+        (
+            ModelingOperationSpec::LinearArray { offset, .. },
+            ["linear_array", "offset", component],
+        ) => set_component_value(offset, component, path, value),
         (ModelingOperationSpec::RadialArray { count, .. }, ["radial_array", "count"]) => {
             *count = scalar_to_u32(path, value)?;
+            Ok(())
+        }
+        (ModelingOperationSpec::RadialArray { axis, .. }, ["radial_array", "axis", component]) => {
+            set_component_value(axis, component, path, value)
+        }
+        (
+            ModelingOperationSpec::RadialArray { angle_degrees, .. },
+            ["radial_array", "angle_degrees"],
+        ) => {
+            *angle_degrees = value;
             Ok(())
         }
         _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
@@ -2375,6 +2729,22 @@ fn set_transform_scalar(
     }
 }
 
+fn set_frame_scalar(
+    frame: &mut Frame3,
+    frame_field: &str,
+    component: &str,
+    path: &str,
+    value: f32,
+) -> Result<(), AssetError> {
+    match frame_field {
+        "origin" => set_component_value(&mut frame.origin, component, path, value),
+        "x_axis" => set_component_value(&mut frame.x_axis, component, path, value),
+        "y_axis" => set_component_value(&mut frame.y_axis, component, path, value),
+        "z_axis" => set_component_value(&mut frame.z_axis, component, path, value),
+        _ => Err(AssetError::UnknownScalarPath(path.to_owned())),
+    }
+}
+
 fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetError> {
     match edit {
         AssetEdit::SetScalar { parameter, value } => {
@@ -2397,6 +2767,14 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                     reason: "value is outside the parameter range",
                 });
             }
+            if let Some(definition) = edits::definition_id_from_scalar_path(&descriptor.path)
+                && descriptor.topology_changing
+            {
+                edits::ensure_topology_editable(recipe, definition)?;
+            }
+            if let Some(instance) = edits::instance_id_from_scalar_path(&descriptor.path) {
+                edits::ensure_instance_editable(recipe, instance)?;
+            }
             let path = descriptor.path.clone();
             set_scalar(recipe, path, *value)
         }
@@ -2404,6 +2782,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             instance,
             transform,
         } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
             let target = recipe
                 .instances
                 .get_mut(instance)
@@ -2412,6 +2791,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             Ok(())
         }
         AssetEdit::SetEnabled { instance, enabled } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
             let target = recipe
                 .instances
                 .get_mut(instance)
@@ -2419,12 +2799,63 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             target.enabled = *enabled;
             Ok(())
         }
+        AssetEdit::SetOptionalPartEnabled { instance, enabled } => {
+            if !recipe.variation.optional_instances.contains(instance) {
+                return Err(AssetError::UnsupportedEdit(format!(
+                    "instance {instance:?} is not optional"
+                )));
+            }
+            edits::ensure_instance_editable(recipe, *instance)?;
+            let target = recipe
+                .instances
+                .get_mut(instance)
+                .ok_or(AssetError::UnknownInstance(*instance))?;
+            target.enabled = *enabled;
+            Ok(())
+        }
+        AssetEdit::SetGeneratorDimension {
+            definition,
+            dimension,
+        } => set_generator_dimension(recipe, *definition, dimension),
+        AssetEdit::ReplaceGeometrySource { definition, source } => {
+            edits::ensure_topology_editable(recipe, *definition)?;
+            let target = recipe
+                .definitions
+                .get_mut(definition)
+                .ok_or(AssetError::UnknownDefinition(*definition))?;
+            target.geometry.source = source.clone();
+            Ok(())
+        }
+        AssetEdit::SetBevelSettings {
+            definition,
+            operation,
+            radius,
+            segments,
+        } => set_bevel_settings(recipe, *definition, *operation, *radius, *segments),
+        AssetEdit::SetSweepProfilePoint {
+            definition,
+            index,
+            point,
+        } => set_sweep_profile_point(recipe, *definition, *index, *point),
+        AssetEdit::SetSweepPathFrame {
+            definition,
+            index,
+            frame,
+        } => set_sweep_path_frame(recipe, *definition, *index, frame),
+        AssetEdit::SetLatheProfilePoint {
+            definition,
+            index,
+            point,
+        } => set_lathe_profile_point(recipe, *definition, *index, *point),
         AssetEdit::AddInstance { instance } => {
             if recipe.instances.contains_key(&instance.id) {
                 return Err(AssetError::UnsupportedEdit(format!(
                     "duplicate instance {:?}",
                     instance.id
                 )));
+            }
+            if let Some(parent) = instance.parent {
+                edits::ensure_instance_editable(recipe, parent)?;
             }
             recipe.instances.insert(instance.id, instance.clone());
             if instance.parent.is_none() {
@@ -2434,6 +2865,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             Ok(())
         }
         AssetEdit::RemoveInstance { instance } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
             let descendants = descendants_of(recipe, *instance)?;
             if !descendants.is_empty() {
                 return Err(AssetError::UnsupportedEdit(format!(
@@ -2449,8 +2881,33 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             Ok(())
         }
         AssetEdit::ReplaceDefinition { definition } => {
+            if let Some(existing) = recipe.definitions.get(&definition.id)
+                && edits::definition_topology_signature(existing)
+                    != edits::definition_topology_signature(definition)
+            {
+                edits::ensure_topology_editable(recipe, definition.id)?;
+            }
             recipe.definitions.insert(definition.id, definition.clone());
             bump_next_ids_for_definition(recipe, definition);
+            Ok(())
+        }
+        AssetEdit::ReplaceInstanceDefinition {
+            instance,
+            definition,
+        } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
+            let current_definition = recipe
+                .instances
+                .get(instance)
+                .ok_or(AssetError::UnknownInstance(*instance))?
+                .definition;
+            edits::ensure_topology_editable(recipe, current_definition)?;
+            edits::ensure_compatible_replacement(recipe, current_definition, *definition)?;
+            let target = recipe
+                .instances
+                .get_mut(instance)
+                .ok_or(AssetError::UnknownInstance(*instance))?;
+            target.definition = *definition;
             Ok(())
         }
         AssetEdit::SetArrayCount {
@@ -2458,10 +2915,37 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             operation,
             count,
         } => set_array_count(recipe, *definition, *operation, *count),
+        AssetEdit::SetArraySpacing {
+            definition,
+            operation,
+            spacing,
+        } => set_array_spacing(recipe, *definition, *operation, spacing),
+        AssetEdit::DuplicateInstance {
+            source,
+            instance,
+            name,
+            transform,
+        } => duplicate_instance(
+            recipe,
+            *source,
+            *instance,
+            name.as_deref(),
+            transform.as_ref(),
+        ),
+        AssetEdit::MirrorInstance {
+            source,
+            instance,
+            plane,
+            name,
+        } => mirror_instance(recipe, *source, *instance, plane, name.as_deref()),
         AssetEdit::Attach {
             instance,
             attachment,
         } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
+            if recipe.instances.contains_key(&attachment.parent_instance) {
+                edits::ensure_instance_editable(recipe, attachment.parent_instance)?;
+            }
             let target = recipe
                 .instances
                 .get_mut(instance)
@@ -2472,6 +2956,14 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             Ok(())
         }
         AssetEdit::Detach { instance } => {
+            edits::ensure_instance_editable(recipe, *instance)?;
+            let previous_parent = recipe
+                .instances
+                .get(instance)
+                .and_then(|target| target.parent);
+            if let Some(parent) = previous_parent {
+                edits::ensure_instance_editable(recipe, parent)?;
+            }
             {
                 let target = recipe
                     .instances
@@ -2494,7 +2986,249 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             }
             Ok(())
         }
+        AssetEdit::SetInstanceLock { instance, locked } => {
+            if !recipe.instances.contains_key(instance) {
+                return Err(AssetError::UnknownInstance(*instance));
+            }
+            if *locked {
+                recipe.instance_locks.insert(*instance);
+            } else {
+                recipe.instance_locks.remove(instance);
+            }
+            Ok(())
+        }
+        AssetEdit::SetSubtreeLock { instance, locked } => {
+            if !recipe.instances.contains_key(instance) {
+                return Err(AssetError::UnknownInstance(*instance));
+            }
+            if *locked {
+                recipe.subtree_locks.insert(*instance);
+            } else {
+                recipe.subtree_locks.remove(instance);
+            }
+            Ok(())
+        }
+        AssetEdit::SetTopologyLock { definition, locked } => {
+            if !recipe.definitions.contains_key(definition) {
+                return Err(AssetError::UnknownDefinition(*definition));
+            }
+            if *locked {
+                recipe.topology_locks.insert(*definition);
+            } else {
+                recipe.topology_locks.remove(definition);
+            }
+            Ok(())
+        }
+        AssetEdit::ReorderChildInstances {
+            parent,
+            ordered_children,
+        } => reorder_child_instances(recipe, *parent, ordered_children),
     }
+}
+
+fn set_generator_dimension(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    dimension: &GeneratorDimensionEdit,
+) -> Result<(), AssetError> {
+    if dimension.topology_changing() {
+        edits::ensure_topology_editable(recipe, definition)?;
+    }
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    match (&mut definition_ref.geometry.source, dimension) {
+        (
+            GeometrySource::RoundedBox { half_extents, .. },
+            GeneratorDimensionEdit::RoundedBoxHalfExtents(value),
+        ) => {
+            *half_extents = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::RoundedBox { radius, .. },
+            GeneratorDimensionEdit::RoundedBoxRadius(value),
+        ) => {
+            *radius = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Cylinder { radius, .. },
+            GeneratorDimensionEdit::CylinderRadius(value),
+        ) => {
+            *radius = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Cylinder { height, .. },
+            GeneratorDimensionEdit::CylinderHeight(value),
+        ) => {
+            *height = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Cylinder {
+                radial_segments, ..
+            },
+            GeneratorDimensionEdit::CylinderRadialSegments(value),
+        ) => {
+            *radial_segments = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Frustum { bottom_radius, .. },
+            GeneratorDimensionEdit::FrustumBottomRadius(value),
+        ) => {
+            *bottom_radius = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Frustum { top_radius, .. },
+            GeneratorDimensionEdit::FrustumTopRadius(value),
+        ) => {
+            *top_radius = *value;
+            Ok(())
+        }
+        (GeometrySource::Frustum { height, .. }, GeneratorDimensionEdit::FrustumHeight(value)) => {
+            *height = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Frustum {
+                radial_segments, ..
+            },
+            GeneratorDimensionEdit::FrustumRadialSegments(value),
+        ) => {
+            *radial_segments = *value;
+            Ok(())
+        }
+        (GeometrySource::Plate { size, .. }, GeneratorDimensionEdit::PlateSize(value)) => {
+            *size = *value;
+            Ok(())
+        }
+        (
+            GeometrySource::Plate { thickness, .. },
+            GeneratorDimensionEdit::PlateThickness(value),
+        ) => {
+            *thickness = *value;
+            Ok(())
+        }
+        (GeometrySource::Lathe { segments, .. }, GeneratorDimensionEdit::LatheSegments(value)) => {
+            *segments = *value;
+            Ok(())
+        }
+        _ => Err(AssetError::UnsupportedEdit(format!(
+            "dimension edit does not match definition {definition:?}"
+        ))),
+    }
+}
+
+fn set_bevel_settings(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    radius: Option<f32>,
+    segments: Option<u32>,
+) -> Result<(), AssetError> {
+    if segments.is_some() {
+        edits::ensure_topology_editable(recipe, definition)?;
+    }
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let operation_ref = definition_ref
+        .geometry
+        .operations
+        .iter_mut()
+        .find(|candidate| candidate.operation_id() == operation)
+        .ok_or_else(|| {
+            AssetError::UnsupportedEdit(format!("unknown bevel operation {operation:?}"))
+        })?;
+    let ModelingOperationSpec::SetBevelProfile {
+        radius: target_radius,
+        segments: target_segments,
+        ..
+    } = operation_ref
+    else {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "operation {operation:?} is not a bevel"
+        )));
+    };
+    if let Some(radius) = radius {
+        *target_radius = radius;
+    }
+    if let Some(segments) = segments {
+        *target_segments = segments;
+    }
+    Ok(())
+}
+
+fn set_sweep_profile_point(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    index: usize,
+    point: [f32; 2],
+) -> Result<(), AssetError> {
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let GeometrySource::Sweep { profile, .. } = &mut definition_ref.geometry.source else {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "definition {definition:?} is not a sweep"
+        )));
+    };
+    let target = profile.get_mut(index).ok_or_else(|| {
+        AssetError::UnsupportedEdit(format!("unknown sweep profile index {index}"))
+    })?;
+    *target = point;
+    Ok(())
+}
+
+fn set_sweep_path_frame(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    index: usize,
+    frame: &Frame3,
+) -> Result<(), AssetError> {
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let GeometrySource::Sweep { path, .. } = &mut definition_ref.geometry.source else {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "definition {definition:?} is not a sweep"
+        )));
+    };
+    let target = path
+        .get_mut(index)
+        .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown sweep path index {index}")))?;
+    *target = frame.clone();
+    Ok(())
+}
+
+fn set_lathe_profile_point(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    index: usize,
+    point: [f32; 2],
+) -> Result<(), AssetError> {
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let GeometrySource::Lathe { profile, .. } = &mut definition_ref.geometry.source else {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "definition {definition:?} is not a lathe"
+        )));
+    };
+    let target = profile.get_mut(index).ok_or_else(|| {
+        AssetError::UnsupportedEdit(format!("unknown lathe profile index {index}"))
+    })?;
+    *target = point;
+    Ok(())
 }
 
 fn set_array_count(
@@ -2503,6 +3237,19 @@ fn set_array_count(
     operation: OperationId,
     count: u32,
 ) -> Result<(), AssetError> {
+    edits::ensure_topology_editable(recipe, definition)?;
+    if let Some(range) = recipe.variation.count_ranges.get(&operation)
+        && (count < range.minimum || count > range.maximum)
+    {
+        return Err(AssetError::InvalidScalarValue {
+            path: format!(
+                "definition.{}.operation.{}.array.count",
+                definition.0, operation.0
+            ),
+            value: count as f32,
+            reason: "count is outside the authored array range",
+        });
+    }
     let definition = recipe
         .definitions
         .get_mut(&definition)
@@ -2525,6 +3272,152 @@ fn set_array_count(
             "operation {operation:?} is not an array"
         ))),
     }
+}
+
+fn set_array_spacing(
+    recipe: &mut AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    spacing: &ArraySpacingEdit,
+) -> Result<(), AssetError> {
+    let definition_ref = recipe
+        .definitions
+        .get_mut(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    let operation_ref = definition_ref
+        .geometry
+        .operations
+        .iter_mut()
+        .find(|candidate| candidate.operation_id() == operation)
+        .ok_or_else(|| {
+            AssetError::UnsupportedEdit(format!("unknown array operation {operation:?}"))
+        })?;
+    match (operation_ref, spacing) {
+        (
+            ModelingOperationSpec::LinearArray { offset, .. },
+            ArraySpacingEdit::LinearOffset(value),
+        ) => {
+            *offset = *value;
+            Ok(())
+        }
+        (ModelingOperationSpec::RadialArray { axis, .. }, ArraySpacingEdit::RadialAxis(value)) => {
+            *axis = *value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::RadialArray { angle_degrees, .. },
+            ArraySpacingEdit::RadialAngleDegrees(value),
+        ) => {
+            *angle_degrees = *value;
+            Ok(())
+        }
+        _ => Err(AssetError::UnsupportedEdit(format!(
+            "spacing edit does not match array operation {operation:?}"
+        ))),
+    }
+}
+
+fn duplicate_instance(
+    recipe: &mut AssetRecipe,
+    source: PartInstanceId,
+    instance: PartInstanceId,
+    name: Option<&str>,
+    transform: Option<&Transform3>,
+) -> Result<(), AssetError> {
+    edits::ensure_instance_editable(recipe, source)?;
+    if recipe.instances.contains_key(&instance) {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "duplicate instance {instance:?}"
+        )));
+    }
+    let mut duplicate = recipe
+        .instances
+        .get(&source)
+        .ok_or(AssetError::UnknownInstance(source))?
+        .clone();
+    if let Some(parent) = duplicate.parent {
+        edits::ensure_instance_editable(recipe, parent)?;
+    }
+    duplicate.id = instance;
+    duplicate.name = name
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} copy", duplicate.name));
+    if let Some(transform) = transform {
+        duplicate.local_transform = transform.clone();
+    }
+    recipe.instances.insert(instance, duplicate.clone());
+    if duplicate.parent.is_none() {
+        insert_root_instance(recipe, instance);
+    }
+    recipe.variation.optional_instances.remove(&instance);
+    bump_next_ids_for_instance(recipe, &duplicate);
+    Ok(())
+}
+
+fn mirror_instance(
+    recipe: &mut AssetRecipe,
+    source: PartInstanceId,
+    instance: PartInstanceId,
+    plane: &MirrorInstanceSpec,
+    name: Option<&str>,
+) -> Result<(), AssetError> {
+    if !array_is_finite(&plane.plane_normal) || !plane.plane_offset.is_finite() {
+        return Err(AssetError::UnsupportedEdit(
+            "mirror plane must be finite".to_owned(),
+        ));
+    }
+    let normal = Vec3::from_array(plane.plane_normal);
+    let length = normal.length();
+    if length == 0.0 {
+        return Err(AssetError::UnsupportedEdit(
+            "mirror plane normal must be non-zero".to_owned(),
+        ));
+    }
+    duplicate_instance(recipe, source, instance, name, None)?;
+    let target = recipe
+        .instances
+        .get_mut(&instance)
+        .ok_or(AssetError::UnknownInstance(instance))?;
+    let unit_normal = normal / length;
+    let point = Vec3::from_array(target.local_transform.translation);
+    let distance = point.dot(unit_normal) - plane.plane_offset;
+    target.local_transform.translation = (point - 2.0 * distance * unit_normal).to_array();
+    Ok(())
+}
+
+fn reorder_child_instances(
+    recipe: &mut AssetRecipe,
+    parent: Option<PartInstanceId>,
+    ordered_children: &[PartInstanceId],
+) -> Result<(), AssetError> {
+    let actual_children = match parent {
+        Some(parent) => {
+            edits::ensure_instance_editable(recipe, parent)?;
+            if !recipe.instances.contains_key(&parent) {
+                return Err(AssetError::UnknownInstance(parent));
+            }
+            recipe
+                .instances
+                .values()
+                .filter(|candidate| candidate.parent == Some(parent))
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>()
+        }
+        None => recipe.root_instances.clone(),
+    };
+    let requested = ordered_children.iter().copied().collect::<BTreeSet<_>>();
+    let actual = actual_children.iter().copied().collect::<BTreeSet<_>>();
+    if requested != actual {
+        return Err(AssetError::UnsupportedEdit(
+            "reorder must contain exactly the current children".to_owned(),
+        ));
+    }
+    if parent.is_none() {
+        let mut roots = ordered_children.to_vec();
+        roots.sort_unstable();
+        recipe.root_instances = roots;
+    }
+    Ok(())
 }
 
 fn insert_root_instance(recipe: &mut AssetRecipe, instance: PartInstanceId) {
@@ -2640,6 +3533,11 @@ fn component_index(component: &str, length: usize, path: &str) -> Result<usize, 
 
 fn parse_id(raw: &str, path: &str) -> Result<u64, AssetError> {
     raw.parse::<u64>()
+        .map_err(|_| AssetError::UnknownScalarPath(path.to_owned()))
+}
+
+fn parse_index(raw: &str, path: &str) -> Result<usize, AssetError> {
+    raw.parse::<usize>()
         .map_err(|_| AssetError::UnknownScalarPath(path.to_owned()))
 }
 
