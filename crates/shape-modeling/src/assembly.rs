@@ -8,7 +8,7 @@ use shape_asset::{
     PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec, Transform3,
 };
 use shape_poly::{
-    FaceMetadata, MeshBounds, PolyError, PolygonMesh, TriangulatedPolygonMesh,
+    ElementId, FaceMetadata, MeshBounds, PolyError, PolygonMesh, TriangulatedPolygonMesh,
     bounds_from_positions, combine_polygon_meshes, compute_topology_signature,
     triangulate_polygon_mesh,
 };
@@ -947,12 +947,20 @@ impl<'a, G: GeometryGenerator> AssemblyState<'a, G> {
     }
 
     fn finish(self) -> Result<AssemblyEvaluation, AssemblyError> {
-        let ordered_meshes = self
-            .instances
-            .iter()
-            .filter_map(|instance| self.world_meshes.get(&instance.instance_id))
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut ordered_meshes = Vec::new();
+        let mut next_preview_vertex_id = 0;
+        let mut next_preview_face_id = 0;
+        for instance in &self.instances {
+            if let Some(mesh) = self.world_meshes.get(&instance.instance_id) {
+                let mut mesh = mesh.clone();
+                remap_preview_element_ids(
+                    &mut mesh,
+                    &mut next_preview_vertex_id,
+                    &mut next_preview_face_id,
+                )?;
+                ordered_meshes.push(mesh);
+            }
+        }
         let combined_preview_mesh = combine_polygon_meshes(&ordered_meshes)?;
         let combined_preview = triangulate_polygon_mesh(&combined_preview_mesh)?;
         let provenance = build_provenance(&self);
@@ -1125,6 +1133,26 @@ fn transform_mesh_for_instance(
     transformed.topology_signature =
         compute_topology_signature(&transformed.positions, &transformed.faces);
     Ok(transformed)
+}
+
+fn remap_preview_element_ids(
+    mesh: &mut PolygonMesh,
+    next_vertex_id: &mut u64,
+    next_face_id: &mut u64,
+) -> Result<(), AssemblyError> {
+    for vertex_id in &mut mesh.vertex_ids {
+        *vertex_id = ElementId(*next_vertex_id);
+        *next_vertex_id = next_vertex_id.checked_add(1).ok_or_else(|| {
+            AssemblyError::InvalidInput("combined preview vertex ElementId overflow".to_owned())
+        })?;
+    }
+    for face in &mut mesh.faces {
+        face.id = ElementId(*next_face_id);
+        *next_face_id = next_face_id.checked_add(1).ok_or_else(|| {
+            AssemblyError::InvalidInput("combined preview face ElementId overflow".to_owned())
+        })?;
+    }
+    Ok(())
 }
 
 fn fill_metadata(
