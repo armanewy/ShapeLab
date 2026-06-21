@@ -18,6 +18,8 @@ use shape_poly::{FaceMetadata, MeshBounds, PolyError, PolygonMesh, polygon_mesh_
 use thiserror::Error;
 
 pub mod assembly;
+/// Semantic constructive detail features.
+pub mod features;
 
 /// Deterministic explicit-topology generators.
 pub mod generators {
