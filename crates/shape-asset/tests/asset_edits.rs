@@ -347,6 +347,83 @@ fn issue_codes(report: &AssetValidationReport) -> BTreeSet<&str> {
         .collect()
 }
 
+fn minimal_cut_recipe_value(
+    schema_version: u32,
+    operation: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": schema_version,
+        "id": 42,
+        "title": "cut recipe",
+        "definitions": {
+            "1": {
+                "id": 1,
+                "name": "plate",
+                "tags": [],
+                "geometry": {
+                    "source": { "Plate": { "size": [1.0, 1.0], "thickness": 0.1 } },
+                    "operations": [operation]
+                },
+                "regions": {
+                    "1": { "id": 1, "name": "front", "role": "PrimarySurface", "tags": [] },
+                    "2": { "id": 2, "name": "back", "role": "PrimarySurface", "tags": [] },
+                    "3": { "id": 3, "name": "side", "role": "Side", "tags": [] }
+                },
+                "sockets": {},
+                "local_pivot": {
+                    "origin": [0.0, 0.0, 0.0],
+                    "x_axis": [1.0, 0.0, 0.0],
+                    "y_axis": [0.0, 1.0, 0.0],
+                    "z_axis": [0.0, 0.0, 1.0]
+                },
+                "variant_group": null,
+                "production_hints": null
+            }
+        },
+        "instances": {
+            "1": {
+                "id": 1,
+                "definition": 1,
+                "name": "plate",
+                "parent": null,
+                "local_transform": {
+                    "translation": [0.0, 0.0, 0.0],
+                    "rotation_degrees": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                "attachment": null,
+                "enabled": true,
+                "tags": [],
+                "generated_by": null
+            }
+        },
+        "root_instances": [1],
+        "parameters": {},
+        "locks": [],
+        "instance_locks": [],
+        "subtree_locks": [],
+        "topology_locks": [],
+        "constraints": [],
+        "relationships": [],
+        "variation": {
+            "optional_instances": [],
+            "replacement_groups": {},
+            "count_ranges": {},
+            "parameter_range_overrides": {}
+        },
+        "next_ids": {
+            "part_definition": 2,
+            "part_instance": 2,
+            "operation": 6,
+            "region": 23,
+            "boundary_loop": 9,
+            "socket": 1,
+            "parameter": 1,
+            "revision": 1
+        }
+    })
+}
+
 #[test]
 fn every_edit_type_applies_and_reports() {
     let recipe = edit_recipe();
@@ -661,6 +738,104 @@ fn topology_lock_allows_shape_preserving_parameters_only() {
 }
 
 #[test]
+fn cut_corner_radius_positive_changes_preserve_topology_lock() {
+    let mut recipe = edit_recipe();
+    let cut_operation = OperationId(50);
+    let mut plate = recipe.definitions[&PLATE].clone();
+    plate.regions.insert(
+        RegionId(1),
+        SurfaceRegionSpec {
+            id: RegionId(1),
+            name: "front".to_owned(),
+            role: SurfaceRole::PrimarySurface,
+            tags: BTreeSet::new(),
+        },
+    );
+    plate.geometry.operations = vec![ModelingOperationSpec::RecessedPanelCut {
+        operation: cut_operation,
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.4, 0.3],
+        depth: 0.04,
+        corner_radius: 0.02,
+        rim_width: 0.03,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(1),
+        floor_loop: BoundaryLoopId(2),
+        outer_region: RegionId(1),
+        rim_region: RegionId(20),
+        wall_region: RegionId(21),
+        floor_region: RegionId(22),
+        edge_treatment: CutEdgeTreatment::Hard,
+    }];
+    recipe.definitions.insert(PLATE, plate.clone());
+    recipe.topology_locks.insert(PLATE);
+
+    let mut radius_changed = plate.clone();
+    let ModelingOperationSpec::RecessedPanelCut { corner_radius, .. } =
+        &mut radius_changed.geometry.operations[0]
+    else {
+        unreachable!("test plate should use a recessed cut");
+    };
+    *corner_radius = 0.05;
+    apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "radius".to_owned(),
+            seed: 71,
+            operations: vec![AssetEdit::ReplaceDefinition {
+                definition: radius_changed,
+            }],
+        },
+    )
+    .expect("positive radius changes should preserve topology");
+
+    let mut segment_changed = plate.clone();
+    let ModelingOperationSpec::RecessedPanelCut {
+        corner_segments, ..
+    } = &mut segment_changed.geometry.operations[0]
+    else {
+        unreachable!("test plate should use a recessed cut");
+    };
+    *corner_segments = 6;
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "segments".to_owned(),
+                seed: 72,
+                operations: vec![AssetEdit::ReplaceDefinition {
+                    definition: segment_changed,
+                }],
+            },
+        ),
+        Err(AssetError::LockedTopology(PLATE))
+    ));
+
+    let mut sharp_changed = plate.clone();
+    let ModelingOperationSpec::RecessedPanelCut { corner_radius, .. } =
+        &mut sharp_changed.geometry.operations[0]
+    else {
+        unreachable!("test plate should use a recessed cut");
+    };
+    *corner_radius = 0.0;
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "sharp".to_owned(),
+                seed: 73,
+                operations: vec![AssetEdit::ReplaceDefinition {
+                    definition: sharp_changed,
+                }],
+            },
+        ),
+        Err(AssetError::LockedTopology(PLATE))
+    ));
+}
+
+#[test]
 fn compatible_and_incompatible_replacements_are_distinct() {
     let recipe = edit_recipe();
 
@@ -948,6 +1123,76 @@ fn legacy_cut_boundary_loop_migrates_to_distinct_physical_loops() {
     );
     assert_eq!(recipe.next_ids.boundary_loop, 9);
     assert!(validate_asset_recipe(&recipe).is_valid());
+}
+
+#[test]
+fn schema_four_cut_fields_migrate_to_schema_five() {
+    let recipe: AssetRecipe = serde_json::from_value(minimal_cut_recipe_value(
+        4,
+        serde_json::json!({
+            "RecessedPanelCut": {
+                "operation": 5,
+                "region": 1,
+                "face": "PositiveY",
+                "center": [0.0, 0.0],
+                "size": [0.4, 0.3],
+                "depth": 0.03,
+                "corner_radius": 0.02,
+                "entry_loop": 7,
+                "floor_loop": 8,
+                "outer_region": 1,
+                "rim_region": 20,
+                "wall_region": 21,
+                "floor_region": 22,
+                "edge_treatment": "BevelEligible"
+            }
+        }),
+    ))
+    .expect("schema 4 recipe should migrate missing explicit cut fields");
+
+    assert_eq!(recipe.schema_version, ASSET_RECIPE_SCHEMA_VERSION);
+    let ModelingOperationSpec::RecessedPanelCut {
+        rim_width,
+        corner_segments,
+        ..
+    } = &recipe.definitions[&PartDefinitionId(1)].geometry.operations[0]
+    else {
+        panic!("schema 4 fixture should contain a recessed cut");
+    };
+    assert_eq!(*rim_width, 0.048);
+    assert_eq!(*corner_segments, 4);
+    assert!(validate_asset_recipe(&recipe).is_valid());
+}
+
+#[test]
+fn schema_five_cut_fields_are_required() {
+    let error = serde_json::from_value::<AssetRecipe>(minimal_cut_recipe_value(
+        5,
+        serde_json::json!({
+            "RecessedPanelCut": {
+                "operation": 5,
+                "region": 1,
+                "face": "PositiveY",
+                "center": [0.0, 0.0],
+                "size": [0.4, 0.3],
+                "depth": 0.03,
+                "corner_radius": 0.02,
+                "entry_loop": 7,
+                "floor_loop": 8,
+                "outer_region": 1,
+                "rim_region": 20,
+                "wall_region": 21,
+                "floor_region": 22,
+                "edge_treatment": "BevelEligible"
+            }
+        }),
+    ))
+    .expect_err("schema 5 recipe should require explicit cut fields");
+
+    assert!(
+        error.to_string().contains("RecessedPanelCut.rim_width"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

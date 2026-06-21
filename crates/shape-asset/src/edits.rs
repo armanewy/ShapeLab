@@ -397,8 +397,9 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
             corner_segments,
             ..
         } => {
+            let corner_topology = cut_corner_topology(*corner_radius, *corner_segments);
             signature.push_str(&format!(
-                "recessed_panel_cut:{}:{corner_radius:.6}:{corner_segments}",
+                "recessed_panel_cut:{}:{corner_topology}",
                 operation.0,
             ));
         }
@@ -408,8 +409,9 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
             corner_segments,
             ..
         } => {
+            let corner_topology = cut_corner_topology(*corner_radius, *corner_segments);
             signature.push_str(&format!(
-                "rectangular_through_cut:{}:{corner_radius:.6}:{corner_segments}",
+                "rectangular_through_cut:{}:{corner_topology}",
                 operation.0,
             ));
         }
@@ -438,5 +440,13 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
         ModelingOperationSpec::ReservedDeformationProgram { operation, .. } => {
             signature.push_str(&format!("reserved_deformation:{}", operation.0));
         }
+    }
+}
+
+fn cut_corner_topology(corner_radius: f32, corner_segments: u32) -> String {
+    if corner_radius > 0.0 {
+        format!("rounded:{corner_segments}")
+    } else {
+        "sharp".to_owned()
     }
 }

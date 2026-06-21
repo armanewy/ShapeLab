@@ -215,7 +215,7 @@ struct AssetRecipeWire {
     schema_version: u32,
     id: AssetId,
     title: String,
-    definitions: BTreeMap<PartDefinitionId, PartDefinition>,
+    definitions: BTreeMap<PartDefinitionId, PartDefinitionWire>,
     instances: BTreeMap<PartInstanceId, PartInstance>,
     root_instances: Vec<PartInstanceId>,
     parameters: BTreeMap<ParameterId, ParameterDescriptor>,
@@ -234,30 +234,76 @@ struct AssetRecipeWire {
     next_ids: AssetIdCounters,
 }
 
-impl From<AssetRecipeWire> for AssetRecipe {
-    fn from(wire: AssetRecipeWire) -> Self {
-        let schema_version = wire.schema_version;
-        let mut recipe = Self {
+#[derive(Deserialize)]
+struct PartDefinitionWire {
+    id: PartDefinitionId,
+    name: String,
+    tags: BTreeSet<String>,
+    geometry: GeometryRecipeWire,
+    regions: BTreeMap<RegionId, SurfaceRegionSpec>,
+    sockets: BTreeMap<SocketId, SocketSpec>,
+    local_pivot: Frame3,
+    variant_group: Option<String>,
+    production_hints: Option<ProductionHints>,
+}
+
+#[derive(Deserialize)]
+struct GeometryRecipeWire {
+    source: GeometrySource,
+    operations: Vec<ModelingOperationSpecWire>,
+}
+
+impl AssetRecipeWire {
+    fn into_recipe(self) -> Result<AssetRecipe, String> {
+        let schema_version = self.schema_version;
+        let mut definitions = BTreeMap::new();
+        for (id, definition) in self.definitions {
+            definitions.insert(id, definition.into_definition(schema_version)?);
+        }
+        let mut recipe = AssetRecipe {
             schema_version: migrated_asset_recipe_schema_version(schema_version),
-            id: wire.id,
-            title: wire.title,
-            definitions: wire.definitions,
-            instances: wire.instances,
-            root_instances: wire.root_instances,
-            parameters: wire.parameters,
-            locks: wire.locks,
-            instance_locks: wire.instance_locks,
-            subtree_locks: wire.subtree_locks,
-            topology_locks: wire.topology_locks,
-            constraints: wire.constraints,
-            relationships: wire.relationships,
-            variation: wire.variation,
-            next_ids: wire.next_ids,
+            id: self.id,
+            title: self.title,
+            definitions,
+            instances: self.instances,
+            root_instances: self.root_instances,
+            parameters: self.parameters,
+            locks: self.locks,
+            instance_locks: self.instance_locks,
+            subtree_locks: self.subtree_locks,
+            topology_locks: self.topology_locks,
+            constraints: self.constraints,
+            relationships: self.relationships,
+            variation: self.variation,
+            next_ids: self.next_ids,
         };
         if schema_version < 4 {
             migrate_legacy_cut_boundary_loops(&mut recipe);
         }
-        recipe
+        Ok(recipe)
+    }
+}
+
+impl PartDefinitionWire {
+    fn into_definition(self, schema_version: u32) -> Result<PartDefinition, String> {
+        let mut operations = Vec::with_capacity(self.geometry.operations.len());
+        for operation in self.geometry.operations {
+            operations.push(operation.into_operation(schema_version)?);
+        }
+        Ok(PartDefinition {
+            id: self.id,
+            name: self.name,
+            tags: self.tags,
+            geometry: GeometryRecipe {
+                source: self.geometry.source,
+                operations,
+            },
+            regions: self.regions,
+            sockets: self.sockets,
+            local_pivot: self.local_pivot,
+            variant_group: self.variant_group,
+            production_hints: self.production_hints,
+        })
     }
 }
 
@@ -266,7 +312,9 @@ impl<'de> Deserialize<'de> for AssetRecipe {
     where
         D: serde::Deserializer<'de>,
     {
-        AssetRecipeWire::deserialize(deserializer).map(Into::into)
+        AssetRecipeWire::deserialize(deserializer)?
+            .into_recipe()
+            .map_err(de::Error::custom)
     }
 }
 
@@ -1047,197 +1095,280 @@ struct CircularThroughCutWire {
     edge_treatment: CutEdgeTreatment,
 }
 
+impl ModelingOperationSpecWire {
+    fn into_operation(self, schema_version: u32) -> Result<ModelingOperationSpec, String> {
+        Ok(match self {
+            Self::TransformGeometry {
+                operation,
+                transform,
+            } => ModelingOperationSpec::TransformGeometry {
+                operation,
+                transform,
+            },
+            Self::SetBevelProfile {
+                operation,
+                radius,
+                segments,
+            } => ModelingOperationSpec::SetBevelProfile {
+                operation,
+                radius,
+                segments,
+            },
+            Self::AddPanel {
+                operation,
+                region,
+                inset,
+                depth,
+            } => ModelingOperationSpec::AddPanel {
+                operation,
+                region,
+                inset,
+                depth,
+            },
+            Self::AddTrim {
+                operation,
+                region,
+                width,
+                height,
+            } => ModelingOperationSpec::AddTrim {
+                operation,
+                region,
+                width,
+                height,
+            },
+            Self::RecessedPanelCut(wire) => ModelingOperationSpec::RecessedPanelCut {
+                operation: wire.operation,
+                region: wire.region,
+                face: wire.face,
+                center: wire.center,
+                size: wire.size,
+                depth: wire.depth,
+                corner_radius: wire.corner_radius,
+                rim_width: required_or_legacy_rect_rim_width(
+                    wire.rim_width,
+                    wire.size,
+                    "RecessedPanelCut.rim_width",
+                    schema_version,
+                )?,
+                corner_segments: required_or_legacy_corner_segments(
+                    wire.corner_segments,
+                    "RecessedPanelCut.corner_segments",
+                    schema_version,
+                )?,
+                entry_loop: required_or_legacy_loop(
+                    wire.entry_loop,
+                    wire.boundary_loop,
+                    "RecessedPanelCut.entry_loop",
+                    schema_version,
+                )?,
+                floor_loop: legacy_or_required_secondary_loop(
+                    wire.floor_loop,
+                    wire.boundary_loop,
+                    "RecessedPanelCut.floor_loop",
+                    schema_version,
+                )?,
+                outer_region: wire.outer_region,
+                rim_region: wire.rim_region,
+                wall_region: wire.wall_region,
+                floor_region: wire.floor_region,
+                edge_treatment: wire.edge_treatment,
+            },
+            Self::RectangularThroughCut(wire) => ModelingOperationSpec::RectangularThroughCut {
+                operation: wire.operation,
+                region: wire.region,
+                face: wire.face,
+                center: wire.center,
+                size: wire.size,
+                corner_radius: wire.corner_radius,
+                rim_width: required_or_legacy_rect_rim_width(
+                    wire.rim_width,
+                    wire.size,
+                    "RectangularThroughCut.rim_width",
+                    schema_version,
+                )?,
+                corner_segments: required_or_legacy_corner_segments(
+                    wire.corner_segments,
+                    "RectangularThroughCut.corner_segments",
+                    schema_version,
+                )?,
+                entry_loop: required_or_legacy_loop(
+                    wire.entry_loop,
+                    wire.boundary_loop,
+                    "RectangularThroughCut.entry_loop",
+                    schema_version,
+                )?,
+                exit_loop: legacy_or_required_secondary_loop(
+                    wire.exit_loop,
+                    wire.boundary_loop,
+                    "RectangularThroughCut.exit_loop",
+                    schema_version,
+                )?,
+                outer_region: wire.outer_region,
+                rim_region: wire.rim_region,
+                wall_region: wire.wall_region,
+                edge_treatment: wire.edge_treatment,
+            },
+            Self::CircularThroughCut(wire) => ModelingOperationSpec::CircularThroughCut {
+                operation: wire.operation,
+                region: wire.region,
+                face: wire.face,
+                center: wire.center,
+                radius: wire.radius,
+                radial_segments: wire.radial_segments,
+                rim_width: required_or_legacy_circular_rim_width(
+                    wire.rim_width,
+                    wire.radius,
+                    "CircularThroughCut.rim_width",
+                    schema_version,
+                )?,
+                entry_loop: required_or_legacy_loop(
+                    wire.entry_loop,
+                    wire.boundary_loop,
+                    "CircularThroughCut.entry_loop",
+                    schema_version,
+                )?,
+                exit_loop: legacy_or_required_secondary_loop(
+                    wire.exit_loop,
+                    wire.boundary_loop,
+                    "CircularThroughCut.exit_loop",
+                    schema_version,
+                )?,
+                outer_region: wire.outer_region,
+                rim_region: wire.rim_region,
+                wall_region: wire.wall_region,
+                edge_treatment: wire.edge_treatment,
+            },
+            Self::MirrorInstances {
+                operation,
+                plane_normal,
+                plane_offset,
+            } => ModelingOperationSpec::MirrorInstances {
+                operation,
+                plane_normal,
+                plane_offset,
+            },
+            Self::LinearArray {
+                operation,
+                count,
+                offset,
+            } => ModelingOperationSpec::LinearArray {
+                operation,
+                count,
+                offset,
+            },
+            Self::RadialArray {
+                operation,
+                count,
+                axis,
+                angle_degrees,
+            } => ModelingOperationSpec::RadialArray {
+                operation,
+                count,
+                axis,
+                angle_degrees,
+            },
+            Self::ReservedBoolean { operation, label } => {
+                ModelingOperationSpec::ReservedBoolean { operation, label }
+            }
+            Self::ReservedDeformationProgram { operation, label } => {
+                ModelingOperationSpec::ReservedDeformationProgram { operation, label }
+            }
+        })
+    }
+}
+
 impl<'de> Deserialize<'de> for ModelingOperationSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(
-            match ModelingOperationSpecWire::deserialize(deserializer)? {
-                ModelingOperationSpecWire::TransformGeometry {
-                    operation,
-                    transform,
-                } => Self::TransformGeometry {
-                    operation,
-                    transform,
-                },
-                ModelingOperationSpecWire::SetBevelProfile {
-                    operation,
-                    radius,
-                    segments,
-                } => Self::SetBevelProfile {
-                    operation,
-                    radius,
-                    segments,
-                },
-                ModelingOperationSpecWire::AddPanel {
-                    operation,
-                    region,
-                    inset,
-                    depth,
-                } => Self::AddPanel {
-                    operation,
-                    region,
-                    inset,
-                    depth,
-                },
-                ModelingOperationSpecWire::AddTrim {
-                    operation,
-                    region,
-                    width,
-                    height,
-                } => Self::AddTrim {
-                    operation,
-                    region,
-                    width,
-                    height,
-                },
-                ModelingOperationSpecWire::RecessedPanelCut(wire) => Self::RecessedPanelCut {
-                    operation: wire.operation,
-                    region: wire.region,
-                    face: wire.face,
-                    center: wire.center,
-                    size: wire.size,
-                    depth: wire.depth,
-                    corner_radius: wire.corner_radius,
-                    rim_width: wire
-                        .rim_width
-                        .unwrap_or_else(|| default_rect_cut_rim_width(wire.size)),
-                    corner_segments: wire
-                        .corner_segments
-                        .unwrap_or(DEFAULT_RECT_CUT_CORNER_SEGMENTS),
-                    entry_loop: required_or_legacy_loop::<D::Error>(
-                        wire.entry_loop,
-                        wire.boundary_loop,
-                        "RecessedPanelCut.entry_loop",
-                    )?,
-                    floor_loop: legacy_or_required_secondary_loop::<D::Error>(
-                        wire.floor_loop,
-                        wire.boundary_loop,
-                        "RecessedPanelCut.floor_loop",
-                    )?,
-                    outer_region: wire.outer_region,
-                    rim_region: wire.rim_region,
-                    wall_region: wire.wall_region,
-                    floor_region: wire.floor_region,
-                    edge_treatment: wire.edge_treatment,
-                },
-                ModelingOperationSpecWire::RectangularThroughCut(wire) => {
-                    Self::RectangularThroughCut {
-                        operation: wire.operation,
-                        region: wire.region,
-                        face: wire.face,
-                        center: wire.center,
-                        size: wire.size,
-                        corner_radius: wire.corner_radius,
-                        rim_width: wire
-                            .rim_width
-                            .unwrap_or_else(|| default_rect_cut_rim_width(wire.size)),
-                        corner_segments: wire
-                            .corner_segments
-                            .unwrap_or(DEFAULT_RECT_CUT_CORNER_SEGMENTS),
-                        entry_loop: required_or_legacy_loop::<D::Error>(
-                            wire.entry_loop,
-                            wire.boundary_loop,
-                            "RectangularThroughCut.entry_loop",
-                        )?,
-                        exit_loop: legacy_or_required_secondary_loop::<D::Error>(
-                            wire.exit_loop,
-                            wire.boundary_loop,
-                            "RectangularThroughCut.exit_loop",
-                        )?,
-                        outer_region: wire.outer_region,
-                        rim_region: wire.rim_region,
-                        wall_region: wire.wall_region,
-                        edge_treatment: wire.edge_treatment,
-                    }
-                }
-                ModelingOperationSpecWire::CircularThroughCut(wire) => Self::CircularThroughCut {
-                    operation: wire.operation,
-                    region: wire.region,
-                    face: wire.face,
-                    center: wire.center,
-                    radius: wire.radius,
-                    radial_segments: wire.radial_segments,
-                    rim_width: wire
-                        .rim_width
-                        .unwrap_or_else(|| default_circular_cut_rim_width(wire.radius)),
-                    entry_loop: required_or_legacy_loop::<D::Error>(
-                        wire.entry_loop,
-                        wire.boundary_loop,
-                        "CircularThroughCut.entry_loop",
-                    )?,
-                    exit_loop: legacy_or_required_secondary_loop::<D::Error>(
-                        wire.exit_loop,
-                        wire.boundary_loop,
-                        "CircularThroughCut.exit_loop",
-                    )?,
-                    outer_region: wire.outer_region,
-                    rim_region: wire.rim_region,
-                    wall_region: wire.wall_region,
-                    edge_treatment: wire.edge_treatment,
-                },
-                ModelingOperationSpecWire::MirrorInstances {
-                    operation,
-                    plane_normal,
-                    plane_offset,
-                } => Self::MirrorInstances {
-                    operation,
-                    plane_normal,
-                    plane_offset,
-                },
-                ModelingOperationSpecWire::LinearArray {
-                    operation,
-                    count,
-                    offset,
-                } => Self::LinearArray {
-                    operation,
-                    count,
-                    offset,
-                },
-                ModelingOperationSpecWire::RadialArray {
-                    operation,
-                    count,
-                    axis,
-                    angle_degrees,
-                } => Self::RadialArray {
-                    operation,
-                    count,
-                    axis,
-                    angle_degrees,
-                },
-                ModelingOperationSpecWire::ReservedBoolean { operation, label } => {
-                    Self::ReservedBoolean { operation, label }
-                }
-                ModelingOperationSpecWire::ReservedDeformationProgram { operation, label } => {
-                    Self::ReservedDeformationProgram { operation, label }
-                }
-            },
-        )
+        ModelingOperationSpecWire::deserialize(deserializer)?
+            .into_operation(ASSET_RECIPE_SCHEMA_VERSION)
+            .map_err(de::Error::custom)
     }
 }
 
-fn required_or_legacy_loop<E: de::Error>(
-    current: Option<BoundaryLoopId>,
-    legacy: Option<BoundaryLoopId>,
-    field: &'static str,
-) -> Result<BoundaryLoopId, E> {
-    current
-        .or(legacy)
-        .ok_or_else(|| E::custom(format!("{field} is missing")))
+fn required_current_field<T>(current: Option<T>, field: &'static str) -> Result<T, String> {
+    current.ok_or_else(|| format!("{field} is missing"))
 }
 
-fn legacy_or_required_secondary_loop<E: de::Error>(
+fn legacy_boundary_loop_schema(schema_version: u32) -> bool {
+    matches!(schema_version, 1..=3)
+}
+
+fn legacy_rim_field_schema(schema_version: u32) -> bool {
+    matches!(schema_version, 1..=4)
+}
+
+fn required_or_legacy_loop(
     current: Option<BoundaryLoopId>,
     legacy: Option<BoundaryLoopId>,
     field: &'static str,
-) -> Result<BoundaryLoopId, E> {
-    if let Some(current) = current {
-        Ok(current)
-    } else if legacy.is_some() {
-        Ok(LEGACY_MISSING_BOUNDARY_LOOP)
+    schema_version: u32,
+) -> Result<BoundaryLoopId, String> {
+    if legacy_boundary_loop_schema(schema_version) {
+        current
+            .or(legacy)
+            .ok_or_else(|| format!("{field} is missing"))
     } else {
-        Err(E::custom(format!("{field} is missing")))
+        required_current_field(current, field)
+    }
+}
+
+fn legacy_or_required_secondary_loop(
+    current: Option<BoundaryLoopId>,
+    legacy: Option<BoundaryLoopId>,
+    field: &'static str,
+    schema_version: u32,
+) -> Result<BoundaryLoopId, String> {
+    if legacy_boundary_loop_schema(schema_version) {
+        if let Some(current) = current {
+            Ok(current)
+        } else if legacy.is_some() {
+            Ok(LEGACY_MISSING_BOUNDARY_LOOP)
+        } else {
+            Err(format!("{field} is missing"))
+        }
+    } else {
+        required_current_field(current, field)
+    }
+}
+
+fn required_or_legacy_rect_rim_width(
+    current: Option<f32>,
+    size: [f32; 2],
+    field: &'static str,
+    schema_version: u32,
+) -> Result<f32, String> {
+    if legacy_rim_field_schema(schema_version) {
+        Ok(current.unwrap_or_else(|| default_rect_cut_rim_width(size)))
+    } else {
+        required_current_field(current, field)
+    }
+}
+
+fn required_or_legacy_circular_rim_width(
+    current: Option<f32>,
+    radius: f32,
+    field: &'static str,
+    schema_version: u32,
+) -> Result<f32, String> {
+    if legacy_rim_field_schema(schema_version) {
+        Ok(current.unwrap_or_else(|| default_circular_cut_rim_width(radius)))
+    } else {
+        required_current_field(current, field)
+    }
+}
+
+fn required_or_legacy_corner_segments(
+    current: Option<u32>,
+    field: &'static str,
+    schema_version: u32,
+) -> Result<u32, String> {
+    if legacy_rim_field_schema(schema_version) {
+        Ok(current.unwrap_or(DEFAULT_RECT_CUT_CORNER_SEGMENTS))
+    } else {
+        required_current_field(current, field)
     }
 }
 
