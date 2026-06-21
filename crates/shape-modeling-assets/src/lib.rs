@@ -16,6 +16,8 @@ use shape_asset::{
 pub enum BenchmarkAsset {
     /// Industrial crate benchmark.
     IndustrialCrate,
+    /// Semantic multi-cut panel benchmark.
+    MultiCutPanel,
     /// Explicit desk lamp benchmark.
     ExplicitDeskLamp,
     /// Stylized stool benchmark.
@@ -28,6 +30,7 @@ impl BenchmarkAsset {
     pub fn parse(slug: &str) -> Option<Self> {
         match slug {
             "industrial-crate" => Some(Self::IndustrialCrate),
+            "multi-cut-panel" => Some(Self::MultiCutPanel),
             "explicit-desk-lamp" => Some(Self::ExplicitDeskLamp),
             "stylized-stool" => Some(Self::StylizedStool),
             _ => None,
@@ -39,6 +42,7 @@ impl BenchmarkAsset {
     pub const fn slug(self) -> &'static str {
         match self {
             Self::IndustrialCrate => "industrial-crate",
+            Self::MultiCutPanel => "multi-cut-panel",
             Self::ExplicitDeskLamp => "explicit-desk-lamp",
             Self::StylizedStool => "stylized-stool",
         }
@@ -49,6 +53,7 @@ impl BenchmarkAsset {
     pub fn recipe(self) -> AssetRecipe {
         match self {
             Self::IndustrialCrate => industrial_crate_recipe(),
+            Self::MultiCutPanel => multi_cut_panel_recipe(),
             Self::ExplicitDeskLamp => explicit_desk_lamp_recipe(),
             Self::StylizedStool => stylized_stool_recipe(),
         }
@@ -57,9 +62,10 @@ impl BenchmarkAsset {
 
 /// Return every bundled benchmark asset.
 #[must_use]
-pub const fn benchmark_assets() -> [BenchmarkAsset; 3] {
+pub const fn benchmark_assets() -> [BenchmarkAsset; 4] {
     [
         BenchmarkAsset::IndustrialCrate,
+        BenchmarkAsset::MultiCutPanel,
         BenchmarkAsset::ExplicitDeskLamp,
         BenchmarkAsset::StylizedStool,
     ]
@@ -638,6 +644,272 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
     );
     recipe.root_instances.push(PartInstanceId(1));
     finish_ids(&mut recipe, 9, 18, 15, 3);
+    recipe
+}
+
+/// Build a visible semantic multi-cut panel benchmark.
+#[must_use]
+pub fn multi_cut_panel_recipe() -> AssetRecipe {
+    let mut recipe = AssetRecipe::new(AssetId(1004), "Multi-Cut Panel");
+    recipe.definitions.insert(
+        PartDefinitionId(1),
+        definition_with_regions(
+            1,
+            "semantic multi-cut plate",
+            GeometrySource::Plate {
+                size: [4.0, 3.4],
+                thickness: 0.30,
+            },
+            vec![
+                ModelingOperationSpec::RecessedPanelCut {
+                    operation: OperationId(1),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [-1.40, 0.0],
+                    size: [0.55, 0.44],
+                    depth: 0.08,
+                    corner_radius: 0.08,
+                    rim_width: 0.07,
+                    corner_segments: 4,
+                    entry_loop: BoundaryLoopId(1),
+                    floor_loop: BoundaryLoopId(2),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(10),
+                    wall_region: RegionId(11),
+                    floor_region: RegionId(12),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(2),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [-0.45, -0.72],
+                    radius: 0.08,
+                    radial_segments: 12,
+                    rim_width: 0.04,
+                    entry_loop: BoundaryLoopId(3),
+                    exit_loop: BoundaryLoopId(4),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(20),
+                    wall_region: RegionId(21),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(3),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.15, -0.72],
+                    radius: 0.08,
+                    radial_segments: 12,
+                    rim_width: 0.04,
+                    entry_loop: BoundaryLoopId(5),
+                    exit_loop: BoundaryLoopId(6),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(22),
+                    wall_region: RegionId(23),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(4),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.75, -0.72],
+                    radius: 0.08,
+                    radial_segments: 12,
+                    rim_width: 0.04,
+                    entry_loop: BoundaryLoopId(7),
+                    exit_loop: BoundaryLoopId(8),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(24),
+                    wall_region: RegionId(25),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(5),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [1.35, -0.72],
+                    radius: 0.08,
+                    radial_segments: 12,
+                    rim_width: 0.04,
+                    entry_loop: BoundaryLoopId(9),
+                    exit_loop: BoundaryLoopId(10),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(26),
+                    wall_region: RegionId(27),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(6),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [-0.45, 0.70],
+                    size: [0.24, 0.05],
+                    corner_radius: 0.01,
+                    rim_width: 0.04,
+                    corner_segments: 3,
+                    entry_loop: BoundaryLoopId(11),
+                    exit_loop: BoundaryLoopId(12),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(30),
+                    wall_region: RegionId(31),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(7),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.15, 0.70],
+                    size: [0.24, 0.05],
+                    corner_radius: 0.01,
+                    rim_width: 0.04,
+                    corner_segments: 3,
+                    entry_loop: BoundaryLoopId(13),
+                    exit_loop: BoundaryLoopId(14),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(32),
+                    wall_region: RegionId(33),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(8),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.75, 0.70],
+                    size: [0.24, 0.05],
+                    corner_radius: 0.01,
+                    rim_width: 0.04,
+                    corner_segments: 3,
+                    entry_loop: BoundaryLoopId(15),
+                    exit_loop: BoundaryLoopId(16),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(34),
+                    wall_region: RegionId(35),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+            ],
+            plate_regions(),
+            BTreeMap::new(),
+        ),
+    );
+    add_instance(
+        &mut recipe,
+        1,
+        1,
+        "multi-cut panel",
+        None,
+        Transform3::default(),
+    );
+    recipe.parameters.insert(
+        ParameterId(1),
+        parameter(
+            1,
+            "Recess width",
+            "Panel Cuts",
+            "definition.1.operation.1.recessed_panel_cut.size.x",
+            0.38,
+            0.78,
+            0.02,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(2),
+        parameter(
+            2,
+            "Recess height",
+            "Panel Cuts",
+            "definition.1.operation.1.recessed_panel_cut.size.y",
+            0.30,
+            0.58,
+            0.02,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(3),
+        parameter(
+            3,
+            "Recess depth",
+            "Panel Cuts",
+            "definition.1.operation.1.recessed_panel_cut.depth",
+            0.045,
+            0.12,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(4),
+        parameter(
+            4,
+            "Recess corner radius",
+            "Panel Cuts",
+            "definition.1.operation.1.recessed_panel_cut.corner_radius",
+            0.025,
+            0.12,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(5),
+        parameter(
+            5,
+            "Mount hole radius",
+            "Hole Cuts",
+            "definition.1.operation.2.circular_through_cut.radius",
+            0.045,
+            0.12,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(6),
+        topology_parameter(
+            6,
+            "Mount hole segments",
+            "Detail Density",
+            "definition.1.operation.2.circular_through_cut.radial_segments",
+            8.0,
+            20.0,
+            2.0,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(7),
+        parameter(
+            7,
+            "Vent width",
+            "Vent Cuts",
+            "definition.1.operation.6.rectangular_through_cut.size.x",
+            0.16,
+            0.36,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(8),
+        parameter(
+            8,
+            "Vent height",
+            "Vent Cuts",
+            "definition.1.operation.6.rectangular_through_cut.size.y",
+            0.032,
+            0.08,
+            0.004,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(9),
+        parameter(
+            9,
+            "Vent spacing",
+            "Vent Cuts",
+            "definition.1.operation.7.rectangular_through_cut.center.x",
+            -0.05,
+            0.35,
+            0.02,
+        ),
+    );
+    recipe.root_instances.push(PartInstanceId(1));
+    finish_ids(&mut recipe, 2, 2, 9, 1);
     recipe
 }
 

@@ -480,6 +480,38 @@ fn candidate_preview_batch_keeps_successes_when_one_candidate_fails() {
 }
 
 #[test]
+fn multi_cut_panel_benchmark_generates_structural_explore_variants() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let request = start_job(
+        state
+            .handle_command(AssetAppCommand::GenerateExplore)
+            .expect("generation should schedule"),
+    );
+    for event in run_asset_job(request) {
+        state.handle_job_event(event);
+    }
+
+    assert_eq!(state.candidate_slots.len(), 6);
+    assert!(
+        state
+            .candidate_slots
+            .iter()
+            .all(|slot| slot.candidate.artifact.is_some()),
+        "multi-cut panel candidates should keep compiled preview artifacts"
+    );
+    assert!(
+        state.candidate_slots.iter().any(|slot| {
+            slot.candidate
+                .changes
+                .iter()
+                .any(|change| change.kind == AssetCandidateEditKind::ModelingOperation)
+        }),
+        "Explore should surface duplicated semantic cut operations for the multi-cut panel"
+    );
+}
+
+#[test]
 fn project_snapshot_round_trip_preserves_branch_history() {
     let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
         .expect("stool template should load");

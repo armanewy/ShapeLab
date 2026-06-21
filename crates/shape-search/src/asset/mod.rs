@@ -448,12 +448,14 @@ fn collect_definition_opportunities(
                 );
             }
             GeometrySource::Plate { size, thickness } => {
-                opportunities.push(EditOpportunity::Dimension(
-                    DefinitionDimensionTarget::PlateSize {
-                        definition: *definition_id,
-                        current: *size,
-                    },
-                ));
+                if !definition.geometry.operations.iter().any(operation_is_cut) {
+                    opportunities.push(EditOpportunity::Dimension(
+                        DefinitionDimensionTarget::PlateSize {
+                            definition: *definition_id,
+                            current: *size,
+                        },
+                    ));
+                }
                 opportunities.push(EditOpportunity::Dimension(
                     DefinitionDimensionTarget::PlateThickness {
                         definition: *definition_id,
@@ -581,7 +583,10 @@ fn collect_definition_opportunities(
                     });
                 }
                 ModelingOperationSpec::RecessedPanelCut {
-                    operation, size, ..
+                    operation,
+                    center,
+                    size,
+                    ..
                 } => {
                     push_topology_opportunity(
                         recipe,
@@ -591,13 +596,19 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
-                            source: CutDuplicateSource::RecessedPanel { size: *size },
+                            source: CutDuplicateSource::RecessedPanel {
+                                center: *center,
+                                size: *size,
+                            },
                         },
                         opportunities,
                     );
                 }
                 ModelingOperationSpec::RectangularThroughCut {
-                    operation, size, ..
+                    operation,
+                    center,
+                    size,
+                    ..
                 } => {
                     push_topology_opportunity(
                         recipe,
@@ -607,13 +618,19 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
-                            source: CutDuplicateSource::RectangularThrough { size: *size },
+                            source: CutDuplicateSource::RectangularThrough {
+                                center: *center,
+                                size: *size,
+                            },
                         },
                         opportunities,
                     );
                 }
                 ModelingOperationSpec::CircularThroughCut {
-                    operation, radius, ..
+                    operation,
+                    center,
+                    radius,
+                    ..
                 } => {
                     push_topology_opportunity(
                         recipe,
@@ -623,7 +640,10 @@ fn collect_definition_opportunities(
                         EditOpportunity::DuplicateCut {
                             definition: *definition_id,
                             operation: *operation,
-                            source: CutDuplicateSource::CircularThrough { radius: *radius },
+                            source: CutDuplicateSource::CircularThrough {
+                                center: *center,
+                                radius: *radius,
+                            },
                         },
                         opportunities,
                     );
@@ -719,6 +739,15 @@ fn push_topology_opportunity(
     opportunities.push(opportunity);
 }
 
+fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
+    matches!(
+        operation,
+        ModelingOperationSpec::RecessedPanelCut { .. }
+            | ModelingOperationSpec::RectangularThroughCut { .. }
+            | ModelingOperationSpec::CircularThroughCut { .. }
+    )
+}
+
 fn select_opportunities(
     opportunities: &[EditOpportunity],
     mode: AssetCandidateMode,
@@ -744,7 +773,15 @@ fn select_opportunities(
     selected.push(pool.remove(first_index));
     while selected.len() < target_count && !pool.is_empty() {
         let index = rng.random_range(0..pool.len());
-        selected.push(pool.remove(index));
+        let opportunity = pool.remove(index);
+        if opportunity.is_structural_cut_duplicate()
+            && selected
+                .iter()
+                .any(EditOpportunity::is_structural_cut_duplicate)
+        {
+            continue;
+        }
+        selected.push(opportunity);
     }
     selected
 }
@@ -815,9 +852,9 @@ enum EditOpportunity {
 
 #[derive(Debug, Clone)]
 enum CutDuplicateSource {
-    RecessedPanel { size: [f32; 2] },
-    RectangularThrough { size: [f32; 2] },
-    CircularThrough { radius: f32 },
+    RecessedPanel { center: [f32; 2], size: [f32; 2] },
+    RectangularThrough { center: [f32; 2], size: [f32; 2] },
+    CircularThrough { center: [f32; 2], radius: f32 },
 }
 
 impl CutDuplicateSource {
@@ -827,13 +864,33 @@ impl CutDuplicateSource {
 
     fn center_offset(&self, mode: AssetCandidateMode, rng: &mut ChaCha8Rng) -> [f32; 2] {
         let mut offset = [0.0, 0.0];
-        let axis = rng.random_range(0..2);
-        let sign = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
+        let center = self.center();
+        let axis = if center[1].abs() > 0.35 {
+            1
+        } else if center[0].abs() > 0.35 {
+            0
+        } else {
+            rng.random_range(0..2)
+        };
+        let outward_sign = if center[axis] > 0.10 {
+            1.0
+        } else if center[axis] < -0.10 {
+            -1.0
+        } else if rng.random_bool(0.5) {
+            1.0
+        } else {
+            -1.0
+        };
+        let sign = if matches!(self, Self::RecessedPanel { .. }) {
+            -outward_sign
+        } else {
+            outward_sign
+        };
         let base_spacing = match self {
-            Self::RecessedPanel { size } | Self::RectangularThrough { size } => {
-                size[axis].abs().max(0.08) * 1.35
+            Self::RecessedPanel { size, .. } | Self::RectangularThrough { size, .. } => {
+                (size[axis].abs() * 1.55).max(0.42)
             }
-            Self::CircularThrough { radius } => radius.abs().max(0.04) * 2.70,
+            Self::CircularThrough { radius, .. } => (radius.abs() * 4.20).max(0.42),
         };
         let exploration_scale = match mode {
             AssetCandidateMode::Refine => 1.0,
@@ -841,6 +898,14 @@ impl CutDuplicateSource {
         };
         offset[axis] = sign * base_spacing * exploration_scale;
         offset
+    }
+
+    fn center(&self) -> [f32; 2] {
+        match self {
+            Self::RecessedPanel { center, .. }
+            | Self::RectangularThrough { center, .. }
+            | Self::CircularThrough { center, .. } => *center,
+        }
     }
 }
 
@@ -880,6 +945,10 @@ impl ProposalIdAllocator {
 }
 
 impl EditOpportunity {
+    fn is_structural_cut_duplicate(&self) -> bool {
+        matches!(self, Self::DuplicateCut { .. })
+    }
+
     fn build_edit(
         &self,
         _recipe: &AssetRecipe,

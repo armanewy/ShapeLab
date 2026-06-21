@@ -729,6 +729,9 @@ fn template_description(id: &str) -> &'static str {
         Some(BenchmarkAsset::IndustrialCrate) => {
             "Crate body, handles, bolts, panels, vents, feet, and optional trim."
         }
+        Some(BenchmarkAsset::MultiCutPanel) => {
+            "One plate with a recessed panel, circular mounting holes, rectangular vents, and semantic cut metadata."
+        }
         Some(BenchmarkAsset::ExplicitDeskLamp) => {
             "Lathed base and shade with swept supports, collars, switch details, and rim trim."
         }
