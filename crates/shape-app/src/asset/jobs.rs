@@ -39,7 +39,7 @@ use shape_search::asset::{
 
 const DEFAULT_GENERATED_CANDIDATES: usize = 6;
 const MIN_REFINE_PROPOSALS: usize = 48;
-const MIN_EXPLORE_PROPOSALS: usize = 72;
+const MIN_EXPLORE_PROPOSALS: usize = 120;
 const PROPOSAL_MULTIPLIER: usize = 12;
 const ASSET_CANDIDATE_TRIANGLE_BUDGET: usize = 80_000;
 const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;

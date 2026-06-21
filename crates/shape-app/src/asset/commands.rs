@@ -78,7 +78,7 @@ pub(crate) enum AssetAppCommand {
     RejectCandidate(AssetCandidateId),
     Undo,
     SwitchBranch(RevisionId),
-    LoadTemplate(AssetTemplate),
+    LoadTemplate(Box<AssetTemplate>),
     Save,
     SaveAs(PathBuf),
     Load(PathBuf),

@@ -1,13 +1,13 @@
 # Known Limitations
 
-- Only implicit shape-graph models are natively editable.
+- The legacy implicit shape-graph editor remains available, and Asset Modeling Lab now provides the primary explicit asset-editing workflow.
 - Imported arbitrary meshes are not semantically editable.
 - Topology is generated from the implicit field and is not stable between revisions.
 - There are no UVs, materials, rigging, or animation.
-- Candidate generation edits existing scalar parameters only; it does not add, remove, or replace structural parts.
+- Candidate generation can propose semantic scalar edits, structural part choices, duplicated cuts, and grouped cut-operation edits, but it is still not a general-purpose modeler.
 - The viewport and thumbnails use a CPU renderer and are intentionally limited.
 - User selections do not yet train a persistent preference model.
-- Project files are versioned JSON, but there are no schema migrations yet.
+- Asset recipe JSON has targeted migrations for older authored relationship and cut metadata. Broad cross-version project migrations are still limited.
 - Autosave and crash recovery snapshots are not part of the MVP.
 - The desktop app does not yet have automated window-level visual regression tests.
 - Packaging notes and icons exist, but installers, code signing, and publishing are not implemented.

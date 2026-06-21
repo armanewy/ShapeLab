@@ -23,7 +23,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 5;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 6;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -319,7 +319,7 @@ impl<'de> Deserialize<'de> for AssetRecipe {
 }
 
 fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
-    if matches!(schema_version, 1..=4) {
+    if matches!(schema_version, 1..=5) {
         ASSET_RECIPE_SCHEMA_VERSION
     } else {
         schema_version
@@ -517,6 +517,9 @@ pub struct AuthoredVariationMetadata {
     pub count_ranges: BTreeMap<OperationId, CountRangeHint>,
     /// Parameter-specific authored ranges that override descriptor UI ranges.
     pub parameter_range_overrides: BTreeMap<ParameterId, ParameterRangeOverride>,
+    /// Named repeated semantic cuts that should be edited as a group.
+    #[serde(default)]
+    pub semantic_cut_groups: BTreeMap<String, SemanticCutGroupHint>,
 }
 
 /// Replacement group for interchangeable part definitions.
@@ -533,6 +536,35 @@ pub struct CountRangeHint {
     pub minimum: u32,
     /// Maximum authored count.
     pub maximum: u32,
+}
+
+/// Authored repeated-cut group for novice-facing controls and search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticCutGroupHint {
+    /// Human-facing group label.
+    pub label: String,
+    /// Definition containing every grouped operation.
+    pub definition: PartDefinitionId,
+    /// Cut operations that participate in stable group order.
+    pub operations: Vec<OperationId>,
+    /// Author intent for the repeated feature.
+    pub role: CutGroupRole,
+    /// Optional count range reserved for future add/remove controls.
+    #[serde(default)]
+    pub count_range: Option<CountRangeHint>,
+}
+
+/// Author intent for a semantic cut group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CutGroupRole {
+    /// Repeated mounting holes or bolt holes.
+    MountHoles,
+    /// Repeated ventilation slots.
+    Vents,
+    /// Repeated recessed panels.
+    Recesses,
+    /// Project-specific semantic role.
+    Custom(String),
 }
 
 /// Authored parameter range override.
@@ -3542,6 +3574,100 @@ fn validate_variation_metadata(recipe: &AssetRecipe, report: &mut AssetValidatio
             );
         }
     }
+
+    for (group, hint) in &recipe.variation.semantic_cut_groups {
+        if group.trim().is_empty() {
+            push_issue(
+                report,
+                Some("variation.semantic_cut_group".to_owned()),
+                "empty_semantic_cut_group",
+                "Semantic cut group IDs cannot be empty.",
+            );
+        }
+        if hint.label.trim().is_empty() {
+            push_issue(
+                report,
+                Some(format!("variation.semantic_cut_group.{group}.label")),
+                "empty_semantic_cut_group_label",
+                "Semantic cut groups must have a non-empty label.",
+            );
+        }
+        if hint.operations.is_empty() {
+            push_issue(
+                report,
+                Some(format!("variation.semantic_cut_group.{group}.operations")),
+                "empty_semantic_cut_group_operations",
+                "Semantic cut groups must reference at least one cut operation.",
+            );
+        }
+        let Some(definition) = recipe.definitions.get(&hint.definition) else {
+            push_issue(
+                report,
+                Some(format!("variation.semantic_cut_group.{group}.definition")),
+                "unknown_semantic_cut_group_definition",
+                "Semantic cut group references an unknown definition.",
+            );
+            continue;
+        };
+        let mut seen_operations = BTreeSet::new();
+        for operation in &hint.operations {
+            if !seen_operations.insert(*operation) {
+                push_issue(
+                    report,
+                    Some(format!(
+                        "variation.semantic_cut_group.{group}.operation.{}",
+                        operation.0
+                    )),
+                    "duplicate_semantic_cut_group_operation",
+                    "Semantic cut groups cannot list the same operation more than once.",
+                );
+            }
+            match definition
+                .geometry
+                .operations
+                .iter()
+                .find(|candidate| candidate.operation_id() == *operation)
+            {
+                Some(operation_spec) if operation_is_cut(operation_spec) => {}
+                Some(_) => push_issue(
+                    report,
+                    Some(format!(
+                        "variation.semantic_cut_group.{group}.operation.{}",
+                        operation.0
+                    )),
+                    "invalid_semantic_cut_group_operation",
+                    "Semantic cut groups must reference cut operations.",
+                ),
+                None => push_issue(
+                    report,
+                    Some(format!(
+                        "variation.semantic_cut_group.{group}.operation.{}",
+                        operation.0
+                    )),
+                    "unknown_semantic_cut_group_operation",
+                    "Semantic cut group references an unknown operation on its definition.",
+                ),
+            }
+        }
+        if let Some(range) = hint.count_range {
+            if range.minimum > range.maximum {
+                push_issue(
+                    report,
+                    Some(format!("variation.semantic_cut_group.{group}.count_range")),
+                    "invalid_semantic_cut_group_count_range",
+                    "Semantic cut group count range minimum cannot exceed maximum.",
+                );
+            }
+            if range.minimum == 0 {
+                push_issue(
+                    report,
+                    Some(format!("variation.semantic_cut_group.{group}.count_range")),
+                    "semantic_cut_group_count_range_too_small",
+                    "Semantic cut group count ranges must start at one or greater.",
+                );
+            }
+        }
+    }
 }
 
 fn validate_next_ids(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
@@ -3660,6 +3786,15 @@ fn operation_is_array(operation: &ModelingOperationSpec) -> bool {
     matches!(
         operation,
         ModelingOperationSpec::LinearArray { .. } | ModelingOperationSpec::RadialArray { .. }
+    )
+}
+
+fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
+    matches!(
+        operation,
+        ModelingOperationSpec::RecessedPanelCut { .. }
+            | ModelingOperationSpec::RectangularThroughCut { .. }
+            | ModelingOperationSpec::CircularThroughCut { .. }
     )
 }
 
@@ -5930,6 +6065,16 @@ fn operation_metadata_references(
         references.push(format!("variation.count_range.{}", operation.0));
     }
     references.extend(
+        recipe
+            .variation
+            .semantic_cut_groups
+            .iter()
+            .filter(|(_, group)| {
+                group.definition == definition && group.operations.contains(&operation)
+            })
+            .map(|(group, _)| format!("variation.semantic_cut_group.{group}")),
+    );
+    references.extend(
         owned_parameters
             .iter()
             .filter(|parameter| {
@@ -5955,6 +6100,13 @@ fn cascade_operation_metadata(
         recipe.variation.parameter_range_overrides.remove(parameter);
     }
     recipe.variation.count_ranges.remove(&operation);
+    recipe.variation.semantic_cut_groups.retain(|_, group| {
+        if group.definition != definition {
+            return true;
+        }
+        group.operations.retain(|candidate| *candidate != operation);
+        !group.operations.is_empty()
+    });
 }
 
 fn operation_parameter_ids(
@@ -6704,6 +6856,33 @@ mod tests {
         let recipe = test_recipe();
 
         assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn validation_rejects_invalid_semantic_cut_groups() {
+        let mut recipe = test_recipe();
+        recipe.variation.semantic_cut_groups.insert(
+            "body_rows".to_owned(),
+            SemanticCutGroupHint {
+                label: String::new(),
+                definition: PartDefinitionId(1),
+                operations: vec![OperationId(1), OperationId(1), OperationId(99)],
+                role: CutGroupRole::Vents,
+                count_range: Some(CountRangeHint {
+                    minimum: 0,
+                    maximum: 1,
+                }),
+            },
+        );
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("empty_semantic_cut_group_label"));
+        assert!(codes.contains("duplicate_semantic_cut_group_operation"));
+        assert!(codes.contains("invalid_semantic_cut_group_operation"));
+        assert!(codes.contains("unknown_semantic_cut_group_operation"));
+        assert!(codes.contains("semantic_cut_group_count_range_too_small"));
     }
 
     #[test]

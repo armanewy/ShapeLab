@@ -219,7 +219,7 @@ impl AssetModelingLabApp {
                         ui.label(egui::RichText::new(&template.title).strong());
                         ui.small(template_description(&template.id));
                         if ui.button("Start").clicked() {
-                            commands.push(AssetAppCommand::LoadTemplate(template));
+                            commands.push(AssetAppCommand::LoadTemplate(Box::new(template)));
                         }
                     });
                 }
@@ -405,7 +405,7 @@ impl AssetModelingLabApp {
             let render_after_viewport = self.prepare_viewport_command(&command);
             let Some(state) = &mut self.state else {
                 if let AssetAppCommand::LoadTemplate(template) = command {
-                    self.load_template(template, ctx);
+                    self.load_template(*template, ctx);
                 } else if let AssetAppCommand::Load(path) = command {
                     self.load_project(path, ctx);
                 }

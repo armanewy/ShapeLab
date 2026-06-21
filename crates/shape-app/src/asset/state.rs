@@ -343,7 +343,7 @@ impl AssetAppState {
             AssetAppCommand::RejectCandidate(_) => Ok(Vec::new()),
             AssetAppCommand::Undo => self.undo(),
             AssetAppCommand::SwitchBranch(revision) => self.switch_revision(revision, true),
-            AssetAppCommand::LoadTemplate(template) => self.load_template(template),
+            AssetAppCommand::LoadTemplate(template) => self.load_template(*template),
             AssetAppCommand::Save => self.save(),
             AssetAppCommand::SaveAs(path) => Ok(vec![AssetAppEffect::SaveProject {
                 path,

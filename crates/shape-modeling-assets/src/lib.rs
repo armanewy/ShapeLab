@@ -5,10 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AssetRelationshipPolicy, BoundaryLoopId, CutEdgeTreatment, Frame3,
-    GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterDescriptor,
-    ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace,
-    RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
+    AssetId, AssetRecipe, AssetRelationshipPolicy, BoundaryLoopId, CountRangeHint,
+    CutEdgeTreatment, CutGroupRole, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
+    OperationId, ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
+    PartInstanceId, PlanarCutFace, RegionId, SemanticCutGroupHint, SocketId, SocketSpec,
+    SurfaceRegionSpec, SurfaceRole, Transform3,
 };
 
 /// Built-in explicit modeling benchmark asset.
@@ -907,6 +908,37 @@ pub fn multi_cut_panel_recipe() -> AssetRecipe {
             0.35,
             0.02,
         ),
+    );
+    recipe.variation.semantic_cut_groups.insert(
+        "mount_holes".to_owned(),
+        SemanticCutGroupHint {
+            label: "Mounting holes".to_owned(),
+            definition: PartDefinitionId(1),
+            operations: vec![
+                OperationId(2),
+                OperationId(3),
+                OperationId(4),
+                OperationId(5),
+            ],
+            role: CutGroupRole::MountHoles,
+            count_range: Some(CountRangeHint {
+                minimum: 2,
+                maximum: 8,
+            }),
+        },
+    );
+    recipe.variation.semantic_cut_groups.insert(
+        "vents".to_owned(),
+        SemanticCutGroupHint {
+            label: "Vent slots".to_owned(),
+            definition: PartDefinitionId(1),
+            operations: vec![OperationId(6), OperationId(7), OperationId(8)],
+            role: CutGroupRole::Vents,
+            count_range: Some(CountRangeHint {
+                minimum: 1,
+                maximum: 6,
+            }),
+        },
     );
     recipe.root_instances.push(PartInstanceId(1));
     finish_ids(&mut recipe, 2, 2, 9, 1);
@@ -1900,5 +1932,25 @@ mod tests {
             assert!(artifact.validation_report.is_valid(), "{}", asset.slug());
             assert!(!artifact.statistics.used_sdf_or_remeshing);
         }
+    }
+
+    #[test]
+    fn multi_cut_panel_authors_semantic_cut_groups() {
+        let recipe = multi_cut_panel_recipe();
+        let mount_holes = recipe
+            .variation
+            .semantic_cut_groups
+            .get("mount_holes")
+            .expect("mount hole group should be authored");
+        let vents = recipe
+            .variation
+            .semantic_cut_groups
+            .get("vents")
+            .expect("vent group should be authored");
+
+        assert_eq!(mount_holes.operations.len(), 4);
+        assert_eq!(mount_holes.role, CutGroupRole::MountHoles);
+        assert_eq!(vents.operations.len(), 3);
+        assert_eq!(vents.role, CutGroupRole::Vents);
     }
 }

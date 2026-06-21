@@ -274,9 +274,9 @@ fn template_reset_replaces_recipe_and_clears_dirty_state() {
     assert!(state.dirty);
 
     state
-        .handle_command(AssetAppCommand::LoadTemplate(template(
+        .handle_command(AssetAppCommand::LoadTemplate(Box::new(template(
             "lamp", "Lamp", 0.36,
-        )))
+        ))))
         .expect("template reset");
 
     assert_eq!(state.recipe.title, "Lamp");

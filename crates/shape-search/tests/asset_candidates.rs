@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetEdit, AssetId, AssetRecipe, BoundaryLoopId, CountRangeHint, CutEdgeTreatment, Frame3,
-    GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterDescriptor,
-    ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace,
-    RegionId, ReplacementGroupHint, SurfaceRegionSpec, SurfaceRole, Transform3,
-    validate_asset_recipe,
+    AssetEdit, AssetId, AssetRecipe, BoundaryLoopId, CountRangeHint, CutEdgeTreatment,
+    CutGroupRole, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId,
+    ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
+    PartInstanceId, PlanarCutFace, RegionId, ReplacementGroupHint, SemanticCutGroupHint,
+    SurfaceRegionSpec, SurfaceRole, Transform3, validate_asset_recipe,
 };
 use shape_search::asset::{
     AssetCandidateEditKind, AssetCandidateMode, AssetCandidateRequest, generate_asset_candidates,
@@ -263,6 +263,94 @@ fn rich_recipe() -> AssetRecipe {
     recipe
 }
 
+fn grouped_cut_recipe() -> AssetRecipe {
+    let mut recipe = rich_recipe();
+    let definition = recipe
+        .definitions
+        .get_mut(&PartDefinitionId(7))
+        .expect("cut panel definition should exist");
+    definition.geometry.operations = vec![
+        rectangular_cut(
+            OperationId(5),
+            [-0.36, 0.0],
+            BoundaryLoopId(1),
+            BoundaryLoopId(2),
+            RegionId(4),
+            RegionId(5),
+        ),
+        rectangular_cut(
+            OperationId(6),
+            [0.0, 0.0],
+            BoundaryLoopId(3),
+            BoundaryLoopId(4),
+            RegionId(6),
+            RegionId(7),
+        ),
+        rectangular_cut(
+            OperationId(7),
+            [0.36, 0.0],
+            BoundaryLoopId(5),
+            BoundaryLoopId(6),
+            RegionId(8),
+            RegionId(9),
+        ),
+    ];
+    for (region_id, name, role) in [
+        (RegionId(6), "cut rim 2", SurfaceRole::Detail),
+        (RegionId(7), "cut wall 2", SurfaceRole::Interior),
+        (RegionId(8), "cut rim 3", SurfaceRole::Detail),
+        (RegionId(9), "cut wall 3", SurfaceRole::Interior),
+    ] {
+        definition
+            .regions
+            .insert(region_id, region(region_id.0, name, role));
+    }
+    recipe.variation.semantic_cut_groups.insert(
+        "vents".to_owned(),
+        SemanticCutGroupHint {
+            label: "Vent slots".to_owned(),
+            definition: PartDefinitionId(7),
+            operations: vec![OperationId(5), OperationId(6), OperationId(7)],
+            role: CutGroupRole::Vents,
+            count_range: Some(CountRangeHint {
+                minimum: 1,
+                maximum: 5,
+            }),
+        },
+    );
+    recipe.next_ids.operation = 8;
+    recipe.next_ids.region = 10;
+    recipe.next_ids.boundary_loop = 7;
+    assert!(validate_asset_recipe(&recipe).is_valid());
+    recipe
+}
+
+fn rectangular_cut(
+    operation: OperationId,
+    center: [f32; 2],
+    entry_loop: BoundaryLoopId,
+    exit_loop: BoundaryLoopId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+) -> ModelingOperationSpec {
+    ModelingOperationSpec::RectangularThroughCut {
+        operation,
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center,
+        size: [0.16, 0.08],
+        corner_radius: 0.02,
+        rim_width: 0.03,
+        corner_segments: 3,
+        entry_loop,
+        exit_loop,
+        outer_region: RegionId(1),
+        rim_region,
+        wall_region,
+        edge_treatment: CutEdgeTreatment::Hard,
+    }
+}
+
 fn request(seed: u64, mode: AssetCandidateMode) -> AssetCandidateRequest {
     AssetCandidateRequest {
         seed,
@@ -483,6 +571,47 @@ fn explore_generates_structural_cut_duplication() {
     assert!(duplicate_cut.6.0 > duplicate_cut.5.0);
     assert_eq!(duplicate_cut.7, None);
     assert_ne!(duplicate_cut.8, [0.0, 0.0]);
+}
+
+#[test]
+fn explore_generates_semantic_cut_group_edits() {
+    let recipe = grouped_cut_recipe();
+    let output = generate_asset_candidates(
+        &recipe,
+        &AssetCandidateRequest {
+            seed: 41,
+            proposal_count: 192,
+            result_count: 96,
+            mode: AssetCandidateMode::Explore,
+        },
+    )
+    .expect("candidates should generate");
+
+    let grouped_fields = output
+        .candidates
+        .iter()
+        .flat_map(|candidate| &candidate.program.operations)
+        .filter_map(|operation| match operation {
+            AssetEdit::SetOperationScalar {
+                definition,
+                operation,
+                field,
+                ..
+            } if *definition == PartDefinitionId(7)
+                && matches!(*operation, OperationId(5) | OperationId(6) | OperationId(7)) =>
+            {
+                Some(field.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        grouped_fields
+            .windows(3)
+            .any(|fields| fields.iter().all(|field| *field == fields[0])),
+        "expected at least one semantic cut group proposal to edit all vents together"
+    );
 }
 
 #[test]

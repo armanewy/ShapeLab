@@ -8,10 +8,10 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     ArraySpacingEdit, AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationReport,
-    BoundaryLoopId, CountRangeHint, Frame3, GeneratorDimensionEdit, GeometrySource,
+    BoundaryLoopId, CountRangeHint, CutGroupRole, Frame3, GeneratorDimensionEdit, GeometrySource,
     ModelingOperationSpec, OperationId, ParameterDescriptor, PartDefinitionId, PartInstanceId,
-    RegionId, Transform3, apply_edit_program, enumerate_parameters, get_scalar,
-    validate_asset_recipe,
+    RegionId, Transform3, apply_edit_program, definition_scalar_path, enumerate_parameters,
+    get_scalar, validate_asset_recipe,
 };
 use thiserror::Error;
 
@@ -202,10 +202,10 @@ pub fn generate_asset_candidates(
         let mut operations = Vec::new();
         let mut id_allocator = ProposalIdAllocator::from_recipe(recipe);
         for opportunity in selected {
-            if let Some(operation) =
+            if let Some(generated) =
                 opportunity.build_edit(recipe, request.mode, &mut rng, &mut id_allocator)
             {
-                operations.push(operation);
+                operations.extend(generated);
             }
         }
         if operations.is_empty() {
@@ -292,6 +292,7 @@ fn collect_opportunities(
 ) -> Vec<EditOpportunity> {
     let mut opportunities = Vec::new();
     collect_parameter_opportunities(recipe, mode, skipped, &mut opportunities);
+    collect_cut_group_opportunities(recipe, mode, skipped, &mut opportunities);
     collect_instance_opportunities(recipe, mode, skipped, &mut opportunities);
     collect_definition_opportunities(recipe, mode, skipped, &mut opportunities);
     collect_optional_part_opportunities(recipe, mode, skipped, &mut opportunities);
@@ -336,6 +337,273 @@ fn collect_parameter_opportunities(
                 range,
             });
         }
+    }
+}
+
+fn collect_cut_group_opportunities(
+    recipe: &AssetRecipe,
+    mode: AssetCandidateMode,
+    skipped: &mut usize,
+    opportunities: &mut Vec<EditOpportunity>,
+) {
+    if mode == AssetCandidateMode::Refine {
+        return;
+    }
+    for (group_id, group) in &recipe.variation.semantic_cut_groups {
+        if recipe.topology_locks.contains(&group.definition) {
+            *skipped += 1;
+            continue;
+        }
+        let Some(definition) = recipe.definitions.get(&group.definition) else {
+            continue;
+        };
+        let operations = group
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                definition
+                    .geometry
+                    .operations
+                    .iter()
+                    .find(|candidate| candidate.operation_id() == *operation)
+                    .map(|operation_spec| (*operation, operation_spec))
+            })
+            .collect::<Vec<_>>();
+        if operations.len() < 2 {
+            continue;
+        }
+        match &group.role {
+            CutGroupRole::MountHoles => {
+                collect_circular_cut_group_opportunities(
+                    group_id,
+                    group.definition,
+                    &operations,
+                    opportunities,
+                );
+            }
+            CutGroupRole::Vents => {
+                collect_rectangular_cut_group_opportunities(
+                    group_id,
+                    group.definition,
+                    &operations,
+                    opportunities,
+                );
+            }
+            CutGroupRole::Recesses | CutGroupRole::Custom(_) => {
+                collect_recessed_cut_group_opportunities(
+                    group_id,
+                    group.definition,
+                    &operations,
+                    opportunities,
+                );
+            }
+        }
+    }
+}
+
+fn collect_circular_cut_group_opportunities(
+    group_id: &str,
+    definition: PartDefinitionId,
+    operations: &[(OperationId, &ModelingOperationSpec)],
+    opportunities: &mut Vec<EditOpportunity>,
+) {
+    let mut ids = Vec::new();
+    let mut radii = Vec::new();
+    let mut rim_widths = Vec::new();
+    let mut radial_segments = Vec::new();
+    for (operation, operation_spec) in operations {
+        let ModelingOperationSpec::CircularThroughCut {
+            radius,
+            rim_width,
+            radial_segments: segments,
+            ..
+        } = operation_spec
+        else {
+            return;
+        };
+        ids.push(*operation);
+        radii.push(*radius);
+        rim_widths.push(*rim_width);
+        radial_segments.push(*segments as f32);
+    }
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "circular_through_cut.radius",
+        average(&radii),
+        positive_group_range(average(&radii), 0.015, 0.24, 0.005),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "circular_through_cut.rim_width",
+        average(&rim_widths),
+        positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "circular_through_cut.radial_segments",
+        average(&radial_segments),
+        ParameterRange {
+            minimum: 8.0,
+            maximum: 32.0,
+            step: 1.0,
+            mutation_sigma: 2.0,
+        },
+    );
+}
+
+fn collect_rectangular_cut_group_opportunities(
+    group_id: &str,
+    definition: PartDefinitionId,
+    operations: &[(OperationId, &ModelingOperationSpec)],
+    opportunities: &mut Vec<EditOpportunity>,
+) {
+    let mut ids = Vec::new();
+    let mut centers = Vec::new();
+    let mut widths = Vec::new();
+    let mut heights = Vec::new();
+    let mut rim_widths = Vec::new();
+    for (operation, operation_spec) in operations {
+        let ModelingOperationSpec::RectangularThroughCut {
+            center,
+            size,
+            rim_width,
+            ..
+        } = operation_spec
+        else {
+            return;
+        };
+        ids.push(*operation);
+        centers.push(*center);
+        widths.push(size[0]);
+        heights.push(size[1]);
+        rim_widths.push(*rim_width);
+    }
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "rectangular_through_cut.size.x",
+        average(&widths),
+        positive_group_range(average(&widths), 0.04, 0.72, 0.01),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "rectangular_through_cut.size.y",
+        average(&heights),
+        positive_group_range(average(&heights), 0.015, 0.24, 0.005),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "rectangular_through_cut.rim_width",
+        average(&rim_widths),
+        positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "rectangular_through_cut.center.y",
+        average_axis(&centers, 1),
+        signed_group_range(average_axis(&centers, 1), 1.25, 0.02),
+    );
+    if centers.len() >= 2 {
+        let spacing = average_spacing(&centers, 0).abs();
+        opportunities.push(EditOpportunity::CutGroupLinearSpacing {
+            group: group_id.to_owned(),
+            definition,
+            operations: ids,
+            field: "rectangular_through_cut.center.x".to_owned(),
+            axis: 0,
+            centers,
+            current_spacing: spacing,
+            range: positive_group_range(spacing, 0.18, 1.20, 0.02),
+        });
+    }
+}
+
+fn collect_recessed_cut_group_opportunities(
+    group_id: &str,
+    definition: PartDefinitionId,
+    operations: &[(OperationId, &ModelingOperationSpec)],
+    opportunities: &mut Vec<EditOpportunity>,
+) {
+    let mut ids = Vec::new();
+    let mut widths = Vec::new();
+    let mut heights = Vec::new();
+    let mut depths = Vec::new();
+    for (operation, operation_spec) in operations {
+        let ModelingOperationSpec::RecessedPanelCut { size, depth, .. } = operation_spec else {
+            return;
+        };
+        ids.push(*operation);
+        widths.push(size[0]);
+        heights.push(size[1]);
+        depths.push(*depth);
+    }
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "recessed_panel_cut.size.x",
+        average(&widths),
+        positive_group_range(average(&widths), 0.04, 1.20, 0.02),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "recessed_panel_cut.size.y",
+        average(&heights),
+        positive_group_range(average(&heights), 0.04, 1.20, 0.02),
+    );
+    push_group_scalar(
+        opportunities,
+        group_id,
+        definition,
+        &ids,
+        "recessed_panel_cut.depth",
+        average(&depths),
+        positive_group_range(average(&depths), 0.01, 0.30, 0.005),
+    );
+}
+
+fn push_group_scalar(
+    opportunities: &mut Vec<EditOpportunity>,
+    group: &str,
+    definition: PartDefinitionId,
+    operations: &[OperationId],
+    field: &str,
+    current: f32,
+    range: ParameterRange,
+) {
+    if current.is_finite() && range.minimum < range.maximum {
+        opportunities.push(EditOpportunity::CutGroupScalar {
+            group: group.to_owned(),
+            definition,
+            operations: operations.to_vec(),
+            field: field.to_owned(),
+            current,
+            range,
+        });
     }
 }
 
@@ -748,6 +1016,52 @@ fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
     )
 }
 
+fn average(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f32>() / values.len() as f32
+}
+
+fn average_axis(values: &[[f32; 2]], axis: usize) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().map(|value| value[axis]).sum::<f32>() / values.len() as f32
+}
+
+fn average_spacing(values: &[[f32; 2]], axis: usize) -> f32 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+    values
+        .windows(2)
+        .map(|pair| pair[1][axis] - pair[0][axis])
+        .sum::<f32>()
+        / (values.len() - 1) as f32
+}
+
+fn positive_group_range(current: f32, floor: f32, ceiling: f32, step: f32) -> ParameterRange {
+    let baseline = current.abs().max(step.max(0.01));
+    ParameterRange {
+        minimum: floor.max((baseline * 0.45).min(ceiling)),
+        maximum: ceiling
+            .max(floor + step)
+            .min((baseline * 1.85).max(floor + step)),
+        step,
+        mutation_sigma: (baseline * 0.20).max(step),
+    }
+}
+
+fn signed_group_range(current: f32, radius: f32, step: f32) -> ParameterRange {
+    ParameterRange {
+        minimum: current - radius,
+        maximum: current + radius,
+        step,
+        mutation_sigma: (radius * 0.10).max(step),
+    }
+}
+
 fn select_opportunities(
     opportunities: &[EditOpportunity],
     mode: AssetCandidateMode,
@@ -779,6 +1093,9 @@ fn select_opportunities(
                 .iter()
                 .any(EditOpportunity::is_structural_cut_duplicate)
         {
+            continue;
+        }
+        if opportunity.is_cut_group() && selected.iter().any(EditOpportunity::is_cut_group) {
             continue;
         }
         selected.push(opportunity);
@@ -846,6 +1163,24 @@ enum EditOpportunity {
         definition: PartDefinitionId,
         operation: OperationId,
         source: CutDuplicateSource,
+    },
+    CutGroupScalar {
+        group: String,
+        definition: PartDefinitionId,
+        operations: Vec<OperationId>,
+        field: String,
+        current: f32,
+        range: ParameterRange,
+    },
+    CutGroupLinearSpacing {
+        group: String,
+        definition: PartDefinitionId,
+        operations: Vec<OperationId>,
+        field: String,
+        axis: usize,
+        centers: Vec<[f32; 2]>,
+        current_spacing: f32,
+        range: ParameterRange,
     },
     DetailDensity(DetailDensityTarget),
 }
@@ -949,37 +1284,57 @@ impl EditOpportunity {
         matches!(self, Self::DuplicateCut { .. })
     }
 
+    fn is_cut_group(&self) -> bool {
+        match self {
+            Self::CutGroupScalar { .. } | Self::CutGroupLinearSpacing { .. } => true,
+            Self::ScalarParameter { .. }
+            | Self::Transform { .. }
+            | Self::Dimension(_)
+            | Self::BevelRadius { .. }
+            | Self::SweepProfilePoint { .. }
+            | Self::SweepPathFrame { .. }
+            | Self::LatheProfilePoint { .. }
+            | Self::ArrayCount { .. }
+            | Self::LinearArraySpacing { .. }
+            | Self::RadialArrayAngle { .. }
+            | Self::OptionalPart { .. }
+            | Self::Replacement { .. }
+            | Self::DuplicateCut { .. }
+            | Self::DetailDensity(_) => false,
+        }
+    }
+
     fn build_edit(
         &self,
         _recipe: &AssetRecipe,
         mode: AssetCandidateMode,
         rng: &mut ChaCha8Rng,
         ids: &mut ProposalIdAllocator,
-    ) -> Option<AssetEdit> {
+    ) -> Option<Vec<AssetEdit>> {
         match self {
             Self::ScalarParameter {
                 parameter,
                 current,
                 range,
-            } => Some(AssetEdit::SetScalar {
+            } => Some(vec![AssetEdit::SetScalar {
                 parameter: parameter.id,
                 value: mutate_scalar(*current, *range, mode, rng)?,
-            }),
-            Self::Transform { instance, current } => Some(AssetEdit::SetTransform {
+            }]),
+            Self::Transform { instance, current } => Some(vec![AssetEdit::SetTransform {
                 instance: *instance,
                 transform: mutate_transform(current, mode, rng),
-            }),
-            Self::Dimension(target) => target.build_edit(mode, rng),
+            }]),
+            Self::Dimension(target) => target.build_edit(mode, rng).map(|edit| vec![edit]),
             Self::BevelRadius {
                 definition,
                 operation,
                 current,
-            } => Some(AssetEdit::SetBevelSettings {
+            } => Some(vec![AssetEdit::SetBevelSettings {
                 definition: *definition,
                 operation: *operation,
                 radius: Some(mutate_non_negative(*current, mode, rng)),
                 segments: None,
-            }),
+            }]),
             Self::SweepProfilePoint {
                 definition,
                 index,
@@ -992,11 +1347,11 @@ impl EditOpportunity {
                 } else {
                     mutate_signed(point[axis], mode, rng)
                 };
-                Some(AssetEdit::SetSweepProfilePoint {
+                Some(vec![AssetEdit::SetSweepProfilePoint {
                     definition: *definition,
                     index: *index,
                     point,
-                })
+                }])
             }
             Self::SweepPathFrame {
                 definition,
@@ -1006,11 +1361,11 @@ impl EditOpportunity {
                 let mut frame = current.clone();
                 let axis = rng.random_range(0..3);
                 frame.origin[axis] = mutate_signed(frame.origin[axis], mode, rng);
-                Some(AssetEdit::SetSweepPathFrame {
+                Some(vec![AssetEdit::SetSweepPathFrame {
                     definition: *definition,
                     index: *index,
                     frame,
-                })
+                }])
             }
             Self::LatheProfilePoint {
                 definition,
@@ -1024,22 +1379,22 @@ impl EditOpportunity {
                 } else {
                     mutate_signed(point[axis], mode, rng)
                 };
-                Some(AssetEdit::SetLatheProfilePoint {
+                Some(vec![AssetEdit::SetLatheProfilePoint {
                     definition: *definition,
                     index: *index,
                     point,
-                })
+                }])
             }
             Self::ArrayCount {
                 definition,
                 operation,
                 current,
                 range,
-            } => Some(AssetEdit::SetArrayCount {
+            } => Some(vec![AssetEdit::SetArrayCount {
                 definition: *definition,
                 operation: *operation,
                 count: mutate_count(*current, range.minimum, range.maximum, rng)?,
-            }),
+            }]),
             Self::LinearArraySpacing {
                 definition,
                 operation,
@@ -1048,34 +1403,38 @@ impl EditOpportunity {
                 let mut offset = *current;
                 let axis = rng.random_range(0..3);
                 offset[axis] = mutate_signed(offset[axis], mode, rng);
-                Some(AssetEdit::SetArraySpacing {
+                Some(vec![AssetEdit::SetArraySpacing {
                     definition: *definition,
                     operation: *operation,
                     spacing: ArraySpacingEdit::LinearOffset(offset),
-                })
+                }])
             }
             Self::RadialArrayAngle {
                 definition,
                 operation,
                 current,
-            } => Some(AssetEdit::SetArraySpacing {
+            } => Some(vec![AssetEdit::SetArraySpacing {
                 definition: *definition,
                 operation: *operation,
                 spacing: ArraySpacingEdit::RadialAngleDegrees(mutate_angle(*current, mode, rng)),
-            }),
-            Self::OptionalPart { instance, current } => Some(AssetEdit::SetOptionalPartEnabled {
-                instance: *instance,
-                enabled: !*current,
-            }),
-            Self::Replacement { instance, to, .. } => Some(AssetEdit::ReplaceInstanceDefinition {
-                instance: *instance,
-                definition: *to,
-            }),
+            }]),
+            Self::OptionalPart { instance, current } => {
+                Some(vec![AssetEdit::SetOptionalPartEnabled {
+                    instance: *instance,
+                    enabled: !*current,
+                }])
+            }
+            Self::Replacement { instance, to, .. } => {
+                Some(vec![AssetEdit::ReplaceInstanceDefinition {
+                    instance: *instance,
+                    definition: *to,
+                }])
+            }
             Self::DuplicateCut {
                 definition,
                 operation,
                 source,
-            } => Some(AssetEdit::DuplicateCutOperation {
+            } => Some(vec![AssetEdit::DuplicateCutOperation {
                 definition: *definition,
                 source: *operation,
                 operation: ids.operation(),
@@ -1085,8 +1444,61 @@ impl EditOpportunity {
                 wall_region: ids.region(),
                 floor_region: source.requires_floor_region().then(|| ids.region()),
                 center_offset: source.center_offset(mode, rng),
-            }),
-            Self::DetailDensity(target) => target.build_edit(rng),
+            }]),
+            Self::CutGroupScalar {
+                definition,
+                operations,
+                field,
+                current,
+                range,
+                ..
+            } => {
+                let value = mutate_scalar(*current, *range, mode, rng)?;
+                Some(
+                    operations
+                        .iter()
+                        .map(|operation| AssetEdit::SetOperationScalar {
+                            definition: *definition,
+                            operation: *operation,
+                            field: field.clone(),
+                            value,
+                        })
+                        .collect(),
+                )
+            }
+            Self::CutGroupLinearSpacing {
+                definition,
+                operations,
+                field,
+                axis,
+                centers,
+                current_spacing,
+                range,
+                ..
+            } => {
+                let spacing = mutate_scalar(*current_spacing, *range, mode, rng)?;
+                let sign = if average_spacing(centers, *axis) < 0.0 {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let center = average_axis(centers, *axis);
+                let start =
+                    center - sign * spacing * (operations.len().saturating_sub(1) as f32) * 0.5;
+                Some(
+                    operations
+                        .iter()
+                        .enumerate()
+                        .map(|(index, operation)| AssetEdit::SetOperationScalar {
+                            definition: *definition,
+                            operation: *operation,
+                            field: field.clone(),
+                            value: start + sign * spacing * index as f32,
+                        })
+                        .collect(),
+                )
+            }
+            Self::DetailDensity(target) => target.build_edit(rng).map(|edit| vec![edit]),
         }
     }
 
@@ -1106,7 +1518,9 @@ impl EditOpportunity {
             }
             Self::OptionalPart { .. } => AssetCandidateEditKind::OptionalPart,
             Self::Replacement { .. } => AssetCandidateEditKind::Replacement,
-            Self::DuplicateCut { .. } => AssetCandidateEditKind::ModelingOperation,
+            Self::DuplicateCut { .. }
+            | Self::CutGroupScalar { .. }
+            | Self::CutGroupLinearSpacing { .. } => AssetCandidateEditKind::ModelingOperation,
             Self::DetailDensity(_) => AssetCandidateEditKind::DetailDensity,
         }
     }
@@ -1166,6 +1580,21 @@ impl EditOpportunity {
             } => format!(
                 "definition.{}.operation.{}.duplicate",
                 definition.0, operation.0
+            ),
+            Self::CutGroupScalar {
+                group,
+                definition,
+                field,
+                ..
+            } => format!("definition.{}.cut_group.{group}.{field}", definition.0),
+            Self::CutGroupLinearSpacing {
+                group,
+                definition,
+                axis,
+                ..
+            } => format!(
+                "definition.{}.cut_group.{group}.spacing.{axis}",
+                definition.0
             ),
             Self::DetailDensity(target) => target.subject(),
         }
@@ -1725,6 +2154,20 @@ fn diagnose_change(
             format!("radius={radius:?}; segments={segments:?}"),
             "changed bevel settings".to_owned(),
         ),
+        AssetEdit::SetOperationScalar {
+            definition,
+            field,
+            operation,
+            ..
+        } => {
+            let path_suffix = format!("operation.{}.{}", operation.0, field);
+            let path = definition_scalar_path(*definition, &path_suffix);
+            (
+                scalar_summary(before, &path),
+                scalar_summary(after, &path),
+                format!("changed grouped cut control '{path_suffix}'"),
+            )
+        }
         AssetEdit::SetSweepProfilePoint { point, .. } => (
             "sweep profile point".to_owned(),
             format_array2(*point),

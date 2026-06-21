@@ -52,6 +52,8 @@ Modeling operations are grouped into coarse phases: source configuration, local 
 
 Cut operations are also reflected directly in the Asset Modeling Lab inspector. This lets generated or duplicated cuts expose editable controls without permanently authoring a `ParameterDescriptor` for every operation field. Descriptor-free operation edits still flow through the recipe reducer, topology-lock checks, validation, history, and compile jobs.
 
+Recipes can also author semantic cut groups in variation metadata. These groups name repeated operation sets such as mounting holes or ventilation slots, validate that every member is a supported cut on the declared definition, and allow candidate search to vary repeated dimensions or spacing as one semantic proposal rather than unrelated one-off edits.
+
 Boundary-loop metadata has an explicit lifecycle. Cut operations produce live loops, while future boundary-treatment operations may reference a loop or consume it and emit replacement loops. Compile validation checks the final mesh against the live loop set while still retaining consumed loops as historical provenance, so a bevel can replace an entry loop with outer/inner replacement loops without making the original cut invalid.
 
 Part instances declare:

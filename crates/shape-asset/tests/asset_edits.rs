@@ -917,6 +917,104 @@ fn descriptor_free_cut_operation_scalar_edits_are_lock_aware() {
 }
 
 #[test]
+fn removing_cut_operation_cascades_semantic_cut_groups() {
+    let mut recipe = edit_recipe();
+    let first_cut = OperationId(51);
+    let second_cut = OperationId(52);
+    let mut plate = recipe.definitions[&PLATE].clone();
+    plate.regions.insert(
+        RegionId(1),
+        SurfaceRegionSpec {
+            id: RegionId(1),
+            name: "front".to_owned(),
+            role: SurfaceRole::PrimarySurface,
+            tags: BTreeSet::new(),
+        },
+    );
+    plate.geometry.operations = vec![
+        ModelingOperationSpec::CircularThroughCut {
+            operation: first_cut,
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [-0.2, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(3),
+            exit_loop: BoundaryLoopId(4),
+            outer_region: RegionId(1),
+            rim_region: RegionId(30),
+            wall_region: RegionId(31),
+            edge_treatment: CutEdgeTreatment::Hard,
+        },
+        ModelingOperationSpec::CircularThroughCut {
+            operation: second_cut,
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.2, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(5),
+            exit_loop: BoundaryLoopId(6),
+            outer_region: RegionId(1),
+            rim_region: RegionId(32),
+            wall_region: RegionId(33),
+            edge_treatment: CutEdgeTreatment::Hard,
+        },
+    ];
+    recipe.definitions.insert(PLATE, plate);
+    recipe.variation.semantic_cut_groups.insert(
+        "mount_holes".to_owned(),
+        SemanticCutGroupHint {
+            label: "Mounting holes".to_owned(),
+            definition: PLATE,
+            operations: vec![first_cut, second_cut],
+            role: CutGroupRole::MountHoles,
+            count_range: None,
+        },
+    );
+    recipe.next_ids.operation = 53;
+    recipe.next_ids.region = 34;
+    recipe.next_ids.boundary_loop = 7;
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "reject referenced cut".to_owned(),
+                seed: 76,
+                operations: vec![AssetEdit::RemoveModelingOperation {
+                    definition: PLATE,
+                    operation: first_cut,
+                    policy: OperationRemovalPolicy::RejectIfReferenced,
+                }],
+            },
+        ),
+        Err(AssetError::UnsupportedEdit(_))
+    ));
+
+    let edited = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "cascade referenced cut".to_owned(),
+            seed: 77,
+            operations: vec![AssetEdit::RemoveModelingOperation {
+                definition: PLATE,
+                operation: first_cut,
+                policy: OperationRemovalPolicy::CascadeOwnedMetadata,
+            }],
+        },
+    )
+    .expect("semantic cut group reference should cascade");
+
+    assert_eq!(
+        edited.variation.semantic_cut_groups["mount_holes"].operations,
+        vec![second_cut]
+    );
+}
+
+#[test]
 fn compatible_and_incompatible_replacements_are_distinct() {
     let recipe = edit_recipe();
 
