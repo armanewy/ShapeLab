@@ -65,7 +65,9 @@ Shape Lab also includes an explicit polygon modeling lane for part-aware assets:
 ```text
 AssetRecipe
   -> shape-modeling generators + assembly
-  -> shape-search semantic candidates + scoring
+  -> shape-search semantic candidates
+  -> bounded proposal compilation
+  -> shape-render mesh visual descriptors + scoring
   -> shape-compile exports
 ```
 
@@ -105,7 +107,7 @@ Render fixed-camera shaded and wireframe benchmark sheets for the Asset Modeling
 cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
 ```
 
-Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`.
+Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`. Candidate selection uses compiled mesh descriptors derived from fixed-camera silhouette masks, perimeter, depth histograms, mesh volume, and recipe structure.
 
 Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 
@@ -127,7 +129,7 @@ The decompiler requires identical ordered topology and writes canonical binary m
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, candidates, validation, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationships, and revisions.
 
 The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
 

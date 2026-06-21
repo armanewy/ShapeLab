@@ -327,6 +327,13 @@ fn crate_mvp_workflow_generates_six_unlocked_variants() {
 
     assert_eq!(state.candidate_slots.len(), 6);
     assert!(
+        state
+            .candidate_slots
+            .iter()
+            .all(|slot| slot.candidate.artifact.is_some()),
+        "selected semantic candidates should retain compiled artifacts for preview reuse"
+    );
+    assert!(
         state.candidate_slots.iter().any(|slot| {
             slot.candidate.changes.len() > 1
                 || slot

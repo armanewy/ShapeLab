@@ -193,6 +193,9 @@ pub struct AssetRecipe {
     pub topology_locks: BTreeSet<PartDefinitionId>,
     /// Asset-level constraints.
     pub constraints: Vec<AssetConstraint>,
+    /// Authored geometric relationship policies between part instances.
+    #[serde(default)]
+    pub relationships: Vec<AssetRelationshipPolicy>,
     /// Authored variation hints that do not affect hierarchy or generation semantics.
     #[serde(default)]
     pub variation: AuthoredVariationMetadata,
@@ -217,6 +220,7 @@ impl AssetRecipe {
             subtree_locks: BTreeSet::new(),
             topology_locks: BTreeSet::new(),
             constraints: Vec::new(),
+            relationships: Vec::new(),
             variation: AuthoredVariationMetadata::default(),
             next_ids: AssetIdCounters::default(),
         }
@@ -695,6 +699,83 @@ pub enum AssetConstraint {
     },
 }
 
+/// Authored geometric relationship policy between two semantic part instances.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AssetRelationshipPolicy {
+    /// This pair is intentionally allowed to overlap.
+    MayOverlap {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+        /// Human-facing reason for the relationship.
+        reason: String,
+    },
+    /// This pair must not intersect.
+    MustNotIntersect {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+    },
+    /// This pair must touch or remain within attachment clearance.
+    MustTouch {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+        /// Maximum accepted clearance in world units.
+        max_clearance: f32,
+    },
+    /// The contained part must remain inside the container's authored bounds.
+    MustContain {
+        /// Containing part instance.
+        container: PartInstanceId,
+        /// Contained part instance.
+        contained: PartInstanceId,
+    },
+    /// This pair must maintain at least the authored clearance.
+    MinimumClearance {
+        /// First part instance.
+        first: PartInstanceId,
+        /// Second part instance.
+        second: PartInstanceId,
+        /// Minimum clearance in world units.
+        clearance: f32,
+    },
+    /// The child instance must remain attached to the parent through the named socket.
+    SocketAttached {
+        /// Parent part instance.
+        parent: PartInstanceId,
+        /// Child part instance.
+        child: PartInstanceId,
+        /// Socket that should be shared by parent and child.
+        socket: SocketId,
+        /// Maximum accepted socket-origin distance in world units.
+        max_origin_distance: f32,
+        /// Maximum accepted axis angle in degrees.
+        max_axis_angle_degrees: f32,
+        /// Optional maximum accepted mesh clearance in world units.
+        max_clearance: Option<f32>,
+    },
+}
+
+impl AssetRelationshipPolicy {
+    /// Create a relationship that allows intentional overlap.
+    #[must_use]
+    pub fn may_overlap(
+        first: PartInstanceId,
+        second: PartInstanceId,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::MayOverlap {
+            first,
+            second,
+            reason: reason.into(),
+        }
+    }
+}
+
 /// Editable generator dimensions and segment counts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GeneratorDimensionEdit {
@@ -1093,6 +1174,7 @@ pub fn validate_asset_recipe(recipe: &AssetRecipe) -> AssetValidationReport {
     validate_parameters(recipe, &mut report);
     validate_locks(recipe, &mut report);
     validate_constraints(recipe, &mut report);
+    validate_relationships(recipe, &mut report);
     validate_variation_metadata(recipe, &mut report);
     validate_next_ids(recipe, &mut report);
 
@@ -1638,6 +1720,160 @@ fn validate_constraints(recipe: &AssetRecipe, report: &mut AssetValidationReport
                 "Constraint references an unknown instance.",
             );
         }
+    }
+}
+
+fn validate_relationships(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    for (index, relationship) in recipe.relationships.iter().enumerate() {
+        match relationship {
+            AssetRelationshipPolicy::MayOverlap {
+                first,
+                second,
+                reason,
+            } => {
+                validate_relationship_pair(recipe, report, index, *first, *second);
+                if reason.trim().is_empty() {
+                    push_issue(
+                        report,
+                        Some(format!("relationship.{index}.reason")),
+                        "empty_relationship_reason",
+                        "MayOverlap relationships must explain why overlap is intentional.",
+                    );
+                }
+            }
+            AssetRelationshipPolicy::MustNotIntersect { first, second } => {
+                validate_relationship_pair(recipe, report, index, *first, *second);
+            }
+            AssetRelationshipPolicy::MustTouch {
+                first,
+                second,
+                max_clearance,
+            } => {
+                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_non_negative(
+                    report,
+                    Some(format!("relationship.{index}.max_clearance")),
+                    *max_clearance,
+                );
+            }
+            AssetRelationshipPolicy::MustContain {
+                container,
+                contained,
+            } => {
+                validate_relationship_pair(recipe, report, index, *container, *contained);
+            }
+            AssetRelationshipPolicy::MinimumClearance {
+                first,
+                second,
+                clearance,
+            } => {
+                validate_relationship_pair(recipe, report, index, *first, *second);
+                validate_non_negative(
+                    report,
+                    Some(format!("relationship.{index}.clearance")),
+                    *clearance,
+                );
+            }
+            AssetRelationshipPolicy::SocketAttached {
+                parent,
+                child,
+                socket,
+                max_origin_distance,
+                max_axis_angle_degrees,
+                max_clearance,
+            } => {
+                validate_relationship_pair(recipe, report, index, *parent, *child);
+                validate_non_negative(
+                    report,
+                    Some(format!("relationship.{index}.max_origin_distance")),
+                    *max_origin_distance,
+                );
+                validate_non_negative(
+                    report,
+                    Some(format!("relationship.{index}.max_axis_angle_degrees")),
+                    *max_axis_angle_degrees,
+                );
+                if let Some(clearance) = max_clearance {
+                    validate_non_negative(
+                        report,
+                        Some(format!("relationship.{index}.max_clearance")),
+                        *clearance,
+                    );
+                }
+                validate_relationship_socket(recipe, report, index, *parent, *child, *socket);
+            }
+        }
+    }
+}
+
+fn validate_relationship_pair(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    index: usize,
+    first: PartInstanceId,
+    second: PartInstanceId,
+) {
+    if first == second {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}")),
+            "self_relationship",
+            "Relationship endpoints must be different instances.",
+        );
+    }
+    if !recipe.instances.contains_key(&first) {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}.first")),
+            "unknown_relationship_instance",
+            "Relationship references an unknown first instance.",
+        );
+    }
+    if !recipe.instances.contains_key(&second) {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}.second")),
+            "unknown_relationship_instance",
+            "Relationship references an unknown second instance.",
+        );
+    }
+}
+
+fn validate_relationship_socket(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    index: usize,
+    parent: PartInstanceId,
+    child: PartInstanceId,
+    socket: SocketId,
+) {
+    let Some(parent_instance) = recipe.instances.get(&parent) else {
+        return;
+    };
+    let Some(child_instance) = recipe.instances.get(&child) else {
+        return;
+    };
+    let Some(parent_definition) = recipe.definitions.get(&parent_instance.definition) else {
+        return;
+    };
+    let Some(child_definition) = recipe.definitions.get(&child_instance.definition) else {
+        return;
+    };
+    if !parent_definition.sockets.contains_key(&socket) {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}.socket")),
+            "unknown_relationship_parent_socket",
+            "SocketAttached relationship references a missing parent socket.",
+        );
+    }
+    if !child_definition.sockets.contains_key(&socket) {
+        push_issue(
+            report,
+            Some(format!("relationship.{index}.socket")),
+            "unknown_relationship_child_socket",
+            "SocketAttached relationship references a missing child socket.",
+        );
     }
 }
 

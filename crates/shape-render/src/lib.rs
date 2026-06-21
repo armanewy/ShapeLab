@@ -34,6 +34,16 @@ const CACHE_HASH_PRIME: u64 = 1_099_511_628_211;
 const MATERIAL_COLOR: Vec3 = Vec3::new(196.0, 202.0, 193.0);
 const WIREFRAME_MIX: Vec3 = Vec3::new(34.0, 36.0, 38.0);
 
+/// Number of fixed views used by mesh visual descriptors.
+pub const VISUAL_DESCRIPTOR_CAMERA_COUNT: usize = 4;
+/// Width and height of descriptor silhouette masks.
+pub const VISUAL_DESCRIPTOR_MASK_SIZE: u32 = 64;
+/// Number of u64 words in one descriptor silhouette mask.
+pub const VISUAL_DESCRIPTOR_MASK_WORDS: usize =
+    (VISUAL_DESCRIPTOR_MASK_SIZE as usize * VISUAL_DESCRIPTOR_MASK_SIZE as usize) / 64;
+/// Number of bins in each fixed-view depth histogram.
+pub const VISUAL_DESCRIPTOR_DEPTH_BINS: usize = 8;
+
 /// Orbit camera.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrbitCamera {
@@ -250,6 +260,19 @@ impl RenderedImage {
         let pixel = self.rgba8.get(byte_index..end)?;
         Some([pixel[0], pixel[1], pixel[2], pixel[3]])
     }
+}
+
+/// Mesh visual descriptors derived from low-resolution fixed-camera renders.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshVisualDescriptor {
+    /// Foreground occupancy per fixed view.
+    pub silhouette_occupancy: [f32; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+    /// Normalized boundary length per fixed view.
+    pub silhouette_perimeter: [f32; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+    /// One packed 64x64 binary silhouette mask per fixed view.
+    pub silhouette_masks: [[u64; VISUAL_DESCRIPTOR_MASK_WORDS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+    /// Flattened fixed-view depth histograms.
+    pub depth_histogram: [[f32; VISUAL_DESCRIPTOR_DEPTH_BINS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
 }
 
 /// Stable key for the effective render inputs used by `RenderCache`.
@@ -576,6 +599,62 @@ pub fn fit_camera_to_bounds_with_aspect(bounds: Aabb, aspect_ratio: f32) -> Orbi
     camera.clamped()
 }
 
+/// Fit an orbit camera with explicit yaw and pitch to bounds.
+#[must_use]
+pub fn fit_camera_to_bounds_from_angles(
+    bounds: Aabb,
+    yaw_degrees: f32,
+    pitch_degrees: f32,
+    aspect_ratio: f32,
+) -> OrbitCamera {
+    let mut camera = fit_camera_to_bounds_with_aspect(bounds, aspect_ratio);
+    camera.yaw_degrees = yaw_degrees;
+    camera.pitch_degrees = pitch_degrees;
+    camera = camera.clamped();
+    camera.distance = fit_distance_for_bounds(bounds, &camera, aspect_ratio);
+    camera.clamped()
+}
+
+/// Derive fixed-camera visual descriptors from the rendered mesh silhouette.
+pub fn visual_descriptor_for_mesh(
+    mesh: &TriangleMesh,
+) -> Result<MeshVisualDescriptor, RenderError> {
+    let mut descriptor = MeshVisualDescriptor {
+        silhouette_occupancy: [0.0; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+        silhouette_perimeter: [0.0; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+        silhouette_masks: [[0; VISUAL_DESCRIPTOR_MASK_WORDS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+        depth_histogram: [[0.0; VISUAL_DESCRIPTOR_DEPTH_BINS]; VISUAL_DESCRIPTOR_CAMERA_COUNT],
+    };
+    if mesh.indices.is_empty() || mesh.bounds.is_empty() {
+        return Ok(descriptor);
+    }
+
+    let settings = RenderSettings {
+        width: VISUAL_DESCRIPTOR_MASK_SIZE,
+        height: VISUAL_DESCRIPTOR_MASK_SIZE,
+        background: [0, 0, 0, 0],
+        ambient: 1.0,
+        wireframe: false,
+        ..RenderSettings::default()
+    };
+    let mut workspace = RenderWorkspace::default();
+    let mut image = RenderedImage {
+        width: 0,
+        height: 0,
+        rgba8: Vec::new(),
+    };
+    for (view_index, (yaw, pitch)) in visual_descriptor_views().into_iter().enumerate() {
+        let camera = fit_camera_to_bounds_from_angles(mesh.bounds, yaw, pitch, 1.0);
+        workspace.render_mesh_into(&mut image, mesh, &camera, &settings)?;
+        descriptor.silhouette_masks[view_index] = silhouette_mask(&image);
+        descriptor.silhouette_occupancy[view_index] = silhouette_occupancy(&image);
+        descriptor.silhouette_perimeter[view_index] = silhouette_perimeter(&image);
+        descriptor.depth_histogram[view_index] = depth_histogram(mesh, &camera);
+    }
+
+    Ok(descriptor)
+}
+
 /// Render a mesh to an RGBA8 image.
 pub fn render_mesh(
     mesh: &TriangleMesh,
@@ -666,6 +745,105 @@ impl PixelBounds {
             max_y: max_y as usize,
         })
     }
+}
+
+fn visual_descriptor_views() -> [(f32, f32); VISUAL_DESCRIPTOR_CAMERA_COUNT] {
+    [(0.0, 0.0), (90.0, 0.0), (35.0, 25.0), (35.0, 80.0)]
+}
+
+fn silhouette_mask(image: &RenderedImage) -> [u64; VISUAL_DESCRIPTOR_MASK_WORDS] {
+    let mut words = [0_u64; VISUAL_DESCRIPTOR_MASK_WORDS];
+    for index in 0..foreground_pixel_count(image)
+        .min(VISUAL_DESCRIPTOR_MASK_SIZE as usize * VISUAL_DESCRIPTOR_MASK_SIZE as usize)
+    {
+        let byte_index = index * 4;
+        if image.rgba8.get(byte_index + 3).copied().unwrap_or(0) != 0 {
+            words[index / 64] |= 1_u64 << (index % 64);
+        }
+    }
+    words
+}
+
+fn silhouette_occupancy(image: &RenderedImage) -> f32 {
+    let pixel_count = foreground_pixel_count(image);
+    if pixel_count == 0 {
+        return 0.0;
+    }
+    let foreground = (0..pixel_count)
+        .filter(|index| {
+            let byte_index = index * 4;
+            image.rgba8.get(byte_index + 3).copied().unwrap_or(0) != 0
+        })
+        .count();
+    foreground as f32 / pixel_count as f32
+}
+
+fn silhouette_perimeter(image: &RenderedImage) -> f32 {
+    let width = image.width as i32;
+    let height = image.height as i32;
+    if width <= 0 || height <= 0 {
+        return 0.0;
+    }
+    let mut perimeter = 0_usize;
+    for y in 0..height {
+        for x in 0..width {
+            if !is_foreground(image, x, y) {
+                continue;
+            }
+            let boundary = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                .into_iter()
+                .any(|(nx, ny)| !is_foreground(image, nx, ny));
+            if boundary {
+                perimeter += 1;
+            }
+        }
+    }
+    (perimeter as f32 / (2.0 * (width + height) as f32)).clamp(0.0, 4.0)
+}
+
+fn foreground_pixel_count(image: &RenderedImage) -> usize {
+    let pixel_count = u64::from(image.width) * u64::from(image.height);
+    usize::try_from(pixel_count).unwrap_or(0)
+}
+
+fn is_foreground(image: &RenderedImage, x: i32, y: i32) -> bool {
+    if x < 0 || y < 0 || x >= image.width as i32 || y >= image.height as i32 {
+        return false;
+    }
+    let index = (y as usize * image.width as usize + x as usize) * 4 + 3;
+    image.rgba8.get(index).copied().unwrap_or(0) != 0
+}
+
+fn depth_histogram(
+    mesh: &TriangleMesh,
+    camera: &OrbitCamera,
+) -> [f32; VISUAL_DESCRIPTOR_DEPTH_BINS] {
+    let view = camera.view_matrix();
+    let mut depths = Vec::new();
+    for position in &mesh.positions {
+        let depth = -view.transform_point3(vec3_from_array(*position)).z;
+        if depth.is_finite() && depth > 0.0 {
+            depths.push(depth);
+        }
+    }
+    let mut histogram = [0.0_f32; VISUAL_DESCRIPTOR_DEPTH_BINS];
+    if depths.is_empty() {
+        return histogram;
+    }
+    let minimum = depths.iter().copied().fold(f32::INFINITY, f32::min);
+    let maximum = depths.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let span = (maximum - minimum).max(f32::EPSILON);
+    for depth in depths.iter().copied() {
+        let normalized = ((depth - minimum) / span).clamp(0.0, 1.0);
+        let index = ((normalized * VISUAL_DESCRIPTOR_DEPTH_BINS as f32).floor() as usize)
+            .min(VISUAL_DESCRIPTOR_DEPTH_BINS - 1);
+        histogram[index] += 1.0;
+    }
+    let total = depths.len() as f32;
+    for value in &mut histogram {
+        *value /= total;
+    }
+    histogram
 }
 
 fn fill_background(rgba8: &mut [u8], background: [u8; 4]) {
@@ -1276,6 +1454,24 @@ mod tests {
                 .rgba8
                 .chunks_exact(4)
                 .any(|pixel| pixel != settings(64, 64).background)
+        );
+    }
+
+    #[test]
+    fn visual_descriptor_is_deterministic_and_view_dependent() {
+        let first =
+            visual_descriptor_for_mesh(&triangle_mesh()).expect("visual descriptor should render");
+        let second =
+            visual_descriptor_for_mesh(&triangle_mesh()).expect("visual descriptor should render");
+
+        assert_eq!(first, second);
+        assert!(first.silhouette_occupancy[0] > 0.01);
+        assert!(first.silhouette_perimeter[0] > 0.0);
+        assert_ne!(first.silhouette_masks[0], first.silhouette_masks[1]);
+        assert!(
+            first.depth_histogram[0]
+                .iter()
+                .all(|value| value.is_finite())
         );
     }
 

@@ -5,9 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
-    OperationId, ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
-    PartInstanceId, RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
+    AssetId, AssetRecipe, AssetRelationshipPolicy, Frame3, GeometryRecipe, GeometrySource,
+    ModelingOperationSpec, OperationId, ParameterDescriptor, ParameterId, PartDefinition,
+    PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec,
+    SurfaceRegionSpec, SurfaceRole, Transform3,
 };
 
 /// Built-in explicit modeling benchmark asset.
@@ -868,8 +869,41 @@ pub fn explicit_desk_lamp_recipe() -> AssetRecipe {
         ),
     );
     recipe.root_instances.push(PartInstanceId(1));
+    recipe.relationships = lamp_relationships();
     finish_ids(&mut recipe, 9, 11, 8, 3);
     recipe
+}
+
+fn lamp_relationships() -> Vec<AssetRelationshipPolicy> {
+    [
+        (1, 7, "lower collar nests into base pivot boss"),
+        (1, 10, "base switch detail sits in the base surface"),
+        (2, 7, "lower pivot and collar share a socket"),
+        (3, 4, "stem terminates into upper pivot socket"),
+        (3, 5, "stem passes near shade neck under the shade"),
+        (3, 7, "stem lower end aligns with lower collar"),
+        (3, 8, "stem upper end aligns with upper collar"),
+        (3, 9, "stem routes under shade rim trim"),
+        (4, 5, "upper pivot seats shade socket"),
+        (4, 6, "support bracket attaches to upper pivot"),
+        (4, 8, "upper collar surrounds upper pivot"),
+        (4, 9, "shade rim trim surrounds upper pivot clearance"),
+        (5, 6, "support bracket attaches to shade neck"),
+        (5, 8, "shade clears through upper collar"),
+        (
+            5,
+            9,
+            "shade and rim trim are authored as nested shade parts",
+        ),
+        (6, 8, "bracket passes through upper collar"),
+        (6, 9, "bracket meets shade rim trim"),
+        (8, 9, "upper collar and shade rim trim meet at shade socket"),
+    ]
+    .into_iter()
+    .map(|(first, second, reason)| {
+        AssetRelationshipPolicy::may_overlap(PartInstanceId(first), PartInstanceId(second), reason)
+    })
+    .collect()
 }
 
 /// Build the stylized stool recipe.

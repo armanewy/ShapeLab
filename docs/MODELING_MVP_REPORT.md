@@ -4,7 +4,7 @@
 
 Wave 6 adds a native application mode named **Asset Modeling Lab**. The desktop app now starts in this mode and keeps the legacy implicit editor available through the mode switcher.
 
-The MVP uses the explicit asset recipe path only. It compiles authored polygon parts through `shape-compile`, renders CPU previews off the UI thread, generates deterministic semantic candidate recipes through `shape-search::asset`, scores and de-duplicates compiled proposals, and exports both grouped OBJ and the canonical model package.
+The MVP uses the explicit asset recipe path only. It compiles authored polygon parts through `shape-compile`, renders CPU previews off the UI thread, generates deterministic semantic candidate recipes through `shape-search::asset`, derives mesh visual descriptors through `shape-render`, scores and de-duplicates compiled proposals, and exports both grouped OBJ and the canonical model package.
 
 ## Implemented Scope
 
@@ -22,8 +22,8 @@ The MVP uses the explicit asset recipe path only. It compiles authored polygon p
   - current asset compile
   - current preview render
   - semantic candidate proposal generation
-  - candidate compile/scoring/diversity selection
-  - candidate preview compile/render
+  - bounded parallel candidate compile/scoring/diversity selection
+  - candidate preview render using selected compiled artifacts when recipe hashes match
   - OBJ export
   - canonical package export
 - Stale job handling:
@@ -55,7 +55,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - Bolt count: `Bolt count`
 - Optional trim disable: optional skid rail trim instances
 - Body lock: part instance lock filters semantic candidate programs that would modify the body, including definition-level body edits
-- Six variants: Refine/Explore over-generate semantic proposals, compile and score the pool, collapse duplicates, and select six diverse survivors when available
+- Six variants: Refine/Explore over-generate semantic proposals, compile and score the pool, compare fixed-camera mesh silhouettes/depth/volume/recipe channels, collapse duplicates, and select six diverse survivors when available
 - Accept/undo/branch: reducer revisions are branchable and serialized
 - Save/reload: Asset Modeling Lab snapshots preserve revision history
 - Export: OBJ and canonical model package jobs write files off the UI thread
@@ -63,7 +63,8 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 
 ## Known Caveats
 
-- Candidate generation is deterministic, lock-aware, semantic, and score-selected, but the descriptor metrics are still approximations rather than visual taste or artistic quality.
+- Candidate generation is deterministic, lock-aware, semantic, and score-selected from mesh-derived visual descriptors, but the metrics remain heuristics rather than visual taste or artistic quality.
+- Authored relationship policies travel with recipes for concrete part instances. Generated occurrence relationship policies are still represented indirectly by baseline-relative intersection scoring.
 - The viewport overlay exposes selected-part context, validation, and wireframe hinting; direct viewport part picking is not in this MVP.
 - Current explicit generators avoid booleans; interlocking geometry is modeled as separate clean parts rather than fused constructive solids.
 

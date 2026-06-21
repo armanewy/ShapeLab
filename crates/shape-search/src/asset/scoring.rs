@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use shape_core::{Aabb, Scalar};
 
 /// Number of fixed-camera projected silhouette samples used by asset scoring.
-pub const FIXED_CAMERA_COUNT: usize = 3;
+pub const FIXED_CAMERA_COUNT: usize = 4;
 
 const DEFAULT_REPRESENTATIVE_COUNT: usize = 6;
 const DEFAULT_DUPLICATE_DISTANCE: Scalar = 0.035;
@@ -50,6 +50,12 @@ pub struct AssetCandidateInput {
     pub volume_approximation: Scalar,
     /// Projected silhouette occupancy from the fixed camera set.
     pub silhouette_occupancy: [Scalar; FIXED_CAMERA_COUNT],
+    /// Packed binary silhouette masks from the fixed camera set.
+    pub silhouette_masks: Vec<Vec<u64>>,
+    /// Normalized silhouette boundary lengths from the fixed camera set.
+    pub silhouette_perimeter: Vec<Scalar>,
+    /// Flattened fixed-camera depth histograms.
+    pub depth_histogram: Vec<Scalar>,
     /// Per-part approximate volumes.
     pub part_volumes: Vec<Scalar>,
     /// Authored or detected region count.
@@ -97,7 +103,10 @@ impl AssetCandidateInput {
             provenance_complete: true,
             world_bounds,
             volume_approximation: volume * 0.55,
-            silhouette_occupancy: [0.45, 0.45, 0.45],
+            silhouette_occupancy: [0.45; FIXED_CAMERA_COUNT],
+            silhouette_masks: Vec::new(),
+            silhouette_perimeter: vec![0.0; FIXED_CAMERA_COUNT],
+            depth_histogram: Vec::new(),
             part_volumes: vec![volume * 0.55],
             region_count: 1,
             detail_count: 0,
@@ -150,6 +159,12 @@ pub struct AssetDescriptor {
     pub volume_approximation: Scalar,
     /// Projected silhouette occupancy from the fixed camera set.
     pub silhouette_occupancy: [Scalar; FIXED_CAMERA_COUNT],
+    /// Packed binary silhouette masks from the fixed camera set.
+    pub silhouette_masks: Vec<Vec<u64>>,
+    /// Normalized silhouette boundary lengths from the fixed camera set.
+    pub silhouette_perimeter: Vec<Scalar>,
+    /// Flattened fixed-camera depth histograms.
+    pub depth_histogram: Vec<Scalar>,
     /// Number of visual parts.
     pub part_count: usize,
     /// Descending normalized proportions for the major parts.
@@ -220,6 +235,12 @@ pub struct AssetDescriptorWeights {
     pub volume_approximation: Scalar,
     /// Fixed-camera silhouette occupancy weight.
     pub silhouette_occupancy: Scalar,
+    /// Fixed-camera silhouette mask weight.
+    pub silhouette_masks: Scalar,
+    /// Silhouette boundary-complexity weight.
+    pub silhouette_perimeter: Scalar,
+    /// Fixed-camera depth histogram weight.
+    pub depth_histogram: Scalar,
     /// Part-count weight.
     pub part_count: Scalar,
     /// Major-part proportion vector weight.
@@ -242,6 +263,9 @@ impl Default for AssetDescriptorWeights {
             world_bounds: 0.85,
             volume_approximation: 0.7,
             silhouette_occupancy: 1.4,
+            silhouette_masks: 1.8,
+            silhouette_perimeter: 0.55,
+            depth_histogram: 0.65,
             part_count: 0.65,
             major_part_proportions: 0.8,
             region_detail_count: 0.45,
@@ -475,6 +499,18 @@ pub fn asset_descriptor_distance(
             weights.silhouette_occupancy,
         ),
         (
+            silhouette_mask_distance(&left.silhouette_masks, &right.silhouette_masks),
+            weights.silhouette_masks,
+        ),
+        (
+            vector_distance(&left.silhouette_perimeter, &right.silhouette_perimeter),
+            weights.silhouette_perimeter,
+        ),
+        (
+            vector_distance(&left.depth_histogram, &right.depth_histogram),
+            weights.depth_histogram,
+        ),
+        (
             count_distance(left.part_count, right.part_count),
             weights.part_count,
         ),
@@ -537,6 +573,18 @@ impl AssetDescriptorWeights {
             silhouette_occupancy: finite_non_negative_or_default(
                 self.silhouette_occupancy,
                 defaults.silhouette_occupancy,
+            ),
+            silhouette_masks: finite_non_negative_or_default(
+                self.silhouette_masks,
+                defaults.silhouette_masks,
+            ),
+            silhouette_perimeter: finite_non_negative_or_default(
+                self.silhouette_perimeter,
+                defaults.silhouette_perimeter,
+            ),
+            depth_histogram: finite_non_negative_or_default(
+                self.depth_histogram,
+                defaults.depth_histogram,
             ),
             part_count: finite_non_negative_or_default(self.part_count, defaults.part_count),
             major_part_proportions: finite_non_negative_or_default(
@@ -602,6 +650,9 @@ fn describe_candidate(candidate: &AssetCandidateInput) -> AssetDescriptor {
         world_bounds: candidate.world_bounds,
         volume_approximation: candidate.volume_approximation.max(0.0),
         silhouette_occupancy: candidate.silhouette_occupancy.map(clamp_unit),
+        silhouette_masks: candidate.silhouette_masks.clone(),
+        silhouette_perimeter: sanitize_vector(&candidate.silhouette_perimeter),
+        depth_histogram: sanitize_vector(&candidate.depth_histogram),
         part_count: candidate.part_volumes.len(),
         major_part_proportions: major_part_proportions(&candidate.part_volumes),
         region_detail_count: candidate.region_count + candidate.detail_count,
@@ -761,6 +812,14 @@ fn candidate_geometry_is_finite(candidate: &AssetCandidateInput) -> bool {
             .silhouette_occupancy
             .iter()
             .all(|value| value.is_finite())
+        && candidate
+            .silhouette_perimeter
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+        && candidate
+            .depth_histogram
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
         && candidate.part_volumes.iter().all(|value| value.is_finite())
         && candidate.bevel_radii.iter().all(|value| value.is_finite())
         && candidate.accidental_intersection.is_finite()
@@ -788,6 +847,15 @@ fn major_part_proportions(part_volumes: &[Scalar]) -> Vec<Scalar> {
     positive_volumes
         .into_iter()
         .map(|volume| volume / total)
+        .collect()
+}
+
+fn sanitize_vector(values: &[Scalar]) -> Vec<Scalar> {
+    values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .map(|value| value.max(0.0))
         .collect()
 }
 
@@ -899,6 +967,36 @@ fn silhouette_distance(
         .map(|(left, right)| (left - right).abs())
         .sum::<Scalar>()
         / FIXED_CAMERA_COUNT as Scalar
+}
+
+fn silhouette_mask_distance(left: &[Vec<u64>], right: &[Vec<u64>]) -> Scalar {
+    let camera_count = left.len().max(right.len());
+    if camera_count == 0 {
+        return 0.0;
+    }
+    (0..camera_count)
+        .map(|camera| {
+            let left_words = left.get(camera).map_or(&[][..], Vec::as_slice);
+            let right_words = right.get(camera).map_or(&[][..], Vec::as_slice);
+            word_hamming_distance(left_words, right_words)
+        })
+        .sum::<Scalar>()
+        / camera_count as Scalar
+}
+
+fn word_hamming_distance(left: &[u64], right: &[u64]) -> Scalar {
+    let word_count = left.len().max(right.len());
+    if word_count == 0 {
+        return 0.0;
+    }
+    let differing_bits = (0..word_count)
+        .map(|index| {
+            let left_word = left.get(index).copied().unwrap_or(0);
+            let right_word = right.get(index).copied().unwrap_or(0);
+            (left_word ^ right_word).count_ones() as usize
+        })
+        .sum::<usize>();
+    differing_bits as Scalar / (word_count as Scalar * 64.0)
 }
 
 fn count_distance(left: usize, right: usize) -> Scalar {

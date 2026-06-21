@@ -8,11 +8,16 @@ use anyhow::{Context, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use glam::Vec3;
 use image::{Rgba, RgbaImage, imageops::FilterType};
+use rayon::prelude::*;
 use serde::Serialize;
-use shape_asset::{AssetRecipe, ModelingOperationSpec, PartInstanceId, validate_asset_recipe};
+use shape_asset::{
+    AssetRecipe, AssetRelationshipPolicy, ModelingOperationSpec, PartInstanceId,
+    validate_asset_recipe,
+};
 use shape_compile::export::{verify_model_package, write_grouped_obj_export, write_model_package};
 use shape_compile::validation::{
-    ModelValidationConfig, PartRelationship, ValidationLimits, validate_artifact, validate_model,
+    ExpectedAttachment, ModelValidationConfig, PartRelationship, ValidationLimits,
+    validate_artifact, validate_model,
 };
 use shape_compile::{
     build_construction_timeline_report, compile_asset, write_blender_reconstruction_script,
@@ -37,7 +42,10 @@ use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::TriangulatedPolygonMesh;
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
-use shape_render::{RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
+use shape_render::{
+    MeshVisualDescriptor, RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh,
+    visual_descriptor_for_mesh,
+};
 use shape_search::asset::scoring::{
     AssetCandidateInput, AssetScoredCandidate, AssetSelectionPolicy,
     score_and_select_asset_candidates_with_policy,
@@ -59,6 +67,7 @@ const CURRENT_IMAGE_SIZE: u32 = 512;
 const CONTACT_CARD_SIZE: u32 = 256;
 const CONTACT_LABEL_HEIGHT: u32 = 28;
 const CONTACT_PADDING: u32 = 12;
+const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
@@ -304,6 +313,19 @@ struct AssetVisualCandidateSummary {
     structural_change_count: usize,
     quality_penalty: f32,
     mesh: MeshSummary,
+}
+
+#[derive(Debug, Clone)]
+struct VisualSelectedCandidate {
+    candidate: SemanticAssetCandidate,
+    scored: AssetScoredCandidate,
+    artifact: shape_compile::AssetArtifact,
+}
+
+struct CompiledVisualCandidate {
+    input: AssetCandidateInput,
+    candidate: Option<SemanticAssetCandidate>,
+    artifact: Option<shape_compile::AssetArtifact>,
 }
 
 struct PreviewArtifact {
@@ -604,10 +626,9 @@ fn run_asset_visual_benchmark(args: AssetVisualBenchmarkArgs) -> anyhow::Result<
                     .map(|candidate| ("refine".to_owned(), candidate))
             })
             .context("visual benchmark produced no accepted candidate")?;
-        let accepted_artifact = compile_asset(&accepted_candidate.0.recipe)
-            .context("compiling accepted visual benchmark candidate")?;
-        let accepted_image = render_asset_artifact(&accepted_artifact, false)?;
-        let accepted_wireframe = render_asset_artifact(&accepted_artifact, true)?;
+        let accepted_artifact = &accepted_candidate.artifact;
+        let accepted_image = render_asset_artifact(accepted_artifact, false)?;
+        let accepted_wireframe = render_asset_artifact(accepted_artifact, true)?;
         save_png(&accepted_image, asset_dir.join("accepted.png"))?;
         save_png(
             &accepted_wireframe,
@@ -616,17 +637,20 @@ fn run_asset_visual_benchmark(args: AssetVisualBenchmarkArgs) -> anyhow::Result<
 
         let package_dir = asset_dir.join("final-package");
         let package_paths = write_model_package(
-            &accepted_candidate.0.recipe,
-            &accepted_artifact,
+            &accepted_candidate.candidate.recipe,
+            accepted_artifact,
             &package_dir,
         )
         .with_context(|| format!("writing final package {}", package_dir.display()))?;
-        let obj = write_grouped_obj_export(&accepted_artifact, Some(&accepted_candidate.0.recipe))
-            .context("writing accepted grouped OBJ")?;
+        let obj = write_grouped_obj_export(
+            accepted_artifact,
+            Some(&accepted_candidate.candidate.recipe),
+        )
+        .context("writing accepted grouped OBJ")?;
         fs::write(asset_dir.join("accepted.obj"), obj.obj)
             .with_context(|| format!("writing accepted.obj to {}", asset_dir.display()))?;
-        let final_image = render_asset_artifact(&accepted_artifact, false)?;
-        let final_wireframe = render_asset_artifact(&accepted_artifact, true)?;
+        let final_image = render_asset_artifact(accepted_artifact, false)?;
+        let final_wireframe = render_asset_artifact(accepted_artifact, true)?;
         save_png(&final_image, asset_dir.join("final-exported.png"))?;
         save_png(
             &final_wireframe,
@@ -642,7 +666,7 @@ fn run_asset_visual_benchmark(args: AssetVisualBenchmarkArgs) -> anyhow::Result<
             refine_candidates: refine_summary,
             explore_candidates: explore_summary,
             accepted_source,
-            accepted: artifact_mesh_summary(&accepted_artifact),
+            accepted: artifact_mesh_summary(accepted_artifact),
             package_dir: package_paths.manifest.display().to_string(),
         };
         write_json(asset_dir.join("visual-benchmark-summary.json"), &summary)?;
@@ -764,7 +788,7 @@ fn select_visual_candidates(
     mode: AssetCandidateMode,
     proposal_count: usize,
     result_count: usize,
-) -> anyhow::Result<Vec<(SemanticAssetCandidate, AssetScoredCandidate)>> {
+) -> anyhow::Result<Vec<VisualSelectedCandidate>> {
     let request = AssetCandidateRequest {
         seed,
         proposal_count,
@@ -773,8 +797,8 @@ fn select_visual_candidates(
     };
     let output = generate_asset_candidates(recipe, &request)
         .with_context(|| format!("generating {mode:?} semantic asset candidates"))?;
-    // Until relationship policies live in recipes, compare intersection counts
-    // against the current authored template instead of requiring absolute zero.
+    // Generated occurrence policies are not yet represented, so compare the
+    // raw default-validator intersection count against the current template.
     let (fallback_bounds, baseline_intersection_tolerance) = compile_asset(recipe)
         .map(|artifact| {
             let bounds = render_mesh_from_triangles(&artifact.combined_preview).bounds;
@@ -782,26 +806,19 @@ fn select_visual_candidates(
             (bounds, report.metrics.accidental_intersection_count as f32)
         })
         .unwrap_or_else(|_| (Aabb::empty(), 0.0));
-    let mut candidate_by_id = BTreeMap::<String, SemanticAssetCandidate>::new();
-    let mut score_inputs = Vec::new();
-
-    for candidate in output.candidates {
-        let id = candidate.id.to_string();
-        match compile_asset(&candidate.recipe) {
-            Ok(artifact) => {
-                score_inputs.push(asset_scoring_input(
-                    &id,
-                    &candidate.recipe,
-                    &artifact,
-                    baseline_intersection_tolerance,
-                ));
-                candidate_by_id.insert(id, candidate);
-            }
-            Err(_) => {
-                let mut input = AssetCandidateInput::new(id.clone(), id, fallback_bounds);
-                input.compile_succeeded = false;
-                score_inputs.push(input);
-            }
+    let compiled = compile_visual_candidates(
+        output.candidates,
+        fallback_bounds,
+        baseline_intersection_tolerance,
+    );
+    let mut candidate_by_id =
+        BTreeMap::<String, (SemanticAssetCandidate, shape_compile::AssetArtifact)>::new();
+    let mut score_inputs = Vec::with_capacity(compiled.len());
+    for compiled in compiled {
+        let id = compiled.input.id.clone();
+        score_inputs.push(compiled.input);
+        if let (Some(candidate), Some(artifact)) = (compiled.candidate, compiled.artifact) {
+            candidate_by_id.insert(id, (candidate, artifact));
         }
     }
 
@@ -819,8 +836,12 @@ fn select_visual_candidates(
     let report = score_and_select_asset_candidates_with_policy(&score_inputs, &policy);
     let mut selected = Vec::with_capacity(result_count);
     for scored in report.representatives.iter().take(result_count) {
-        if let Some(candidate) = candidate_by_id.remove(&scored.id) {
-            selected.push((candidate, scored.clone()));
+        if let Some((candidate, artifact)) = candidate_by_id.remove(&scored.id) {
+            selected.push(VisualSelectedCandidate {
+                candidate,
+                scored: scored.clone(),
+                artifact,
+            });
         }
     }
     if selected.is_empty() {
@@ -834,12 +855,78 @@ fn select_visual_candidates(
     Ok(selected)
 }
 
+fn compile_visual_candidates(
+    candidates: Vec<SemanticAssetCandidate>,
+    fallback_bounds: Aabb,
+    baseline_intersection_tolerance: f32,
+) -> Vec<CompiledVisualCandidate> {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_PROPOSAL_COMPILE_THREADS)
+        .build();
+    match pool {
+        Ok(pool) => pool.install(|| {
+            candidates
+                .into_par_iter()
+                .map(|candidate| {
+                    compile_visual_candidate(
+                        candidate,
+                        fallback_bounds,
+                        baseline_intersection_tolerance,
+                    )
+                })
+                .collect()
+        }),
+        Err(_) => candidates
+            .into_iter()
+            .map(|candidate| {
+                compile_visual_candidate(
+                    candidate,
+                    fallback_bounds,
+                    baseline_intersection_tolerance,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn compile_visual_candidate(
+    candidate: SemanticAssetCandidate,
+    fallback_bounds: Aabb,
+    baseline_intersection_tolerance: f32,
+) -> CompiledVisualCandidate {
+    let id = candidate.id.to_string();
+    match compile_asset(&candidate.recipe) {
+        Ok(artifact) => {
+            let input = asset_scoring_input(
+                &id,
+                &candidate.recipe,
+                &artifact,
+                baseline_intersection_tolerance,
+            );
+            CompiledVisualCandidate {
+                input,
+                candidate: Some(candidate),
+                artifact: Some(artifact),
+            }
+        }
+        Err(_) => {
+            let mut input = AssetCandidateInput::new(id.clone(), id, fallback_bounds);
+            input.compile_succeeded = false;
+            CompiledVisualCandidate {
+                input,
+                candidate: None,
+                artifact: None,
+            }
+        }
+    }
+}
+
 fn render_visual_candidate_set(
     asset_dir: &Path,
     mode: &str,
     original_image: &RenderedImage,
     original_wireframe: &RenderedImage,
-    candidates: &[(SemanticAssetCandidate, AssetScoredCandidate)],
+    candidates: &[VisualSelectedCandidate],
 ) -> anyhow::Result<Vec<AssetVisualCandidateSummary>> {
     let mode_dir = asset_dir.join(mode);
     fs::create_dir_all(&mode_dir).with_context(|| format!("creating {}", mode_dir.display()))?;
@@ -847,11 +934,9 @@ fn render_visual_candidate_set(
     let mut wireframe_images = Vec::with_capacity(candidates.len());
     let mut summaries = Vec::with_capacity(candidates.len());
 
-    for (slot, (candidate, scored)) in candidates.iter().enumerate() {
-        let artifact = compile_asset(&candidate.recipe)
-            .with_context(|| format!("compiling {mode} candidate {slot}"))?;
-        let image = render_asset_artifact(&artifact, false)?;
-        let wireframe = render_asset_artifact(&artifact, true)?;
+    for (slot, selected) in candidates.iter().enumerate() {
+        let image = render_asset_artifact(&selected.artifact, false)?;
+        let wireframe = render_asset_artifact(&selected.artifact, true)?;
         save_png(&image, mode_dir.join(format!("candidate-{slot:02}.png")))?;
         save_png(
             &wireframe,
@@ -861,16 +946,17 @@ fn render_visual_candidate_set(
         wireframe_images.push(wireframe);
         summaries.push(AssetVisualCandidateSummary {
             slot,
-            id: candidate.id,
-            operation_count: candidate.program.operations.len(),
-            structural_change_count: candidate
+            id: selected.candidate.id,
+            operation_count: selected.candidate.program.operations.len(),
+            structural_change_count: selected
+                .candidate
                 .diagnostics
                 .changes
                 .iter()
                 .filter(|change| change.topology_changing)
                 .count(),
-            quality_penalty: scored.weighted_quality_penalty,
-            mesh: artifact_mesh_summary(&artifact),
+            quality_penalty: selected.scored.weighted_quality_penalty,
+            mesh: artifact_mesh_summary(&selected.artifact),
         });
     }
 
@@ -940,8 +1026,12 @@ fn asset_scoring_input(
     input.triangle_budget = 80_000;
     input.geometry_finite = geometry_is_finite(&mesh);
     input.provenance_complete = model_report.metrics.provenance_coverage >= 0.999;
-    input.volume_approximation = bounds_volume(mesh.bounds) * 0.55;
-    input.silhouette_occupancy = silhouette_occupancy(mesh.bounds);
+    let visual = visual_descriptor_for_mesh(&mesh).ok();
+    input.volume_approximation =
+        mesh_volume(&mesh).unwrap_or_else(|| bounds_volume(mesh.bounds) * 0.55);
+    if let Some(visual) = &visual {
+        apply_visual_descriptor(&mut input, visual);
+    }
     input.part_volumes = artifact
         .compiled_parts
         .iter()
@@ -959,7 +1049,10 @@ fn asset_scoring_input(
         .iter()
         .filter(|mapping| mapping.operation.is_some())
         .count();
-    input.symmetry_score = asset_symmetry_score(recipe, artifact);
+    input.symmetry_score = visual.as_ref().map_or_else(
+        || asset_symmetry_score(recipe, artifact),
+        visual_symmetry_score,
+    );
     input.repeated_element_count = asset_repeated_element_count(recipe, artifact);
     input.bevel_radii = asset_bevel_radii(recipe);
     input.topology_cost = asset_topology_cost(recipe, artifact);
@@ -995,20 +1088,82 @@ fn bounds_volume(bounds: Aabb) -> f32 {
     extent.x.max(0.0) * extent.y.max(0.0) * extent.z.max(0.0)
 }
 
-fn silhouette_occupancy(bounds: Aabb) -> [f32; 3] {
-    if bounds.is_empty() {
-        return [0.0, 0.0, 0.0];
+fn apply_visual_descriptor(input: &mut AssetCandidateInput, visual: &MeshVisualDescriptor) {
+    input.silhouette_occupancy = visual.silhouette_occupancy;
+    input.silhouette_masks = visual
+        .silhouette_masks
+        .iter()
+        .map(|mask| mask.to_vec())
+        .collect();
+    input.silhouette_perimeter = visual.silhouette_perimeter.to_vec();
+    input.depth_histogram = visual
+        .depth_histogram
+        .iter()
+        .flat_map(|histogram| histogram.iter().copied())
+        .collect();
+}
+
+fn mesh_volume(mesh: &TriangleMesh) -> Option<f32> {
+    if mesh.indices.len() < 3 {
+        return None;
     }
-    let extent = bounds.extent().abs();
-    let largest_face = (extent.x * extent.y)
-        .max(extent.x * extent.z)
-        .max(extent.y * extent.z)
-        .max(1.0e-6);
-    [
-        ((extent.x * extent.y) / largest_face).clamp(0.0, 1.0),
-        ((extent.x * extent.z) / largest_face).clamp(0.0, 1.0),
-        ((extent.y * extent.z) / largest_face).clamp(0.0, 1.0),
-    ]
+    let mut volume = 0.0_f32;
+    for triangle in mesh.indices.chunks_exact(3) {
+        let p0 = mesh.positions.get(triangle[0] as usize)?;
+        let p1 = mesh.positions.get(triangle[1] as usize)?;
+        let p2 = mesh.positions.get(triangle[2] as usize)?;
+        volume += signed_tetrahedron_volume(*p0, *p1, *p2);
+    }
+    let volume = volume.abs();
+    (volume.is_finite() && volume > 1.0e-6).then_some(volume)
+}
+
+fn signed_tetrahedron_volume(p0: [f32; 3], p1: [f32; 3], p2: [f32; 3]) -> f32 {
+    let cross = [
+        p1[1] * p2[2] - p1[2] * p2[1],
+        p1[2] * p2[0] - p1[0] * p2[2],
+        p1[0] * p2[1] - p1[1] * p2[0],
+    ];
+    (p0[0] * cross[0] + p0[1] * cross[1] + p0[2] * cross[2]) / 6.0
+}
+
+fn visual_symmetry_score(visual: &MeshVisualDescriptor) -> f32 {
+    let scores = visual
+        .silhouette_masks
+        .iter()
+        .map(horizontal_mask_symmetry)
+        .collect::<Vec<_>>();
+    if scores.is_empty() {
+        return 0.5;
+    }
+    (scores.iter().sum::<f32>() / scores.len() as f32).clamp(0.0, 1.0)
+}
+
+fn horizontal_mask_symmetry(mask: &[u64; shape_render::VISUAL_DESCRIPTOR_MASK_WORDS]) -> f32 {
+    let size = shape_render::VISUAL_DESCRIPTOR_MASK_SIZE as usize;
+    let mut compared = 0_usize;
+    let mut mismatched = 0_usize;
+    for y in 0..size {
+        for x in 0..(size / 2) {
+            let left = mask_bit(mask, y * size + x);
+            let right = mask_bit(mask, y * size + (size - 1 - x));
+            if left || right {
+                compared += 1;
+                if left != right {
+                    mismatched += 1;
+                }
+            }
+        }
+    }
+    if compared == 0 {
+        return 0.5;
+    }
+    1.0 - (mismatched as f32 / compared as f32)
+}
+
+fn mask_bit(mask: &[u64; shape_render::VISUAL_DESCRIPTOR_MASK_WORDS], index: usize) -> bool {
+    mask.get(index / 64)
+        .is_some_and(|word| (word & (1_u64 << (index % 64))) != 0)
 }
 
 fn asset_symmetry_score(recipe: &AssetRecipe, artifact: &shape_compile::AssetArtifact) -> f32 {
@@ -1133,10 +1288,8 @@ fn model_validation_config(loaded: &LoadedAsset) -> ModelValidationConfig {
         Some(BenchmarkAsset::StylizedStool) => 20_000,
         None => u64::MAX,
     };
-    let relationships = match loaded.benchmark {
-        Some(BenchmarkAsset::ExplicitDeskLamp) => lamp_relationships(),
-        _ => Vec::new(),
-    };
+    let relationships = relationship_policies(&loaded.recipe);
+    let expected_attachments = expected_attachment_policies(&loaded.recipe);
     ModelValidationConfig {
         limits: ValidationLimits {
             maximum_triangle_count,
@@ -1149,43 +1302,76 @@ fn model_validation_config(loaded: &LoadedAsset) -> ModelValidationConfig {
             .filter(|instance| instance.enabled)
             .map(|instance| instance.id)
             .collect(),
+        expected_attachments,
         relationships,
-        ..ModelValidationConfig::default()
     }
 }
 
-fn lamp_relationships() -> Vec<PartRelationship> {
-    [
-        (1, 7, "lower collar nests into base pivot boss"),
-        (1, 10, "base switch detail sits in the base surface"),
-        (1, 11, "generated switch detail sits in the base surface"),
-        (1, 12, "generated switch detail sits in the base surface"),
-        (2, 7, "lower pivot and collar share a socket"),
-        (3, 4, "stem terminates into upper pivot socket"),
-        (3, 5, "stem passes near shade neck under the shade"),
-        (3, 7, "stem lower end aligns with lower collar"),
-        (3, 8, "stem upper end aligns with upper collar"),
-        (3, 9, "stem routes under shade rim trim"),
-        (4, 5, "upper pivot seats shade socket"),
-        (4, 6, "support bracket attaches to upper pivot"),
-        (4, 8, "upper collar surrounds upper pivot"),
-        (4, 9, "shade rim trim surrounds upper pivot clearance"),
-        (5, 6, "support bracket attaches to shade neck"),
-        (5, 8, "shade clears through upper collar"),
-        (
-            5,
-            9,
-            "shade and rim trim are authored as nested shade parts",
-        ),
-        (6, 8, "bracket passes through upper collar"),
-        (6, 9, "bracket meets shade rim trim"),
-        (8, 9, "upper collar and shade rim trim meet at shade socket"),
-    ]
-    .into_iter()
-    .map(|(first, second, reason)| {
-        PartRelationship::intentional_overlap(PartInstanceId(first), PartInstanceId(second), reason)
-    })
-    .collect()
+fn relationship_policies(recipe: &AssetRecipe) -> Vec<PartRelationship> {
+    recipe
+        .relationships
+        .iter()
+        .filter_map(|relationship| match relationship {
+            AssetRelationshipPolicy::MayOverlap {
+                first,
+                second,
+                reason,
+            } => Some(PartRelationship::intentional_overlap(
+                *first,
+                *second,
+                reason.clone(),
+            )),
+            AssetRelationshipPolicy::MinimumClearance {
+                first,
+                second,
+                clearance,
+            } => Some(PartRelationship::MinimumClearance {
+                first: *first,
+                second: *second,
+                clearance: *clearance,
+            }),
+            AssetRelationshipPolicy::MustContain {
+                container,
+                contained,
+            } => Some(PartRelationship::Containment {
+                container: *container,
+                contained: *contained,
+            }),
+            AssetRelationshipPolicy::MustNotIntersect { .. }
+            | AssetRelationshipPolicy::MustTouch { .. }
+            | AssetRelationshipPolicy::SocketAttached { .. } => None,
+        })
+        .collect()
+}
+
+fn expected_attachment_policies(recipe: &AssetRecipe) -> Vec<ExpectedAttachment> {
+    recipe
+        .relationships
+        .iter()
+        .filter_map(|relationship| match relationship {
+            AssetRelationshipPolicy::SocketAttached {
+                parent,
+                child,
+                socket,
+                max_origin_distance,
+                max_axis_angle_degrees,
+                max_clearance,
+            } => Some(ExpectedAttachment {
+                parent: *parent,
+                child: *child,
+                parent_socket: *socket,
+                child_socket: *socket,
+                max_origin_distance: *max_origin_distance,
+                max_axis_angle_degrees: *max_axis_angle_degrees,
+                max_clearance: *max_clearance,
+            }),
+            AssetRelationshipPolicy::MayOverlap { .. }
+            | AssetRelationshipPolicy::MustNotIntersect { .. }
+            | AssetRelationshipPolicy::MustTouch { .. }
+            | AssetRelationshipPolicy::MustContain { .. }
+            | AssetRelationshipPolicy::MinimumClearance { .. } => None,
+        })
+        .collect()
 }
 
 fn print_part_tree(recipe: &AssetRecipe) {
