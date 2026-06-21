@@ -850,6 +850,123 @@ fn serde_round_trip_preserves_edit_program_and_report() {
 }
 
 #[test]
+fn legacy_cut_boundary_loop_migrates_to_distinct_physical_loops() {
+    let json = r#"{
+        "schema_version": 3,
+        "id": 42,
+        "title": "legacy cut",
+        "definitions": {
+            "1": {
+                "id": 1,
+                "name": "plate",
+                "tags": [],
+                "geometry": {
+                    "source": { "Plate": { "size": [1.0, 1.0], "thickness": 0.1 } },
+                    "operations": [
+                        { "RecessedPanelCut": {
+                            "operation": 5,
+                            "region": 1,
+                            "face": "PositiveY",
+                            "center": [0.0, 0.0],
+                            "size": [0.4, 0.3],
+                            "depth": 0.03,
+                            "corner_radius": 0.02,
+                            "boundary_loop": 7,
+                            "outer_region": 1,
+                            "rim_region": 20,
+                            "wall_region": 21,
+                            "floor_region": 22,
+                            "edge_treatment": "BevelEligible"
+                        } }
+                    ]
+                },
+                "regions": {
+                    "1": { "id": 1, "name": "front", "role": "PrimarySurface", "tags": [] },
+                    "2": { "id": 2, "name": "back", "role": "PrimarySurface", "tags": [] },
+                    "3": { "id": 3, "name": "side", "role": "Side", "tags": [] }
+                },
+                "sockets": {},
+                "local_pivot": {
+                    "origin": [0.0, 0.0, 0.0],
+                    "x_axis": [1.0, 0.0, 0.0],
+                    "y_axis": [0.0, 1.0, 0.0],
+                    "z_axis": [0.0, 0.0, 1.0]
+                },
+                "variant_group": null,
+                "production_hints": null
+            }
+        },
+        "instances": {
+            "1": {
+                "id": 1,
+                "definition": 1,
+                "name": "plate",
+                "parent": null,
+                "local_transform": {
+                    "translation": [0.0, 0.0, 0.0],
+                    "rotation_degrees": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                "attachment": null,
+                "enabled": true,
+                "tags": [],
+                "generated_by": null
+            }
+        },
+        "root_instances": [1],
+        "parameters": {},
+        "locks": [],
+        "instance_locks": [],
+        "subtree_locks": [],
+        "topology_locks": [],
+        "constraints": [],
+        "relationships": [],
+        "variation": {
+            "optional_instances": [],
+            "replacement_groups": {},
+            "count_ranges": {},
+            "parameter_range_overrides": {}
+        },
+        "next_ids": {
+            "part_definition": 2,
+            "part_instance": 2,
+            "operation": 6,
+            "region": 23,
+            "boundary_loop": 8,
+            "socket": 1,
+            "parameter": 1,
+            "revision": 1
+        }
+    }"#;
+
+    let recipe: AssetRecipe = serde_json::from_str(json).expect("legacy recipe parses");
+
+    assert_eq!(recipe.schema_version, ASSET_RECIPE_SCHEMA_VERSION);
+    assert_eq!(
+        recipe.definitions[&PartDefinitionId(1)].geometry.operations[0].boundary_loop_ids(),
+        vec![BoundaryLoopId(7), BoundaryLoopId(8)]
+    );
+    assert_eq!(recipe.next_ids.boundary_loop, 9);
+    assert!(validate_asset_recipe(&recipe).is_valid());
+}
+
+#[test]
+fn schema_zero_is_not_migrated_to_current_schema() {
+    let mut recipe = edit_recipe();
+    recipe.schema_version = 0;
+    let json = serde_json::to_string(&recipe).expect("recipe serializes");
+    let parsed: AssetRecipe = serde_json::from_str(&json).expect("recipe parses");
+
+    assert_eq!(parsed.schema_version, 0);
+    assert!(
+        validate_asset_recipe(&parsed)
+            .issues
+            .iter()
+            .any(|issue| issue.code == "unsupported_schema_version")
+    );
+}
+
+#[test]
 fn beginner_parameter_reflection_uses_expected_groups_and_hides_raw_controls() {
     let mut recipe = edit_recipe();
     recipe.parameters.insert(

@@ -1556,6 +1556,7 @@ fn semantic_edge_metadata(
                 boundary_role,
                 classification,
                 seam_candidate: open,
+                bevel_eligible: false,
                 operation: Some(operation),
                 region_transition: transition,
                 boundary_loop: None,

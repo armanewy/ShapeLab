@@ -550,6 +550,12 @@ fn build_cut_plate(
     let half_y = thickness * 0.5;
     let cut = PlateCutPlan::from_operation(operation, half_x, half_z, thickness)?;
     let face_sign = planar_plate_face_sign(cut.face, cut.operation)?;
+    let (entry_region, opposite_region) = plate_cut_face_regions(cut.face, cut.operation)?;
+    if cut.target_region != entry_region || cut.outer_region != entry_region {
+        return Err(ModelingError::InvalidInput(
+            "cut target region and outer region must match the selected plate face".to_owned(),
+        ));
+    }
     let outside_y = face_sign * half_y;
     let opposite_y = -outside_y;
     let opposite_normal = [0.0, -face_sign, 0.0];
@@ -632,7 +638,7 @@ fn build_cut_plate(
                 opposite_normal,
                 cut_metadata(
                     context,
-                    PLATE_BACK_REGION,
+                    opposite_region,
                     SurfaceRole::PrimarySurface,
                     cut.operation,
                     None,
@@ -644,14 +650,14 @@ fn build_cut_plate(
                 &mut mesh,
                 &outside_inner,
                 cut.operation,
-                cut.boundary_loop,
+                cut.entry_loop,
                 cut.edge_treatment,
             );
             mark_boundary_loop(
                 &mut mesh,
                 &floor_inner,
                 cut.operation,
-                cut.boundary_loop,
+                cut.secondary_loop,
                 cut.edge_treatment,
             );
             let mut regions = plate_regions();
@@ -731,7 +737,7 @@ fn build_cut_plate(
                 opposite_normal,
                 context,
                 cut.operation,
-                cut.outer_region,
+                opposite_region,
                 SurfaceRole::PrimarySurface,
             );
             add_matched_ring_band(
@@ -762,14 +768,14 @@ fn build_cut_plate(
                 &mut mesh,
                 &outside_inner,
                 cut.operation,
-                cut.boundary_loop,
+                cut.entry_loop,
                 cut.edge_treatment,
             );
             mark_boundary_loop(
                 &mut mesh,
                 &opposite_inner,
                 cut.operation,
-                cut.boundary_loop,
+                cut.secondary_loop,
                 cut.edge_treatment,
             );
             let mut regions = plate_regions();
@@ -1058,7 +1064,9 @@ struct PlateCutPlan {
     inner_points: Vec<[f32; 2]>,
     frame_points: Vec<[f32; 2]>,
     frame: Rect2,
-    boundary_loop: BoundaryLoopId,
+    target_region: RegionId,
+    entry_loop: BoundaryLoopId,
+    secondary_loop: BoundaryLoopId,
     outer_region: RegionId,
     rim_region: RegionId,
     wall_region: RegionId,
@@ -1080,7 +1088,9 @@ impl PlateCutPlan {
                 size,
                 depth,
                 corner_radius,
-                boundary_loop,
+                entry_loop,
+                floor_loop,
+                region,
                 outer_region,
                 rim_region,
                 wall_region,
@@ -1109,7 +1119,9 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
-                    boundary_loop: *boundary_loop,
+                    target_region: *region,
+                    entry_loop: *entry_loop,
+                    secondary_loop: *floor_loop,
                     outer_region: *outer_region,
                     rim_region: *rim_region,
                     wall_region: *wall_region,
@@ -1122,7 +1134,9 @@ impl PlateCutPlan {
                 center,
                 size,
                 corner_radius,
-                boundary_loop,
+                entry_loop,
+                exit_loop,
+                region,
                 outer_region,
                 rim_region,
                 wall_region,
@@ -1141,7 +1155,9 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
-                    boundary_loop: *boundary_loop,
+                    target_region: *region,
+                    entry_loop: *entry_loop,
+                    secondary_loop: *exit_loop,
                     outer_region: *outer_region,
                     rim_region: *rim_region,
                     wall_region: *wall_region,
@@ -1154,7 +1170,9 @@ impl PlateCutPlan {
                 center,
                 radius,
                 radial_segments,
-                boundary_loop,
+                entry_loop,
+                exit_loop,
+                region,
                 outer_region,
                 rim_region,
                 wall_region,
@@ -1182,7 +1200,9 @@ impl PlateCutPlan {
                     inner_points,
                     frame_points,
                     frame,
-                    boundary_loop: *boundary_loop,
+                    target_region: *region,
+                    entry_loop: *entry_loop,
+                    secondary_loop: *exit_loop,
                     outer_region: *outer_region,
                     rim_region: *rim_region,
                     wall_region: *wall_region,
@@ -1225,8 +1245,13 @@ fn rounded_cut_points(
 ) -> Result<Vec<[f32; 2]>, ModelingError> {
     let width = finite_positive(size[0], "cut.size.x")?;
     let height = finite_positive(size[1], "cut.size.y")?;
-    let radius = finite_non_negative(corner_radius, "cut.corner_radius")?
-        .min(width.min(height) * 0.5 - EPSILON);
+    let radius = finite_non_negative(corner_radius, "cut.corner_radius")?;
+    let max_radius = width.min(height) * 0.5;
+    if radius > max_radius {
+        return Err(ModelingError::InvalidInput(
+            "cut corner radius must not exceed half the smaller cut dimension".to_owned(),
+        ));
+    }
     let local = rounded_rect_points(width * 0.5, height * 0.5, radius.max(0.0), 4);
     Ok(local
         .into_iter()
@@ -1391,6 +1416,20 @@ fn planar_plate_face_sign(
     match face {
         PlanarCutFace::PositiveY => Ok(1.0),
         PlanarCutFace::NegativeY => Ok(-1.0),
+        _ => Err(ModelingError::UnsupportedOperation {
+            operation,
+            reason: "plate semantic cuts currently target only local +/-Y planar faces".to_owned(),
+        }),
+    }
+}
+
+fn plate_cut_face_regions(
+    face: PlanarCutFace,
+    operation: OperationId,
+) -> Result<(RegionId, RegionId), ModelingError> {
+    match face {
+        PlanarCutFace::PositiveY => Ok((PLATE_FRONT_REGION, PLATE_BACK_REGION)),
+        PlanarCutFace::NegativeY => Ok((PLATE_BACK_REGION, PLATE_FRONT_REGION)),
         _ => Err(ModelingError::UnsupportedOperation {
             operation,
             reason: "plate semantic cuts currently target only local +/-Y planar faces".to_owned(),
@@ -1777,7 +1816,8 @@ fn mark_boundary_loop(
         if let Some(metadata) = mesh.edge_metadata.get_mut(&key) {
             metadata.boundary_role = BoundaryRole::Feature;
             metadata.classification = EdgeClassification::Hard;
-            metadata.seam_candidate = matches!(treatment, CutEdgeTreatment::BevelEligible);
+            metadata.seam_candidate = false;
+            metadata.bevel_eligible = matches!(treatment, CutEdgeTreatment::BevelEligible);
             metadata.operation = Some(operation);
             metadata.boundary_loop = Some(boundary_loop);
         }
@@ -2019,6 +2059,7 @@ fn build_edge_metadata(mesh: &PolygonMesh) -> BTreeMap<EdgeKey, EdgeMetadata> {
                     boundary_role: BoundaryRole::OpenBoundary,
                     classification: EdgeClassification::Hard,
                     seam_candidate: false,
+                    bevel_eligible: false,
                     operation: None,
                     region_transition: None,
                     boundary_loop: None,
@@ -2040,6 +2081,7 @@ fn build_edge_metadata(mesh: &PolygonMesh) -> BTreeMap<EdgeKey, EdgeMetadata> {
                         EdgeClassification::Hard
                     },
                     seam_candidate: false,
+                    bevel_eligible: false,
                     operation: None,
                     region_transition: region_transition(first.region, second.region),
                     boundary_loop: None,

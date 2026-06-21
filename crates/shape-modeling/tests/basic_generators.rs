@@ -267,7 +267,8 @@ fn plate_recessed_panel_cut_is_closed_semantic_and_loop_tagged() {
         size: [1.45, 0.72],
         depth: 0.08,
         corner_radius: 0.12,
-        boundary_loop: BoundaryLoopId(7),
+        entry_loop: BoundaryLoopId(7),
+        floor_loop: BoundaryLoopId(8),
         outer_region: RegionId(1),
         rim_region: RegionId(20),
         wall_region: RegionId(21),
@@ -293,6 +294,7 @@ fn plate_recessed_panel_cut_is_closed_semantic_and_loop_tagged() {
     assert_region_role(&part, RegionId(21), SurfaceRole::CutWall);
     assert_region_role(&part, RegionId(22), SurfaceRole::Interior);
     assert_boundary_loop(&part.mesh, BoundaryLoopId(7), OperationId(30), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(8), OperationId(30), true);
     assert_face_operation_present(&part.mesh, OperationId(30));
 }
 
@@ -305,7 +307,8 @@ fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
         center: [0.08, -0.05],
         size: [1.18, 0.58],
         corner_radius: 0.08,
-        boundary_loop: BoundaryLoopId(8),
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
         outer_region: RegionId(1),
         rim_region: RegionId(23),
         wall_region: RegionId(24),
@@ -317,11 +320,18 @@ fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
     assert_common_mesh_quality(&part.mesh);
     assert_faces_use_regions(
         &part,
-        &[RegionId(1), RegionId(3), RegionId(23), RegionId(24)],
+        &[
+            RegionId(1),
+            RegionId(2),
+            RegionId(3),
+            RegionId(23),
+            RegionId(24),
+        ],
     );
     assert_region_role(&part, RegionId(23), SurfaceRole::Rim);
     assert_region_role(&part, RegionId(24), SurfaceRole::CutWall);
-    assert_boundary_loop(&part.mesh, BoundaryLoopId(8), OperationId(31), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(9), OperationId(31), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(10), OperationId(31), false);
     assert_face_operation_present(&part.mesh, OperationId(31));
 }
 
@@ -329,13 +339,14 @@ fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
 fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
     let operation = ModelingOperationSpec::CircularThroughCut {
         operation: OperationId(32),
-        region: RegionId(1),
+        region: RegionId(2),
         face: PlanarCutFace::NegativeY,
         center: [-0.12, 0.06],
         radius: 0.36,
         radial_segments: 12,
-        boundary_loop: BoundaryLoopId(9),
-        outer_region: RegionId(1),
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(2),
         rim_region: RegionId(25),
         wall_region: RegionId(26),
         edge_treatment: CutEdgeTreatment::BevelEligible,
@@ -346,7 +357,8 @@ fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
     assert_common_mesh_quality(&part.mesh);
     assert_region_role(&part, RegionId(25), SurfaceRole::Rim);
     assert_region_role(&part, RegionId(26), SurfaceRole::CutWall);
-    assert_boundary_loop(&part.mesh, BoundaryLoopId(9), OperationId(32), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(11), OperationId(32), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(12), OperationId(32), true);
 
     let repeated = generate_cut_plate(operation).expect("repeat should generate");
     assert_deterministic_ids(&part.mesh, &repeated.mesh);
@@ -361,7 +373,8 @@ fn plate_cut_rejects_host_boundary_overlap() {
         center: [0.0, 0.0],
         size: [2.95, 1.85],
         corner_radius: 0.0,
-        boundary_loop: BoundaryLoopId(10),
+        entry_loop: BoundaryLoopId(13),
+        exit_loop: BoundaryLoopId(14),
         outer_region: RegionId(1),
         rim_region: RegionId(23),
         wall_region: RegionId(24),
@@ -381,7 +394,8 @@ fn crate_recessed_panel_proportions_are_directed_closed() {
         size: [2.38, 0.48],
         depth: 0.045,
         corner_radius: 0.075,
-        boundary_loop: BoundaryLoopId(11),
+        entry_loop: BoundaryLoopId(15),
+        floor_loop: BoundaryLoopId(16),
         outer_region: RegionId(1),
         rim_region: RegionId(20),
         wall_region: RegionId(21),
@@ -404,7 +418,8 @@ fn crate_ventilation_slat_cut_proportions_are_directed_closed() {
         center: [0.0, 0.0],
         size: [0.42, 0.032],
         corner_radius: 0.006,
-        boundary_loop: BoundaryLoopId(12),
+        entry_loop: BoundaryLoopId(17),
+        exit_loop: BoundaryLoopId(18),
         outer_region: RegionId(1),
         rim_region: RegionId(23),
         wall_region: RegionId(24),
@@ -576,7 +591,7 @@ fn assert_boundary_loop(
     mesh: &PolygonMesh,
     boundary_loop: BoundaryLoopId,
     operation: OperationId,
-    seam_candidate: bool,
+    bevel_eligible: bool,
 ) {
     let edges = mesh
         .edge_metadata
@@ -587,7 +602,8 @@ fn assert_boundary_loop(
     assert!(edges.iter().all(|metadata| {
         metadata.boundary_role == BoundaryRole::Feature
             && metadata.operation == Some(operation)
-            && metadata.seam_candidate == seam_candidate
+            && !metadata.seam_candidate
+            && metadata.bevel_eligible == bevel_eligible
     }));
 }
 

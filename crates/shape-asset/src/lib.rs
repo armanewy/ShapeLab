@@ -23,7 +23,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 3;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 4;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -63,6 +63,7 @@ id_type!(
     BoundaryLoopId,
     "Stable semantic identifier for a generated boundary loop."
 );
+const LEGACY_MISSING_BOUNDARY_LOOP: BoundaryLoopId = BoundaryLoopId(0);
 id_type!(
     SocketId,
     "Stable semantic identifier for an attachment socket."
@@ -234,8 +235,9 @@ struct AssetRecipeWire {
 
 impl From<AssetRecipeWire> for AssetRecipe {
     fn from(wire: AssetRecipeWire) -> Self {
-        Self {
-            schema_version: migrated_asset_recipe_schema_version(wire.schema_version),
+        let schema_version = wire.schema_version;
+        let mut recipe = Self {
+            schema_version: migrated_asset_recipe_schema_version(schema_version),
             id: wire.id,
             title: wire.title,
             definitions: wire.definitions,
@@ -250,7 +252,11 @@ impl From<AssetRecipeWire> for AssetRecipe {
             relationships: wire.relationships,
             variation: wire.variation,
             next_ids: wire.next_ids,
+        };
+        if schema_version < 4 {
+            migrate_legacy_cut_boundary_loops(&mut recipe);
         }
+        recipe
     }
 }
 
@@ -264,11 +270,83 @@ impl<'de> Deserialize<'de> for AssetRecipe {
 }
 
 fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
-    if schema_version <= 2 {
+    if matches!(schema_version, 1..=3) {
         ASSET_RECIPE_SCHEMA_VERSION
     } else {
         schema_version
     }
+}
+
+fn migrate_legacy_cut_boundary_loops(recipe: &mut AssetRecipe) {
+    let mut used = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .flat_map(ModelingOperationSpec::boundary_loop_ids)
+        .filter_map(|id| (id != LEGACY_MISSING_BOUNDARY_LOOP).then_some(id.0))
+        .collect::<BTreeSet<_>>();
+    let mut next = recipe
+        .next_ids
+        .boundary_loop
+        .max(used.last().copied().unwrap_or_default().saturating_add(1))
+        .max(1);
+
+    for definition in recipe.definitions.values_mut() {
+        for operation in &mut definition.geometry.operations {
+            match operation {
+                ModelingOperationSpec::RecessedPanelCut {
+                    entry_loop,
+                    floor_loop,
+                    ..
+                } => {
+                    if *entry_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                        *entry_loop = allocate_migrated_boundary_loop(&mut used, &mut next);
+                    }
+                    if *floor_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                        *floor_loop = allocate_migrated_boundary_loop(&mut used, &mut next);
+                    }
+                }
+                ModelingOperationSpec::RectangularThroughCut {
+                    entry_loop,
+                    exit_loop,
+                    ..
+                }
+                | ModelingOperationSpec::CircularThroughCut {
+                    entry_loop,
+                    exit_loop,
+                    ..
+                } => {
+                    if *entry_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                        *entry_loop = allocate_migrated_boundary_loop(&mut used, &mut next);
+                    }
+                    if *exit_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                        *exit_loop = allocate_migrated_boundary_loop(&mut used, &mut next);
+                    }
+                }
+                ModelingOperationSpec::TransformGeometry { .. }
+                | ModelingOperationSpec::SetBevelProfile { .. }
+                | ModelingOperationSpec::AddPanel { .. }
+                | ModelingOperationSpec::AddTrim { .. }
+                | ModelingOperationSpec::MirrorInstances { .. }
+                | ModelingOperationSpec::LinearArray { .. }
+                | ModelingOperationSpec::RadialArray { .. }
+                | ModelingOperationSpec::ReservedBoolean { .. }
+                | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}
+            }
+        }
+    }
+
+    recipe.next_ids.boundary_loop = recipe.next_ids.boundary_loop.max(next);
+}
+
+fn allocate_migrated_boundary_loop(used: &mut BTreeSet<u64>, next: &mut u64) -> BoundaryLoopId {
+    while *next == 0 || used.contains(&*next) {
+        *next = next.saturating_add(1);
+    }
+    let id = *next;
+    used.insert(id);
+    *next = next.saturating_add(1);
+    BoundaryLoopId(id)
 }
 
 impl AssetRecipe {
@@ -577,7 +655,7 @@ pub enum CutEdgeTreatment {
 }
 
 /// Deterministic modeling operation specification.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ModelingOperationSpec {
     /// Apply a local transform to generated geometry.
     TransformGeometry {
@@ -633,8 +711,10 @@ pub enum ModelingOperationSpec {
         depth: f32,
         /// Corner radius in the face plane.
         corner_radius: f32,
-        /// Generated boundary loop for the panel rim.
-        boundary_loop: BoundaryLoopId,
+        /// Generated boundary loop at the entry cut edge.
+        entry_loop: BoundaryLoopId,
+        /// Generated boundary loop around the recessed floor edge.
+        floor_loop: BoundaryLoopId,
         /// Region assigned to the surviving outer host surface.
         outer_region: RegionId,
         /// Region assigned to the rim/border around the recess.
@@ -660,8 +740,10 @@ pub enum ModelingOperationSpec {
         size: [f32; 2],
         /// Corner radius in the face plane.
         corner_radius: f32,
-        /// Generated boundary loop for the opening.
-        boundary_loop: BoundaryLoopId,
+        /// Generated boundary loop at the entry cut edge.
+        entry_loop: BoundaryLoopId,
+        /// Generated boundary loop at the exit cut edge.
+        exit_loop: BoundaryLoopId,
         /// Region assigned to the surviving outer host surface.
         outer_region: RegionId,
         /// Region assigned to the opening rim.
@@ -685,8 +767,10 @@ pub enum ModelingOperationSpec {
         radius: f32,
         /// Deterministic radial segment count.
         radial_segments: u32,
-        /// Generated boundary loop for the opening.
-        boundary_loop: BoundaryLoopId,
+        /// Generated boundary loop at the entry cut edge.
+        entry_loop: BoundaryLoopId,
+        /// Generated boundary loop at the exit cut edge.
+        exit_loop: BoundaryLoopId,
         /// Region assigned to the surviving outer host surface.
         outer_region: RegionId,
         /// Region assigned to the opening rim.
@@ -765,9 +849,21 @@ impl ModelingOperationSpec {
     #[must_use]
     pub fn boundary_loop_ids(&self) -> Vec<BoundaryLoopId> {
         match self {
-            Self::RecessedPanelCut { boundary_loop, .. }
-            | Self::RectangularThroughCut { boundary_loop, .. }
-            | Self::CircularThroughCut { boundary_loop, .. } => vec![*boundary_loop],
+            Self::RecessedPanelCut {
+                entry_loop,
+                floor_loop,
+                ..
+            } => vec![*entry_loop, *floor_loop],
+            Self::RectangularThroughCut {
+                entry_loop,
+                exit_loop,
+                ..
+            }
+            | Self::CircularThroughCut {
+                entry_loop,
+                exit_loop,
+                ..
+            } => vec![*entry_loop, *exit_loop],
             Self::TransformGeometry { .. }
             | Self::SetBevelProfile { .. }
             | Self::AddPanel { .. }
@@ -813,6 +909,299 @@ impl ModelingOperationSpec {
             | Self::ReservedBoolean { .. }
             | Self::ReservedDeformationProgram { .. } => Vec::new(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+enum ModelingOperationSpecWire {
+    TransformGeometry {
+        operation: OperationId,
+        transform: Transform3,
+    },
+    SetBevelProfile {
+        operation: OperationId,
+        radius: f32,
+        segments: u32,
+    },
+    AddPanel {
+        operation: OperationId,
+        region: RegionId,
+        inset: f32,
+        depth: f32,
+    },
+    AddTrim {
+        operation: OperationId,
+        region: RegionId,
+        width: f32,
+        height: f32,
+    },
+    RecessedPanelCut(RecessedPanelCutWire),
+    RectangularThroughCut(RectangularThroughCutWire),
+    CircularThroughCut(CircularThroughCutWire),
+    MirrorInstances {
+        operation: OperationId,
+        plane_normal: [f32; 3],
+        plane_offset: f32,
+    },
+    LinearArray {
+        operation: OperationId,
+        count: u32,
+        offset: [f32; 3],
+    },
+    RadialArray {
+        operation: OperationId,
+        count: u32,
+        axis: [f32; 3],
+        angle_degrees: f32,
+    },
+    ReservedBoolean {
+        operation: OperationId,
+        label: String,
+    },
+    ReservedDeformationProgram {
+        operation: OperationId,
+        label: String,
+    },
+}
+
+#[derive(Deserialize)]
+struct RecessedPanelCutWire {
+    operation: OperationId,
+    region: RegionId,
+    face: PlanarCutFace,
+    center: [f32; 2],
+    size: [f32; 2],
+    depth: f32,
+    corner_radius: f32,
+    #[serde(default)]
+    boundary_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    entry_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    floor_loop: Option<BoundaryLoopId>,
+    outer_region: RegionId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+    floor_region: RegionId,
+    edge_treatment: CutEdgeTreatment,
+}
+
+#[derive(Deserialize)]
+struct RectangularThroughCutWire {
+    operation: OperationId,
+    region: RegionId,
+    face: PlanarCutFace,
+    center: [f32; 2],
+    size: [f32; 2],
+    corner_radius: f32,
+    #[serde(default)]
+    boundary_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    entry_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    exit_loop: Option<BoundaryLoopId>,
+    outer_region: RegionId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+    edge_treatment: CutEdgeTreatment,
+}
+
+#[derive(Deserialize)]
+struct CircularThroughCutWire {
+    operation: OperationId,
+    region: RegionId,
+    face: PlanarCutFace,
+    center: [f32; 2],
+    radius: f32,
+    radial_segments: u32,
+    #[serde(default)]
+    boundary_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    entry_loop: Option<BoundaryLoopId>,
+    #[serde(default)]
+    exit_loop: Option<BoundaryLoopId>,
+    outer_region: RegionId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+    edge_treatment: CutEdgeTreatment,
+}
+
+impl<'de> Deserialize<'de> for ModelingOperationSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(
+            match ModelingOperationSpecWire::deserialize(deserializer)? {
+                ModelingOperationSpecWire::TransformGeometry {
+                    operation,
+                    transform,
+                } => Self::TransformGeometry {
+                    operation,
+                    transform,
+                },
+                ModelingOperationSpecWire::SetBevelProfile {
+                    operation,
+                    radius,
+                    segments,
+                } => Self::SetBevelProfile {
+                    operation,
+                    radius,
+                    segments,
+                },
+                ModelingOperationSpecWire::AddPanel {
+                    operation,
+                    region,
+                    inset,
+                    depth,
+                } => Self::AddPanel {
+                    operation,
+                    region,
+                    inset,
+                    depth,
+                },
+                ModelingOperationSpecWire::AddTrim {
+                    operation,
+                    region,
+                    width,
+                    height,
+                } => Self::AddTrim {
+                    operation,
+                    region,
+                    width,
+                    height,
+                },
+                ModelingOperationSpecWire::RecessedPanelCut(wire) => Self::RecessedPanelCut {
+                    operation: wire.operation,
+                    region: wire.region,
+                    face: wire.face,
+                    center: wire.center,
+                    size: wire.size,
+                    depth: wire.depth,
+                    corner_radius: wire.corner_radius,
+                    entry_loop: required_or_legacy_loop::<D::Error>(
+                        wire.entry_loop,
+                        wire.boundary_loop,
+                        "RecessedPanelCut.entry_loop",
+                    )?,
+                    floor_loop: legacy_or_required_secondary_loop::<D::Error>(
+                        wire.floor_loop,
+                        wire.boundary_loop,
+                        "RecessedPanelCut.floor_loop",
+                    )?,
+                    outer_region: wire.outer_region,
+                    rim_region: wire.rim_region,
+                    wall_region: wire.wall_region,
+                    floor_region: wire.floor_region,
+                    edge_treatment: wire.edge_treatment,
+                },
+                ModelingOperationSpecWire::RectangularThroughCut(wire) => {
+                    Self::RectangularThroughCut {
+                        operation: wire.operation,
+                        region: wire.region,
+                        face: wire.face,
+                        center: wire.center,
+                        size: wire.size,
+                        corner_radius: wire.corner_radius,
+                        entry_loop: required_or_legacy_loop::<D::Error>(
+                            wire.entry_loop,
+                            wire.boundary_loop,
+                            "RectangularThroughCut.entry_loop",
+                        )?,
+                        exit_loop: legacy_or_required_secondary_loop::<D::Error>(
+                            wire.exit_loop,
+                            wire.boundary_loop,
+                            "RectangularThroughCut.exit_loop",
+                        )?,
+                        outer_region: wire.outer_region,
+                        rim_region: wire.rim_region,
+                        wall_region: wire.wall_region,
+                        edge_treatment: wire.edge_treatment,
+                    }
+                }
+                ModelingOperationSpecWire::CircularThroughCut(wire) => Self::CircularThroughCut {
+                    operation: wire.operation,
+                    region: wire.region,
+                    face: wire.face,
+                    center: wire.center,
+                    radius: wire.radius,
+                    radial_segments: wire.radial_segments,
+                    entry_loop: required_or_legacy_loop::<D::Error>(
+                        wire.entry_loop,
+                        wire.boundary_loop,
+                        "CircularThroughCut.entry_loop",
+                    )?,
+                    exit_loop: legacy_or_required_secondary_loop::<D::Error>(
+                        wire.exit_loop,
+                        wire.boundary_loop,
+                        "CircularThroughCut.exit_loop",
+                    )?,
+                    outer_region: wire.outer_region,
+                    rim_region: wire.rim_region,
+                    wall_region: wire.wall_region,
+                    edge_treatment: wire.edge_treatment,
+                },
+                ModelingOperationSpecWire::MirrorInstances {
+                    operation,
+                    plane_normal,
+                    plane_offset,
+                } => Self::MirrorInstances {
+                    operation,
+                    plane_normal,
+                    plane_offset,
+                },
+                ModelingOperationSpecWire::LinearArray {
+                    operation,
+                    count,
+                    offset,
+                } => Self::LinearArray {
+                    operation,
+                    count,
+                    offset,
+                },
+                ModelingOperationSpecWire::RadialArray {
+                    operation,
+                    count,
+                    axis,
+                    angle_degrees,
+                } => Self::RadialArray {
+                    operation,
+                    count,
+                    axis,
+                    angle_degrees,
+                },
+                ModelingOperationSpecWire::ReservedBoolean { operation, label } => {
+                    Self::ReservedBoolean { operation, label }
+                }
+                ModelingOperationSpecWire::ReservedDeformationProgram { operation, label } => {
+                    Self::ReservedDeformationProgram { operation, label }
+                }
+            },
+        )
+    }
+}
+
+fn required_or_legacy_loop<E: de::Error>(
+    current: Option<BoundaryLoopId>,
+    legacy: Option<BoundaryLoopId>,
+    field: &'static str,
+) -> Result<BoundaryLoopId, E> {
+    current
+        .or(legacy)
+        .ok_or_else(|| E::custom(format!("{field} is missing")))
+}
+
+fn legacy_or_required_secondary_loop<E: de::Error>(
+    current: Option<BoundaryLoopId>,
+    legacy: Option<BoundaryLoopId>,
+    field: &'static str,
+) -> Result<BoundaryLoopId, E> {
+    if let Some(current) = current {
+        Ok(current)
+    } else if legacy.is_some() {
+        Ok(LEGACY_MISSING_BOUNDARY_LOOP)
+    } else {
+        Err(E::custom(format!("{field} is missing")))
     }
 }
 
@@ -1836,6 +2225,7 @@ pub fn instances_of_definition(
 
 fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
     let mut seen_operation_ids = BTreeMap::new();
+    let mut seen_boundary_loop_ids = BTreeMap::new();
     for (id, definition) in &recipe.definitions {
         if definition.id != *id {
             push_issue(
@@ -1870,6 +2260,34 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
                         previous_definition.0
                     ),
                 );
+            }
+            for boundary_loop in operation.boundary_loop_ids() {
+                if boundary_loop == LEGACY_MISSING_BOUNDARY_LOOP {
+                    push_issue(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop",
+                            definition.id.0, operation_id.0
+                        )),
+                        "invalid_boundary_loop_id",
+                        "Generated boundary loop IDs must be non-zero.",
+                    );
+                } else if let Some((previous_definition, previous_operation)) =
+                    seen_boundary_loop_ids.insert(boundary_loop, (*id, operation_id))
+                {
+                    push_issue(
+                        report,
+                        Some(format!(
+                            "definition.{}.operation.{}.boundary_loop.{}",
+                            definition.id.0, operation_id.0, boundary_loop.0
+                        )),
+                        "duplicate_boundary_loop_id",
+                        format!(
+                            "Boundary loop ID is already used by definition {} operation {}.",
+                            previous_definition.0, previous_operation.0
+                        ),
+                    );
+                }
             }
         }
         for (region_id, region) in &definition.regions {
@@ -3050,9 +3468,31 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                 size,
                 depth,
                 corner_radius,
+                entry_loop,
+                floor_loop,
+                outer_region,
+                rim_region,
+                wall_region,
+                floor_region,
                 ..
             } => {
                 validate_region_reference(definition, *region, operation_id, report);
+                validate_cut_generated_regions(
+                    definition.id,
+                    operation_id,
+                    "recessed_panel_cut",
+                    *outer_region,
+                    &[*rim_region, *wall_region, *floor_region],
+                    report,
+                );
+                validate_cut_loop_pair(
+                    definition.id,
+                    operation_id,
+                    "recessed_panel_cut",
+                    *entry_loop,
+                    *floor_loop,
+                    report,
+                );
                 validate_cut_center(
                     definition.id,
                     operation_id,
@@ -3081,15 +3521,44 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     ),
                     *corner_radius,
                 );
+                validate_rect_cut_corner_radius(
+                    definition.id,
+                    operation_id,
+                    "recessed_panel_cut",
+                    size,
+                    *corner_radius,
+                    report,
+                );
             }
             ModelingOperationSpec::RectangularThroughCut {
                 region,
                 center,
                 size,
                 corner_radius,
+                entry_loop,
+                exit_loop,
+                outer_region,
+                rim_region,
+                wall_region,
                 ..
             } => {
                 validate_region_reference(definition, *region, operation_id, report);
+                validate_cut_generated_regions(
+                    definition.id,
+                    operation_id,
+                    "rectangular_through_cut",
+                    *outer_region,
+                    &[*rim_region, *wall_region],
+                    report,
+                );
+                validate_cut_loop_pair(
+                    definition.id,
+                    operation_id,
+                    "rectangular_through_cut",
+                    *entry_loop,
+                    *exit_loop,
+                    report,
+                );
                 validate_cut_center(
                     definition.id,
                     operation_id,
@@ -3113,15 +3582,44 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     ),
                     *corner_radius,
                 );
+                validate_rect_cut_corner_radius(
+                    definition.id,
+                    operation_id,
+                    "rectangular_through_cut",
+                    size,
+                    *corner_radius,
+                    report,
+                );
             }
             ModelingOperationSpec::CircularThroughCut {
                 region,
                 center,
                 radius,
                 radial_segments,
+                entry_loop,
+                exit_loop,
+                outer_region,
+                rim_region,
+                wall_region,
                 ..
             } => {
                 validate_region_reference(definition, *region, operation_id, report);
+                validate_cut_generated_regions(
+                    definition.id,
+                    operation_id,
+                    "circular_through_cut",
+                    *outer_region,
+                    &[*rim_region, *wall_region],
+                    report,
+                );
+                validate_cut_loop_pair(
+                    definition.id,
+                    operation_id,
+                    "circular_through_cut",
+                    *entry_loop,
+                    *exit_loop,
+                    report,
+                );
                 validate_cut_center(
                     definition.id,
                     operation_id,
@@ -3264,6 +3762,93 @@ fn validate_cut_size(
                 format!("{operation_kind}.size.{component}"),
             ),
             *value,
+        );
+    }
+}
+
+fn validate_cut_generated_regions(
+    definition: PartDefinitionId,
+    operation: OperationId,
+    operation_kind: &'static str,
+    outer_region: RegionId,
+    generated_regions: &[RegionId],
+    report: &mut AssetValidationReport,
+) {
+    let mut seen = BTreeSet::new();
+    for region in generated_regions {
+        if *region == outer_region {
+            push_issue(
+                report,
+                operation_subject(
+                    definition,
+                    operation,
+                    format!("{operation_kind}.generated_region"),
+                ),
+                "cut_region_collision",
+                "Generated cut detail regions must not reuse the surviving outer host region.",
+            );
+        }
+        if !seen.insert(*region) {
+            push_issue(
+                report,
+                operation_subject(
+                    definition,
+                    operation,
+                    format!("{operation_kind}.generated_region"),
+                ),
+                "duplicate_cut_generated_region",
+                "Generated cut detail regions must be distinct.",
+            );
+        }
+    }
+}
+
+fn validate_cut_loop_pair(
+    definition: PartDefinitionId,
+    operation: OperationId,
+    operation_kind: &'static str,
+    first: BoundaryLoopId,
+    second: BoundaryLoopId,
+    report: &mut AssetValidationReport,
+) {
+    if first == second {
+        push_issue(
+            report,
+            operation_subject(
+                definition,
+                operation,
+                format!("{operation_kind}.boundary_loop"),
+            ),
+            "duplicate_cut_boundary_loop",
+            "Each physical cut boundary loop must have a distinct semantic ID.",
+        );
+    }
+}
+
+fn validate_rect_cut_corner_radius(
+    definition: PartDefinitionId,
+    operation: OperationId,
+    operation_kind: &'static str,
+    size: &[f32; 2],
+    corner_radius: f32,
+    report: &mut AssetValidationReport,
+) {
+    if size
+        .iter()
+        .copied()
+        .all(|value| value.is_finite() && value > 0.0)
+        && corner_radius.is_finite()
+        && corner_radius > size[0].min(size[1]) * 0.5
+    {
+        push_issue(
+            report,
+            operation_subject(
+                definition,
+                operation,
+                format!("{operation_kind}.corner_radius"),
+            ),
+            "cut_corner_radius_too_large",
+            "Cut corner radius must not exceed half the smaller cut dimension.",
         );
     }
 }

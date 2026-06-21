@@ -199,6 +199,9 @@ pub struct EdgeMetadata {
     pub classification: EdgeClassification,
     /// Whether this edge is a future UV seam candidate.
     pub seam_candidate: bool,
+    /// Whether this edge may be consumed by a future bevel-propagation pass.
+    #[serde(default)]
+    pub bevel_eligible: bool,
     /// Source modeling operation.
     pub operation: Option<OperationId>,
     /// Optional transition between two semantic regions.
@@ -216,6 +219,7 @@ impl EdgeMetadata {
             boundary_role: BoundaryRole::OpenBoundary,
             classification: EdgeClassification::Hard,
             seam_candidate: true,
+            bevel_eligible: false,
             operation: None,
             region_transition: None,
             boundary_loop: None,
@@ -229,6 +233,7 @@ impl EdgeMetadata {
             boundary_role: BoundaryRole::Smooth,
             classification: EdgeClassification::Smooth,
             seam_candidate: false,
+            bevel_eligible: false,
             operation: None,
             region_transition: None,
             boundary_loop: None,
@@ -242,6 +247,7 @@ impl EdgeMetadata {
             boundary_role: BoundaryRole::Hard,
             classification: EdgeClassification::Hard,
             seam_candidate: false,
+            bevel_eligible: false,
             operation: None,
             region_transition: None,
             boundary_loop: None,

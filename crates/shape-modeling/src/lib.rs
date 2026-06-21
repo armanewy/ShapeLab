@@ -249,6 +249,16 @@ fn ensure_context_matches(
 
 fn ensure_operations_supported(definition: &PartDefinition) -> Result<(), ModelingError> {
     for operation in &definition.geometry.operations {
+        if operation_is_semantic_cut(operation)
+            && !matches!(&definition.geometry.source, GeometrySource::Plate { .. })
+        {
+            return Err(ModelingError::UnsupportedOperation {
+                operation: operation.operation_id(),
+                reason:
+                    "semantic cut operations currently compile only against Plate geometry sources"
+                        .to_owned(),
+            });
+        }
         match operation {
             shape_asset::ModelingOperationSpec::ReservedBoolean { operation, .. } => {
                 return Err(ModelingError::UnsupportedOperation {
@@ -281,6 +291,15 @@ fn ensure_operations_supported(definition: &PartDefinition) -> Result<(), Modeli
     Ok(())
 }
 
+fn operation_is_semantic_cut(operation: &shape_asset::ModelingOperationSpec) -> bool {
+    matches!(
+        operation,
+        shape_asset::ModelingOperationSpec::RecessedPanelCut { .. }
+            | shape_asset::ModelingOperationSpec::RectangularThroughCut { .. }
+            | shape_asset::ModelingOperationSpec::CircularThroughCut { .. }
+    )
+}
+
 fn unsupported_geometry(source: &'static str) -> Result<GeneratedPart, ModelingError> {
     Err(ModelingError::UnsupportedGeometry {
         geometry_source: source,
@@ -291,7 +310,10 @@ fn unsupported_geometry(source: &'static str) -> Result<GeneratedPart, ModelingE
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use shape_asset::{Frame3, GeometryRecipe, ModelingOperationSpec, Transform3};
+    use shape_asset::{
+        BoundaryLoopId, CutEdgeTreatment, Frame3, GeometryRecipe, ModelingOperationSpec,
+        PlanarCutFace, RegionId, Transform3,
+    };
 
     use super::*;
 
@@ -354,6 +376,40 @@ mod tests {
             generate_geometry(&definition, &mut context),
             Err(ModelingError::UnsupportedOperation {
                 operation: OperationId(3),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn semantic_cuts_are_rejected_on_unsupported_hosts() {
+        let mut definition = definition(GeometrySource::RoundedBox {
+            half_extents: [1.0, 1.0, 1.0],
+            radius: 0.1,
+        });
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::RectangularThroughCut {
+                operation: OperationId(7),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveY,
+                center: [0.0, 0.0],
+                size: [0.4, 0.3],
+                corner_radius: 0.0,
+                entry_loop: BoundaryLoopId(1),
+                exit_loop: BoundaryLoopId(2),
+                outer_region: RegionId(1),
+                rim_region: RegionId(20),
+                wall_region: RegionId(21),
+                edge_treatment: CutEdgeTreatment::Hard,
+            });
+        let mut context = GeneratorContext::new(PartDefinitionId(1), PartInstanceId(1), 1, 0);
+
+        assert!(matches!(
+            generate_geometry(&definition, &mut context),
+            Err(ModelingError::UnsupportedOperation {
+                operation: OperationId(7),
                 ..
             })
         ));
