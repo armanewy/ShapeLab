@@ -410,6 +410,7 @@ fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
     assert_common_mesh_quality(&part.mesh);
     assert_region_role(&part, RegionId(25), SurfaceRole::Rim);
     assert_region_role(&part, RegionId(26), SurfaceRole::CutWall);
+    assert_circular_rim_region_is_radial_band(&part, RegionId(25), [-0.12, 0.06], 0.36, 0.1152);
     assert_boundary_loop(&part.mesh, BoundaryLoopId(11), OperationId(32), true);
     assert_boundary_loop(&part.mesh, BoundaryLoopId(12), OperationId(32), true);
 
@@ -644,6 +645,33 @@ fn assert_region_role(part: &GeneratedPart, region: RegionId, role: SurfaceRole)
         .role
         .clone();
     assert_eq!(actual, role);
+}
+
+fn assert_circular_rim_region_is_radial_band(
+    part: &GeneratedPart,
+    region: RegionId,
+    center: [f32; 2],
+    radius: f32,
+    rim_width: f32,
+) {
+    let outer = radius + rim_width;
+    let mut checked = 0;
+    for (face, metadata) in part.mesh.faces.iter().zip(&part.mesh.face_metadata) {
+        if metadata.region != Some(region) {
+            continue;
+        }
+        checked += 1;
+        for vertex in &face.vertices {
+            let position = part.mesh.positions[*vertex as usize];
+            let distance =
+                ((position[0] - center[0]).powi(2) + (position[2] - center[1]).powi(2)).sqrt();
+            assert!(
+                distance >= radius - 0.0001 && distance <= outer + 0.0001,
+                "rim vertex radius {distance} fell outside [{radius}, {outer}]"
+            );
+        }
+    }
+    assert!(checked > 0, "expected rim-region faces");
 }
 
 fn assert_boundary_loop(

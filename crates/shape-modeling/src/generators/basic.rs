@@ -582,6 +582,11 @@ fn build_cut_plate(
         } => {
             let floor_y = outside_y - face_sign * depth;
             let outside_frame_ring = builder.add_plate_ring(outside_y, &frame_ring)?;
+            let outside_rim_ring = if cut.has_host_surface_band {
+                builder.add_plate_ring(outside_y, &cut.rim_points)?
+            } else {
+                outside_frame_ring.clone()
+            };
             let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
             let floor_inner = builder.add_plate_ring(floor_y, &cut.inner_points)?;
 
@@ -598,11 +603,25 @@ fn build_cut_plate(
                 cut.outer_region,
                 SurfaceRole::PrimarySurface,
             );
+            if cut.has_host_surface_band {
+                add_matched_ring_band(
+                    &mut builder,
+                    &outside_frame_ring,
+                    &outside_rim_ring,
+                    &frame_ring,
+                    &cut.rim_points,
+                    outside_normal,
+                    context,
+                    cut.operation,
+                    cut.outer_region,
+                    SurfaceRole::PrimarySurface,
+                );
+            }
             add_matched_ring_band(
                 &mut builder,
-                &outside_frame_ring,
+                &outside_rim_ring,
                 &outside_inner,
-                &frame_ring,
+                &cut.rim_points,
                 &cut.inner_points,
                 outside_normal,
                 context,
@@ -700,8 +719,18 @@ fn build_cut_plate(
         }
         PlateCutKind::Through => {
             let outside_frame_ring = builder.add_plate_ring(outside_y, &frame_ring)?;
+            let outside_rim_ring = if cut.has_host_surface_band {
+                builder.add_plate_ring(outside_y, &cut.rim_points)?
+            } else {
+                outside_frame_ring.clone()
+            };
             let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
             let opposite_frame_ring = builder.add_plate_ring(opposite_y, &frame_ring)?;
+            let opposite_rim_ring = if cut.has_host_surface_band {
+                builder.add_plate_ring(opposite_y, &cut.rim_points)?
+            } else {
+                opposite_frame_ring.clone()
+            };
             let opposite_inner = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
 
             add_host_to_ring_cap(
@@ -717,11 +746,25 @@ fn build_cut_plate(
                 cut.outer_region,
                 SurfaceRole::PrimarySurface,
             );
+            if cut.has_host_surface_band {
+                add_matched_ring_band(
+                    &mut builder,
+                    &outside_frame_ring,
+                    &outside_rim_ring,
+                    &frame_ring,
+                    &cut.rim_points,
+                    outside_normal,
+                    context,
+                    cut.operation,
+                    cut.outer_region,
+                    SurfaceRole::PrimarySurface,
+                );
+            }
             add_matched_ring_band(
                 &mut builder,
-                &outside_frame_ring,
+                &outside_rim_ring,
                 &outside_inner,
-                &frame_ring,
+                &cut.rim_points,
                 &cut.inner_points,
                 outside_normal,
                 context,
@@ -742,11 +785,25 @@ fn build_cut_plate(
                 opposite_region,
                 SurfaceRole::PrimarySurface,
             );
+            if cut.has_host_surface_band {
+                add_matched_ring_band(
+                    &mut builder,
+                    &opposite_frame_ring,
+                    &opposite_rim_ring,
+                    &frame_ring,
+                    &cut.rim_points,
+                    opposite_normal,
+                    context,
+                    cut.operation,
+                    opposite_region,
+                    SurfaceRole::PrimarySurface,
+                );
+            }
             add_matched_ring_band(
                 &mut builder,
-                &opposite_frame_ring,
+                &opposite_rim_ring,
                 &opposite_inner,
-                &frame_ring,
+                &cut.rim_points,
                 &cut.inner_points,
                 opposite_normal,
                 context,
@@ -1066,8 +1123,10 @@ struct PlateCutPlan {
     face: PlanarCutFace,
     center: [f32; 2],
     inner_points: Vec<[f32; 2]>,
+    rim_points: Vec<[f32; 2]>,
     frame_points: Vec<[f32; 2]>,
     frame: Rect2,
+    has_host_surface_band: bool,
     rim_width: f32,
     corner_segments: u32,
     target_region: RegionId,
@@ -1133,8 +1192,10 @@ impl PlateCutPlan {
                     face: *face,
                     center: *center,
                     inner_points,
+                    rim_points: frame_points.clone(),
                     frame_points,
                     frame,
+                    has_host_surface_band: false,
                     rim_width,
                     corner_segments,
                     target_region: *region,
@@ -1181,8 +1242,10 @@ impl PlateCutPlan {
                     face: *face,
                     center: *center,
                     inner_points,
+                    rim_points: frame_points.clone(),
                     frame_points,
                     frame,
+                    has_host_surface_band: false,
                     rim_width,
                     corner_segments,
                     target_region: *region,
@@ -1219,8 +1282,15 @@ impl PlateCutPlan {
                     let (sin, cos) = angle.sin_cos();
                     inner_points.push([center[0] + radius * cos, center[1] + radius * sin]);
                 }
-                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
-                let frame_points = inner_points
+                let rim_radius = radius + rim_width;
+                let mut rim_points = Vec::with_capacity(segments as usize);
+                for index in 0..segments {
+                    let angle = 2.0 * PI * index as f32 / segments as f32;
+                    let (sin, cos) = angle.sin_cos();
+                    rim_points.push([center[0] + rim_radius * cos, center[1] + rim_radius * sin]);
+                }
+                let frame = cut_frame_rect(*center, &rim_points, half_x, half_z, rim_width)?;
+                let frame_points = rim_points
                     .iter()
                     .map(|point| ray_to_rect(*center, *point, frame))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1230,8 +1300,10 @@ impl PlateCutPlan {
                     face: *face,
                     center: *center,
                     inner_points,
+                    rim_points,
                     frame_points,
                     frame,
+                    has_host_surface_band: true,
                     rim_width,
                     corner_segments: segments,
                     target_region: *region,
