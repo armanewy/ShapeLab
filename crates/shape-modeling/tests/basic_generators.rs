@@ -492,6 +492,153 @@ fn crate_ventilation_slat_cut_proportions_are_directed_closed() {
     assert_common_mesh_quality(&part.mesh);
 }
 
+#[test]
+fn plate_multiple_same_face_cuts_compose_closed_semantic_geometry() {
+    let mut operations = Vec::new();
+    operations.push(ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(40),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [-1.40, 0.0],
+        size: [0.55, 0.44],
+        depth: 0.08,
+        corner_radius: 0.08,
+        rim_width: 0.07,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(40),
+        floor_loop: BoundaryLoopId(41),
+        outer_region: RegionId(1),
+        rim_region: RegionId(140),
+        wall_region: RegionId(141),
+        floor_region: RegionId(142),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    });
+    for (index, x) in [-0.45, 0.15, 0.75, 1.35].into_iter().enumerate() {
+        let id = 50 + index as u64;
+        operations.push(ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(id),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [x, -0.72],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.04,
+            entry_loop: BoundaryLoopId(50 + index as u64 * 2),
+            exit_loop: BoundaryLoopId(51 + index as u64 * 2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(150 + index as u64 * 2),
+            wall_region: RegionId(151 + index as u64 * 2),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        });
+    }
+    for (index, x) in [-0.45, 0.15, 0.75].into_iter().enumerate() {
+        let id = 60 + index as u64;
+        operations.push(ModelingOperationSpec::RectangularThroughCut {
+            operation: OperationId(id),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [x, 0.70],
+            size: [0.24, 0.05],
+            corner_radius: 0.01,
+            rim_width: 0.04,
+            corner_segments: 3,
+            entry_loop: BoundaryLoopId(70 + index as u64 * 2),
+            exit_loop: BoundaryLoopId(71 + index as u64 * 2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(170 + index as u64 * 2),
+            wall_region: RegionId(171 + index as u64 * 2),
+            edge_treatment: CutEdgeTreatment::Hard,
+        });
+    }
+
+    let part = generate_cut_plate_with_operations(operations, [4.0, 2.0], 0.30)
+        .expect("multi-cut plate should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    for operation in [
+        OperationId(40),
+        OperationId(50),
+        OperationId(51),
+        OperationId(52),
+        OperationId(53),
+        OperationId(60),
+        OperationId(61),
+        OperationId(62),
+    ] {
+        assert_face_operation_present(&part.mesh, operation);
+    }
+    for boundary_loop in [
+        BoundaryLoopId(40),
+        BoundaryLoopId(41),
+        BoundaryLoopId(50),
+        BoundaryLoopId(51),
+        BoundaryLoopId(52),
+        BoundaryLoopId(53),
+        BoundaryLoopId(54),
+        BoundaryLoopId(55),
+        BoundaryLoopId(56),
+        BoundaryLoopId(57),
+        BoundaryLoopId(70),
+        BoundaryLoopId(71),
+        BoundaryLoopId(72),
+        BoundaryLoopId(73),
+        BoundaryLoopId(74),
+        BoundaryLoopId(75),
+    ] {
+        assert!(
+            part.mesh
+                .edge_metadata
+                .values()
+                .any(|metadata| metadata.boundary_loop == Some(boundary_loop)),
+            "missing boundary loop {boundary_loop:?}"
+        );
+    }
+    assert!(
+        part.generator_signature
+            .contains("plate_multi_cut:w=4.000000:h=2.000000:t=0.300000")
+    );
+}
+
+#[test]
+fn plate_multi_cut_rejects_overlapping_footprints() {
+    let operations = vec![
+        ModelingOperationSpec::RectangularThroughCut {
+            operation: OperationId(80),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            size: [0.70, 0.30],
+            corner_radius: 0.0,
+            rim_width: 0.05,
+            corner_segments: 1,
+            entry_loop: BoundaryLoopId(80),
+            exit_loop: BoundaryLoopId(81),
+            outer_region: RegionId(1),
+            rim_region: RegionId(180),
+            wall_region: RegionId(181),
+            edge_treatment: CutEdgeTreatment::Hard,
+        },
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(81),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.20, 0.0],
+            radius: 0.16,
+            radial_segments: 10,
+            rim_width: 0.04,
+            entry_loop: BoundaryLoopId(82),
+            exit_loop: BoundaryLoopId(83),
+            outer_region: RegionId(1),
+            rim_region: RegionId(182),
+            wall_region: RegionId(183),
+            edge_treatment: CutEdgeTreatment::Hard,
+        },
+    ];
+
+    assert!(generate_cut_plate_with_operations(operations, [3.0, 2.0], 0.30).is_err());
+}
+
 fn context() -> GeneratorContext {
     GeneratorContext::new(PartDefinitionId(7), PartInstanceId(11), 100, 0)
 }
@@ -507,13 +654,21 @@ fn generate_cut_plate_with_source(
     size: [f32; 2],
     thickness: f32,
 ) -> Result<GeneratedPart, shape_modeling::ModelingError> {
+    generate_cut_plate_with_operations(vec![operation], size, thickness)
+}
+
+fn generate_cut_plate_with_operations(
+    operations: Vec<ModelingOperationSpec>,
+    size: [f32; 2],
+    thickness: f32,
+) -> Result<GeneratedPart, shape_modeling::ModelingError> {
     let definition = PartDefinition {
         id: PartDefinitionId(7),
         name: "cut plate".to_owned(),
         tags: BTreeSet::new(),
         geometry: GeometryRecipe {
             source: GeometrySource::Plate { size, thickness },
-            operations: vec![operation],
+            operations,
         },
         regions: BTreeMap::new(),
         sockets: BTreeMap::new(),

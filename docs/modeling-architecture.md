@@ -35,7 +35,7 @@ shape-compile validation, triangulation, provenance, statistics
 AssetArtifact with grouped OBJ, preview triangles, and Blender reconstruction script
 ```
 
-The explicit lane compiles complete authored assets. `RoundedBox`, `Cylinder`, `Frustum`, `Plate`, `Sweep`, `Lathe`, and `LiteralMesh` sources dispatch to deterministic generators. `Plate` supports constrained semantic cuts on planar faces: `RecessedPanelCut`, `RectangularThroughCut`, and `CircularThroughCut`. These cuts generate boundary-loop IDs, rim/wall/floor regions, hard-edge and bevel-eligibility metadata, and operation provenance. Reserved arbitrary boolean and deformation-program sources remain typed unsupported paths.
+The explicit lane compiles complete authored assets. `RoundedBox`, `Cylinder`, `Frustum`, `Plate`, `Sweep`, `Lathe`, and `LiteralMesh` sources dispatch to deterministic generators. `Plate` supports constrained semantic cuts on planar faces: `RecessedPanelCut`, `RectangularThroughCut`, and `CircularThroughCut`. Multiple cuts can compose on one plate face when their frames are separated and their rectangular projections do not split another cut window. These cuts generate boundary-loop IDs, rim/wall/floor regions, hard-edge and bevel-eligibility metadata, and operation provenance. Reserved arbitrary boolean and deformation-program sources remain typed unsupported paths.
 
 ## Semantic Recipe Layer
 

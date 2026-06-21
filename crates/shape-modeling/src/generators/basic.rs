@@ -289,13 +289,17 @@ pub fn generate_plate(
             "plate generator received a different geometry source".to_owned(),
         ));
     };
-    if let Some(operation) = single_cut_operation(definition)? {
+    let cut_operations = cut_operations(definition);
+    if let Some(operation) = cut_operations.first().copied() {
         let (bevel_radius, _) = bevel_profile(definition, 0.0, 0);
         if bevel_radius > EPSILON {
             return Err(ModelingError::UnsupportedOperation {
                 operation: operation.operation_id(),
                 reason: "plate cuts do not yet combine with bevel profiles".to_owned(),
             });
+        }
+        if cut_operations.len() > 1 {
+            return build_multi_cut_plate(size, thickness, &cut_operations, context);
         }
         return build_cut_plate(size, thickness, operation, context);
     }
@@ -510,30 +514,20 @@ pub fn build_plate(
     ))
 }
 
-fn single_cut_operation(
-    definition: &PartDefinition,
-) -> Result<Option<&ModelingOperationSpec>, ModelingError> {
-    let mut cut: Option<&ModelingOperationSpec> = None;
-    for operation in &definition.geometry.operations {
-        if matches!(
-            operation,
-            ModelingOperationSpec::RecessedPanelCut { .. }
-                | ModelingOperationSpec::RectangularThroughCut { .. }
-                | ModelingOperationSpec::CircularThroughCut { .. }
-        ) {
-            if let Some(previous) = cut {
-                return Err(ModelingError::UnsupportedOperation {
-                    operation: operation.operation_id(),
-                    reason: format!(
-                        "only one semantic cut operation per plate is supported in this milestone; {:?} already occupies the local cut slot",
-                        previous.operation_id()
-                    ),
-                });
-            }
-            cut = Some(operation);
-        }
-    }
-    Ok(cut)
+fn cut_operations(definition: &PartDefinition) -> Vec<&ModelingOperationSpec> {
+    definition
+        .geometry
+        .operations
+        .iter()
+        .filter(|operation| {
+            matches!(
+                operation,
+                ModelingOperationSpec::RecessedPanelCut { .. }
+                    | ModelingOperationSpec::RectangularThroughCut { .. }
+                    | ModelingOperationSpec::CircularThroughCut { .. }
+            )
+        })
+        .collect()
 }
 
 fn build_cut_plate(
@@ -871,6 +865,250 @@ fn build_cut_plate(
     }
 }
 
+fn build_multi_cut_plate(
+    size: [f32; 2],
+    thickness: f32,
+    operations: &[&ModelingOperationSpec],
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let width = finite_positive(size[0], "plate.width")?;
+    let height = finite_positive(size[1], "plate.height")?;
+    let thickness = finite_positive(thickness, "plate.thickness")?;
+    let half_x = width * 0.5;
+    let half_z = height * 0.5;
+    let half_y = thickness * 0.5;
+    let cuts = operations
+        .iter()
+        .map(|operation| PlateCutPlan::from_operation(operation, half_x, half_z, thickness))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let first = cuts.first().ok_or_else(|| {
+        ModelingError::InvalidInput(
+            "multi-cut plate generation requires at least one cut".to_owned(),
+        )
+    })?;
+    let face = first.face;
+    let face_sign = planar_plate_face_sign(face, first.operation)?;
+    let (entry_region, opposite_region) = plate_cut_face_regions(face, first.operation)?;
+    for cut in &cuts {
+        if cut.face != face {
+            return Err(ModelingError::UnsupportedOperation {
+                operation: cut.operation,
+                reason: "multi-cut plate composition currently supports one target face per part"
+                    .to_owned(),
+            });
+        }
+        if cut.target_region != entry_region || cut.outer_region != entry_region {
+            return Err(ModelingError::InvalidInput(
+                "cut target region and outer region must match the selected plate face".to_owned(),
+            ));
+        }
+    }
+    validate_cut_frame_clearance(&cuts)?;
+
+    let xs = plate_cut_axis_samples(half_x, &cuts, 0);
+    let zs = plate_cut_axis_samples(half_z, &cuts, 1);
+    let outside_y = face_sign * half_y;
+    let opposite_y = -outside_y;
+    let opposite_normal = [0.0, -face_sign, 0.0];
+    let outside_normal = [0.0, face_sign, 0.0];
+    let host_frame = Rect2 {
+        min_x: -half_x,
+        max_x: half_x,
+        min_z: -half_z,
+        max_z: half_z,
+    };
+    let host_points = frame_boundary_points(host_frame, &xs, &zs);
+
+    let mut builder = MeshBuilder::new();
+    let outside_host = builder.add_plate_ring(outside_y, &host_points)?;
+    let opposite_host = builder.add_plate_ring(opposite_y, &host_points)?;
+    add_plate_shell_sides(
+        &mut builder,
+        &opposite_host,
+        &outside_host,
+        &host_points,
+        context,
+        first.operation,
+    );
+
+    add_plate_grid_face_with_holes(
+        &mut builder,
+        outside_y,
+        &xs,
+        &zs,
+        &cuts,
+        outside_normal,
+        context,
+        entry_region,
+    )?;
+    let through_cuts = cuts
+        .iter()
+        .filter(|cut| matches!(cut.kind, PlateCutKind::Through))
+        .cloned()
+        .collect::<Vec<_>>();
+    if through_cuts.is_empty() {
+        add_cap_oriented(
+            &mut builder,
+            opposite_host,
+            opposite_normal,
+            plate_metadata(context, opposite_region),
+        );
+    } else {
+        add_plate_grid_face_with_holes(
+            &mut builder,
+            opposite_y,
+            &xs,
+            &zs,
+            &through_cuts,
+            opposite_normal,
+            context,
+            opposite_region,
+        )?;
+    }
+
+    let mut boundary_marks = Vec::new();
+    let mut regions = plate_regions();
+    for cut in &cuts {
+        add_cut_features_for_face(
+            &mut builder,
+            cut,
+            outside_y,
+            outside_normal,
+            &xs,
+            &zs,
+            context,
+            &mut boundary_marks,
+        )?;
+        if matches!(cut.kind, PlateCutKind::Through) {
+            add_cut_features_for_face(
+                &mut builder,
+                cut,
+                opposite_y,
+                opposite_normal,
+                &xs,
+                &zs,
+                context,
+                &mut boundary_marks,
+            )?;
+        }
+        if let PlateCutKind::Recessed {
+            depth,
+            floor_region,
+        } = cut.kind
+        {
+            let floor_y = outside_y - face_sign * depth;
+            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+            let floor_inner = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+            add_cut_wall_band(
+                &mut builder,
+                &outside_inner,
+                &floor_inner,
+                &cut.inner_points,
+                cut.center,
+                context,
+                cut.operation,
+                cut.wall_region,
+            );
+            add_cap_oriented(
+                &mut builder,
+                floor_inner.clone(),
+                outside_normal,
+                cut_metadata(
+                    context,
+                    floor_region,
+                    SurfaceRole::Interior,
+                    cut.operation,
+                    None,
+                ),
+            );
+            boundary_marks.push(BoundaryLoopMark {
+                ring: outside_inner,
+                operation: cut.operation,
+                boundary_loop: cut.entry_loop,
+                treatment: cut.edge_treatment,
+            });
+            boundary_marks.push(BoundaryLoopMark {
+                ring: floor_inner,
+                operation: cut.operation,
+                boundary_loop: cut.secondary_loop,
+                treatment: cut.edge_treatment,
+            });
+            insert_cut_region(
+                &mut regions,
+                floor_region,
+                "recess_floor",
+                SurfaceRole::Interior,
+            );
+        }
+        insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
+        insert_cut_region(
+            &mut regions,
+            cut.wall_region,
+            "cut_wall",
+            SurfaceRole::CutWall,
+        );
+    }
+
+    for cut in cuts
+        .iter()
+        .filter(|cut| matches!(cut.kind, PlateCutKind::Through))
+    {
+        let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+        let opposite_inner = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
+        add_cut_wall_band(
+            &mut builder,
+            &outside_inner,
+            &opposite_inner,
+            &cut.inner_points,
+            cut.center,
+            context,
+            cut.operation,
+            cut.wall_region,
+        );
+        boundary_marks.push(BoundaryLoopMark {
+            ring: outside_inner,
+            operation: cut.operation,
+            boundary_loop: cut.entry_loop,
+            treatment: cut.edge_treatment,
+        });
+        boundary_marks.push(BoundaryLoopMark {
+            ring: opposite_inner,
+            operation: cut.operation,
+            boundary_loop: cut.secondary_loop,
+            treatment: cut.edge_treatment,
+        });
+    }
+
+    let mut mesh = builder.finish()?;
+    for mark in boundary_marks {
+        mark_boundary_loop(
+            &mut mesh,
+            &mark.ring,
+            mark.operation,
+            mark.boundary_loop,
+            mark.treatment,
+        );
+    }
+
+    Ok(part(
+        mesh,
+        regions,
+        plate_sockets(half_y),
+        format!(
+            "plate_multi_cut:w={:.6}:h={:.6}:t={:.6}:face={:?}:cuts={}",
+            width,
+            height,
+            thickness,
+            face,
+            cuts.iter()
+                .map(|cut| cut.operation.0.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    ))
+}
+
 fn build_frustum_like(
     params: &FrustumParams,
     context: &GeneratorContext,
@@ -1138,6 +1376,13 @@ struct PlateCutPlan {
     edge_treatment: CutEdgeTreatment,
 }
 
+struct BoundaryLoopMark {
+    ring: Vec<u32>,
+    operation: OperationId,
+    boundary_loop: BoundaryLoopId,
+    treatment: CutEdgeTreatment,
+}
+
 impl PlateCutPlan {
     fn from_operation(
         operation: &ModelingOperationSpec,
@@ -1320,6 +1565,281 @@ impl PlateCutPlan {
             )),
         }
     }
+}
+
+fn validate_cut_frame_clearance(cuts: &[PlateCutPlan]) -> Result<(), ModelingError> {
+    for (left_index, left) in cuts.iter().enumerate() {
+        for right in cuts.iter().skip(left_index + 1) {
+            if rects_touch_or_overlap(left.frame, right.frame) {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: right.operation,
+                    reason: format!(
+                        "cut frame for operation {:?} overlaps or touches operation {:?}; multi-cut composition requires separated cut footprints",
+                        right.operation, left.operation
+                    ),
+                });
+            }
+            if frame_projection_splits(left.frame, right.frame)
+                || frame_projection_splits(right.frame, left.frame)
+            {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: right.operation,
+                    reason: format!(
+                        "cut frame for operation {:?} would split operation {:?}'s window boundary; align repeated cut columns/rows or separate their projections",
+                        right.operation, left.operation
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn rects_touch_or_overlap(left: Rect2, right: Rect2) -> bool {
+    left.min_x <= right.max_x + EPSILON
+        && left.max_x + EPSILON >= right.min_x
+        && left.min_z <= right.max_z + EPSILON
+        && left.max_z + EPSILON >= right.min_z
+}
+
+fn frame_projection_splits(frame: Rect2, other: Rect2) -> bool {
+    value_inside_open_interval(other.min_x, frame.min_x, frame.max_x)
+        || value_inside_open_interval(other.max_x, frame.min_x, frame.max_x)
+        || value_inside_open_interval(other.min_z, frame.min_z, frame.max_z)
+        || value_inside_open_interval(other.max_z, frame.min_z, frame.max_z)
+}
+
+fn value_inside_open_interval(value: f32, min: f32, max: f32) -> bool {
+    value > min + EPSILON && value < max - EPSILON
+}
+
+fn plate_cut_axis_samples(half_extent: f32, cuts: &[PlateCutPlan], axis: usize) -> Vec<f32> {
+    let mut samples = vec![-half_extent, half_extent];
+    for cut in cuts {
+        match axis {
+            0 => {
+                samples.push(cut.frame.min_x);
+                samples.push(cut.frame.max_x);
+            }
+            _ => {
+                samples.push(cut.frame.min_z);
+                samples.push(cut.frame.max_z);
+            }
+        }
+    }
+    dedup_sorted_f32(samples)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_plate_grid_face_with_holes(
+    builder: &mut MeshBuilder,
+    y: f32,
+    xs: &[f32],
+    zs: &[f32],
+    holes: &[PlateCutPlan],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    region: RegionId,
+) -> Result<(), ModelingError> {
+    for x_index in 0..xs.len().saturating_sub(1) {
+        for z_index in 0..zs.len().saturating_sub(1) {
+            let cell = Rect2 {
+                min_x: xs[x_index],
+                max_x: xs[x_index + 1],
+                min_z: zs[z_index],
+                max_z: zs[z_index + 1],
+            };
+            let center = [
+                (cell.min_x + cell.max_x) * 0.5,
+                (cell.min_z + cell.max_z) * 0.5,
+            ];
+            if holes.iter().any(|cut| point_inside_rect(center, cut.frame)) {
+                continue;
+            }
+            let points = rect_points(cell.min_x, cell.max_x, cell.min_z, cell.max_z);
+            let vertices = builder.add_plate_ring(y, &points)?;
+            add_oriented_face(
+                builder,
+                vertices,
+                desired_normal,
+                plate_metadata(context, region),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn point_inside_rect(point: [f32; 2], rect: Rect2) -> bool {
+    point[0] > rect.min_x + EPSILON
+        && point[0] < rect.max_x - EPSILON
+        && point[1] > rect.min_z + EPSILON
+        && point[1] < rect.max_z - EPSILON
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_cut_features_for_face(
+    builder: &mut MeshBuilder,
+    cut: &PlateCutPlan,
+    y: f32,
+    desired_normal: [f32; 3],
+    xs: &[f32],
+    zs: &[f32],
+    context: &GeneratorContext,
+    _boundary_marks: &mut Vec<BoundaryLoopMark>,
+) -> Result<(), ModelingError> {
+    let window_points = frame_boundary_points(cut.frame, xs, zs);
+    let window_ring = builder.add_plate_ring(y, &window_points)?;
+    let inner_ring = builder.add_plate_ring(y, &cut.inner_points)?;
+
+    if !cut.has_host_surface_band {
+        add_frame_boundary_to_ring_cap(
+            builder,
+            &window_ring,
+            &window_points,
+            &inner_ring,
+            &cut.inner_points,
+            cut.frame,
+            desired_normal,
+            context,
+            cut.operation,
+            cut.rim_region,
+            SurfaceRole::Rim,
+        )?;
+        return Ok(());
+    }
+
+    let rim_ring = builder.add_plate_ring(y, &cut.rim_points)?;
+    add_frame_boundary_to_ring_cap(
+        builder,
+        &window_ring,
+        &window_points,
+        &rim_ring,
+        &cut.rim_points,
+        cut.frame,
+        desired_normal,
+        context,
+        cut.operation,
+        cut.outer_region,
+        SurfaceRole::PrimarySurface,
+    )?;
+    add_matched_ring_band(
+        builder,
+        &rim_ring,
+        &inner_ring,
+        &cut.rim_points,
+        &cut.inner_points,
+        desired_normal,
+        context,
+        cut.operation,
+        cut.rim_region,
+        SurfaceRole::Rim,
+    );
+    Ok(())
+}
+
+fn frame_boundary_points(frame: Rect2, xs: &[f32], zs: &[f32]) -> Vec<[f32; 2]> {
+    let mut points = Vec::new();
+    let x_values = values_in_range(xs, frame.min_x, frame.max_x);
+    let z_values = values_in_range(zs, frame.min_z, frame.max_z);
+
+    for x in x_values.iter().rev() {
+        points.push([*x, frame.max_z]);
+    }
+    for z in z_values.iter().rev().skip(1) {
+        points.push([frame.min_x, *z]);
+    }
+    for x in x_values.iter().skip(1) {
+        points.push([*x, frame.min_z]);
+    }
+    if z_values.len() > 2 {
+        for z in z_values.iter().skip(1).take(z_values.len() - 2) {
+            points.push([frame.max_x, *z]);
+        }
+    }
+    points
+}
+
+fn values_in_range(samples: &[f32], min: f32, max: f32) -> Vec<f32> {
+    samples
+        .iter()
+        .copied()
+        .filter(|value| *value >= min - EPSILON && *value <= max + EPSILON)
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_frame_boundary_to_ring_cap(
+    builder: &mut MeshBuilder,
+    frame_vertices: &[u32],
+    frame_points: &[[f32; 2]],
+    ring_vertices: &[u32],
+    ring_points: &[[f32; 2]],
+    _frame: Rect2,
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+    role: SurfaceRole,
+) -> Result<(), ModelingError> {
+    add_triangulated_cap_with_vertices(
+        builder,
+        frame_vertices,
+        frame_points,
+        &[frame_points.len()],
+        Some((ring_vertices, ring_points)),
+        desired_normal,
+        cut_metadata(context, region, role, operation, None),
+    )
+}
+
+fn add_triangulated_cap_with_vertices(
+    builder: &mut MeshBuilder,
+    vertices: &[u32],
+    points: &[[f32; 2]],
+    hole_indices: &[usize],
+    extra_ring: Option<(&[u32], &[[f32; 2]])>,
+    desired_normal: [f32; 3],
+    metadata: FaceMetadata,
+) -> Result<(), ModelingError> {
+    if points.len() < 3 || vertices.len() != points.len() {
+        return Ok(());
+    }
+    if let Some((ring_vertices, ring_points)) = extra_ring
+        && (ring_points.len() < 3 || ring_vertices.len() != ring_points.len())
+    {
+        return Ok(());
+    }
+    let total_points = points.len() + extra_ring.map(|(_, ring)| ring.len()).unwrap_or_default();
+    let mut coords = Vec::with_capacity(total_points * 2);
+    for point in points {
+        coords.push(point[0] as f64);
+        coords.push(point[1] as f64);
+    }
+    if let Some((_, ring_points)) = extra_ring {
+        for point in ring_points {
+            coords.push(point[0] as f64);
+            coords.push(point[1] as f64);
+        }
+    }
+    let indices = earcutr::earcut(&coords, hole_indices, 2).map_err(|error| {
+        ModelingError::InvalidInput(format!("failed to triangulate cut window cap: {error:?}"))
+    })?;
+    for triangle in indices.chunks_exact(3) {
+        let face = triangle
+            .iter()
+            .map(|index| {
+                if *index < vertices.len() {
+                    vertices[*index]
+                } else if let Some((ring_vertices, _)) = extra_ring {
+                    ring_vertices[*index - vertices.len()]
+                } else {
+                    vertices[*index]
+                }
+            })
+            .collect::<Vec<_>>();
+        add_oriented_face_if_non_degenerate(builder, face, desired_normal, metadata.clone());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1889,6 +2409,21 @@ fn add_oriented_face(
         vertices.reverse();
     }
     builder.add_face(vertices, metadata);
+}
+
+fn add_oriented_face_if_non_degenerate(
+    builder: &mut MeshBuilder,
+    vertices: Vec<u32>,
+    desired_normal: [f32; 3],
+    metadata: FaceMetadata,
+) {
+    if has_duplicate_indices(&vertices)
+        || vertices.len() < 3
+        || face_normal_dot(&builder.positions, &vertices, desired_normal).abs() <= EPSILON
+    {
+        return;
+    }
+    add_oriented_face(builder, vertices, desired_normal, metadata);
 }
 
 fn face_normal_dot(positions: &[[f32; 3]], vertices: &[u32], desired: [f32; 3]) -> f32 {

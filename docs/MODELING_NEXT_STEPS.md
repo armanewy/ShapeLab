@@ -4,7 +4,8 @@
    - Harden constrained semantic cuts before adding broader booleans.
    - Present: one boundary-loop ID per connected physical loop, target-region/host-face reconciliation, explicit rim width, explicit rectangular corner segments, separate bevel eligibility metadata, and structural recipe edits for inserting, removing, duplicating, and moving local modeling operations.
    - Replace the current one-cut plate path with ordered local operation execution: generate a base source, apply operation stages in recipe order, validate each stage, then apply boundary treatments.
-   - Support multiple non-overlapping cuts on one plate with cut-to-cut clearance validation.
+   - Present: multiple same-face plate cuts are composed when their frames are separated and their rectangular projections do not split another cut window.
+   - Next: relax the aligned-projection constraint with a fuller local face subdivision composer.
    - The first acceptance benchmark is one plate containing one recessed rectangular panel, four circular fastener holes, and three rectangular vents.
 
 2. Boundary-loop bevels
