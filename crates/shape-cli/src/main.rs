@@ -618,6 +618,7 @@ fn model_validation_config(loaded: &LoadedAsset) -> ModelValidationConfig {
     let maximum_triangle_count = match loaded.benchmark {
         Some(BenchmarkAsset::IndustrialCrate) => 30_000,
         Some(BenchmarkAsset::ExplicitDeskLamp) => 25_000,
+        Some(BenchmarkAsset::StylizedStool) => 20_000,
         None => u64::MAX,
     };
     let relationships = match loaded.benchmark {

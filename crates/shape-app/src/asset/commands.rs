@@ -10,6 +10,7 @@ use shape_asset::{
 };
 
 use super::jobs::{AssetCandidateId, AssetJobRequest};
+use super::state::AssetModelingProject;
 
 /// Template metadata plus a full recipe snapshot.
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +69,7 @@ pub(crate) enum AssetAppCommand {
     Save,
     SaveAs(PathBuf),
     Load(PathBuf),
+    ExportObj(PathBuf),
     ExportPackage(PathBuf),
     FitCamera,
     SetWireframe(bool),
@@ -77,9 +79,9 @@ pub(crate) enum AssetAppCommand {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AssetAppEffect {
     StartJob(Box<AssetJobRequest>),
-    SaveRecipe {
+    SaveProject {
         path: PathBuf,
-        recipe: Box<AssetRecipe>,
+        project: Box<AssetModelingProject>,
     },
-    LoadRecipe(PathBuf),
+    LoadProject(PathBuf),
 }

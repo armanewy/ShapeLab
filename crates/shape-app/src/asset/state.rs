@@ -7,6 +7,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationIssue, ParameterId, PartDefinitionId,
     PartInstance, PartInstanceId, RevisionId, apply_edit_program_with_report,
@@ -26,7 +27,9 @@ const FIRST_JOB_ID: u64 = 1;
 const FIRST_GENERATION_ID: u64 = 1;
 const FIRST_REVISION_ID: u64 = 1;
 const FIRST_CHILD_REVISION_ID: u64 = 2;
-const DEFAULT_CANDIDATE_COUNT: usize = 4;
+const DEFAULT_CANDIDATE_COUNT: usize = 6;
+const ASSET_APP_PROJECT_KIND: &str = "shape-lab.asset-modeling-lab";
+const ASSET_APP_PROJECT_SCHEMA_VERSION: u32 = 1;
 
 /// UI-facing validation issue independent of compile and recipe issue sources.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +86,7 @@ pub(crate) struct AssetGenerationState {
 }
 
 /// One app-level recipe revision.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AssetRevision {
     pub id: RevisionId,
     pub parent: Option<RevisionId>,
@@ -92,11 +95,21 @@ pub(crate) struct AssetRevision {
 }
 
 /// Branchable app-level revision history.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AssetRevisionHistory {
     pub current: RevisionId,
     pub revisions: BTreeMap<RevisionId, AssetRevision>,
     next_revision: u64,
+}
+
+/// Branch-preserving project file used by Asset Modeling Lab.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AssetModelingProject {
+    pub project_kind: String,
+    pub schema_version: u32,
+    pub title: String,
+    pub current_file_path_hint: Option<PathBuf>,
+    pub revision_history: AssetRevisionHistory,
 }
 
 impl AssetRevisionHistory {
@@ -284,11 +297,12 @@ impl AssetAppState {
             AssetAppCommand::SwitchBranch(revision) => self.switch_revision(revision, true),
             AssetAppCommand::LoadTemplate(template) => self.load_template(template),
             AssetAppCommand::Save => self.save(),
-            AssetAppCommand::SaveAs(path) => Ok(vec![AssetAppEffect::SaveRecipe {
+            AssetAppCommand::SaveAs(path) => Ok(vec![AssetAppEffect::SaveProject {
                 path,
-                recipe: Box::new(self.recipe.clone()),
+                project: Box::new(self.project_snapshot()),
             }]),
-            AssetAppCommand::Load(path) => Ok(vec![AssetAppEffect::LoadRecipe(path)]),
+            AssetAppCommand::Load(path) => Ok(vec![AssetAppEffect::LoadProject(path)]),
+            AssetAppCommand::ExportObj(path) => self.export_obj(path),
             AssetAppCommand::ExportPackage(path) => self.export_package(path),
             AssetAppCommand::FitCamera => {
                 self.fit_camera();
@@ -310,7 +324,7 @@ impl AssetAppState {
                 job_id,
                 recipe_revision,
                 output,
-            } => self.apply_compile_ready(job_id, recipe_revision, output),
+            } => self.apply_compile_ready(job_id, recipe_revision, *output),
             AssetJobEvent::PreviewReady {
                 job_id,
                 recipe_revision,
@@ -349,6 +363,22 @@ impl AssetAppState {
                 self.finish_job(AssetJobSlot::ExportPackage, job_id);
                 true
             }
+            AssetJobEvent::ExportObjReady {
+                job_id,
+                recipe_revision,
+                ..
+            } => {
+                if !self.is_current_job(
+                    AssetJobSlot::ExportObj,
+                    job_id,
+                    Some(recipe_revision),
+                    None,
+                ) {
+                    return false;
+                }
+                self.finish_job(AssetJobSlot::ExportObj, job_id);
+                true
+            }
             AssetJobEvent::Failed { job_id, message } => self.apply_job_failure(job_id, message),
             AssetJobEvent::Cancelled { job_id } => self.apply_job_cancelled(job_id),
         }
@@ -370,6 +400,28 @@ impl AssetAppState {
         self.schedule_compile_current()
     }
 
+    /// Replace state with a branch-preserving project snapshot.
+    pub(crate) fn replace_loaded_project(
+        &mut self,
+        project: AssetModelingProject,
+        path: PathBuf,
+    ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        ensure_valid_project_snapshot(&project)?;
+        let recipe = project
+            .revision_history
+            .recipe(project.revision_history.current)
+            .ok_or(AssetAppStateError::InvalidProject(
+                "current revision is missing".to_owned(),
+            ))?;
+        self.recipe = recipe;
+        self.revision_history = project.revision_history;
+        self.current_file_path = Some(path);
+        self.current_template = None;
+        self.dirty = false;
+        self.refresh_after_recipe_replacement();
+        self.schedule_compile_current()
+    }
+
     /// Mark a save effect as successfully completed.
     pub(crate) fn mark_saved(&mut self, path: PathBuf) {
         self.current_file_path = Some(path);
@@ -382,9 +434,19 @@ impl AssetAppState {
         render_settings: RenderSettings,
     ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
         self.schedule_job(AssetJobKind::RenderCurrentPreview {
-            camera: Some(self.current_camera.clone()),
+            camera: self
+                .current_preview
+                .as_ref()
+                .map(|_| self.current_camera.clone()),
             render_settings,
         })
+    }
+
+    /// Request compilation of the current recipe.
+    pub(crate) fn request_compile_current(
+        &mut self,
+    ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        self.schedule_compile_current()
     }
 
     /// Request compilation of candidate previews for the latest generation.
@@ -559,14 +621,29 @@ impl AssetAppState {
             .current_file_path
             .clone()
             .ok_or(AssetAppStateError::MissingSavePath)?;
-        Ok(vec![AssetAppEffect::SaveRecipe {
+        Ok(vec![AssetAppEffect::SaveProject {
             path,
-            recipe: Box::new(self.recipe.clone()),
+            project: Box::new(self.project_snapshot()),
         }])
+    }
+
+    fn export_obj(&mut self, path: PathBuf) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        self.schedule_job(AssetJobKind::ExportObj { path })
     }
 
     fn export_package(&mut self, path: PathBuf) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
         self.schedule_job(AssetJobKind::ExportPackage { path })
+    }
+
+    /// Build a serializable, branch-preserving project snapshot.
+    pub(crate) fn project_snapshot(&self) -> AssetModelingProject {
+        AssetModelingProject {
+            project_kind: ASSET_APP_PROJECT_KIND.to_owned(),
+            schema_version: ASSET_APP_PROJECT_SCHEMA_VERSION,
+            title: self.recipe.title.clone(),
+            current_file_path_hint: self.current_file_path.clone(),
+            revision_history: self.revision_history.clone(),
+        }
     }
 
     fn fit_camera(&mut self) {
@@ -632,7 +709,6 @@ impl AssetAppState {
         self.validation_issues = recipe_issues(&self.recipe);
         self.current_artifact = None;
         self.current_timeline = None;
-        self.current_preview = None;
         self.candidate_slots.clear();
         self.active_generation = None;
         self.reconcile_selection();
@@ -929,6 +1005,7 @@ pub(crate) enum AssetAppStateError {
     JobIdOverflow,
     GenerationIdOverflow,
     InvalidRecipe(Vec<AssetAppIssue>),
+    InvalidProject(String),
     EditRejected(String),
 }
 
@@ -960,6 +1037,7 @@ impl fmt::Display for AssetAppStateError {
                     issues.len()
                 )
             }
+            Self::InvalidProject(message) => write!(formatter, "invalid asset project: {message}"),
             Self::EditRejected(message) => write!(formatter, "asset edit rejected: {message}"),
         }
     }
@@ -986,6 +1064,67 @@ fn ensure_valid_recipe(recipe: &AssetRecipe) -> Result<(), AssetAppStateError> {
     } else {
         Err(AssetAppStateError::InvalidRecipe(issues))
     }
+}
+
+fn ensure_valid_project_snapshot(project: &AssetModelingProject) -> Result<(), AssetAppStateError> {
+    if project.project_kind != ASSET_APP_PROJECT_KIND {
+        return Err(AssetAppStateError::InvalidProject(format!(
+            "unsupported project kind '{}'",
+            project.project_kind
+        )));
+    }
+    if project.schema_version != ASSET_APP_PROJECT_SCHEMA_VERSION {
+        return Err(AssetAppStateError::InvalidProject(format!(
+            "unsupported schema version {}",
+            project.schema_version
+        )));
+    }
+    if project.revision_history.revisions.is_empty() {
+        return Err(AssetAppStateError::InvalidProject(
+            "revision history is empty".to_owned(),
+        ));
+    }
+    if !project
+        .revision_history
+        .revisions
+        .contains_key(&project.revision_history.current)
+    {
+        return Err(AssetAppStateError::InvalidProject(
+            "current revision is missing".to_owned(),
+        ));
+    }
+
+    let mut max_revision = 0;
+    for (id, revision) in &project.revision_history.revisions {
+        if revision.id != *id {
+            return Err(AssetAppStateError::InvalidProject(format!(
+                "revision map key {:?} does not match stored id {:?}",
+                id, revision.id
+            )));
+        }
+        max_revision = max_revision.max(id.0);
+        if let Some(parent) = revision.parent {
+            if !project.revision_history.revisions.contains_key(&parent) {
+                return Err(AssetAppStateError::InvalidProject(format!(
+                    "revision {:?} has missing parent {:?}",
+                    id, parent
+                )));
+            }
+            if parent.0 >= id.0 {
+                return Err(AssetAppStateError::InvalidProject(format!(
+                    "revision {:?} parent {:?} does not preserve monotonic ids",
+                    id, parent
+                )));
+            }
+        }
+        ensure_valid_recipe(&revision.recipe)?;
+    }
+    if project.revision_history.next_revision <= max_revision {
+        return Err(AssetAppStateError::InvalidProject(
+            "next revision id is not greater than existing revisions".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn recipe_issues(recipe: &AssetRecipe) -> Vec<AssetAppIssue> {

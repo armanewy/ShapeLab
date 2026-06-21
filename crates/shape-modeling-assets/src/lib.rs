@@ -17,6 +17,8 @@ pub enum BenchmarkAsset {
     IndustrialCrate,
     /// Explicit desk lamp benchmark.
     ExplicitDeskLamp,
+    /// Stylized stool benchmark.
+    StylizedStool,
 }
 
 impl BenchmarkAsset {
@@ -26,6 +28,7 @@ impl BenchmarkAsset {
         match slug {
             "industrial-crate" => Some(Self::IndustrialCrate),
             "explicit-desk-lamp" => Some(Self::ExplicitDeskLamp),
+            "stylized-stool" => Some(Self::StylizedStool),
             _ => None,
         }
     }
@@ -36,6 +39,7 @@ impl BenchmarkAsset {
         match self {
             Self::IndustrialCrate => "industrial-crate",
             Self::ExplicitDeskLamp => "explicit-desk-lamp",
+            Self::StylizedStool => "stylized-stool",
         }
     }
 
@@ -45,16 +49,18 @@ impl BenchmarkAsset {
         match self {
             Self::IndustrialCrate => industrial_crate_recipe(),
             Self::ExplicitDeskLamp => explicit_desk_lamp_recipe(),
+            Self::StylizedStool => stylized_stool_recipe(),
         }
     }
 }
 
 /// Return every bundled benchmark asset.
 #[must_use]
-pub const fn benchmark_assets() -> [BenchmarkAsset; 2] {
+pub const fn benchmark_assets() -> [BenchmarkAsset; 3] {
     [
         BenchmarkAsset::IndustrialCrate,
         BenchmarkAsset::ExplicitDeskLamp,
+        BenchmarkAsset::StylizedStool,
     ]
 }
 
@@ -357,16 +363,132 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             maximum: 6,
         },
     );
+    recipe
+        .variation
+        .optional_instances
+        .insert(PartInstanceId(16));
+    recipe
+        .variation
+        .optional_instances
+        .insert(PartInstanceId(17));
     recipe.parameters.insert(
         ParameterId(1),
         parameter(
             1,
+            "Body width",
+            "Size",
+            "definition.1.geometry.rounded_box.half_extents.x",
+            1.65,
+            2.45,
+            0.05,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(2),
+        parameter(
+            2,
+            "Body height",
+            "Size",
+            "definition.1.geometry.rounded_box.half_extents.y",
+            0.78,
+            1.25,
+            0.04,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(3),
+        parameter(
+            3,
+            "Body depth",
+            "Proportions",
+            "definition.1.geometry.rounded_box.half_extents.z",
+            0.95,
+            1.45,
+            0.04,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(4),
+        parameter(
+            4,
             "Body bevel radius",
-            "Edges",
+            "Edge Softness",
             "definition.1.operation.1.bevel.radius",
             0.08,
             0.18,
             0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(5),
+        parameter(
+            5,
+            "Handle thickness",
+            "Size",
+            "definition.4.geometry.sweep.profile.0.x",
+            0.06,
+            0.13,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(6),
+        topology_parameter(
+            6,
+            "Bolt count",
+            "Repetition",
+            "definition.5.operation.6.linear_array.count",
+            4.0,
+            8.0,
+            1.0,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(7),
+        parameter(
+            7,
+            "Raised panel thickness",
+            "Detail Density",
+            "definition.3.geometry.plate.thickness",
+            0.06,
+            0.16,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(8),
+        parameter(
+            8,
+            "Skid rail height",
+            "Size",
+            "definition.8.geometry.rounded_box.half_extents.y",
+            0.035,
+            0.085,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(9),
+        topology_parameter(
+            9,
+            "Vent slat count",
+            "Repetition",
+            "definition.7.operation.11.linear_array.count",
+            2.0,
+            6.0,
+            1.0,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(10),
+        parameter(
+            10,
+            "Foot width",
+            "Size",
+            "definition.2.geometry.rounded_box.half_extents.x",
+            0.20,
+            0.36,
+            0.02,
         ),
     );
     recipe.root_instances.push(PartInstanceId(1));
@@ -653,16 +775,390 @@ pub fn explicit_desk_lamp_recipe() -> AssetRecipe {
         ParameterId(1),
         parameter(
             1,
+            "Base radius",
+            "Size",
+            "definition.1.geometry.lathe.profile.1.x",
+            0.72,
+            1.02,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(2),
+        parameter(
+            2,
             "Stem sweep radius",
-            "Form",
+            "Size",
             "definition.2.geometry.sweep.profile.0.x",
             0.045,
             0.075,
             0.005,
         ),
     );
+    recipe.parameters.insert(
+        ParameterId(3),
+        parameter(
+            3,
+            "Stem reach",
+            "Placement",
+            "definition.2.geometry.sweep.path.2.origin.x",
+            0.42,
+            0.74,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(4),
+        parameter(
+            4,
+            "Shade flare",
+            "Curvature",
+            "definition.4.geometry.lathe.profile.3.x",
+            0.60,
+            0.88,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(5),
+        parameter(
+            5,
+            "Shade rim height",
+            "Proportions",
+            "definition.4.geometry.lathe.profile.4.y",
+            0.46,
+            0.64,
+            0.02,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(6),
+        parameter(
+            6,
+            "Pivot collar radius",
+            "Size",
+            "definition.6.geometry.cylinder.radius",
+            0.17,
+            0.25,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(7),
+        topology_parameter(
+            7,
+            "Switch detail count",
+            "Repetition",
+            "definition.8.operation.7.radial_array.count",
+            1.0,
+            5.0,
+            1.0,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(8),
+        parameter(
+            8,
+            "Shade rim bevel",
+            "Edge Softness",
+            "definition.7.operation.5.bevel.radius",
+            0.006,
+            0.018,
+            0.002,
+        ),
+    );
     recipe.root_instances.push(PartInstanceId(1));
     finish_ids(&mut recipe, 9, 11, 8, 3);
+    recipe
+}
+
+/// Build the stylized stool recipe.
+#[must_use]
+pub fn stylized_stool_recipe() -> AssetRecipe {
+    let mut recipe = AssetRecipe::new(AssetId(1003), "Stylized Stool");
+    recipe.definitions.insert(
+        PartDefinitionId(1),
+        definition_with_regions(
+            1,
+            "rounded stool seat",
+            GeometrySource::RoundedBox {
+                half_extents: [1.25, 0.14, 1.0],
+                radius: 0.12,
+            },
+            vec![
+                ModelingOperationSpec::SetBevelProfile {
+                    operation: OperationId(1),
+                    radius: 0.12,
+                    segments: 3,
+                },
+                ModelingOperationSpec::AddPanel {
+                    operation: OperationId(2),
+                    region: RegionId(1),
+                    inset: 0.10,
+                    depth: 0.025,
+                },
+            ],
+            rounded_box_regions(),
+            sockets([(SocketId(1), "seat underside center", [0.0, -0.14, 0.0])]),
+        ),
+    );
+    recipe.definitions.insert(
+        PartDefinitionId(2),
+        definition_with_regions(
+            2,
+            "tapered stool leg",
+            GeometrySource::Frustum {
+                bottom_radius: 0.10,
+                top_radius: 0.14,
+                height: 1.28,
+                radial_segments: 16,
+            },
+            vec![ModelingOperationSpec::SetBevelProfile {
+                operation: OperationId(3),
+                radius: 0.012,
+                segments: 1,
+            }],
+            cylinder_regions(),
+            sockets([
+                (SocketId(1), "leg top", [0.0, 0.64, 0.0]),
+                (SocketId(2), "leg foot", [0.0, -0.64, 0.0]),
+            ]),
+        ),
+    );
+    recipe.definitions.insert(
+        PartDefinitionId(3),
+        definition_with_regions(
+            3,
+            "stool foot pad",
+            GeometrySource::Cylinder {
+                radius: 0.18,
+                height: 0.08,
+                radial_segments: 20,
+            },
+            vec![ModelingOperationSpec::SetBevelProfile {
+                operation: OperationId(4),
+                radius: 0.018,
+                segments: 1,
+            }],
+            cylinder_regions(),
+            BTreeMap::new(),
+        ),
+    );
+    recipe.definitions.insert(
+        PartDefinitionId(4),
+        definition_with_regions(
+            4,
+            "under-seat support rail",
+            GeometrySource::RoundedBox {
+                half_extents: [0.82, 0.045, 0.055],
+                radius: 0.018,
+            },
+            vec![ModelingOperationSpec::SetBevelProfile {
+                operation: OperationId(5),
+                radius: 0.018,
+                segments: 1,
+            }],
+            rounded_box_regions(),
+            BTreeMap::new(),
+        ),
+    );
+    recipe.definitions.insert(
+        PartDefinitionId(5),
+        definition_with_regions(
+            5,
+            "optional seat edge trim",
+            GeometrySource::RoundedBox {
+                half_extents: [1.05, 0.045, 0.035],
+                radius: 0.016,
+            },
+            vec![ModelingOperationSpec::SetBevelProfile {
+                operation: OperationId(6),
+                radius: 0.016,
+                segments: 1,
+            }],
+            rounded_box_regions(),
+            BTreeMap::new(),
+        ),
+    );
+
+    add_instance(
+        &mut recipe,
+        1,
+        1,
+        "rounded stool seat",
+        None,
+        Transform3::default(),
+    );
+    for (id, x, z, name) in [
+        (2, -0.95, -0.72, "back left tapered leg"),
+        (3, 0.95, -0.72, "back right tapered leg"),
+        (4, -0.95, 0.72, "front left tapered leg"),
+        (5, 0.95, 0.72, "front right tapered leg"),
+    ] {
+        add_instance(
+            &mut recipe,
+            id,
+            2,
+            name,
+            Some(PartInstanceId(1)),
+            transform([x, -0.82, z], [0.0, 0.0, 0.0]),
+        );
+    }
+    for (id, x, z, name) in [
+        (6, -0.95, -0.72, "back left foot pad"),
+        (7, 0.95, -0.72, "back right foot pad"),
+        (8, -0.95, 0.72, "front left foot pad"),
+        (9, 0.95, 0.72, "front right foot pad"),
+    ] {
+        add_instance(
+            &mut recipe,
+            id,
+            3,
+            name,
+            Some(PartInstanceId(1)),
+            transform([x, -1.51, z], [0.0, 0.0, 0.0]),
+        );
+    }
+    add_instance(
+        &mut recipe,
+        10,
+        4,
+        "front support rail",
+        Some(PartInstanceId(1)),
+        transform([0.0, -0.82, 0.72], [0.0, 0.0, 0.0]),
+    );
+    add_instance(
+        &mut recipe,
+        11,
+        4,
+        "back support rail",
+        Some(PartInstanceId(1)),
+        transform([0.0, -0.82, -0.72], [0.0, 0.0, 0.0]),
+    );
+    add_instance(
+        &mut recipe,
+        12,
+        5,
+        "optional front seat trim",
+        Some(PartInstanceId(1)),
+        transform([0.0, 0.18, 1.05], [0.0, 0.0, 0.0]),
+    );
+    add_instance(
+        &mut recipe,
+        13,
+        5,
+        "optional back seat trim",
+        Some(PartInstanceId(1)),
+        transform([0.0, 0.18, -1.05], [0.0, 0.0, 0.0]),
+    );
+    recipe
+        .variation
+        .optional_instances
+        .insert(PartInstanceId(12));
+    recipe
+        .variation
+        .optional_instances
+        .insert(PartInstanceId(13));
+
+    recipe.parameters.insert(
+        ParameterId(1),
+        parameter(
+            1,
+            "Seat width",
+            "Size",
+            "definition.1.geometry.rounded_box.half_extents.x",
+            1.0,
+            1.55,
+            0.05,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(2),
+        parameter(
+            2,
+            "Seat depth",
+            "Proportions",
+            "definition.1.geometry.rounded_box.half_extents.z",
+            0.82,
+            1.20,
+            0.04,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(3),
+        parameter(
+            3,
+            "Seat bevel radius",
+            "Edge Softness",
+            "definition.1.operation.1.bevel.radius",
+            0.08,
+            0.16,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(4),
+        parameter(
+            4,
+            "Leg top radius",
+            "Size",
+            "definition.2.geometry.frustum.top_radius",
+            0.10,
+            0.18,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(5),
+        parameter(
+            5,
+            "Leg bottom radius",
+            "Proportions",
+            "definition.2.geometry.frustum.bottom_radius",
+            0.08,
+            0.14,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(6),
+        parameter(
+            6,
+            "Support rail height",
+            "Placement",
+            "instance.10.transform.translation.y",
+            -0.96,
+            -0.68,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(7),
+        parameter(
+            7,
+            "Trim thickness",
+            "Size",
+            "definition.5.geometry.rounded_box.half_extents.y",
+            0.025,
+            0.065,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(8),
+        topology_parameter(
+            8,
+            "Leg radial segments",
+            "Detail Density",
+            "definition.2.geometry.frustum.radial_segments",
+            12.0,
+            24.0,
+            2.0,
+        ),
+    );
+
+    recipe.root_instances.push(PartInstanceId(1));
+    finish_ids(&mut recipe, 6, 14, 7, 3);
     recipe
 }
 
@@ -708,6 +1204,21 @@ fn parameter(
         topology_changing: false,
         beginner_description: format!("Adjust {label}."),
     }
+}
+
+fn topology_parameter(
+    id: u64,
+    label: &str,
+    group: &str,
+    path: &str,
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+) -> ParameterDescriptor {
+    let mut descriptor = parameter(id, label, group, path, minimum, maximum, step);
+    descriptor.topology_changing = true;
+    descriptor.mutation_sigma = step;
+    descriptor
 }
 
 fn add_instance(

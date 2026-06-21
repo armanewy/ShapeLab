@@ -6,6 +6,7 @@ mod asset;
 mod viewport;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::PathBuf;
 
 use asset::{
@@ -17,6 +18,7 @@ use shape_asset::{
     PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, ReplacementGroupHint,
     Transform3, definition_scalar_path, get_scalar, instance_scalar_path,
 };
+use shape_modeling_assets::BenchmarkAsset;
 
 const BODY_DEFINITION: PartDefinitionId = PartDefinitionId(1);
 const ALT_BODY_DEFINITION: PartDefinitionId = PartDefinitionId(2);
@@ -261,7 +263,7 @@ fn dirty_state_tracks_save_and_load_boundaries() {
         .expect("save as effect");
     assert!(matches!(
         effects.as_slice(),
-        [AssetAppEffect::SaveRecipe { path: saved, .. }] if saved == &path
+        [AssetAppEffect::SaveProject { path: saved, .. }] if saved == &path
     ));
 
     state.mark_saved(path.clone());
@@ -275,6 +277,159 @@ fn dirty_state_tracks_save_and_load_boundaries() {
     assert_eq!(state.current_file_path, Some(path));
 }
 
+#[test]
+fn crate_mvp_workflow_generates_six_unlocked_variants() {
+    let mut state =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::IndustrialCrate))
+            .expect("crate template should load");
+
+    state
+        .handle_command(AssetAppCommand::SetParameter {
+            parameter: ParameterId(1),
+            value: 2.25,
+        })
+        .expect("body should widen");
+    state
+        .handle_command(AssetAppCommand::SetParameter {
+            parameter: ParameterId(5),
+            value: 0.11,
+        })
+        .expect("handle thickness should change");
+    state
+        .handle_command(AssetAppCommand::SetParameter {
+            parameter: ParameterId(6),
+            value: 8.0,
+        })
+        .expect("bolt count should change");
+    state
+        .handle_command(AssetAppCommand::ToggleOptionalPart {
+            instance: PartInstanceId(16),
+            enabled: false,
+        })
+        .expect("optional trim should disable");
+    state
+        .handle_command(AssetAppCommand::SetLock {
+            target: AssetLockTarget::Instance(PartInstanceId(1)),
+            locked: true,
+        })
+        .expect("body instance should lock");
+
+    let request = start_job(
+        state
+            .handle_command(AssetAppCommand::GenerateExplore)
+            .expect("generation should schedule"),
+    );
+    for event in run_asset_job(request) {
+        state.handle_job_event(event);
+    }
+
+    assert_eq!(state.candidate_slots.len(), 6);
+    let body_parameters = BTreeSet::from([
+        ParameterId(1),
+        ParameterId(2),
+        ParameterId(3),
+        ParameterId(4),
+    ]);
+    assert!(state.candidate_slots.iter().all(|slot| {
+        slot.candidate
+            .changed_parameters
+            .is_disjoint(&body_parameters)
+    }));
+
+    let accepted = state.candidate_slots[0].candidate.id;
+    state
+        .handle_command(AssetAppCommand::AcceptCandidate(accepted))
+        .expect("candidate should apply");
+    let accepted_revision = state.revision_history.current;
+    state
+        .handle_command(AssetAppCommand::Undo)
+        .expect("undo should return to parent");
+    assert_ne!(state.revision_history.current, accepted_revision);
+}
+
+#[test]
+fn project_snapshot_round_trip_preserves_branch_history() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
+        .expect("stool template should load");
+    state
+        .handle_command(AssetAppCommand::SetParameter {
+            parameter: ParameterId(1),
+            value: 1.35,
+        })
+        .expect("first branch edit");
+    let first_branch = state.revision_history.current;
+    state
+        .handle_command(AssetAppCommand::Undo)
+        .expect("undo to root");
+    state
+        .handle_command(AssetAppCommand::SetParameter {
+            parameter: ParameterId(2),
+            value: 1.08,
+        })
+        .expect("second branch edit");
+    let second_branch = state.revision_history.current;
+
+    let json = serde_json::to_string(&state.project_snapshot()).expect("snapshot serializes");
+    let project = serde_json::from_str(&json).expect("snapshot deserializes");
+    let mut loaded =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
+            .expect("seed state");
+    loaded
+        .replace_loaded_project(project, PathBuf::from("stool.shapelab-asset.json"))
+        .expect("snapshot should load");
+
+    assert_eq!(loaded.revision_history.revisions.len(), 3);
+    assert!(
+        loaded
+            .revision_history
+            .revisions
+            .contains_key(&first_branch)
+    );
+    assert!(
+        loaded
+            .revision_history
+            .revisions
+            .contains_key(&second_branch)
+    );
+    assert_eq!(loaded.revision_history.current, second_branch);
+}
+
+#[test]
+fn export_jobs_write_obj_and_canonical_package() {
+    let mut state =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::ExplicitDeskLamp))
+            .expect("lamp template should load");
+    let out_dir = unique_test_dir("shape-lab-asset-export");
+    fs::create_dir_all(&out_dir).expect("test export dir");
+
+    let obj_path = out_dir.join("lamp.obj");
+    let obj_request = start_job(
+        state
+            .handle_command(AssetAppCommand::ExportObj(obj_path.clone()))
+            .expect("obj export should schedule"),
+    );
+    let obj_events = run_asset_job(obj_request);
+    assert!(obj_events.iter().any(|event| {
+        matches!(event, AssetJobEvent::ExportObjReady { path, .. } if path == &obj_path)
+    }));
+    assert!(obj_path.exists());
+
+    let package_dir = out_dir.join("package");
+    let package_request = start_job(
+        state
+            .handle_command(AssetAppCommand::ExportPackage(package_dir.clone()))
+            .expect("package export should schedule"),
+    );
+    let package_events = run_asset_job(package_request);
+    assert!(package_events.iter().any(|event| {
+        matches!(event, AssetJobEvent::ExportPackageReady { path, package_paths, .. }
+            if path == &package_dir && package_paths.manifest.exists())
+    }));
+    assert!(package_dir.join("asset-manifest.json").exists());
+
+    let _ = fs::remove_dir_all(out_dir);
+}
+
 fn test_state() -> AssetAppState {
     AssetAppState::new(recipe("Test Asset", 0.12)).expect("valid test state")
 }
@@ -285,6 +440,26 @@ fn template(id: &str, title: &str, thickness: f32) -> AssetTemplate {
         title: title.to_owned(),
         recipe: recipe(title, thickness),
     }
+}
+
+fn benchmark_template(asset: BenchmarkAsset) -> AssetTemplate {
+    let recipe = asset.recipe();
+    AssetTemplate {
+        id: asset.slug().to_owned(),
+        title: recipe.title.clone(),
+        recipe,
+    }
+}
+
+fn unique_test_dir(stem: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "{}-{}",
+        stem,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ))
 }
 
 fn recipe(title: &str, thickness: f32) -> AssetRecipe {
@@ -411,7 +586,7 @@ fn start_job(effects: Vec<AssetAppEffect>) -> AssetJobRequest {
         .into_iter()
         .find_map(|effect| match effect {
             AssetAppEffect::StartJob(request) => Some(*request),
-            AssetAppEffect::SaveRecipe { .. } | AssetAppEffect::LoadRecipe(_) => None,
+            AssetAppEffect::SaveProject { .. } | AssetAppEffect::LoadProject(_) => None,
         })
         .expect("start job effect")
 }

@@ -8,11 +8,13 @@ pub(crate) use shape_asset::{
     ParameterId, PartDefinitionId, PartInstanceId, RevisionId as AssetRevisionId,
 };
 
+pub(crate) mod app;
 pub(crate) mod commands;
 pub(crate) mod io;
 pub(crate) mod jobs;
 pub(crate) mod panels;
 pub(crate) mod state;
+pub(crate) mod view_model;
 pub(crate) mod viewport;
 
 #[allow(unused_imports)]

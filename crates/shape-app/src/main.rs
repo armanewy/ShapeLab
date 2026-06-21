@@ -3,12 +3,13 @@
 mod app;
 mod asset;
 mod commands;
+mod desktop;
 mod jobs;
 mod panels;
 mod state;
 mod viewport;
 
-use app::ShapeLabApp;
+use desktop::ShapeLabDesktopApp;
 
 fn main() -> eframe::Result<()> {
     let _ = env_logger::try_init();
@@ -21,6 +22,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Shape Lab",
         options,
-        Box::new(|_cc| Ok(Box::<ShapeLabApp>::default())),
+        Box::new(|_cc| Ok(Box::<ShapeLabDesktopApp>::default())),
     )
 }

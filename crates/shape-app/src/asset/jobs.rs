@@ -3,11 +3,15 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::PathBuf;
 
 use shape_asset::{
     AssetEdit, AssetEditProgram, AssetRecipe, ParameterId, RevisionId, apply_edit_program,
-    get_scalar,
+    descendants_of, get_scalar, instances_of_definition,
+};
+use shape_compile::export::{
+    GroupedObjReport, ModelExportPackagePaths, write_grouped_obj_export, write_model_package,
 };
 use shape_compile::{
     AssetArtifact, CompileValidationReport, ConstructionTimelineReport,
@@ -17,7 +21,7 @@ use shape_core::Aabb;
 use shape_mesh::TriangleMesh;
 use shape_render::{OrbitCamera, RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
 
-const DEFAULT_GENERATED_CANDIDATES: usize = 4;
+const DEFAULT_GENERATED_CANDIDATES: usize = 6;
 
 /// Monotonic app job identifier.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,6 +42,7 @@ pub(crate) enum AssetJobSlot {
     RenderCurrentPreview,
     GenerateCandidates,
     CompileCandidatePreviews,
+    ExportObj,
     ExportPackage,
 }
 
@@ -156,6 +161,9 @@ pub(crate) enum AssetJobKind {
     ExportPackage {
         path: PathBuf,
     },
+    ExportObj {
+        path: PathBuf,
+    },
 }
 
 impl AssetJobKind {
@@ -165,6 +173,7 @@ impl AssetJobKind {
             Self::RenderCurrentPreview { .. } => AssetJobSlot::RenderCurrentPreview,
             Self::GenerateCandidates { .. } => AssetJobSlot::GenerateCandidates,
             Self::CompileCandidatePreviews { .. } => AssetJobSlot::CompileCandidatePreviews,
+            Self::ExportObj { .. } => AssetJobSlot::ExportObj,
             Self::ExportPackage { .. } => AssetJobSlot::ExportPackage,
         }
     }
@@ -175,6 +184,7 @@ impl AssetJobKind {
             | Self::CompileCandidatePreviews { generation_id, .. } => Some(*generation_id),
             Self::CompileCurrentAsset
             | Self::RenderCurrentPreview { .. }
+            | Self::ExportObj { .. }
             | Self::ExportPackage { .. } => None,
         }
     }
@@ -200,7 +210,7 @@ pub(crate) enum AssetJobEvent {
     CompileReady {
         job_id: AssetJobId,
         recipe_revision: RevisionId,
-        output: AssetCompileOutput,
+        output: Box<AssetCompileOutput>,
     },
     PreviewReady {
         job_id: AssetJobId,
@@ -223,7 +233,13 @@ pub(crate) enum AssetJobEvent {
         job_id: AssetJobId,
         recipe_revision: RevisionId,
         path: PathBuf,
-        artifact: AssetArtifact,
+        package_paths: ModelExportPackagePaths,
+    },
+    ExportObjReady {
+        job_id: AssetJobId,
+        recipe_revision: RevisionId,
+        path: PathBuf,
+        report: GroupedObjReport,
     },
     Failed {
         job_id: AssetJobId,
@@ -283,14 +299,8 @@ pub(crate) fn run_asset_job(request: AssetJobRequest) -> Vec<AssetJobEvent> {
             camera,
             render_settings,
         ),
-        AssetJobKind::ExportPackage { path } => compile_asset(&request.recipe)
-            .map(|artifact| AssetJobEvent::ExportPackageReady {
-                job_id: request.job_id,
-                recipe_revision: request.recipe_revision,
-                path: path.clone(),
-                artifact,
-            })
-            .map_err(|error| error.to_string()),
+        AssetJobKind::ExportPackage { path } => export_package(&request, path),
+        AssetJobKind::ExportObj { path } => export_obj(&request, path),
     };
 
     events.push(match final_event {
@@ -315,11 +325,11 @@ fn compile_current(request: &AssetJobRequest) -> Result<AssetJobEvent, String> {
     Ok(AssetJobEvent::CompileReady {
         job_id: request.job_id,
         recipe_revision: request.recipe_revision,
-        output: AssetCompileOutput {
+        output: Box::new(AssetCompileOutput {
             recipe_revision: request.recipe_revision,
             artifact,
             timeline,
-        },
+        }),
     })
 }
 
@@ -373,6 +383,31 @@ fn compile_candidate_previews(
     })
 }
 
+fn export_package(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobEvent, String> {
+    let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+    let package_paths =
+        write_model_package(&request.recipe, &artifact, path).map_err(|error| error.to_string())?;
+    Ok(AssetJobEvent::ExportPackageReady {
+        job_id: request.job_id,
+        recipe_revision: request.recipe_revision,
+        path: path.clone(),
+        package_paths,
+    })
+}
+
+fn export_obj(request: &AssetJobRequest, path: &PathBuf) -> Result<AssetJobEvent, String> {
+    let artifact = compile_asset(&request.recipe).map_err(|error| error.to_string())?;
+    let export = write_grouped_obj_export(&artifact, Some(&request.recipe))
+        .map_err(|error| error.to_string())?;
+    fs::write(path, export.obj).map_err(|error| error.to_string())?;
+    Ok(AssetJobEvent::ExportObjReady {
+        job_id: request.job_id,
+        recipe_revision: request.recipe_revision,
+        path: path.clone(),
+        report: export.report,
+    })
+}
+
 fn generate_candidates(
     recipe: &AssetRecipe,
     generation_id: AssetGenerationId,
@@ -386,6 +421,9 @@ fn generate_candidates(
             break;
         }
         if recipe.locks.contains(&parameter.id) {
+            continue;
+        }
+        if parameter_is_locked_by_scope(recipe, parameter) {
             continue;
         }
         let Ok(before) = get_scalar(recipe, &parameter.path) else {
@@ -432,6 +470,53 @@ fn generate_candidates(
         });
     }
     candidates
+}
+
+fn parameter_is_locked_by_scope(
+    recipe: &AssetRecipe,
+    parameter: &shape_asset::ParameterDescriptor,
+) -> bool {
+    if let Some(instance) = instance_id_from_scalar_path(&parameter.path) {
+        return instance_locked(recipe, instance);
+    }
+    if let Some(definition) = definition_id_from_scalar_path(&parameter.path) {
+        if parameter.topology_changing && recipe.topology_locks.contains(&definition) {
+            return true;
+        }
+        let instances = instances_of_definition(recipe, definition);
+        return !instances.is_empty()
+            && instances
+                .into_iter()
+                .all(|instance| instance_locked(recipe, instance));
+    }
+    false
+}
+
+fn instance_locked(recipe: &AssetRecipe, instance: shape_asset::PartInstanceId) -> bool {
+    recipe.instance_locks.contains(&instance)
+        || recipe.subtree_locks.iter().any(|root| {
+            *root == instance
+                || descendants_of(recipe, *root)
+                    .map(|descendants| descendants.contains(&instance))
+                    .unwrap_or(false)
+        })
+}
+
+fn definition_id_from_scalar_path(path: &str) -> Option<shape_asset::PartDefinitionId> {
+    let mut parts = path.split('.');
+    (parts.next()? == "definition").then(|| {
+        parts
+            .next()?
+            .parse()
+            .ok()
+            .map(shape_asset::PartDefinitionId)
+    })?
+}
+
+fn instance_id_from_scalar_path(path: &str) -> Option<shape_asset::PartInstanceId> {
+    let mut parts = path.split('.');
+    (parts.next()? == "instance")
+        .then(|| parts.next()?.parse().ok().map(shape_asset::PartInstanceId))?
 }
 
 pub(crate) fn candidate_preview_from_artifact(
