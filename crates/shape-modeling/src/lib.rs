@@ -17,6 +17,8 @@ use shape_asset::{
 use shape_poly::{MeshBounds, PolyError, PolygonMesh};
 use thiserror::Error;
 
+pub mod assembly;
+
 /// Deterministic explicit-topology generators.
 pub mod generators {
     /// Basic built-in generator families.
