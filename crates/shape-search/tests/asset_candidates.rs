@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, CountRangeHint, Frame3, GeometryRecipe, GeometrySource,
-    ModelingOperationSpec, OperationId, ParameterDescriptor, ParameterId, PartDefinition,
-    PartDefinitionId, PartInstance, PartInstanceId, ReplacementGroupHint, Transform3,
+    AssetEdit, AssetId, AssetRecipe, BoundaryLoopId, CountRangeHint, CutEdgeTreatment, Frame3,
+    GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterDescriptor,
+    ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace,
+    RegionId, ReplacementGroupHint, SurfaceRegionSpec, SurfaceRole, Transform3,
     validate_asset_recipe,
 };
 use shape_search::asset::{
@@ -114,6 +115,47 @@ fn rich_recipe() -> AssetRecipe {
             None,
         ),
     );
+    let mut cut_panel = definition(
+        7,
+        "cut panel",
+        GeometrySource::Plate {
+            size: [1.6, 0.9],
+            thickness: 0.08,
+        },
+        vec![ModelingOperationSpec::RectangularThroughCut {
+            operation: OperationId(5),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            size: [0.24, 0.12],
+            corner_radius: 0.02,
+            rim_width: 0.03,
+            corner_segments: 3,
+            entry_loop: BoundaryLoopId(1),
+            exit_loop: BoundaryLoopId(2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(4),
+            wall_region: RegionId(5),
+            edge_treatment: CutEdgeTreatment::Hard,
+        }],
+        None,
+    );
+    cut_panel
+        .regions
+        .insert(RegionId(1), region(1, "front", SurfaceRole::PrimarySurface));
+    cut_panel
+        .regions
+        .insert(RegionId(2), region(2, "back", SurfaceRole::PrimarySurface));
+    cut_panel
+        .regions
+        .insert(RegionId(3), region(3, "side", SurfaceRole::Side));
+    cut_panel
+        .regions
+        .insert(RegionId(4), region(4, "cut rim", SurfaceRole::Detail));
+    cut_panel
+        .regions
+        .insert(RegionId(5), region(5, "cut wall", SurfaceRole::Interior));
+    recipe.definitions.insert(PartDefinitionId(7), cut_panel);
 
     recipe
         .instances
@@ -131,6 +173,9 @@ fn rich_recipe() -> AssetRecipe {
     recipe
         .instances
         .insert(PartInstanceId(5), instance(5, 6, "literal", Some(1)));
+    recipe
+        .instances
+        .insert(PartInstanceId(6), instance(6, 7, "cut panel", Some(1)));
     recipe.root_instances.push(PartInstanceId(1));
 
     recipe.parameters.insert(
@@ -207,9 +252,11 @@ fn rich_recipe() -> AssetRecipe {
             maximum: 6,
         },
     );
-    recipe.next_ids.part_definition = 7;
-    recipe.next_ids.part_instance = 6;
-    recipe.next_ids.operation = 5;
+    recipe.next_ids.part_definition = 8;
+    recipe.next_ids.part_instance = 7;
+    recipe.next_ids.operation = 6;
+    recipe.next_ids.region = 6;
+    recipe.next_ids.boundary_loop = 3;
     recipe.next_ids.parameter = 5;
 
     assert!(validate_asset_recipe(&recipe).is_valid());
@@ -259,6 +306,7 @@ fn refine_remains_local_and_topology_preserving() {
                     | AssetCandidateEditKind::Replacement
                     | AssetCandidateEditKind::ArrayCount
                     | AssetCandidateEditKind::DetailDensity
+                    | AssetCandidateEditKind::ModelingOperation
             )
         }));
     }
@@ -319,6 +367,10 @@ fn topology_locks_block_topology_changes_for_definition() {
         for operation in &candidate.program.operations {
             match operation {
                 shape_asset::AssetEdit::SetArrayCount { definition, .. }
+                | shape_asset::AssetEdit::DuplicateCutOperation { definition, .. }
+                | shape_asset::AssetEdit::RemoveModelingOperation { definition, .. }
+                | shape_asset::AssetEdit::InsertModelingOperation { definition, .. }
+                | shape_asset::AssetEdit::MoveModelingOperation { definition, .. }
                 | shape_asset::AssetEdit::SetBevelSettings {
                     definition,
                     segments: Some(_),
@@ -383,6 +435,54 @@ fn optional_parts_replacements_and_array_counts_are_generated() {
             )
         })
     }));
+}
+
+#[test]
+fn explore_generates_structural_cut_duplication() {
+    let recipe = rich_recipe();
+    let output = generate_asset_candidates(&recipe, &request(37, AssetCandidateMode::Explore))
+        .expect("candidates should generate");
+
+    assert!(has_kind(&output, AssetCandidateEditKind::ModelingOperation));
+    let duplicate_cut = output
+        .candidates
+        .iter()
+        .flat_map(|candidate| &candidate.program.operations)
+        .find_map(|operation| match operation {
+            AssetEdit::DuplicateCutOperation {
+                definition,
+                source,
+                operation,
+                entry_loop,
+                secondary_loop,
+                rim_region,
+                wall_region,
+                floor_region,
+                center_offset,
+            } => Some((
+                *definition,
+                *source,
+                *operation,
+                *entry_loop,
+                *secondary_loop,
+                *rim_region,
+                *wall_region,
+                *floor_region,
+                *center_offset,
+            )),
+            _ => None,
+        })
+        .expect("Explore should propose at least one cut duplication");
+
+    assert_eq!(duplicate_cut.0, PartDefinitionId(7));
+    assert_eq!(duplicate_cut.1, OperationId(5));
+    assert!(duplicate_cut.2.0 >= 6);
+    assert!(duplicate_cut.3.0 >= 3);
+    assert!(duplicate_cut.4.0 > duplicate_cut.3.0);
+    assert!(duplicate_cut.5.0 >= 6);
+    assert!(duplicate_cut.6.0 > duplicate_cut.5.0);
+    assert_eq!(duplicate_cut.7, None);
+    assert_ne!(duplicate_cut.8, [0.0, 0.0]);
 }
 
 #[test]
@@ -477,6 +577,15 @@ fn definition(
         local_pivot: Frame3::default(),
         variant_group: variant_group.map(str::to_owned),
         production_hints: None,
+    }
+}
+
+fn region(id: u64, name: &str, role: SurfaceRole) -> SurfaceRegionSpec {
+    SurfaceRegionSpec {
+        id: RegionId(id),
+        name: name.to_owned(),
+        role,
+        tags: BTreeSet::new(),
     }
 }
 

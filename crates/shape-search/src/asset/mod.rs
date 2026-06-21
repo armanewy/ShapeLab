@@ -8,9 +8,10 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     ArraySpacingEdit, AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationReport,
-    CountRangeHint, Frame3, GeneratorDimensionEdit, GeometrySource, ModelingOperationSpec,
-    OperationId, ParameterDescriptor, PartDefinitionId, PartInstanceId, Transform3,
-    apply_edit_program, enumerate_parameters, get_scalar, validate_asset_recipe,
+    BoundaryLoopId, CountRangeHint, Frame3, GeneratorDimensionEdit, GeometrySource,
+    ModelingOperationSpec, OperationId, ParameterDescriptor, PartDefinitionId, PartInstanceId,
+    RegionId, Transform3, apply_edit_program, enumerate_parameters, get_scalar,
+    validate_asset_recipe,
 };
 use thiserror::Error;
 
@@ -199,8 +200,11 @@ pub fn generate_asset_candidates(
         let mut rng = ChaCha8Rng::seed_from_u64(proposal_seed);
         let selected = select_opportunities(&opportunities, request.mode, proposal_index, &mut rng);
         let mut operations = Vec::new();
+        let mut id_allocator = ProposalIdAllocator::from_recipe(recipe);
         for opportunity in selected {
-            if let Some(operation) = opportunity.build_edit(recipe, request.mode, &mut rng) {
+            if let Some(operation) =
+                opportunity.build_edit(recipe, request.mode, &mut rng, &mut id_allocator)
+            {
                 operations.push(operation);
             }
         }
@@ -576,12 +580,57 @@ fn collect_definition_opportunities(
                         current: *angle_degrees,
                     });
                 }
+                ModelingOperationSpec::RecessedPanelCut {
+                    operation, size, ..
+                } => {
+                    push_topology_opportunity(
+                        recipe,
+                        mode,
+                        skipped,
+                        *definition_id,
+                        EditOpportunity::DuplicateCut {
+                            definition: *definition_id,
+                            operation: *operation,
+                            source: CutDuplicateSource::RecessedPanel { size: *size },
+                        },
+                        opportunities,
+                    );
+                }
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation, size, ..
+                } => {
+                    push_topology_opportunity(
+                        recipe,
+                        mode,
+                        skipped,
+                        *definition_id,
+                        EditOpportunity::DuplicateCut {
+                            definition: *definition_id,
+                            operation: *operation,
+                            source: CutDuplicateSource::RectangularThrough { size: *size },
+                        },
+                        opportunities,
+                    );
+                }
+                ModelingOperationSpec::CircularThroughCut {
+                    operation, radius, ..
+                } => {
+                    push_topology_opportunity(
+                        recipe,
+                        mode,
+                        skipped,
+                        *definition_id,
+                        EditOpportunity::DuplicateCut {
+                            definition: *definition_id,
+                            operation: *operation,
+                            source: CutDuplicateSource::CircularThrough { radius: *radius },
+                        },
+                        opportunities,
+                    );
+                }
                 ModelingOperationSpec::TransformGeometry { .. }
                 | ModelingOperationSpec::AddPanel { .. }
                 | ModelingOperationSpec::AddTrim { .. }
-                | ModelingOperationSpec::RecessedPanelCut { .. }
-                | ModelingOperationSpec::RectangularThroughCut { .. }
-                | ModelingOperationSpec::CircularThroughCut { .. }
                 | ModelingOperationSpec::MirrorInstances { .. }
                 | ModelingOperationSpec::ReservedBoolean { .. }
                 | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}
@@ -756,7 +805,78 @@ enum EditOpportunity {
         instance: PartInstanceId,
         to: PartDefinitionId,
     },
+    DuplicateCut {
+        definition: PartDefinitionId,
+        operation: OperationId,
+        source: CutDuplicateSource,
+    },
     DetailDensity(DetailDensityTarget),
+}
+
+#[derive(Debug, Clone)]
+enum CutDuplicateSource {
+    RecessedPanel { size: [f32; 2] },
+    RectangularThrough { size: [f32; 2] },
+    CircularThrough { radius: f32 },
+}
+
+impl CutDuplicateSource {
+    fn requires_floor_region(&self) -> bool {
+        matches!(self, Self::RecessedPanel { .. })
+    }
+
+    fn center_offset(&self, mode: AssetCandidateMode, rng: &mut ChaCha8Rng) -> [f32; 2] {
+        let mut offset = [0.0, 0.0];
+        let axis = rng.random_range(0..2);
+        let sign = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
+        let base_spacing = match self {
+            Self::RecessedPanel { size } | Self::RectangularThrough { size } => {
+                size[axis].abs().max(0.08) * 1.35
+            }
+            Self::CircularThrough { radius } => radius.abs().max(0.04) * 2.70,
+        };
+        let exploration_scale = match mode {
+            AssetCandidateMode::Refine => 1.0,
+            AssetCandidateMode::Explore => rng.random_range(0.85..1.70),
+        };
+        offset[axis] = sign * base_spacing * exploration_scale;
+        offset
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProposalIdAllocator {
+    next_operation: u64,
+    next_region: u64,
+    next_boundary_loop: u64,
+}
+
+impl ProposalIdAllocator {
+    fn from_recipe(recipe: &AssetRecipe) -> Self {
+        Self {
+            next_operation: recipe.next_ids.operation,
+            next_region: recipe.next_ids.region,
+            next_boundary_loop: recipe.next_ids.boundary_loop,
+        }
+    }
+
+    fn operation(&mut self) -> OperationId {
+        let id = OperationId(self.next_operation);
+        self.next_operation = self.next_operation.saturating_add(1);
+        id
+    }
+
+    fn region(&mut self) -> RegionId {
+        let id = RegionId(self.next_region);
+        self.next_region = self.next_region.saturating_add(1);
+        id
+    }
+
+    fn boundary_loop(&mut self) -> BoundaryLoopId {
+        let id = BoundaryLoopId(self.next_boundary_loop);
+        self.next_boundary_loop = self.next_boundary_loop.saturating_add(1);
+        id
+    }
 }
 
 impl EditOpportunity {
@@ -765,6 +885,7 @@ impl EditOpportunity {
         _recipe: &AssetRecipe,
         mode: AssetCandidateMode,
         rng: &mut ChaCha8Rng,
+        ids: &mut ProposalIdAllocator,
     ) -> Option<AssetEdit> {
         match self {
             Self::ScalarParameter {
@@ -881,6 +1002,21 @@ impl EditOpportunity {
                 instance: *instance,
                 definition: *to,
             }),
+            Self::DuplicateCut {
+                definition,
+                operation,
+                source,
+            } => Some(AssetEdit::DuplicateCutOperation {
+                definition: *definition,
+                source: *operation,
+                operation: ids.operation(),
+                entry_loop: ids.boundary_loop(),
+                secondary_loop: ids.boundary_loop(),
+                rim_region: ids.region(),
+                wall_region: ids.region(),
+                floor_region: source.requires_floor_region().then(|| ids.region()),
+                center_offset: source.center_offset(mode, rng),
+            }),
             Self::DetailDensity(target) => target.build_edit(rng),
         }
     }
@@ -901,6 +1037,7 @@ impl EditOpportunity {
             }
             Self::OptionalPart { .. } => AssetCandidateEditKind::OptionalPart,
             Self::Replacement { .. } => AssetCandidateEditKind::Replacement,
+            Self::DuplicateCut { .. } => AssetCandidateEditKind::ModelingOperation,
             Self::DetailDensity(_) => AssetCandidateEditKind::DetailDensity,
         }
     }
@@ -953,6 +1090,14 @@ impl EditOpportunity {
             ),
             Self::OptionalPart { instance, .. } => format!("instance.{}.optional", instance.0),
             Self::Replacement { instance, .. } => format!("instance.{}.definition", instance.0),
+            Self::DuplicateCut {
+                definition,
+                operation,
+                ..
+            } => format!(
+                "definition.{}.operation.{}.duplicate",
+                definition.0, operation.0
+            ),
             Self::DetailDensity(target) => target.subject(),
         }
     }
