@@ -3651,6 +3651,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "shape-asset"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "shape-cli"
 version = "0.1.0"
 dependencies = [
@@ -3670,6 +3680,18 @@ dependencies = [
  "shape-render",
  "shape-search",
  "tempfile",
+]
+
+[[package]]
+name = "shape-compile"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shape-asset",
+ "shape-modeling",
+ "shape-poly",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3712,6 +3734,28 @@ dependencies = [
  "glam",
  "shape-core",
  "shape-field",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-modeling"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shape-asset",
+ "shape-poly",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-poly"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+ "shape-asset",
  "thiserror 2.0.18",
 ]
 

@@ -1,11 +1,15 @@
 [workspace]
 members = [
+    "crates/shape-asset",
     "crates/shape-app",
     "crates/shape-cli",
+    "crates/shape-compile",
     "crates/shape-core",
     "crates/shape-decompiler",
     "crates/shape-field",
     "crates/shape-mesh",
+    "crates/shape-modeling",
+    "crates/shape-poly",
     "crates/shape-presets",
     "crates/shape-project",
     "crates/shape-render",
@@ -41,10 +45,14 @@ serde_json = "1.0.150"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 
+shape-asset = { path = "crates/shape-asset" }
+shape-compile = { path = "crates/shape-compile" }
 shape-core = { path = "crates/shape-core" }
 shape-decompiler = { path = "crates/shape-decompiler" }
 shape-field = { path = "crates/shape-field" }
 shape-mesh = { path = "crates/shape-mesh" }
+shape-modeling = { path = "crates/shape-modeling" }
+shape-poly = { path = "crates/shape-poly" }
 shape-presets = { path = "crates/shape-presets" }
 shape-project = { path = "crates/shape-project" }
 shape-render = { path = "crates/shape-render" }
