@@ -1558,6 +1558,7 @@ fn semantic_edge_metadata(
                 seam_candidate: open,
                 operation: Some(operation),
                 region_transition: transition,
+                boundary_loop: None,
             },
         );
     }

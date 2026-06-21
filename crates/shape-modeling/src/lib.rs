@@ -270,6 +270,9 @@ fn ensure_operations_supported(definition: &PartDefinition) -> Result<(), Modeli
             | shape_asset::ModelingOperationSpec::SetBevelProfile { .. }
             | shape_asset::ModelingOperationSpec::AddPanel { .. }
             | shape_asset::ModelingOperationSpec::AddTrim { .. }
+            | shape_asset::ModelingOperationSpec::RecessedPanelCut { .. }
+            | shape_asset::ModelingOperationSpec::RectangularThroughCut { .. }
+            | shape_asset::ModelingOperationSpec::CircularThroughCut { .. }
             | shape_asset::ModelingOperationSpec::MirrorInstances { .. }
             | shape_asset::ModelingOperationSpec::LinearArray { .. }
             | shape_asset::ModelingOperationSpec::RadialArray { .. } => {}

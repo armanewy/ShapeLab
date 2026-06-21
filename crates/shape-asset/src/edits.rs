@@ -391,6 +391,36 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
         ModelingOperationSpec::AddTrim { operation, .. } => {
             signature.push_str(&format!("trim:{}", operation.0));
         }
+        ModelingOperationSpec::RecessedPanelCut {
+            operation,
+            corner_radius,
+            ..
+        } => {
+            signature.push_str(&format!(
+                "recessed_panel_cut:{}:{corner_radius:.6}",
+                operation.0
+            ));
+        }
+        ModelingOperationSpec::RectangularThroughCut {
+            operation,
+            corner_radius,
+            ..
+        } => {
+            signature.push_str(&format!(
+                "rectangular_through_cut:{}:{corner_radius:.6}",
+                operation.0
+            ));
+        }
+        ModelingOperationSpec::CircularThroughCut {
+            operation,
+            radial_segments,
+            ..
+        } => {
+            signature.push_str(&format!(
+                "circular_through_cut:{}:{radial_segments}",
+                operation.0
+            ));
+        }
         ModelingOperationSpec::MirrorInstances { operation, .. } => {
             signature.push_str(&format!("mirror:{}", operation.0));
         }

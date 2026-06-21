@@ -1,13 +1,13 @@
 # Modeling Benchmark
 
-Wave 2 adds two explicit-topology benchmark assets in `crates/shape-modeling-assets`.
+The explicit-topology benchmark assets live in `crates/shape-modeling-assets`.
 
-Checked-in recipe JSON:
+Checked-in recipe JSON fixtures:
 
 - `crates/shape-modeling-assets/assets/industrial_crate.asset.json`
 - `crates/shape-modeling-assets/assets/explicit_desk_lamp.asset.json`
 
-The Rust constructors in `shape-modeling-assets` are the source of truth used by tests and `shape-cli model-demo`; the JSON files are the serialized benchmark recipes for inspection and external tooling.
+The Rust constructors in `shape-modeling-assets` are the source of truth used by tests, Asset Modeling Lab templates, and `shape-cli model-demo`; the JSON files are serialized benchmark recipes for inspection and external tooling.
 
 ## Industrial Crate
 
@@ -17,17 +17,18 @@ Implemented parts and features:
 
 - rounded-box body
 - four separate feet
-- separate raised front and back panels
+- semantic recessed front and back panels
 - swept side handle with mirrored generated counterpart
 - repeated cylinder bolt rows on front and back panels
-- no generic booleans
+- top ventilation slat array with rectangular through-cuts
+- constrained semantic plate cuts, but no generic mesh booleans
 - no SDF or remeshing path
 
 Current `model-demo` output:
 
-- parts: 21
-- exported triangles: 2684
-- budget: below 25,000 triangles
+- parts: 31
+- exported triangles: 5012
+- budget: below 30,000 triangles
 
 ## Explicit Desk Lamp
 
@@ -45,13 +46,33 @@ Implemented parts and features:
 
 Current `model-demo` output:
 
-- parts: 5
-- exported triangles: 1092
-- budget: below 20,000 triangles
+- parts: 12
+- exported triangles: 2776
+- budget: below 25,000 triangles
+
+## Stylized Stool
+
+The Stylized Stool exercises non-crate, non-lamp part hierarchy with tapered supports and clean repeated construction.
+
+Implemented parts and features:
+
+- rounded seat
+- four tapered legs
+- foot pads
+- support rails
+- bevel controls
+- optional seat trim
+- no SDF or remeshing path
+
+Current `model-demo` output:
+
+- parts: 13
+- exported triangles: 2140
+- budget: below 25,000 triangles
 
 ## Quality Checks
 
-Both assets are covered by `shape-modeling-assets` tests and `shape-cli model-demo` output validation. The compiler validates:
+The benchmark assets are covered by `shape-modeling-assets` tests and `shape-cli model-demo` output validation. The compiler validates:
 
 - no invalid polygon indices
 - no degenerate faces

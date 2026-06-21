@@ -392,6 +392,14 @@ pub fn build_construction_timeline_report(
     let panel_operations = operation_ids_matching(recipe, |operation| {
         matches!(operation, ModelingOperationSpec::AddPanel { .. })
     });
+    let cut_operations = operation_ids_matching(recipe, |operation| {
+        matches!(
+            operation,
+            ModelingOperationSpec::RecessedPanelCut { .. }
+                | ModelingOperationSpec::RectangularThroughCut { .. }
+                | ModelingOperationSpec::CircularThroughCut { .. }
+        )
+    });
     let trim_operations = operation_ids_matching(recipe, |operation| {
         matches!(operation, ModelingOperationSpec::AddTrim { .. })
     });
@@ -435,6 +443,14 @@ pub fn build_construction_timeline_report(
             ),
             timeline_stage(
                 4,
+                "semantic_cuts",
+                "semantic cuts",
+                artifact.compiled_parts.iter().collect(),
+                cut_operations,
+                "Adds analytic recessed panels, through-cuts, and generated boundary loops.",
+            ),
+            timeline_stage(
+                5,
                 "trim",
                 "trim",
                 trim,
@@ -442,7 +458,7 @@ pub fn build_construction_timeline_report(
                 "Adds reinforcement trim, collars, brackets, and boundary details.",
             ),
             timeline_stage(
-                5,
+                6,
                 "repeated_details",
                 "repeated details",
                 repeated,
@@ -450,7 +466,7 @@ pub fn build_construction_timeline_report(
                 "Expands mirrored or arrayed fasteners, feet, vents, and other repeated detail.",
             ),
             timeline_stage(
-                6,
+                7,
                 "edge_treatment",
                 "edge treatment",
                 artifact.compiled_parts.iter().collect(),
@@ -458,7 +474,7 @@ pub fn build_construction_timeline_report(
                 "Applies the asset bevel language and preserves hard feature loops.",
             ),
             timeline_stage(
-                7,
+                8,
                 "final_assembly",
                 "final assembly",
                 artifact.compiled_parts.iter().collect(),
@@ -1228,9 +1244,9 @@ mod tests {
 
         let timeline = build_construction_timeline_report(&recipe, &artifact);
 
-        assert_eq!(timeline.stages.len(), 7);
+        assert_eq!(timeline.stages.len(), 8);
         assert_eq!(timeline.stages[0].key, "primary_body");
-        assert_eq!(timeline.stages[6].key, "final_assembly");
+        assert_eq!(timeline.stages[7].key, "final_assembly");
         assert!(
             timeline
                 .stages

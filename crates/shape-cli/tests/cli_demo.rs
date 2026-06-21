@@ -215,7 +215,7 @@ fn inspect_and_compile_asset_use_canonical_model_package() {
         &fs::read_to_string(out_dir.join("construction-timeline.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(timeline["stages"].as_array().unwrap().len(), 7);
+    assert_eq!(timeline["stages"].as_array().unwrap().len(), 8);
     let model_validation: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("model-validation.json")).unwrap())
             .unwrap();

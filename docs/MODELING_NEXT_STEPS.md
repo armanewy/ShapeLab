@@ -1,7 +1,8 @@
 # Modeling Next Steps
 
-1. Robust constructive booleans
-   - Add deterministic polygon boolean operations for union, subtract, intersect, and inset cut workflows.
+1. Broader constructive booleans
+   - Constrained semantic plate cuts are present for recessed panels, rectangular through-cuts, and circular through-cuts.
+   - Next add deterministic closed-solid union and broader subtract/intersect workflows without regressing provenance.
    - Preserve semantic provenance through boolean output faces and generated boundary loops.
 
 2. Broader bevel support

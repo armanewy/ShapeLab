@@ -67,7 +67,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - Candidate generation is deterministic, lock-aware, semantic, and score-selected from mesh-derived visual descriptors, but the metrics remain heuristics rather than visual taste or artistic quality.
 - Authored relationship policies travel with recipes and can target concrete instances, generated operation occurrences, prototype occurrence families, part tags, and definition role tags. Future Boolean boundary-loop relationships still need richer selectors.
 - The viewport overlay exposes selected-part context, validation, and wireframe hinting; direct viewport part picking is not in this MVP.
-- Current explicit generators avoid booleans; interlocking geometry is modeled as separate clean parts rather than fused constructive solids.
+- Current explicit generators avoid generic booleans. The crate now uses constrained semantic plate cuts for recessed panels and through-cut vents; broader arbitrary mesh booleans remain future work.
 
 ## Verification
 
@@ -77,7 +77,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - `cargo build --workspace --release`: passed
 - `cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark`: writes fixed-camera shaded and wireframe sheets for original templates, Refine outputs, Explore outputs, accepted branches, and final exported packages
 - Template export:
-  - `industrial-crate`: 31 parts, 4212 triangles
+  - `industrial-crate`: 31 parts, 5012 triangles
   - `explicit-desk-lamp`: 12 parts, 2776 triangles
   - `stylized-stool`: 13 parts, 2140 triangles
 - Blender 4.5 create/reopen verification:

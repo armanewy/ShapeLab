@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use shape_asset::{
-    Frame3, GeometrySource, ModelingOperationSpec, PartDefinition, RegionId, SocketId, SocketSpec,
-    SurfaceRegionSpec, SurfaceRole,
+    BoundaryLoopId, CutEdgeTreatment, Frame3, GeometrySource, ModelingOperationSpec, OperationId,
+    PartDefinition, PlanarCutFace, RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole,
 };
 use shape_poly::{
     BoundaryRole, EdgeClassification, EdgeKey, EdgeMetadata, ElementId, FaceMetadata, PolygonFace,
@@ -289,6 +289,16 @@ pub fn generate_plate(
             "plate generator received a different geometry source".to_owned(),
         ));
     };
+    if let Some(operation) = single_cut_operation(definition)? {
+        let (bevel_radius, _) = bevel_profile(definition, 0.0, 0);
+        if bevel_radius > EPSILON {
+            return Err(ModelingError::UnsupportedOperation {
+                operation: operation.operation_id(),
+                reason: "plate cuts do not yet combine with bevel profiles".to_owned(),
+            });
+        }
+        return build_cut_plate(size, thickness, operation, context);
+    }
     let (bevel_radius, bevel_segments) = bevel_profile(definition, 0.0, 0);
     let params = PlateParams {
         width: size[0],
@@ -498,6 +508,300 @@ pub fn build_plate(
             width, height, thickness, corner_radius, corner_segments, bevel
         ),
     ))
+}
+
+fn single_cut_operation(
+    definition: &PartDefinition,
+) -> Result<Option<&ModelingOperationSpec>, ModelingError> {
+    let mut cut: Option<&ModelingOperationSpec> = None;
+    for operation in &definition.geometry.operations {
+        if matches!(
+            operation,
+            ModelingOperationSpec::RecessedPanelCut { .. }
+                | ModelingOperationSpec::RectangularThroughCut { .. }
+                | ModelingOperationSpec::CircularThroughCut { .. }
+        ) {
+            if let Some(previous) = cut {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: operation.operation_id(),
+                    reason: format!(
+                        "only one semantic cut operation per plate is supported in this milestone; {:?} already occupies the local cut slot",
+                        previous.operation_id()
+                    ),
+                });
+            }
+            cut = Some(operation);
+        }
+    }
+    Ok(cut)
+}
+
+fn build_cut_plate(
+    size: [f32; 2],
+    thickness: f32,
+    operation: &ModelingOperationSpec,
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let width = finite_positive(size[0], "plate.width")?;
+    let height = finite_positive(size[1], "plate.height")?;
+    let thickness = finite_positive(thickness, "plate.thickness")?;
+    let half_x = width * 0.5;
+    let half_z = height * 0.5;
+    let half_y = thickness * 0.5;
+    let cut = PlateCutPlan::from_operation(operation, half_x, half_z, thickness)?;
+    let face_sign = planar_plate_face_sign(cut.face, cut.operation)?;
+    let outside_y = face_sign * half_y;
+    let opposite_y = -outside_y;
+    let opposite_normal = [0.0, -face_sign, 0.0];
+    let outside_normal = [0.0, face_sign, 0.0];
+    let host_points = rect_points(-half_x, half_x, -half_z, half_z);
+    let frame_ring = cut.frame_points.clone();
+
+    let mut builder = MeshBuilder::new();
+    let outside_host = builder.add_plate_ring(outside_y, &host_points)?;
+    let opposite_host = builder.add_plate_ring(opposite_y, &host_points)?;
+    add_plate_shell_sides(
+        &mut builder,
+        &opposite_host,
+        &outside_host,
+        &host_points,
+        context,
+        cut.operation,
+    );
+
+    match cut.kind {
+        PlateCutKind::Recessed {
+            depth,
+            floor_region,
+        } => {
+            let floor_y = outside_y - face_sign * depth;
+            let outside_frame_ring = builder.add_plate_ring(outside_y, &frame_ring)?;
+            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+            let floor_inner = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+
+            add_host_to_ring_cap(
+                &mut builder,
+                &outside_host,
+                &host_points,
+                &outside_frame_ring,
+                &frame_ring,
+                cut.frame,
+                outside_normal,
+                context,
+                cut.operation,
+                cut.outer_region,
+                SurfaceRole::PrimarySurface,
+            );
+            add_matched_ring_band(
+                &mut builder,
+                &outside_frame_ring,
+                &outside_inner,
+                &frame_ring,
+                &cut.inner_points,
+                outside_normal,
+                context,
+                cut.operation,
+                cut.rim_region,
+                SurfaceRole::Rim,
+            );
+            add_cut_wall_band(
+                &mut builder,
+                &outside_inner,
+                &floor_inner,
+                &cut.inner_points,
+                cut.center,
+                context,
+                cut.operation,
+                cut.wall_region,
+            );
+            add_cap_oriented(
+                &mut builder,
+                floor_inner.clone(),
+                outside_normal,
+                cut_metadata(
+                    context,
+                    floor_region,
+                    SurfaceRole::Interior,
+                    cut.operation,
+                    None,
+                ),
+            );
+            add_cap_oriented(
+                &mut builder,
+                opposite_host,
+                opposite_normal,
+                cut_metadata(
+                    context,
+                    PLATE_BACK_REGION,
+                    SurfaceRole::PrimarySurface,
+                    cut.operation,
+                    None,
+                ),
+            );
+
+            let mut mesh = builder.finish()?;
+            mark_boundary_loop(
+                &mut mesh,
+                &outside_inner,
+                cut.operation,
+                cut.boundary_loop,
+                cut.edge_treatment,
+            );
+            mark_boundary_loop(
+                &mut mesh,
+                &floor_inner,
+                cut.operation,
+                cut.boundary_loop,
+                cut.edge_treatment,
+            );
+            let mut regions = plate_regions();
+            insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
+            insert_cut_region(
+                &mut regions,
+                cut.wall_region,
+                "cut_wall",
+                SurfaceRole::CutWall,
+            );
+            insert_cut_region(
+                &mut regions,
+                floor_region,
+                "recess_floor",
+                SurfaceRole::Interior,
+            );
+            Ok(part(
+                mesh,
+                regions,
+                plate_sockets(half_y),
+                format!(
+                    "plate_cut:recessed:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:depth={:.6}:frame={:.6},{:.6},{:.6},{:.6}",
+                    width,
+                    height,
+                    thickness,
+                    cut.operation.0,
+                    cut.face,
+                    cut.center[0],
+                    cut.center[1],
+                    cut.inner_points.len(),
+                    depth,
+                    cut.frame.min_x,
+                    cut.frame.max_x,
+                    cut.frame.min_z,
+                    cut.frame.max_z
+                ),
+            ))
+        }
+        PlateCutKind::Through => {
+            let outside_frame_ring = builder.add_plate_ring(outside_y, &frame_ring)?;
+            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+            let opposite_frame_ring = builder.add_plate_ring(opposite_y, &frame_ring)?;
+            let opposite_inner = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
+
+            add_host_to_ring_cap(
+                &mut builder,
+                &outside_host,
+                &host_points,
+                &outside_frame_ring,
+                &frame_ring,
+                cut.frame,
+                outside_normal,
+                context,
+                cut.operation,
+                cut.outer_region,
+                SurfaceRole::PrimarySurface,
+            );
+            add_matched_ring_band(
+                &mut builder,
+                &outside_frame_ring,
+                &outside_inner,
+                &frame_ring,
+                &cut.inner_points,
+                outside_normal,
+                context,
+                cut.operation,
+                cut.rim_region,
+                SurfaceRole::Rim,
+            );
+            add_host_to_ring_cap(
+                &mut builder,
+                &opposite_host,
+                &host_points,
+                &opposite_frame_ring,
+                &frame_ring,
+                cut.frame,
+                opposite_normal,
+                context,
+                cut.operation,
+                cut.outer_region,
+                SurfaceRole::PrimarySurface,
+            );
+            add_matched_ring_band(
+                &mut builder,
+                &opposite_frame_ring,
+                &opposite_inner,
+                &frame_ring,
+                &cut.inner_points,
+                opposite_normal,
+                context,
+                cut.operation,
+                cut.rim_region,
+                SurfaceRole::Rim,
+            );
+            add_cut_wall_band(
+                &mut builder,
+                &outside_inner,
+                &opposite_inner,
+                &cut.inner_points,
+                cut.center,
+                context,
+                cut.operation,
+                cut.wall_region,
+            );
+
+            let mut mesh = builder.finish()?;
+            mark_boundary_loop(
+                &mut mesh,
+                &outside_inner,
+                cut.operation,
+                cut.boundary_loop,
+                cut.edge_treatment,
+            );
+            mark_boundary_loop(
+                &mut mesh,
+                &opposite_inner,
+                cut.operation,
+                cut.boundary_loop,
+                cut.edge_treatment,
+            );
+            let mut regions = plate_regions();
+            insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
+            insert_cut_region(
+                &mut regions,
+                cut.wall_region,
+                "cut_wall",
+                SurfaceRole::CutWall,
+            );
+            Ok(part(
+                mesh,
+                regions,
+                plate_sockets(half_y),
+                format!(
+                    "plate_cut:through:w={:.6}:h={:.6}:t={:.6}:op={}:face={:?}:cx={:.6}:cz={:.6}:n={}:frame={:.6},{:.6},{:.6},{:.6}",
+                    width,
+                    height,
+                    thickness,
+                    cut.operation.0,
+                    cut.face,
+                    cut.center[0],
+                    cut.center[1],
+                    cut.inner_points.len(),
+                    cut.frame.min_x,
+                    cut.frame.max_x,
+                    cut.frame.min_z,
+                    cut.frame.max_z
+                ),
+            ))
+        }
+    }
 }
 
 fn build_frustum_like(
@@ -739,6 +1043,779 @@ fn add_plate_band(
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum PlateCutKind {
+    Recessed { depth: f32, floor_region: RegionId },
+    Through,
+}
+
+#[derive(Debug, Clone)]
+struct PlateCutPlan {
+    kind: PlateCutKind,
+    operation: OperationId,
+    face: PlanarCutFace,
+    center: [f32; 2],
+    inner_points: Vec<[f32; 2]>,
+    frame_points: Vec<[f32; 2]>,
+    frame: Rect2,
+    boundary_loop: BoundaryLoopId,
+    outer_region: RegionId,
+    rim_region: RegionId,
+    wall_region: RegionId,
+    edge_treatment: CutEdgeTreatment,
+}
+
+impl PlateCutPlan {
+    fn from_operation(
+        operation: &ModelingOperationSpec,
+        half_x: f32,
+        half_z: f32,
+        thickness: f32,
+    ) -> Result<Self, ModelingError> {
+        match operation {
+            ModelingOperationSpec::RecessedPanelCut {
+                operation,
+                face,
+                center,
+                size,
+                depth,
+                corner_radius,
+                boundary_loop,
+                outer_region,
+                rim_region,
+                wall_region,
+                floor_region,
+                edge_treatment,
+                ..
+            } => {
+                let depth = finite_positive(*depth, "recessed_panel_cut.depth")?;
+                if depth >= thickness - EPSILON {
+                    return Err(ModelingError::InvalidInput(
+                        "recessed panel depth must leave material behind the cut".to_owned(),
+                    ));
+                }
+                let inner_points =
+                    rounded_cut_points(*center, *size, *corner_radius, CutPointCount::RoundedRect)?;
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
+                let frame_points = rounded_frame_points(*center, *size, *corner_radius, frame)?;
+                Ok(Self {
+                    kind: PlateCutKind::Recessed {
+                        depth,
+                        floor_region: *floor_region,
+                    },
+                    operation: *operation,
+                    face: *face,
+                    center: *center,
+                    inner_points,
+                    frame_points,
+                    frame,
+                    boundary_loop: *boundary_loop,
+                    outer_region: *outer_region,
+                    rim_region: *rim_region,
+                    wall_region: *wall_region,
+                    edge_treatment: *edge_treatment,
+                })
+            }
+            ModelingOperationSpec::RectangularThroughCut {
+                operation,
+                face,
+                center,
+                size,
+                corner_radius,
+                boundary_loop,
+                outer_region,
+                rim_region,
+                wall_region,
+                edge_treatment,
+                ..
+            } => {
+                let inner_points =
+                    rounded_cut_points(*center, *size, *corner_radius, CutPointCount::RoundedRect)?;
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
+                let frame_points = rounded_frame_points(*center, *size, *corner_radius, frame)?;
+                Ok(Self {
+                    kind: PlateCutKind::Through,
+                    operation: *operation,
+                    face: *face,
+                    center: *center,
+                    inner_points,
+                    frame_points,
+                    frame,
+                    boundary_loop: *boundary_loop,
+                    outer_region: *outer_region,
+                    rim_region: *rim_region,
+                    wall_region: *wall_region,
+                    edge_treatment: *edge_treatment,
+                })
+            }
+            ModelingOperationSpec::CircularThroughCut {
+                operation,
+                face,
+                center,
+                radius,
+                radial_segments,
+                boundary_loop,
+                outer_region,
+                rim_region,
+                wall_region,
+                edge_treatment,
+                ..
+            } => {
+                let radius = finite_positive(*radius, "circular_through_cut.radius")?;
+                let segments = (*radial_segments).max(6);
+                let mut inner_points = Vec::with_capacity(segments as usize);
+                for index in 0..segments {
+                    let angle = 2.0 * PI * index as f32 / segments as f32;
+                    let (sin, cos) = angle.sin_cos();
+                    inner_points.push([center[0] + radius * cos, center[1] + radius * sin]);
+                }
+                let frame = cut_frame_rect(*center, &inner_points, half_x, half_z)?;
+                let frame_points = inner_points
+                    .iter()
+                    .map(|point| ray_to_rect(*center, *point, frame))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Self {
+                    kind: PlateCutKind::Through,
+                    operation: *operation,
+                    face: *face,
+                    center: *center,
+                    inner_points,
+                    frame_points,
+                    frame,
+                    boundary_loop: *boundary_loop,
+                    outer_region: *outer_region,
+                    rim_region: *rim_region,
+                    wall_region: *wall_region,
+                    edge_treatment: *edge_treatment,
+                })
+            }
+            _ => Err(ModelingError::InvalidInput(
+                "build_cut_plate received a non-cut operation".to_owned(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum CutPointCount {
+    RoundedRect,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Rect2 {
+    min_x: f32,
+    max_x: f32,
+    min_z: f32,
+    max_z: f32,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum RectSide {
+    Right,
+    Top,
+    Left,
+    Bottom,
+}
+
+fn rounded_cut_points(
+    center: [f32; 2],
+    size: [f32; 2],
+    corner_radius: f32,
+    _count: CutPointCount,
+) -> Result<Vec<[f32; 2]>, ModelingError> {
+    let width = finite_positive(size[0], "cut.size.x")?;
+    let height = finite_positive(size[1], "cut.size.y")?;
+    let radius = finite_non_negative(corner_radius, "cut.corner_radius")?
+        .min(width.min(height) * 0.5 - EPSILON);
+    let local = rounded_rect_points(width * 0.5, height * 0.5, radius.max(0.0), 4);
+    Ok(local
+        .into_iter()
+        .map(|point| [point[0] + center[0], point[1] + center[1]])
+        .collect())
+}
+
+fn rounded_frame_points(
+    center: [f32; 2],
+    size: [f32; 2],
+    corner_radius: f32,
+    frame: Rect2,
+) -> Result<Vec<[f32; 2]>, ModelingError> {
+    let frame_half_x = (frame.max_x - frame.min_x) * 0.5;
+    let frame_half_z = (frame.max_z - frame.min_z) * 0.5;
+    let rim_x = (frame_half_x - size[0] * 0.5).max(0.0);
+    let rim_z = (frame_half_z - size[1] * 0.5).max(0.0);
+    let rim = rim_x.min(rim_z);
+    let radius = if corner_radius > EPSILON {
+        finite_non_negative(corner_radius, "cut.corner_radius")? + rim
+    } else {
+        0.0
+    }
+    .min(frame_half_x.min(frame_half_z));
+    Ok(rounded_rect_points(frame_half_x, frame_half_z, radius, 4)
+        .into_iter()
+        .map(|point| [point[0] + center[0], point[1] + center[1]])
+        .collect())
+}
+
+fn cut_frame_rect(
+    center: [f32; 2],
+    inner_points: &[[f32; 2]],
+    half_x: f32,
+    half_z: f32,
+) -> Result<Rect2, ModelingError> {
+    let inner_bounds = bounds_2d(inner_points)?;
+    if inner_bounds.min_x <= -half_x + EPSILON
+        || inner_bounds.max_x >= half_x - EPSILON
+        || inner_bounds.min_z <= -half_z + EPSILON
+        || inner_bounds.max_z >= half_z - EPSILON
+    {
+        return Err(ModelingError::InvalidInput(
+            "cut boundary must stay inside the plate face".to_owned(),
+        ));
+    }
+    let clearance = [
+        inner_bounds.min_x - -half_x,
+        half_x - inner_bounds.max_x,
+        inner_bounds.min_z - -half_z,
+        half_z - inner_bounds.max_z,
+    ]
+    .into_iter()
+    .fold(f32::INFINITY, f32::min);
+    if !clearance.is_finite() || clearance <= EPSILON {
+        return Err(ModelingError::InvalidInput(
+            "cut has no safe margin to the host boundary".to_owned(),
+        ));
+    }
+    let opening_span = (inner_bounds.max_x - inner_bounds.min_x)
+        .min(inner_bounds.max_z - inner_bounds.min_z)
+        .max(EPSILON);
+    let required_margin = opening_span * 0.12;
+    if clearance < required_margin {
+        return Err(ModelingError::InvalidInput(
+            "cut rim requires a safe margin from the host boundary".to_owned(),
+        ));
+    }
+    let rim = (opening_span * 0.16).clamp(EPSILON * 10.0, clearance * 0.6);
+    let frame = Rect2 {
+        min_x: inner_bounds.min_x - rim,
+        max_x: inner_bounds.max_x + rim,
+        min_z: inner_bounds.min_z - rim,
+        max_z: inner_bounds.max_z + rim,
+    };
+    if frame.min_x <= -half_x + EPSILON
+        || frame.max_x >= half_x - EPSILON
+        || frame.min_z <= -half_z + EPSILON
+        || frame.max_z >= half_z - EPSILON
+    {
+        return Err(ModelingError::InvalidInput(
+            "cut rim overlaps the host boundary".to_owned(),
+        ));
+    }
+    if center[0] <= frame.min_x
+        || center[0] >= frame.max_x
+        || center[1] <= frame.min_z
+        || center[1] >= frame.max_z
+    {
+        return Err(ModelingError::InvalidInput(
+            "cut center must lie inside the generated frame".to_owned(),
+        ));
+    }
+    Ok(frame)
+}
+
+fn bounds_2d(points: &[[f32; 2]]) -> Result<Rect2, ModelingError> {
+    if points.len() < 3 {
+        return Err(ModelingError::InvalidInput(
+            "cut boundary requires at least three points".to_owned(),
+        ));
+    }
+    let mut bounds = Rect2 {
+        min_x: f32::INFINITY,
+        max_x: f32::NEG_INFINITY,
+        min_z: f32::INFINITY,
+        max_z: f32::NEG_INFINITY,
+    };
+    for point in points {
+        if !point.iter().copied().all(f32::is_finite) {
+            return Err(ModelingError::InvalidInput(
+                "cut boundary contains a non-finite point".to_owned(),
+            ));
+        }
+        bounds.min_x = bounds.min_x.min(point[0]);
+        bounds.max_x = bounds.max_x.max(point[0]);
+        bounds.min_z = bounds.min_z.min(point[1]);
+        bounds.max_z = bounds.max_z.max(point[1]);
+    }
+    Ok(bounds)
+}
+
+fn rect_points(min_x: f32, max_x: f32, min_z: f32, max_z: f32) -> Vec<[f32; 2]> {
+    vec![
+        [max_x, max_z],
+        [min_x, max_z],
+        [min_x, min_z],
+        [max_x, min_z],
+    ]
+}
+
+fn ray_to_rect(center: [f32; 2], point: [f32; 2], rect: Rect2) -> Result<[f32; 2], ModelingError> {
+    let delta = [point[0] - center[0], point[1] - center[1]];
+    if dot2(delta, delta) <= EPSILON {
+        return Err(ModelingError::InvalidInput(
+            "cut boundary point cannot equal the cut center".to_owned(),
+        ));
+    }
+    let mut t = f32::INFINITY;
+    if delta[0] > EPSILON {
+        t = t.min((rect.max_x - center[0]) / delta[0]);
+    } else if delta[0] < -EPSILON {
+        t = t.min((rect.min_x - center[0]) / delta[0]);
+    }
+    if delta[1] > EPSILON {
+        t = t.min((rect.max_z - center[1]) / delta[1]);
+    } else if delta[1] < -EPSILON {
+        t = t.min((rect.min_z - center[1]) / delta[1]);
+    }
+    if !t.is_finite() || t <= 1.0 {
+        return Err(ModelingError::InvalidInput(
+            "cut rim must expand outward from the cut boundary".to_owned(),
+        ));
+    }
+    Ok([center[0] + delta[0] * t, center[1] + delta[1] * t])
+}
+
+fn planar_plate_face_sign(
+    face: PlanarCutFace,
+    operation: OperationId,
+) -> Result<f32, ModelingError> {
+    match face {
+        PlanarCutFace::PositiveY => Ok(1.0),
+        PlanarCutFace::NegativeY => Ok(-1.0),
+        _ => Err(ModelingError::UnsupportedOperation {
+            operation,
+            reason: "plate semantic cuts currently target only local +/-Y planar faces".to_owned(),
+        }),
+    }
+}
+
+fn add_plate_shell_sides(
+    builder: &mut MeshBuilder,
+    back_ring: &[u32],
+    front_ring: &[u32],
+    points: &[[f32; 2]],
+    context: &GeneratorContext,
+    operation: OperationId,
+) {
+    for index in 0..points.len() {
+        let next = (index + 1) % points.len();
+        let midpoint = [
+            (points[index][0] + points[next][0]) * 0.5,
+            0.0,
+            (points[index][1] + points[next][1]) * 0.5,
+        ];
+        add_oriented_face(
+            builder,
+            vec![
+                back_ring[index],
+                back_ring[next],
+                front_ring[next],
+                front_ring[index],
+            ],
+            normalize_or(midpoint, [1.0, 0.0, 0.0]),
+            cut_metadata(
+                context,
+                PLATE_SIDE_REGION,
+                SurfaceRole::Side,
+                operation,
+                Some(2),
+            ),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_host_to_ring_cap(
+    builder: &mut MeshBuilder,
+    host_vertices: &[u32],
+    host_points: &[[f32; 2]],
+    ring_vertices: &[u32],
+    ring_points: &[[f32; 2]],
+    frame: Rect2,
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+    role: SurfaceRole,
+) {
+    let mut by_side: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
+    for (index, point) in ring_points.iter().copied().enumerate() {
+        for side in [
+            RectSide::Right,
+            RectSide::Top,
+            RectSide::Left,
+            RectSide::Bottom,
+        ] {
+            if point_on_frame_side(point, frame, side) {
+                by_side[side_index(side)].push(index);
+            }
+        }
+    }
+    by_side[side_index(RectSide::Top)]
+        .sort_by(|left, right| ring_points[*left][0].total_cmp(&ring_points[*right][0]));
+    by_side[side_index(RectSide::Left)]
+        .sort_by(|left, right| ring_points[*left][1].total_cmp(&ring_points[*right][1]));
+    by_side[side_index(RectSide::Bottom)]
+        .sort_by(|left, right| ring_points[*right][0].total_cmp(&ring_points[*left][0]));
+    by_side[side_index(RectSide::Right)]
+        .sort_by(|left, right| ring_points[*right][1].total_cmp(&ring_points[*left][1]));
+    add_host_side_cap(
+        builder,
+        [host_vertices[0], host_vertices[1]],
+        &by_side[side_index(RectSide::Top)],
+        ring_vertices,
+        desired_normal,
+        context,
+        operation,
+        region,
+        role.clone(),
+    );
+    add_host_side_cap(
+        builder,
+        [host_vertices[1], host_vertices[2]],
+        &by_side[side_index(RectSide::Left)],
+        ring_vertices,
+        desired_normal,
+        context,
+        operation,
+        region,
+        role.clone(),
+    );
+    add_host_side_cap(
+        builder,
+        [host_vertices[2], host_vertices[3]],
+        &by_side[side_index(RectSide::Bottom)],
+        ring_vertices,
+        desired_normal,
+        context,
+        operation,
+        region,
+        role.clone(),
+    );
+    add_host_side_cap(
+        builder,
+        [host_vertices[3], host_vertices[0]],
+        &by_side[side_index(RectSide::Right)],
+        ring_vertices,
+        desired_normal,
+        context,
+        operation,
+        region,
+        role.clone(),
+    );
+    for index in 0..ring_points.len() {
+        let next = (index + 1) % ring_points.len();
+        if edge_lies_on_frame_side(ring_points[index], ring_points[next], frame) {
+            continue;
+        }
+        let midpoint = [
+            (ring_points[index][0] + ring_points[next][0]) * 0.5,
+            (ring_points[index][1] + ring_points[next][1]) * 0.5,
+        ];
+        let corner = corner_for_frame_segment(midpoint, frame);
+        let corner_index = nearest_host_corner(host_points, corner);
+        add_oriented_face(
+            builder,
+            vec![
+                host_vertices[corner_index],
+                ring_vertices[index],
+                ring_vertices[next],
+            ],
+            desired_normal,
+            cut_metadata(context, region, role.clone(), operation, None),
+        );
+    }
+}
+
+fn corner_for_frame_segment(midpoint: [f32; 2], frame: Rect2) -> usize {
+    let center = [
+        (frame.min_x + frame.max_x) * 0.5,
+        (frame.min_z + frame.max_z) * 0.5,
+    ];
+    match (midpoint[0] >= center[0], midpoint[1] >= center[1]) {
+        (true, true) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+        (true, false) => 3,
+    }
+}
+
+fn point_on_frame_side(point: [f32; 2], frame: Rect2, side: RectSide) -> bool {
+    let tolerance = EPSILON * 10.0;
+    match side {
+        RectSide::Right => (point[0] - frame.max_x).abs() <= tolerance,
+        RectSide::Top => (point[1] - frame.max_z).abs() <= tolerance,
+        RectSide::Left => (point[0] - frame.min_x).abs() <= tolerance,
+        RectSide::Bottom => (point[1] - frame.min_z).abs() <= tolerance,
+    }
+}
+
+fn edge_lies_on_frame_side(first: [f32; 2], second: [f32; 2], frame: Rect2) -> bool {
+    [
+        RectSide::Right,
+        RectSide::Top,
+        RectSide::Left,
+        RectSide::Bottom,
+    ]
+    .into_iter()
+    .any(|side| point_on_frame_side(first, frame, side) && point_on_frame_side(second, frame, side))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_host_side_cap(
+    builder: &mut MeshBuilder,
+    host_edge: [u32; 2],
+    side_indices: &[usize],
+    ring_vertices: &[u32],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+    role: SurfaceRole,
+) {
+    if side_indices.len() < 2 {
+        return;
+    }
+    let mut vertices = vec![host_edge[0], host_edge[1]];
+    for index in side_indices {
+        vertices.push(ring_vertices[*index]);
+    }
+    add_oriented_face(
+        builder,
+        vertices,
+        desired_normal,
+        cut_metadata(context, region, role, operation, None),
+    );
+}
+
+fn side_index(side: RectSide) -> usize {
+    match side {
+        RectSide::Right => 0,
+        RectSide::Top => 1,
+        RectSide::Left => 2,
+        RectSide::Bottom => 3,
+    }
+}
+
+fn nearest_host_corner(host_points: &[[f32; 2]], corner: usize) -> usize {
+    let target = match corner {
+        0 => [f32::INFINITY, f32::INFINITY],
+        1 => [f32::NEG_INFINITY, f32::INFINITY],
+        2 => [f32::NEG_INFINITY, f32::NEG_INFINITY],
+        _ => [f32::INFINITY, f32::NEG_INFINITY],
+    };
+    host_points
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            let left_key = corner_sort_key(**left, target);
+            let right_key = corner_sort_key(**right, target);
+            left_key.total_cmp(&right_key)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(corner.min(host_points.len().saturating_sub(1)))
+}
+
+fn corner_sort_key(point: [f32; 2], target: [f32; 2]) -> f32 {
+    let x = if target[0].is_sign_positive() {
+        -point[0]
+    } else {
+        point[0]
+    };
+    let z = if target[1].is_sign_positive() {
+        -point[1]
+    } else {
+        point[1]
+    };
+    x + z
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_matched_ring_band(
+    builder: &mut MeshBuilder,
+    outer_ring: &[u32],
+    inner_ring: &[u32],
+    outer_points: &[[f32; 2]],
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+    role: SurfaceRole,
+) {
+    for index in 0..outer_ring.len() {
+        let next = (index + 1) % outer_ring.len();
+        add_oriented_face(
+            builder,
+            vec![
+                outer_ring[index],
+                outer_ring[next],
+                inner_ring[next],
+                inner_ring[index],
+            ],
+            desired_normal,
+            cut_metadata(context, region, role.clone(), operation, None),
+        );
+        let side_a = outer_points[index];
+        let side_b = outer_points[next];
+        if (side_a[0] - side_b[0]).abs() > EPSILON && (side_a[1] - side_b[1]).abs() > EPSILON {
+            let midpoint = [
+                (inner_points[index][0] + inner_points[next][0]) * 0.5,
+                0.0,
+                (inner_points[index][1] + inner_points[next][1]) * 0.5,
+            ];
+            let _ = midpoint;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_cut_wall_band(
+    builder: &mut MeshBuilder,
+    front_ring: &[u32],
+    back_ring: &[u32],
+    points: &[[f32; 2]],
+    center: [f32; 2],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+) {
+    for index in 0..front_ring.len() {
+        let next = (index + 1) % front_ring.len();
+        let midpoint = [
+            (points[index][0] + points[next][0]) * 0.5,
+            0.0,
+            (points[index][1] + points[next][1]) * 0.5,
+        ];
+        let desired = normalize_or(
+            [center[0] - midpoint[0], 0.0, center[1] - midpoint[2]],
+            [1.0, 0.0, 0.0],
+        );
+        add_oriented_face(
+            builder,
+            vec![
+                front_ring[index],
+                front_ring[next],
+                back_ring[next],
+                back_ring[index],
+            ],
+            desired,
+            cut_metadata(context, region, SurfaceRole::CutWall, operation, None),
+        );
+    }
+}
+
+fn add_cap_oriented(
+    builder: &mut MeshBuilder,
+    vertices: Vec<u32>,
+    desired_normal: [f32; 3],
+    metadata: FaceMetadata,
+) {
+    add_oriented_face(builder, vertices, desired_normal, metadata);
+}
+
+fn add_oriented_face(
+    builder: &mut MeshBuilder,
+    mut vertices: Vec<u32>,
+    desired_normal: [f32; 3],
+    metadata: FaceMetadata,
+) {
+    if face_normal_dot(&builder.positions, &vertices, desired_normal) < 0.0 {
+        vertices.reverse();
+    }
+    builder.add_face(vertices, metadata);
+}
+
+fn face_normal_dot(positions: &[[f32; 3]], vertices: &[u32], desired: [f32; 3]) -> f32 {
+    let mut normal = [0.0; 3];
+    for index in 0..vertices.len() {
+        let current = positions[vertices[index] as usize];
+        let next = positions[vertices[(index + 1) % vertices.len()] as usize];
+        normal[0] += (current[1] - next[1]) * (current[2] + next[2]);
+        normal[1] += (current[2] - next[2]) * (current[0] + next[0]);
+        normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
+    }
+    dot(normal, desired)
+}
+
+fn cut_metadata(
+    context: &GeneratorContext,
+    region: RegionId,
+    surface_role: SurfaceRole,
+    operation: OperationId,
+    smoothing_group: Option<u32>,
+) -> FaceMetadata {
+    FaceMetadata {
+        part_definition: Some(context.part_definition),
+        part_instance: Some(context.part_instance),
+        region: Some(region),
+        operation: Some(operation),
+        smoothing_group,
+        surface_role: Some(surface_role),
+    }
+}
+
+fn mark_boundary_loop(
+    mesh: &mut PolygonMesh,
+    ring: &[u32],
+    operation: OperationId,
+    boundary_loop: BoundaryLoopId,
+    treatment: CutEdgeTreatment,
+) {
+    for index in 0..ring.len() {
+        let next = (index + 1) % ring.len();
+        let key = EdgeKey::new(ring[index], ring[next]);
+        if let Some(metadata) = mesh.edge_metadata.get_mut(&key) {
+            metadata.boundary_role = BoundaryRole::Feature;
+            metadata.classification = EdgeClassification::Hard;
+            metadata.seam_candidate = matches!(treatment, CutEdgeTreatment::BevelEligible);
+            metadata.operation = Some(operation);
+            metadata.boundary_loop = Some(boundary_loop);
+        }
+    }
+}
+
+fn insert_cut_region(
+    regions: &mut BTreeMap<RegionId, SurfaceRegionSpec>,
+    id: RegionId,
+    name: &'static str,
+    role: SurfaceRole,
+) {
+    regions.entry(id).or_insert_with(|| {
+        let mut tags = BTreeSet::new();
+        tags.insert("cut".to_owned());
+        tags.insert(name.replace('_', "-"));
+        SurfaceRegionSpec {
+            id,
+            name: name.to_owned(),
+            role,
+            tags,
+        }
+    });
+}
+
+fn normalize_or(value: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {
+    let length = dot(value, value).sqrt();
+    if length <= EPSILON {
+        fallback
+    } else {
+        [value[0] / length, value[1] / length, value[2] / length]
+    }
+}
+
+fn dot2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
 #[derive(Debug, Clone)]
 struct Ring {
     y: f32,
@@ -944,6 +2021,7 @@ fn build_edge_metadata(mesh: &PolygonMesh) -> BTreeMap<EdgeKey, EdgeMetadata> {
                     seam_candidate: false,
                     operation: None,
                     region_transition: None,
+                    boundary_loop: None,
                 }
             } else {
                 let first = &mesh.face_metadata[faces[0]];
@@ -964,6 +2042,7 @@ fn build_edge_metadata(mesh: &PolygonMesh) -> BTreeMap<EdgeKey, EdgeMetadata> {
                     seam_candidate: false,
                     operation: None,
                     region_transition: region_transition(first.region, second.region),
+                    boundary_loop: None,
                 }
             };
             (edge, metadata)

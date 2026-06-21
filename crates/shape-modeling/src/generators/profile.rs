@@ -833,6 +833,7 @@ fn sweep_edge_metadata(
                 seam_candidate,
                 operation: None,
                 region_transition: transition,
+                boundary_loop: None,
             },
         );
     }
@@ -949,6 +950,7 @@ fn lathe_edge_metadata(
                 seam_candidate,
                 operation: None,
                 region_transition: transition,
+                boundary_loop: None,
             },
         );
     }

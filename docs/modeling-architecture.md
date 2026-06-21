@@ -35,7 +35,7 @@ shape-compile validation, triangulation, provenance, statistics
 AssetArtifact with grouped OBJ, preview triangles, and Blender reconstruction script
 ```
 
-Wave 2 compiles the first complete explicit assets. `RoundedBox`, `Cylinder`, `Frustum`, `Plate`, `Sweep`, `Lathe`, and `LiteralMesh` sources dispatch to deterministic generators. Reserved boolean and deformation-program sources remain typed unsupported paths and are not used by the benchmark assets.
+The explicit lane compiles complete authored assets. `RoundedBox`, `Cylinder`, `Frustum`, `Plate`, `Sweep`, `Lathe`, and `LiteralMesh` sources dispatch to deterministic generators. `Plate` supports constrained semantic cuts on planar faces: `RecessedPanelCut`, `RectangularThroughCut`, and `CircularThroughCut`. These cuts generate boundary-loop IDs, rim/wall/floor regions, hard-edge and bevel-eligibility metadata, and operation provenance. Reserved arbitrary boolean and deformation-program sources remain typed unsupported paths.
 
 ## Semantic Recipe Layer
 
@@ -44,7 +44,7 @@ Wave 2 compiles the first complete explicit assets. `RoundedBox`, `Cylinder`, `F
 Part definitions declare:
 
 - a `GeometryRecipe` with one base `GeometrySource` and ordered `ModelingOperationSpec` values
-- generic `SurfaceRegionSpec` values such as `PrimarySurface`, `Cap`, `Side`, `BevelBand`, `Panel`, `Trim`, `Attachment`, `Interior`, and `Detail`
+- generic `SurfaceRegionSpec` values such as `PrimarySurface`, `Cap`, `Side`, `BevelBand`, `Panel`, `Trim`, `Rim`, `CutWall`, `Attachment`, `Interior`, and `Detail`
 - generic `SocketSpec` values with local frames for later attachment and articulation work
 - a local pivot frame and optional variant or production hints
 
@@ -96,7 +96,7 @@ The Blender script creates one object per part occurrence from canonical arrays,
 
 ## ID Stability Contract
 
-Part, operation, region, and socket IDs are semantic IDs. They must remain stable when unrelated parameters change.
+Part, operation, region, boundary-loop, and socket IDs are semantic IDs. They must remain stable when unrelated parameters change.
 
 Vertex and face IDs are deterministic for a given topology signature. They are not promised to survive topology-changing parameters such as radial segment counts, array counts, or sweep profile resolution.
 
@@ -104,4 +104,4 @@ Provenance must always connect generated polygon elements back to semantic IDs. 
 
 ## Boundaries
 
-This lane deliberately avoids materials, textures, UV coordinates, rig data, animation, LLM integration, generic mesh booleans, arbitrary imported-mesh editing, and SDF production geometry. Surface regions and seam candidates are metadata for future systems, not material or UV implementations.
+This lane deliberately avoids materials, textures, UV coordinates, rig data, animation, LLM integration, generic mesh booleans, arbitrary imported-mesh editing, and SDF production geometry. The current cut operations are controlled topology generators for supported plate faces, not arbitrary triangle-mesh subtraction. Surface regions, boundary loops, and seam candidates are metadata for future systems, not material or UV implementations.

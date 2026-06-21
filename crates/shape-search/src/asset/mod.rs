@@ -577,6 +577,9 @@ fn collect_definition_opportunities(
                 ModelingOperationSpec::TransformGeometry { .. }
                 | ModelingOperationSpec::AddPanel { .. }
                 | ModelingOperationSpec::AddTrim { .. }
+                | ModelingOperationSpec::RecessedPanelCut { .. }
+                | ModelingOperationSpec::RectangularThroughCut { .. }
+                | ModelingOperationSpec::CircularThroughCut { .. }
                 | ModelingOperationSpec::MirrorInstances { .. }
                 | ModelingOperationSpec::ReservedBoolean { .. }
                 | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}

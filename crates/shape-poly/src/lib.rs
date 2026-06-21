@@ -12,7 +12,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use glam::{EulerRot, Mat3, Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    OperationId, PartDefinitionId, PartInstanceId, RegionId, SurfaceRole, Transform3,
+    BoundaryLoopId, OperationId, PartDefinitionId, PartInstanceId, RegionId, SurfaceRole,
+    Transform3,
 };
 use thiserror::Error;
 
@@ -202,6 +203,9 @@ pub struct EdgeMetadata {
     pub operation: Option<OperationId>,
     /// Optional transition between two semantic regions.
     pub region_transition: Option<(RegionId, RegionId)>,
+    /// Optional generated boundary loop identity.
+    #[serde(default)]
+    pub boundary_loop: Option<BoundaryLoopId>,
 }
 
 impl EdgeMetadata {
@@ -214,6 +218,7 @@ impl EdgeMetadata {
             seam_candidate: true,
             operation: None,
             region_transition: None,
+            boundary_loop: None,
         }
     }
 
@@ -226,6 +231,7 @@ impl EdgeMetadata {
             seam_candidate: false,
             operation: None,
             region_transition: None,
+            boundary_loop: None,
         }
     }
 
@@ -238,6 +244,7 @@ impl EdgeMetadata {
             seam_candidate: false,
             operation: None,
             region_transition: None,
+            boundary_loop: None,
         }
     }
 }

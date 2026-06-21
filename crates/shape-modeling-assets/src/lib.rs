@@ -5,10 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AssetRelationshipPolicy, Frame3, GeometryRecipe, GeometrySource,
-    ModelingOperationSpec, OperationId, ParameterDescriptor, ParameterId, PartDefinition,
-    PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec,
-    SurfaceRegionSpec, SurfaceRole, Transform3,
+    AssetId, AssetRecipe, AssetRelationshipPolicy, BoundaryLoopId, CutEdgeTreatment, Frame3,
+    GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterDescriptor,
+    ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace,
+    RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
 };
 
 /// Built-in explicit modeling benchmark asset.
@@ -123,15 +123,25 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
         PartDefinitionId(3),
         definition_with_regions(
             3,
-            "raised crate panel",
+            "recessed crate panel",
             GeometrySource::Plate {
                 size: [3.25, 0.82],
                 thickness: 0.10,
             },
-            vec![ModelingOperationSpec::SetBevelProfile {
-                operation: OperationId(3),
-                radius: 0.025,
-                segments: 1,
+            vec![ModelingOperationSpec::RecessedPanelCut {
+                operation: OperationId(13),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveY,
+                center: [0.0, 0.0],
+                size: [2.38, 0.48],
+                depth: 0.045,
+                corner_radius: 0.075,
+                boundary_loop: BoundaryLoopId(1),
+                outer_region: RegionId(1),
+                rim_region: RegionId(20),
+                wall_region: RegionId(21),
+                floor_region: RegionId(22),
+                edge_treatment: CutEdgeTreatment::BevelEligible,
             }],
             plate_regions(),
             BTreeMap::new(),
@@ -217,10 +227,18 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                 thickness: 0.045,
             },
             vec![
-                ModelingOperationSpec::SetBevelProfile {
-                    operation: OperationId(10),
-                    radius: 0.01,
-                    segments: 1,
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(14),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveY,
+                    center: [0.0, 0.0],
+                    size: [0.42, 0.032],
+                    corner_radius: 0.006,
+                    boundary_loop: BoundaryLoopId(2),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(23),
+                    wall_region: RegionId(24),
+                    edge_treatment: CutEdgeTreatment::Hard,
                 },
                 ModelingOperationSpec::LinearArray {
                     operation: OperationId(11),
@@ -271,7 +289,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
         &mut recipe,
         6,
         3,
-        "front raised panel",
+        "front recessed panel",
         Some(PartInstanceId(1)),
         transform([0.0, 0.06, 1.27], [90.0, 0.0, 0.0]),
     );
@@ -279,7 +297,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
         &mut recipe,
         7,
         3,
-        "back raised panel",
+        "back recessed panel",
         Some(PartInstanceId(1)),
         transform([0.0, 0.06, -1.27], [-90.0, 0.0, 0.0]),
     );
@@ -448,7 +466,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
         ParameterId(7),
         parameter(
             7,
-            "Raised panel thickness",
+            "Panel thickness",
             "Detail Density",
             "definition.3.geometry.plate.thickness",
             0.06,
@@ -492,8 +510,80 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             0.02,
         ),
     );
+    recipe.parameters.insert(
+        ParameterId(11),
+        parameter(
+            11,
+            "Panel recess width",
+            "Panel Cuts",
+            "definition.3.operation.13.recessed_panel_cut.size.x",
+            1.85,
+            2.85,
+            0.05,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(12),
+        parameter(
+            12,
+            "Panel recess height",
+            "Panel Cuts",
+            "definition.3.operation.13.recessed_panel_cut.size.y",
+            0.34,
+            0.64,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(13),
+        parameter(
+            13,
+            "Panel recess depth",
+            "Panel Cuts",
+            "definition.3.operation.13.recessed_panel_cut.depth",
+            0.025,
+            0.075,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(14),
+        parameter(
+            14,
+            "Panel corner radius",
+            "Panel Cuts",
+            "definition.3.operation.13.recessed_panel_cut.corner_radius",
+            0.04,
+            0.14,
+            0.01,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(15),
+        parameter(
+            15,
+            "Vent opening width",
+            "Vent Cuts",
+            "definition.7.operation.14.rectangular_through_cut.size.x",
+            0.26,
+            0.62,
+            0.03,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(16),
+        parameter(
+            16,
+            "Vent opening height",
+            "Vent Cuts",
+            "definition.7.operation.14.rectangular_through_cut.size.y",
+            0.022,
+            0.045,
+            0.003,
+        ),
+    );
     recipe.root_instances.push(PartInstanceId(1));
-    finish_ids(&mut recipe, 9, 18, 13, 3);
+    finish_ids(&mut recipe, 9, 18, 15, 3);
     recipe
 }
 
@@ -1323,7 +1413,24 @@ fn finish_ids(
     recipe.next_ids.region = recipe
         .definitions
         .values()
-        .flat_map(|definition| definition.regions.keys())
+        .flat_map(|definition| {
+            definition.regions.keys().copied().chain(
+                definition
+                    .geometry
+                    .operations
+                    .iter()
+                    .flat_map(ModelingOperationSpec::generated_region_ids),
+            )
+        })
+        .map(|id| id.0)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    recipe.next_ids.boundary_loop = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .flat_map(ModelingOperationSpec::boundary_loop_ids)
         .map(|id| id.0)
         .max()
         .unwrap_or(0)

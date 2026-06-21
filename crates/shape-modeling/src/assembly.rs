@@ -91,6 +91,9 @@ impl AssemblyPlan {
                     | ModelingOperationSpec::SetBevelProfile { .. }
                     | ModelingOperationSpec::AddPanel { .. }
                     | ModelingOperationSpec::AddTrim { .. }
+                    | ModelingOperationSpec::RecessedPanelCut { .. }
+                    | ModelingOperationSpec::RectangularThroughCut { .. }
+                    | ModelingOperationSpec::CircularThroughCut { .. }
                     | ModelingOperationSpec::ReservedBoolean { .. }
                     | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}
                 }

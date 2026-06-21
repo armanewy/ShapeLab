@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use shape_asset::{PartDefinitionId, PartInstanceId, RegionId, SocketId};
+use shape_asset::{
+    BoundaryLoopId, CutEdgeTreatment, Frame3, GeometryRecipe, GeometrySource,
+    ModelingOperationSpec, OperationId, PartDefinition, PartDefinitionId, PartInstanceId,
+    PlanarCutFace, RegionId, SocketId, SurfaceRole,
+};
 use shape_modeling::generators::basic::{
     CapMode, CylinderParams, FaceMask, FrustumParams, PlateParams, RoundedBoxParams,
-    build_cylinder, build_frustum, build_plate, build_rounded_box,
+    build_cylinder, build_frustum, build_plate, build_rounded_box, generate_plate,
 };
 use shape_modeling::{GeneratedPart, GeneratorContext};
 use shape_poly::{
@@ -253,20 +257,250 @@ fn plate_is_closed_rounded_and_semantic() {
     );
 }
 
+#[test]
+fn plate_recessed_panel_cut_is_closed_semantic_and_loop_tagged() {
+    let operation = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(30),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [1.45, 0.72],
+        depth: 0.08,
+        corner_radius: 0.12,
+        boundary_loop: BoundaryLoopId(7),
+        outer_region: RegionId(1),
+        rim_region: RegionId(20),
+        wall_region: RegionId(21),
+        floor_region: RegionId(22),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let part = generate_cut_plate(operation).expect("recessed panel cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_faces_use_regions(
+        &part,
+        &[
+            RegionId(1),
+            RegionId(2),
+            RegionId(3),
+            RegionId(20),
+            RegionId(21),
+            RegionId(22),
+        ],
+    );
+    assert_region_role(&part, RegionId(20), SurfaceRole::Rim);
+    assert_region_role(&part, RegionId(21), SurfaceRole::CutWall);
+    assert_region_role(&part, RegionId(22), SurfaceRole::Interior);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(7), OperationId(30), true);
+    assert_face_operation_present(&part.mesh, OperationId(30));
+}
+
+#[test]
+fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
+    let operation = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        boundary_loop: BoundaryLoopId(8),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+    let part = generate_cut_plate(operation).expect("rectangular through cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_faces_use_regions(
+        &part,
+        &[RegionId(1), RegionId(3), RegionId(23), RegionId(24)],
+    );
+    assert_region_role(&part, RegionId(23), SurfaceRole::Rim);
+    assert_region_role(&part, RegionId(24), SurfaceRole::CutWall);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(8), OperationId(31), false);
+    assert_face_operation_present(&part.mesh, OperationId(31));
+}
+
+#[test]
+fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
+    let operation = ModelingOperationSpec::CircularThroughCut {
+        operation: OperationId(32),
+        region: RegionId(1),
+        face: PlanarCutFace::NegativeY,
+        center: [-0.12, 0.06],
+        radius: 0.36,
+        radial_segments: 12,
+        boundary_loop: BoundaryLoopId(9),
+        outer_region: RegionId(1),
+        rim_region: RegionId(25),
+        wall_region: RegionId(26),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let part = generate_cut_plate(operation.clone()).expect("circular through cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_role(&part, RegionId(25), SurfaceRole::Rim);
+    assert_region_role(&part, RegionId(26), SurfaceRole::CutWall);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(9), OperationId(32), true);
+
+    let repeated = generate_cut_plate(operation).expect("repeat should generate");
+    assert_deterministic_ids(&part.mesh, &repeated.mesh);
+}
+
+#[test]
+fn plate_cut_rejects_host_boundary_overlap() {
+    let operation = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(33),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [2.95, 1.85],
+        corner_radius: 0.0,
+        boundary_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+
+    assert!(generate_cut_plate(operation).is_err());
+}
+
+#[test]
+fn crate_recessed_panel_proportions_are_directed_closed() {
+    let operation = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(34),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [2.38, 0.48],
+        depth: 0.045,
+        corner_radius: 0.075,
+        boundary_loop: BoundaryLoopId(11),
+        outer_region: RegionId(1),
+        rim_region: RegionId(20),
+        wall_region: RegionId(21),
+        floor_region: RegionId(22),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let part = generate_cut_plate_with_source(operation, [3.25, 0.82], 0.10)
+        .expect("crate panel cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+}
+
+#[test]
+fn crate_ventilation_slat_cut_proportions_are_directed_closed() {
+    let operation = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(35),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.42, 0.032],
+        corner_radius: 0.006,
+        boundary_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+    let part = generate_cut_plate_with_source(operation, [0.84, 0.08], 0.045)
+        .expect("crate ventilation slat cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+}
+
 fn context() -> GeneratorContext {
     GeneratorContext::new(PartDefinitionId(7), PartInstanceId(11), 100, 0)
 }
 
+fn generate_cut_plate(
+    operation: ModelingOperationSpec,
+) -> Result<GeneratedPart, shape_modeling::ModelingError> {
+    generate_cut_plate_with_source(operation, [3.0, 2.0], 0.30)
+}
+
+fn generate_cut_plate_with_source(
+    operation: ModelingOperationSpec,
+    size: [f32; 2],
+    thickness: f32,
+) -> Result<GeneratedPart, shape_modeling::ModelingError> {
+    let definition = PartDefinition {
+        id: PartDefinitionId(7),
+        name: "cut plate".to_owned(),
+        tags: BTreeSet::new(),
+        geometry: GeometryRecipe {
+            source: GeometrySource::Plate { size, thickness },
+            operations: vec![operation],
+        },
+        regions: BTreeMap::new(),
+        sockets: BTreeMap::new(),
+        local_pivot: Frame3::default(),
+        variant_group: None,
+        production_hints: None,
+    };
+    let mut context = context();
+    generate_plate(&definition, &mut context)
+}
+
 fn assert_closed_mesh(mesh: &PolygonMesh) {
     let adjacency = build_adjacency(mesh).expect("adjacency should build");
+    let bad_edges = adjacency
+        .edge_faces
+        .iter()
+        .filter(|(_, faces)| faces.len() != 2)
+        .take(8)
+        .map(|(edge, faces)| {
+            format!(
+                "{}.{}, {:?}->{:?} -> {}",
+                edge.a,
+                edge.b,
+                mesh.positions[edge.a as usize],
+                mesh.positions[edge.b as usize],
+                faces.len()
+            )
+        })
+        .collect::<Vec<_>>();
     assert!(
         adjacency.edge_faces.values().all(|faces| faces.len() == 2),
-        "closed mesh should have exactly two incident faces per edge"
+        "closed mesh should have exactly two incident faces per edge; bad edges: {bad_edges:?}"
     );
     assert_eq!(open_boundary_count(mesh), 0);
+    assert_directed_edges_are_paired(mesh);
     assert!(
         signed_volume(mesh) > EPSILON,
         "closed mesh should have consistent outward winding"
+    );
+}
+
+fn assert_directed_edges_are_paired(mesh: &PolygonMesh) {
+    let mut edge_uses = BTreeMap::<shape_poly::EdgeKey, Vec<(u32, u32)>>::new();
+    for face in &mesh.faces {
+        for index in 0..face.vertices.len() {
+            let from = face.vertices[index];
+            let to = face.vertices[(index + 1) % face.vertices.len()];
+            edge_uses
+                .entry(shape_poly::EdgeKey::new(from, to))
+                .or_default()
+                .push((from, to));
+        }
+    }
+    let bad_edges = edge_uses
+        .iter()
+        .filter(|(_, uses)| uses.len() != 2 || uses[0] == uses[1])
+        .take(8)
+        .map(|(edge, uses)| format!("{}.{} -> {uses:?}", edge.a, edge.b))
+        .collect::<Vec<_>>();
+    assert!(
+        bad_edges.is_empty(),
+        "closed mesh should use every edge in opposite directions; bad edges: {bad_edges:?}"
     );
 }
 
@@ -326,6 +560,44 @@ fn assert_region_names(part: &GeneratedPart, expected_names: &[&str]) {
     for expected in expected_names {
         assert!(names.contains(expected), "missing region name {expected}");
     }
+}
+
+fn assert_region_role(part: &GeneratedPart, region: RegionId, role: SurfaceRole) {
+    let actual = part
+        .regions
+        .get(&region)
+        .unwrap_or_else(|| panic!("missing region {region:?}"))
+        .role
+        .clone();
+    assert_eq!(actual, role);
+}
+
+fn assert_boundary_loop(
+    mesh: &PolygonMesh,
+    boundary_loop: BoundaryLoopId,
+    operation: OperationId,
+    seam_candidate: bool,
+) {
+    let edges = mesh
+        .edge_metadata
+        .values()
+        .filter(|metadata| metadata.boundary_loop == Some(boundary_loop))
+        .collect::<Vec<_>>();
+    assert!(!edges.is_empty(), "missing boundary loop {boundary_loop:?}");
+    assert!(edges.iter().all(|metadata| {
+        metadata.boundary_role == BoundaryRole::Feature
+            && metadata.operation == Some(operation)
+            && metadata.seam_candidate == seam_candidate
+    }));
+}
+
+fn assert_face_operation_present(mesh: &PolygonMesh, operation: OperationId) {
+    assert!(
+        mesh.face_metadata
+            .iter()
+            .any(|metadata| metadata.operation == Some(operation)),
+        "expected at least one face sourced by {operation:?}"
+    );
 }
 
 fn assert_socket_origin(part: &GeneratedPart, socket: SocketId, expected: [f32; 3]) {

@@ -37,7 +37,7 @@ use shape_decompiler::{
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
-use shape_poly::TriangulatedPolygonMesh;
+use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::{
@@ -849,11 +849,49 @@ fn select_visual_candidates(
         }
     }
     if selected.is_empty() {
+        let samples = score_inputs
+            .iter()
+            .take(8)
+            .map(|input| {
+                let edits = candidate_by_id
+                    .get(&input.id)
+                    .map(|(candidate, _)| {
+                        candidate
+                            .diagnostics
+                            .changes
+                            .iter()
+                            .map(|change| {
+                                format!(
+                                    "{:?}:{}:{}->{}",
+                                    change.kind, change.subject, change.before, change.after
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "{} recipe={} compile={} closed={} intersections={:.1}/{:.1} finite={} provenance={} tris={} edits={}",
+                    input.id,
+                    input.recipe_valid,
+                    input.compile_succeeded,
+                    input.closed_manifold,
+                    input.accidental_intersection,
+                    input.intersection_tolerance,
+                    input.geometry_finite,
+                    input.provenance_complete,
+                    input.triangle_count,
+                    edits
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
         bail!(
-            "no {mode:?} visual benchmark candidates survived scoring; scored={} unique={} rejected={:?}",
+            "no {mode:?} visual benchmark candidates survived scoring; scored={} unique={} rejected={:?}; samples=[{}]",
             report.scored_candidates.len(),
             report.unique_candidates.len(),
-            report.rejection_counts()
+            report.rejection_counts(),
+            samples
         );
     }
     Ok(selected)
@@ -1522,6 +1560,47 @@ fn print_topology_statistics(
         "  hard/feature edge count: {}",
         model_report.metrics.hard_edge_count
     );
+    println!(
+        "  closed part fraction: {:.3}",
+        model_report.metrics.manifold_closed_part_fraction
+    );
+    let non_closed = artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| {
+            !polygon_mesh_is_directed_closed(&part.local_mesh)
+                || !polygon_mesh_is_directed_closed(&part.world_mesh)
+        })
+        .map(|part| {
+            format!(
+                "{}(local={},world={})",
+                part.instance_id.0,
+                polygon_mesh_is_directed_closed(&part.local_mesh),
+                polygon_mesh_is_directed_closed(&part.world_mesh)
+            )
+        })
+        .collect::<Vec<_>>();
+    if !non_closed.is_empty() {
+        println!("  non-closed compiled instances: {non_closed:?}");
+    }
+}
+
+fn polygon_mesh_is_directed_closed(mesh: &PolygonMesh) -> bool {
+    let mut edge_uses = BTreeMap::<EdgeKey, Vec<(u32, u32)>>::new();
+    for face in &mesh.faces {
+        for index in 0..face.vertices.len() {
+            let from = face.vertices[index];
+            let to = face.vertices[(index + 1) % face.vertices.len()];
+            edge_uses
+                .entry(EdgeKey::new(from, to))
+                .or_default()
+                .push((from, to));
+        }
+    }
+    !edge_uses.is_empty()
+        && edge_uses
+            .values()
+            .all(|uses| uses.len() == 2 && uses[0] != uses[1])
 }
 
 fn operation_label(operation: &ModelingOperationSpec) -> String {
@@ -1547,6 +1626,34 @@ fn operation_label(operation: &ModelingOperationSpec) -> String {
         } => format!(
             "add trim region={} width={width:.4} height={height:.4}",
             region.0
+        ),
+        ModelingOperationSpec::RecessedPanelCut {
+            face,
+            center,
+            size,
+            depth,
+            corner_radius,
+            ..
+        } => format!(
+            "recessed panel cut face={face:?} center={center:?} size={size:?} depth={depth:.4} radius={corner_radius:.4}"
+        ),
+        ModelingOperationSpec::RectangularThroughCut {
+            face,
+            center,
+            size,
+            corner_radius,
+            ..
+        } => format!(
+            "rectangular through cut face={face:?} center={center:?} size={size:?} radius={corner_radius:.4}"
+        ),
+        ModelingOperationSpec::CircularThroughCut {
+            face,
+            center,
+            radius,
+            radial_segments,
+            ..
+        } => format!(
+            "circular through cut face={face:?} center={center:?} radius={radius:.4} segments={radial_segments}"
         ),
         ModelingOperationSpec::MirrorInstances {
             plane_normal,
