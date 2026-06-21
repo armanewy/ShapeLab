@@ -459,6 +459,7 @@ fn paint_viewport(
 ) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_rgb(26, 28, 30));
+    paint_reference_grid(&painter, rect);
 
     if let Some(texture) = texture {
         let image_rect = fit_rect_preserve_aspect(rect, texture.size_vec2());
@@ -472,7 +473,6 @@ fn paint_viewport(
         paint_checker_placeholder(&painter, rect);
         paint_center_label(&painter, rect, "No preview yet");
     }
-    paint_reference_grid(&painter, rect);
 
     if overlay.rendering {
         paint_badge(
