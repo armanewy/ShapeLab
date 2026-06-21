@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
+pub mod validation;
+
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetRecipe, OperationId, PartDefinitionId, PartInstanceId, RegionId, SocketId, SocketSpec,
