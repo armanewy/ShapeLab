@@ -11,6 +11,7 @@ rand_chacha.workspace = true
 rand_distr.workspace = true
 rayon.workspace = true
 serde.workspace = true
+shape-asset.workspace = true
 shape-core.workspace = true
 thiserror.workspace = true
 
