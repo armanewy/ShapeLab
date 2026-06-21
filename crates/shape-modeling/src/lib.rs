@@ -17,6 +17,12 @@ use shape_asset::{
 use shape_poly::{MeshBounds, PolyError, PolygonMesh};
 use thiserror::Error;
 
+/// Explicit profile-based generators.
+pub mod generators {
+    /// Sweep and lathe profile generators.
+    pub mod profile;
+}
+
 /// Generated local part payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeneratedPart {
