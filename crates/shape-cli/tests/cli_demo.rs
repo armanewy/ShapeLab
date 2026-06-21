@@ -105,6 +105,63 @@ fn model_demo_generates_explicit_asset_artifacts() {
 }
 
 #[test]
+fn asset_visual_benchmark_writes_search_contact_sheets() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("visual");
+
+    let status = Command::new(exe)
+        .args([
+            "asset-visual-benchmark",
+            "--asset",
+            "explicit-desk-lamp",
+            "--seed",
+            "9",
+            "--proposal-count",
+            "24",
+            "--result-count",
+            "2",
+            "--out-dir",
+        ])
+        .arg(&out_dir)
+        .status()
+        .expect("run shape-cli asset-visual-benchmark");
+
+    assert!(status.success());
+    let asset_dir = out_dir.join("explicit-desk-lamp");
+    for name in [
+        "original.png",
+        "original-wireframe.png",
+        "accepted.png",
+        "accepted-wireframe.png",
+        "accepted.obj",
+        "final-exported.png",
+        "final-exported-wireframe.png",
+        "visual-benchmark-summary.json",
+        "refine/contact-sheet.png",
+        "refine/contact-sheet-wireframe.png",
+        "explore/contact-sheet.png",
+        "explore/contact-sheet-wireframe.png",
+        "final-package/asset-manifest.json",
+        "final-package/blender_reconstruct.py",
+    ] {
+        let path = asset_dir.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+
+    let summary: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(asset_dir.join("visual-benchmark-summary.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(summary["refine_candidates"].as_array().unwrap().len(), 2);
+    assert_eq!(summary["explore_candidates"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn inspect_and_compile_asset_use_canonical_model_package() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");

@@ -2,11 +2,14 @@
 
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
-The MVP proves a category-independent loop:
+The current desktop app starts in **Asset Modeling Lab**, a part-aware forward-modeling workflow for explicit polygon assets. The legacy implicit editor remains available from the mode switcher.
+
+The product slice proves a category-independent loop:
 
 1. Open a local desktop app.
-2. View a non-humanoid procedural object.
-3. Generate several coherent futures.
+2. Choose a modeled asset template.
+3. View named parts, parameters, locks, validation, and branch history.
+4. Generate several coherent semantic futures.
 4. Choose one direction.
 5. Repeat while keeping branchable history.
 
@@ -23,13 +26,14 @@ Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPOR
 
 The native app opens a local `egui` desktop workspace with:
 
-- a rendered current-shape viewport with orbit, pan, zoom, fit, and resize-triggered rerenders
-- preset loading for Desk Lamp, Toy Submarine, Alien Plant, and Sky Shrine
-- an outliner, inspector, revision history, status bar, and candidate gallery
-- background preview, render, and candidate generation jobs that keep the UI responsive
-- JSON project save/open and OBJ export
+- Asset Modeling Lab template choices for Industrial Crate, Explicit Desk Lamp, and Stylized Stool
+- a rendered asset viewport with orbit, pan, zoom, fit, selected-part overlays, and wireframe display
+- a part tree, inspector, locks, validation, branch history, status bar, and candidate gallery
+- background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
+- branch-preserving `.shapelab-asset.json` save/open, grouped OBJ export, and canonical model-package export
+- a switchable legacy implicit editor for the older SDF shape-document workflow
 
-Startup loads the Desk Lamp preset and builds the first preview in the background.
+Startup shows the Asset Modeling Lab template picker. The hidden legacy implicit mode is initialized only after the user switches to it.
 
 ## Architecture
 
@@ -59,10 +63,13 @@ shape-project branchable revision history
 Shape Lab also includes an explicit polygon modeling lane for part-aware assets:
 
 ```text
-AssetRecipe -> shape-modeling generators + assembly -> shape-compile exports
+AssetRecipe
+  -> shape-modeling generators + assembly
+  -> shape-search semantic candidates + scoring
+  -> shape-compile exports
 ```
 
-That lane is additive to the implicit editor and same-topology decompiler. Its first benchmark assets live in `crates/shape-modeling-assets`.
+That lane is additive to the implicit editor and same-topology decompiler. Its benchmark assets live in `crates/shape-modeling-assets`.
 
 ## CLI
 
@@ -87,9 +94,18 @@ Compile and export explicit benchmark assets:
 ```bash
 cargo run -p shape-cli -- model-demo --asset industrial-crate --out-dir target/model-demo/crate
 cargo run -p shape-cli -- model-demo --asset explicit-desk-lamp --out-dir target/model-demo/lamp
+cargo run -p shape-cli -- model-demo --asset stylized-stool --out-dir target/model-demo/stool
 ```
 
 Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`.
+
+Render fixed-camera shaded and wireframe benchmark sheets for the Asset Modeling Lab search loop:
+
+```bash
+cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
+```
+
+Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`.
 
 Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 
@@ -111,9 +127,9 @@ The decompiler requires identical ordered topology and writes canonical binary m
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Presets include a lamp, submarine, alien plant, and sky shrine, and the core vocabulary is nodes, primitives, transforms, tags, constraints, edits, candidates, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, candidates, validation, and revisions.
 
-The MVP is still representation-specific: the main editor works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
+The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
 
 ## Non-Goals Before MVP Gate
 

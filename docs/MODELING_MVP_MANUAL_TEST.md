@@ -62,6 +62,29 @@ Run the generated reconstruction script with Blender:
 
 Expected result: Blender exits successfully and prints JSON containing `verify_reopen: true`.
 
+## Visual Search Benchmark
+
+Run:
+
+```powershell
+cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
+```
+
+For each of `industrial-crate`, `explicit-desk-lamp`, and `stylized-stool`, inspect:
+
+- `original.png`
+- `refine/contact-sheet.png`
+- `refine/contact-sheet-wireframe.png`
+- `explore/contact-sheet.png`
+- `explore/contact-sheet-wireframe.png`
+- `accepted.png`
+- `accepted-wireframe.png`
+- `final-exported.png`
+- `final-exported-wireframe.png`
+- `final-package/blender_reconstruct.py`
+
+The fixed-camera sheets should show readable silhouettes, structural variation across Refine and Explore, intact wireframes, and an exported final package that can be verified in Blender.
+
 ## Required Commands
 
 ```powershell

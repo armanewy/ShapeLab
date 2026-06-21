@@ -12,7 +12,7 @@ use serde::Serialize;
 use shape_asset::{AssetRecipe, ModelingOperationSpec, PartInstanceId, validate_asset_recipe};
 use shape_compile::export::{verify_model_package, write_grouped_obj_export, write_model_package};
 use shape_compile::validation::{
-    ModelValidationConfig, PartRelationship, ValidationLimits, validate_model,
+    ModelValidationConfig, PartRelationship, ValidationLimits, validate_artifact, validate_model,
 };
 use shape_compile::{
     build_construction_timeline_report, compile_asset, write_blender_reconstruction_script,
@@ -33,11 +33,19 @@ use shape_decompiler::{
 };
 use shape_field::compile_document;
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
-use shape_modeling_assets::BenchmarkAsset;
+use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::TriangulatedPolygonMesh;
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::{RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
+use shape_search::asset::scoring::{
+    AssetCandidateInput, AssetScoredCandidate, AssetSelectionPolicy,
+    score_and_select_asset_candidates_with_policy,
+};
+use shape_search::asset::{
+    AssetCandidate as SemanticAssetCandidate, AssetCandidateMode, AssetCandidateRequest,
+    generate_asset_candidates,
+};
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
 const DEFAULT_PRESET: &str = "desk-lamp";
@@ -70,6 +78,8 @@ enum Command {
     Export(ExportArgs),
     /// Compile and export an explicit benchmark asset recipe.
     ModelDemo(ModelDemoArgs),
+    /// Render fixed-camera semantic Refine/Explore benchmark sheets for explicit assets.
+    AssetVisualBenchmark(AssetVisualBenchmarkArgs),
     /// Inspect an explicit asset recipe or built-in benchmark slug.
     InspectAsset(InspectAssetArgs),
     /// Compile an explicit asset recipe or built-in benchmark slug.
@@ -137,6 +147,25 @@ struct ModelDemoArgs {
     /// Built-in explicit asset slug.
     #[arg(long)]
     asset: String,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct AssetVisualBenchmarkArgs {
+    /// Optional built-in explicit asset slug. Omit to run all benchmark assets.
+    #[arg(long)]
+    asset: Option<String>,
+    /// Deterministic semantic candidate seed.
+    #[arg(long, default_value_t = DEFAULT_SEED)]
+    seed: u64,
+    /// Number of semantic proposals to compile and score for each mode.
+    #[arg(long, default_value_t = 96)]
+    proposal_count: usize,
+    /// Number of representative candidates to render per mode.
+    #[arg(long, default_value_t = DEFAULT_RESULT_COUNT)]
+    result_count: usize,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -253,6 +282,30 @@ struct ChangedParameter {
     after: f32,
 }
 
+#[derive(Debug, Serialize)]
+struct AssetVisualBenchmarkSummary {
+    asset: String,
+    seed: u64,
+    proposal_count: usize,
+    result_count: usize,
+    original: MeshSummary,
+    refine_candidates: Vec<AssetVisualCandidateSummary>,
+    explore_candidates: Vec<AssetVisualCandidateSummary>,
+    accepted_source: String,
+    accepted: MeshSummary,
+    package_dir: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AssetVisualCandidateSummary {
+    slot: usize,
+    id: u64,
+    operation_count: usize,
+    structural_change_count: usize,
+    quality_penalty: f32,
+    mesh: MeshSummary,
+}
+
 struct PreviewArtifact {
     mesh: TriangleMesh,
     image: RenderedImage,
@@ -265,6 +318,7 @@ fn main() -> anyhow::Result<()> {
         Command::Validate(args) => run_validate(args),
         Command::Export(args) => run_export(args),
         Command::ModelDemo(args) => run_model_demo(args),
+        Command::AssetVisualBenchmark(args) => run_asset_visual_benchmark(args),
         Command::InspectAsset(args) => run_inspect_asset(args),
         Command::CompileAsset(args) => run_compile_asset(args),
         Command::Decompile(args) => run_decompile(args),
@@ -483,6 +537,125 @@ fn run_model_demo(args: ModelDemoArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn run_asset_visual_benchmark(args: AssetVisualBenchmarkArgs) -> anyhow::Result<()> {
+    let proposal_count = clamp_usize(args.proposal_count, 1, 512);
+    let result_count = clamp_usize(args.result_count, 1, 12);
+    let assets = match &args.asset {
+        Some(slug) => vec![
+            BenchmarkAsset::parse(slug)
+                .with_context(|| format!("unknown asset benchmark '{slug}'"))?,
+        ],
+        None => benchmark_assets().to_vec(),
+    };
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+
+    for asset in assets {
+        let asset_dir = args.out_dir.join(asset.slug());
+        fs::create_dir_all(&asset_dir)
+            .with_context(|| format!("creating {}", asset_dir.display()))?;
+        let recipe = asset.recipe();
+        let original_artifact = compile_asset(&recipe)
+            .with_context(|| format!("compiling original {}", asset.slug()))?;
+        let original_image = render_asset_artifact(&original_artifact, false)?;
+        let original_wireframe = render_asset_artifact(&original_artifact, true)?;
+        save_png(&original_image, asset_dir.join("original.png"))?;
+        save_png(
+            &original_wireframe,
+            asset_dir.join("original-wireframe.png"),
+        )?;
+
+        let refine = select_visual_candidates(
+            &recipe,
+            args.seed ^ 0x52ef_1111,
+            AssetCandidateMode::Refine,
+            proposal_count,
+            result_count,
+        )?;
+        let explore = select_visual_candidates(
+            &recipe,
+            args.seed ^ 0xe901_2222,
+            AssetCandidateMode::Explore,
+            proposal_count,
+            result_count,
+        )?;
+
+        let refine_summary = render_visual_candidate_set(
+            &asset_dir,
+            "refine",
+            &original_image,
+            &original_wireframe,
+            &refine,
+        )?;
+        let explore_summary = render_visual_candidate_set(
+            &asset_dir,
+            "explore",
+            &original_image,
+            &original_wireframe,
+            &explore,
+        )?;
+
+        let (accepted_source, accepted_candidate) = explore
+            .first()
+            .map(|candidate| ("explore".to_owned(), candidate))
+            .or_else(|| {
+                refine
+                    .first()
+                    .map(|candidate| ("refine".to_owned(), candidate))
+            })
+            .context("visual benchmark produced no accepted candidate")?;
+        let accepted_artifact = compile_asset(&accepted_candidate.0.recipe)
+            .context("compiling accepted visual benchmark candidate")?;
+        let accepted_image = render_asset_artifact(&accepted_artifact, false)?;
+        let accepted_wireframe = render_asset_artifact(&accepted_artifact, true)?;
+        save_png(&accepted_image, asset_dir.join("accepted.png"))?;
+        save_png(
+            &accepted_wireframe,
+            asset_dir.join("accepted-wireframe.png"),
+        )?;
+
+        let package_dir = asset_dir.join("final-package");
+        let package_paths = write_model_package(
+            &accepted_candidate.0.recipe,
+            &accepted_artifact,
+            &package_dir,
+        )
+        .with_context(|| format!("writing final package {}", package_dir.display()))?;
+        let obj = write_grouped_obj_export(&accepted_artifact, Some(&accepted_candidate.0.recipe))
+            .context("writing accepted grouped OBJ")?;
+        fs::write(asset_dir.join("accepted.obj"), obj.obj)
+            .with_context(|| format!("writing accepted.obj to {}", asset_dir.display()))?;
+        let final_image = render_asset_artifact(&accepted_artifact, false)?;
+        let final_wireframe = render_asset_artifact(&accepted_artifact, true)?;
+        save_png(&final_image, asset_dir.join("final-exported.png"))?;
+        save_png(
+            &final_wireframe,
+            asset_dir.join("final-exported-wireframe.png"),
+        )?;
+
+        let summary = AssetVisualBenchmarkSummary {
+            asset: asset.slug().to_owned(),
+            seed: args.seed,
+            proposal_count,
+            result_count,
+            original: artifact_mesh_summary(&original_artifact),
+            refine_candidates: refine_summary,
+            explore_candidates: explore_summary,
+            accepted_source,
+            accepted: artifact_mesh_summary(&accepted_artifact),
+            package_dir: package_paths.manifest.display().to_string(),
+        };
+        write_json(asset_dir.join("visual-benchmark-summary.json"), &summary)?;
+        println!(
+            "Rendered visual benchmark {} to {}",
+            asset.slug(),
+            asset_dir.display()
+        );
+    }
+
+    Ok(())
+}
+
 fn run_inspect_asset(args: InspectAssetArgs) -> anyhow::Result<()> {
     let loaded = load_asset_recipe(&args.recipe)?;
     let recipe_report = validate_asset_recipe(&loaded.recipe);
@@ -583,6 +756,345 @@ fn run_compile_asset(args: CompileAssetArgs) -> anyhow::Result<()> {
         package_verification.finite_numeric_payloads
     );
     Ok(())
+}
+
+fn select_visual_candidates(
+    recipe: &AssetRecipe,
+    seed: u64,
+    mode: AssetCandidateMode,
+    proposal_count: usize,
+    result_count: usize,
+) -> anyhow::Result<Vec<(SemanticAssetCandidate, AssetScoredCandidate)>> {
+    let request = AssetCandidateRequest {
+        seed,
+        proposal_count,
+        result_count: proposal_count,
+        mode,
+    };
+    let output = generate_asset_candidates(recipe, &request)
+        .with_context(|| format!("generating {mode:?} semantic asset candidates"))?;
+    // Until relationship policies live in recipes, compare intersection counts
+    // against the current authored template instead of requiring absolute zero.
+    let (fallback_bounds, baseline_intersection_tolerance) = compile_asset(recipe)
+        .map(|artifact| {
+            let bounds = render_mesh_from_triangles(&artifact.combined_preview).bounds;
+            let report = validate_artifact(&artifact);
+            (bounds, report.metrics.accidental_intersection_count as f32)
+        })
+        .unwrap_or_else(|_| (Aabb::empty(), 0.0));
+    let mut candidate_by_id = BTreeMap::<String, SemanticAssetCandidate>::new();
+    let mut score_inputs = Vec::new();
+
+    for candidate in output.candidates {
+        let id = candidate.id.to_string();
+        match compile_asset(&candidate.recipe) {
+            Ok(artifact) => {
+                score_inputs.push(asset_scoring_input(
+                    &id,
+                    &candidate.recipe,
+                    &artifact,
+                    baseline_intersection_tolerance,
+                ));
+                candidate_by_id.insert(id, candidate);
+            }
+            Err(_) => {
+                let mut input = AssetCandidateInput::new(id.clone(), id, fallback_bounds);
+                input.compile_succeeded = false;
+                score_inputs.push(input);
+            }
+        }
+    }
+
+    let mut policy = AssetSelectionPolicy {
+        representative_count: result_count,
+        duplicate_descriptor_distance: match mode {
+            AssetCandidateMode::Refine => 0.0,
+            AssetCandidateMode::Explore => 0.012,
+        },
+        ..AssetSelectionPolicy::default()
+    };
+    if mode == AssetCandidateMode::Explore {
+        policy.diversity_weight = 1.25;
+    }
+    let report = score_and_select_asset_candidates_with_policy(&score_inputs, &policy);
+    let mut selected = Vec::with_capacity(result_count);
+    for scored in report.representatives.iter().take(result_count) {
+        if let Some(candidate) = candidate_by_id.remove(&scored.id) {
+            selected.push((candidate, scored.clone()));
+        }
+    }
+    if selected.is_empty() {
+        bail!(
+            "no {mode:?} visual benchmark candidates survived scoring; scored={} unique={} rejected={:?}",
+            report.scored_candidates.len(),
+            report.unique_candidates.len(),
+            report.rejection_counts()
+        );
+    }
+    Ok(selected)
+}
+
+fn render_visual_candidate_set(
+    asset_dir: &Path,
+    mode: &str,
+    original_image: &RenderedImage,
+    original_wireframe: &RenderedImage,
+    candidates: &[(SemanticAssetCandidate, AssetScoredCandidate)],
+) -> anyhow::Result<Vec<AssetVisualCandidateSummary>> {
+    let mode_dir = asset_dir.join(mode);
+    fs::create_dir_all(&mode_dir).with_context(|| format!("creating {}", mode_dir.display()))?;
+    let mut shaded_images = Vec::with_capacity(candidates.len());
+    let mut wireframe_images = Vec::with_capacity(candidates.len());
+    let mut summaries = Vec::with_capacity(candidates.len());
+
+    for (slot, (candidate, scored)) in candidates.iter().enumerate() {
+        let artifact = compile_asset(&candidate.recipe)
+            .with_context(|| format!("compiling {mode} candidate {slot}"))?;
+        let image = render_asset_artifact(&artifact, false)?;
+        let wireframe = render_asset_artifact(&artifact, true)?;
+        save_png(&image, mode_dir.join(format!("candidate-{slot:02}.png")))?;
+        save_png(
+            &wireframe,
+            mode_dir.join(format!("candidate-{slot:02}-wireframe.png")),
+        )?;
+        shaded_images.push(image);
+        wireframe_images.push(wireframe);
+        summaries.push(AssetVisualCandidateSummary {
+            slot,
+            id: candidate.id,
+            operation_count: candidate.program.operations.len(),
+            structural_change_count: candidate
+                .diagnostics
+                .changes
+                .iter()
+                .filter(|change| change.topology_changing)
+                .count(),
+            quality_penalty: scored.weighted_quality_penalty,
+            mesh: artifact_mesh_summary(&artifact),
+        });
+    }
+
+    let shaded_refs = shaded_images.iter().collect::<Vec<_>>();
+    save_contact_sheet(
+        original_image,
+        &shaded_refs,
+        mode_dir.join("contact-sheet.png"),
+    )?;
+    let wireframe_refs = wireframe_images.iter().collect::<Vec<_>>();
+    save_contact_sheet(
+        original_wireframe,
+        &wireframe_refs,
+        mode_dir.join("contact-sheet-wireframe.png"),
+    )?;
+    Ok(summaries)
+}
+
+fn render_asset_artifact(
+    artifact: &shape_compile::AssetArtifact,
+    wireframe: bool,
+) -> anyhow::Result<RenderedImage> {
+    let preview_mesh = render_mesh_from_triangles(&artifact.combined_preview);
+    let camera = fit_camera_to_bounds(preview_mesh.bounds);
+    let settings = RenderSettings {
+        width: CURRENT_IMAGE_SIZE,
+        height: CURRENT_IMAGE_SIZE,
+        wireframe,
+        ..RenderSettings::default()
+    };
+    render_mesh(&preview_mesh, &camera, &settings).context("rendering asset artifact")
+}
+
+fn asset_scoring_input(
+    id: &str,
+    recipe: &AssetRecipe,
+    artifact: &shape_compile::AssetArtifact,
+    intersection_tolerance: f32,
+) -> AssetCandidateInput {
+    let mesh = render_mesh_from_triangles(&artifact.combined_preview);
+    let model_report = validate_artifact(artifact);
+    let mut input = AssetCandidateInput::new(
+        id.to_owned(),
+        artifact.source_recipe_hash.to_string(),
+        mesh.bounds,
+    );
+    input.recipe_valid = validate_asset_recipe(recipe).is_valid();
+    input.compile_succeeded = true;
+    input.requires_closed_part = true;
+    input.closed_manifold = model_report.metrics.manifold_closed_part_fraction >= 0.999;
+    input.accidental_intersection = model_report.metrics.accidental_intersection_count as f32;
+    input.intersection_tolerance = intersection_tolerance.max(0.0);
+    input.required_attachment_count = recipe
+        .instances
+        .values()
+        .filter(|instance| instance.attachment.is_some())
+        .count();
+    let missing_attachments = model_report
+        .issues
+        .iter()
+        .filter(|issue| issue.code == "missing_attachment")
+        .count();
+    input.attached_attachment_count = input
+        .required_attachment_count
+        .saturating_sub(missing_attachments);
+    input.triangle_count = artifact.statistics.triangle_count as usize;
+    input.triangle_budget = 80_000;
+    input.geometry_finite = geometry_is_finite(&mesh);
+    input.provenance_complete = model_report.metrics.provenance_coverage >= 0.999;
+    input.volume_approximation = bounds_volume(mesh.bounds) * 0.55;
+    input.silhouette_occupancy = silhouette_occupancy(mesh.bounds);
+    input.part_volumes = artifact
+        .compiled_parts
+        .iter()
+        .map(|part| {
+            bounds_volume(Aabb {
+                min: part.world_mesh.bounds.min.into(),
+                max: part.world_mesh.bounds.max.into(),
+            })
+        })
+        .collect();
+    input.region_count = model_report.metrics.region_count as usize;
+    input.detail_count = artifact
+        .provenance_report
+        .part_region_operation_mappings
+        .iter()
+        .filter(|mapping| mapping.operation.is_some())
+        .count();
+    input.symmetry_score = asset_symmetry_score(recipe, artifact);
+    input.repeated_element_count = asset_repeated_element_count(recipe, artifact);
+    input.bevel_radii = asset_bevel_radii(recipe);
+    input.topology_cost = asset_topology_cost(recipe, artifact);
+    input.near_coincident_surface_ratio = near_coincident_ratio(&model_report.issues);
+    input.detached_visual_components = recipe.root_instances.len().saturating_sub(1);
+    input
+}
+
+fn artifact_mesh_summary(artifact: &shape_compile::AssetArtifact) -> MeshSummary {
+    MeshSummary {
+        vertices: artifact.combined_preview.mesh.positions.len(),
+        triangles: artifact.statistics.triangle_count as usize,
+    }
+}
+
+fn geometry_is_finite(mesh: &TriangleMesh) -> bool {
+    mesh.positions
+        .iter()
+        .all(|point| point.iter().all(|value| value.is_finite()))
+        && mesh
+            .normals
+            .iter()
+            .all(|normal| normal.iter().all(|value| value.is_finite()))
+        && mesh.bounds.min.is_finite()
+        && mesh.bounds.max.is_finite()
+}
+
+fn bounds_volume(bounds: Aabb) -> f32 {
+    if bounds.is_empty() {
+        return 0.0;
+    }
+    let extent = bounds.extent();
+    extent.x.max(0.0) * extent.y.max(0.0) * extent.z.max(0.0)
+}
+
+fn silhouette_occupancy(bounds: Aabb) -> [f32; 3] {
+    if bounds.is_empty() {
+        return [0.0, 0.0, 0.0];
+    }
+    let extent = bounds.extent().abs();
+    let largest_face = (extent.x * extent.y)
+        .max(extent.x * extent.z)
+        .max(extent.y * extent.z)
+        .max(1.0e-6);
+    [
+        ((extent.x * extent.y) / largest_face).clamp(0.0, 1.0),
+        ((extent.x * extent.z) / largest_face).clamp(0.0, 1.0),
+        ((extent.y * extent.z) / largest_face).clamp(0.0, 1.0),
+    ]
+}
+
+fn asset_symmetry_score(recipe: &AssetRecipe, artifact: &shape_compile::AssetArtifact) -> f32 {
+    let mirrored = recipe.definitions.values().any(|definition| {
+        definition
+            .geometry
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, ModelingOperationSpec::MirrorInstances { .. }))
+    });
+    let generated = artifact
+        .compiled_parts
+        .iter()
+        .filter(|part| part.generated_by.is_some())
+        .count();
+    if mirrored {
+        0.9
+    } else if generated >= 4 {
+        0.75
+    } else if generated >= 2 {
+        0.6
+    } else {
+        0.45
+    }
+}
+
+fn asset_repeated_element_count(
+    recipe: &AssetRecipe,
+    artifact: &shape_compile::AssetArtifact,
+) -> usize {
+    let operation_repeats = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .map(|operation| match operation {
+            ModelingOperationSpec::LinearArray { count, .. }
+            | ModelingOperationSpec::RadialArray { count, .. } => count.saturating_sub(1) as usize,
+            _ => 0,
+        })
+        .sum::<usize>();
+    operation_repeats
+        + artifact
+            .compiled_parts
+            .iter()
+            .filter(|part| part.generated_by.is_some())
+            .count()
+}
+
+fn asset_bevel_radii(recipe: &AssetRecipe) -> Vec<f32> {
+    recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .filter_map(|operation| match operation {
+            ModelingOperationSpec::SetBevelProfile { radius, .. } => Some(*radius),
+            _ => None,
+        })
+        .filter(|radius| radius.is_finite() && *radius > 0.0)
+        .collect()
+}
+
+fn asset_topology_cost(recipe: &AssetRecipe, artifact: &shape_compile::AssetArtifact) -> f32 {
+    let operation_count = recipe
+        .definitions
+        .values()
+        .map(|definition| definition.geometry.operations.len())
+        .sum::<usize>() as f32;
+    let part_cost = artifact.statistics.part_count as f32 * 0.04;
+    let region_cost = artifact
+        .provenance_report
+        .part_region_operation_mappings
+        .len() as f32
+        * 0.01;
+    (operation_count * 0.05 + part_cost + region_cost).max(0.01)
+}
+
+fn near_coincident_ratio(issues: &[shape_compile::validation::ValidationIssue]) -> f32 {
+    let count = issues
+        .iter()
+        .filter(|issue| {
+            issue.code.contains("coincident")
+                || issue.code.contains("duplicate_vertex")
+                || issue.code.contains("minimum_edge")
+        })
+        .count();
+    (count as f32 * 0.02).clamp(0.0, 1.0)
 }
 
 struct LoadedAsset {

@@ -102,19 +102,17 @@ fn candidates_for_state(state: &AssetAppState) -> Vec<AssetCandidate> {
         .candidate_slots
         .iter()
         .map(|slot| {
-            let descriptors = slot
+            let edits = slot
                 .candidate
-                .changed_parameters
+                .changes
                 .iter()
-                .filter_map(|parameter| state.recipe.parameters.get(parameter))
+                .map(candidate_edit_from_change)
                 .collect::<Vec<_>>();
-            let edits = descriptors
+            let structural_changes = slot
+                .candidate
+                .changes
                 .iter()
-                .map(|descriptor| candidate_edit(&state.recipe, &slot.candidate.recipe, descriptor))
-                .collect::<Vec<_>>();
-            let structural_changes = descriptors
-                .iter()
-                .filter(|descriptor| descriptor.topology_changing)
+                .filter(|change| change.structural)
                 .count();
             let numeric_changes = edits.len().saturating_sub(structural_changes);
             AssetCandidate {
@@ -135,6 +133,11 @@ fn candidates_for_state(state: &AssetAppState) -> Vec<AssetCandidate> {
                                 preview.validation_summary.issue_count
                             ))
                         }
+                    })
+                    .or_else(|| {
+                        slot.preview_failure
+                            .as_ref()
+                            .map(|message| AssetValidationState::Error(message.clone()))
                     })
                     .unwrap_or(AssetValidationState::Pending),
             }
@@ -212,32 +215,28 @@ fn validation_for_state(issues: &[AssetAppIssue]) -> Vec<AssetValidationMessage>
         .collect()
 }
 
-fn candidate_edit(
-    before_recipe: &AssetRecipe,
-    after_recipe: &AssetRecipe,
-    descriptor: &ParameterDescriptor,
-) -> AssetCandidateEdit {
+fn candidate_edit_from_change(change: &super::jobs::AssetCandidateChange) -> AssetCandidateEdit {
     AssetCandidateEdit {
-        subject: parameter_subject(before_recipe, descriptor),
-        label: descriptor.label.clone(),
-        before: get_scalar(before_recipe, &descriptor.path).ok(),
-        after: get_scalar(after_recipe, &descriptor.path).ok(),
-        structural: descriptor.topology_changing,
+        subject: change.subject.clone(),
+        label: change_label(change),
+        before: change.before.as_deref().and_then(parse_scalar_summary),
+        after: change.after.as_deref().and_then(parse_scalar_summary),
+        structural: change.structural,
     }
 }
 
-fn parameter_subject(recipe: &AssetRecipe, descriptor: &ParameterDescriptor) -> String {
-    if let Some(instance) = instance_id_from_scalar_path(&descriptor.path)
-        && let Some(part) = recipe.instances.get(&instance)
-    {
-        return part.name.clone();
+fn change_label(change: &super::jobs::AssetCandidateChange) -> String {
+    match (&change.before, &change.after) {
+        (Some(before), Some(after)) if parse_scalar_summary(before).is_none() => {
+            format!("{}: {before} -> {after}", change.label)
+        }
+        (None, Some(after)) => format!("{}: {after}", change.label),
+        _ => change.label.clone(),
     }
-    if let Some(definition) = definition_id_from_scalar_path(&descriptor.path)
-        && let Some(definition) = recipe.definitions.get(&definition)
-    {
-        return definition.name.clone();
-    }
-    "Asset".to_owned()
+}
+
+fn parse_scalar_summary(value: &str) -> Option<f32> {
+    value.parse::<f32>().ok()
 }
 
 fn issues_for_part(issues: &[AssetAppIssue], part: PartInstanceId) -> usize {

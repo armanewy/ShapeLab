@@ -19,6 +19,8 @@ use shape_asset::{
     Transform3, definition_scalar_path, get_scalar, instance_scalar_path,
 };
 use shape_modeling_assets::BenchmarkAsset;
+use shape_render::RenderSettings;
+use shape_search::asset::AssetCandidateEditKind;
 
 const BODY_DEFINITION: PartDefinitionId = PartDefinitionId(1);
 const ALT_BODY_DEFINITION: PartDefinitionId = PartDefinitionId(2);
@@ -324,6 +326,17 @@ fn crate_mvp_workflow_generates_six_unlocked_variants() {
     }
 
     assert_eq!(state.candidate_slots.len(), 6);
+    assert!(
+        state.candidate_slots.iter().any(|slot| {
+            slot.candidate.changes.len() > 1
+                || slot
+                    .candidate
+                    .changes
+                    .iter()
+                    .any(|change| change.kind != AssetCandidateEditKind::Parameter)
+        }),
+        "Explore should surface semantic or structural candidates, not only one scalar nudge"
+    );
     let body_parameters = BTreeSet::from([
         ParameterId(1),
         ParameterId(2),
@@ -345,6 +358,72 @@ fn crate_mvp_workflow_generates_six_unlocked_variants() {
         .handle_command(AssetAppCommand::Undo)
         .expect("undo should return to parent");
     assert_ne!(state.revision_history.current, accepted_revision);
+}
+
+#[test]
+fn candidate_preview_batch_keeps_successes_when_one_candidate_fails() {
+    let mut state =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::IndustrialCrate))
+            .expect("crate template should load");
+    let request = start_job(
+        state
+            .handle_command(AssetAppCommand::GenerateExplore)
+            .expect("generation should schedule"),
+    );
+    for event in run_asset_job(request) {
+        state.handle_job_event(event);
+    }
+    assert_eq!(state.candidate_slots.len(), 6);
+
+    let failed_candidate = state.candidate_slots[0].candidate.id;
+    state.candidate_slots[0]
+        .candidate
+        .recipe
+        .definitions
+        .clear();
+    let preview_request = start_job(
+        state
+            .request_candidate_previews(RenderSettings {
+                width: 24,
+                height: 24,
+                ..RenderSettings::default()
+            })
+            .expect("preview batch should schedule"),
+    );
+    let events = run_asset_job(preview_request);
+    let ready = events
+        .iter()
+        .find_map(|event| match event {
+            AssetJobEvent::CandidatePreviewsReady {
+                previews, failures, ..
+            } => Some((previews, failures)),
+            _ => None,
+        })
+        .expect("preview batch should complete");
+
+    assert_eq!(ready.1.len(), 1);
+    assert_eq!(ready.1[0].candidate_id, failed_candidate);
+    assert!(
+        !ready.0.is_empty(),
+        "one failed candidate should not discard successful previews"
+    );
+
+    for event in events {
+        state.handle_job_event(event);
+    }
+
+    assert!(
+        state.candidate_slots[0].preview_failure.is_some(),
+        "failed candidate should retain an individual error"
+    );
+    assert!(
+        state
+            .candidate_slots
+            .iter()
+            .skip(1)
+            .any(|slot| slot.preview.is_some()),
+        "successful candidate previews should still be stored"
+    );
 }
 
 #[test]

@@ -75,6 +75,7 @@ pub(crate) struct AssetCandidateSlot {
     pub slot: usize,
     pub candidate: AssetCandidate,
     pub preview: Option<AssetCandidatePreview>,
+    pub preview_failure: Option<String>,
 }
 
 /// Current or latest generation state.
@@ -341,11 +342,13 @@ impl AssetAppState {
                 generation_id,
                 recipe_revision,
                 previews,
+                failures,
             } => self.apply_candidate_previews_ready(
                 job_id,
                 generation_id,
                 recipe_revision,
                 previews,
+                failures,
             ),
             AssetJobEvent::ExportPackageReady {
                 job_id,
@@ -910,6 +913,7 @@ impl AssetAppState {
                 slot: candidate.slot,
                 candidate,
                 preview: None,
+                preview_failure: None,
             })
             .collect();
         self.candidate_slots.sort_by_key(|slot| slot.slot);
@@ -923,6 +927,7 @@ impl AssetAppState {
         generation_id: AssetGenerationId,
         recipe_revision: RevisionId,
         previews: Vec<AssetCandidatePreview>,
+        failures: Vec<super::jobs::AssetCandidatePreviewFailure>,
     ) -> bool {
         if !self.is_current_job(
             AssetJobSlot::CompileCandidatePreviews,
@@ -939,6 +944,17 @@ impl AssetAppState {
                 .find(|slot| slot.candidate.id == preview.candidate_id)
             {
                 slot.preview = Some(preview);
+                slot.preview_failure = None;
+            }
+        }
+        for failure in failures {
+            if let Some(slot) = self
+                .candidate_slots
+                .iter_mut()
+                .find(|slot| slot.candidate.id == failure.candidate_id)
+            {
+                slot.preview = None;
+                slot.preview_failure = Some(failure.message);
             }
         }
         self.finish_job(AssetJobSlot::CompileCandidatePreviews, job_id);

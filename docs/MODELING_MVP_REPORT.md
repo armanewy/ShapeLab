@@ -4,7 +4,7 @@
 
 Wave 6 adds a native application mode named **Asset Modeling Lab**. The desktop app now starts in this mode and keeps the legacy implicit editor available through the mode switcher.
 
-The MVP uses the explicit asset recipe path only. It compiles authored polygon parts through `shape-compile`, renders CPU previews off the UI thread, generates deterministic candidate recipes, and exports both grouped OBJ and the canonical model package.
+The MVP uses the explicit asset recipe path only. It compiles authored polygon parts through `shape-compile`, renders CPU previews off the UI thread, generates deterministic semantic candidate recipes through `shape-search::asset`, scores and de-duplicates compiled proposals, and exports both grouped OBJ and the canonical model package.
 
 ## Implemented Scope
 
@@ -21,13 +21,15 @@ The MVP uses the explicit asset recipe path only. It compiles authored polygon p
 - Off-thread work:
   - current asset compile
   - current preview render
-  - candidate generation
+  - semantic candidate proposal generation
+  - candidate compile/scoring/diversity selection
   - candidate preview compile/render
   - OBJ export
   - canonical package export
 - Stale job handling:
   - reducer rejects stale job IDs, stale generation IDs, and stale recipe revisions
   - previous preview remains visible while rebuild work is pending
+  - individual candidate preview failures are reported on the affected card instead of aborting the whole batch
   - repaint is requested only while jobs are active or when new results arrive
 - Persistence:
   - branch-preserving Asset Modeling Lab project snapshots
@@ -52,8 +54,8 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - Handle thickness: `Handle thickness`
 - Bolt count: `Bolt count`
 - Optional trim disable: optional skid rail trim instances
-- Body lock: part instance lock skips body definition parameters during candidate generation
-- Six variants: default candidate count is six; generation respects locks and deterministic parameter order
+- Body lock: part instance lock filters semantic candidate programs that would modify the body, including definition-level body edits
+- Six variants: Refine/Explore over-generate semantic proposals, compile and score the pool, collapse duplicates, and select six diverse survivors when available
 - Accept/undo/branch: reducer revisions are branchable and serialized
 - Save/reload: Asset Modeling Lab snapshots preserve revision history
 - Export: OBJ and canonical model package jobs write files off the UI thread
@@ -61,7 +63,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 
 ## Known Caveats
 
-- Candidate generation is deterministic and lock-aware, but still parameter-neighborhood based rather than design-intent search.
+- Candidate generation is deterministic, lock-aware, semantic, and score-selected, but the descriptor metrics are still approximations rather than visual taste or artistic quality.
 - The viewport overlay exposes selected-part context, validation, and wireframe hinting; direct viewport part picking is not in this MVP.
 - Current explicit generators avoid booleans; interlocking geometry is modeled as separate clean parts rather than fused constructive solids.
 
@@ -71,6 +73,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - `cargo test --workspace`: passed
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed
 - `cargo build --workspace --release`: passed
+- `cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark`: writes fixed-camera shaded and wireframe sheets for original templates, Refine outputs, Explore outputs, accepted branches, and final exported packages
 - Template export:
   - `industrial-crate`: 31 parts, 4212 triangles
   - `explicit-desk-lamp`: 12 parts, 2776 triangles
