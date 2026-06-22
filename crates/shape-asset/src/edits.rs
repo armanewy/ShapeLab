@@ -476,6 +476,13 @@ fn push_operation_topology(signature: &mut String, operation: &ModelingOperation
                 operation.0
             ));
         }
+        ModelingOperationSpec::BevelBoundaryLoop {
+            operation,
+            segments,
+            ..
+        } => {
+            signature.push_str(&format!("bevel_boundary_loop:{}:{segments}", operation.0));
+        }
         ModelingOperationSpec::MirrorInstances { operation, .. } => {
             signature.push_str(&format!("mirror:{}", operation.0));
         }

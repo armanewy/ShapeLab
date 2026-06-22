@@ -23,7 +23,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 6;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 7;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -319,7 +319,7 @@ impl<'de> Deserialize<'de> for AssetRecipe {
 }
 
 fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
-    if matches!(schema_version, 1..=5) {
+    if matches!(schema_version, 1..=6) {
         ASSET_RECIPE_SCHEMA_VERSION
     } else {
         schema_version
@@ -376,6 +376,7 @@ fn migrate_legacy_cut_boundary_loops(recipe: &mut AssetRecipe) {
                 | ModelingOperationSpec::SetBevelProfile { .. }
                 | ModelingOperationSpec::AddPanel { .. }
                 | ModelingOperationSpec::AddTrim { .. }
+                | ModelingOperationSpec::BevelBoundaryLoop { .. }
                 | ModelingOperationSpec::MirrorInstances { .. }
                 | ModelingOperationSpec::LinearArray { .. }
                 | ModelingOperationSpec::RadialArray { .. }
@@ -891,6 +892,25 @@ pub enum ModelingOperationSpec {
         /// Edge metadata emitted around the boundary loop.
         edge_treatment: CutEdgeTreatment,
     },
+    /// Replace one generated boundary loop with a controlled bevel band.
+    BevelBoundaryLoop {
+        /// Stable operation ID.
+        operation: OperationId,
+        /// Existing live boundary loop consumed by the bevel.
+        target_loop: BoundaryLoopId,
+        /// Uniform bevel width.
+        width: f32,
+        /// Deterministic band segment count.
+        segments: u32,
+        /// Profile exponent; 1.0 is linear.
+        profile: f32,
+        /// Region assigned to the generated bevel band.
+        bevel_region: RegionId,
+        /// Replacement loop on the outer/surface side of the bevel.
+        outer_replacement_loop: BoundaryLoopId,
+        /// Replacement loop on the inner/wall side of the bevel.
+        inner_replacement_loop: BoundaryLoopId,
+    },
     /// Mirror generated instances across a plane.
     MirrorInstances {
         /// Stable operation ID.
@@ -948,6 +968,7 @@ impl ModelingOperationSpec {
             | Self::RecessedPanelCut { operation, .. }
             | Self::RectangularThroughCut { operation, .. }
             | Self::CircularThroughCut { operation, .. }
+            | Self::BevelBoundaryLoop { operation, .. }
             | Self::MirrorInstances { operation, .. }
             | Self::LinearArray { operation, .. }
             | Self::RadialArray { operation, .. }
@@ -960,7 +981,9 @@ impl ModelingOperationSpec {
     #[must_use]
     pub fn phase(&self) -> OperationPhase {
         match self {
-            Self::SetBevelProfile { .. } => OperationPhase::BoundaryTreatment,
+            Self::SetBevelProfile { .. } | Self::BevelBoundaryLoop { .. } => {
+                OperationPhase::BoundaryTreatment
+            }
             Self::AddPanel { .. }
             | Self::AddTrim { .. }
             | Self::RecessedPanelCut { .. }
@@ -999,6 +1022,7 @@ impl ModelingOperationSpec {
             | Self::SetBevelProfile { .. }
             | Self::AddPanel { .. }
             | Self::AddTrim { .. }
+            | Self::BevelBoundaryLoop { .. }
             | Self::MirrorInstances { .. }
             | Self::LinearArray { .. }
             | Self::RadialArray { .. }
@@ -1042,7 +1066,19 @@ impl ModelingOperationSpec {
     /// Return boundary-loop lifecycle dependencies declared by this operation.
     #[must_use]
     pub fn boundary_loop_dependencies(&self) -> Vec<BoundaryLoopDependency> {
-        Vec::new()
+        match self {
+            Self::BevelBoundaryLoop {
+                target_loop,
+                outer_replacement_loop,
+                inner_replacement_loop,
+                ..
+            } => vec![BoundaryLoopDependency {
+                input: *target_loop,
+                mode: BoundaryLoopDependencyMode::Consume,
+                outputs: vec![*outer_replacement_loop, *inner_replacement_loop],
+            }],
+            _ => Vec::new(),
+        }
     }
 
     /// Return operation-emitted region IDs that are not necessarily declared as base regions.
@@ -1068,6 +1104,7 @@ impl ModelingOperationSpec {
                 wall_region,
                 ..
             } => vec![*outer_region, *rim_region, *wall_region],
+            Self::BevelBoundaryLoop { bevel_region, .. } => vec![*bevel_region],
             Self::TransformGeometry { .. }
             | Self::SetBevelProfile { .. }
             | Self::AddPanel { .. }
@@ -1107,6 +1144,16 @@ enum ModelingOperationSpecWire {
     RecessedPanelCut(RecessedPanelCutWire),
     RectangularThroughCut(RectangularThroughCutWire),
     CircularThroughCut(CircularThroughCutWire),
+    BevelBoundaryLoop {
+        operation: OperationId,
+        target_loop: BoundaryLoopId,
+        width: f32,
+        segments: u32,
+        profile: f32,
+        bevel_region: RegionId,
+        outer_replacement_loop: BoundaryLoopId,
+        inner_replacement_loop: BoundaryLoopId,
+    },
     MirrorInstances {
         operation: OperationId,
         plane_normal: [f32; 3],
@@ -1347,6 +1394,25 @@ impl ModelingOperationSpecWire {
                 rim_region: wire.rim_region,
                 wall_region: wire.wall_region,
                 edge_treatment: wire.edge_treatment,
+            },
+            Self::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+                bevel_region,
+                outer_replacement_loop,
+                inner_replacement_loop,
+            } => ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+                bevel_region,
+                outer_replacement_loop,
+                inner_replacement_loop,
             },
             Self::MirrorInstances {
                 operation,
@@ -4402,6 +4468,67 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     *rim_width,
                 );
             }
+            ModelingOperationSpec::BevelBoundaryLoop {
+                target_loop,
+                width,
+                segments,
+                profile,
+                bevel_region,
+                outer_replacement_loop,
+                inner_replacement_loop,
+                ..
+            } => {
+                validate_positive(
+                    report,
+                    operation_subject(definition.id, operation_id, "bevel_boundary_loop.width"),
+                    *width,
+                );
+                validate_count(
+                    report,
+                    operation_subject(definition.id, operation_id, "bevel_boundary_loop.segments"),
+                    *segments,
+                    1,
+                );
+                validate_positive(
+                    report,
+                    operation_subject(definition.id, operation_id, "bevel_boundary_loop.profile"),
+                    *profile,
+                );
+                if *bevel_region == RegionId(0) {
+                    push_issue(
+                        report,
+                        operation_subject(
+                            definition.id,
+                            operation_id,
+                            "bevel_boundary_loop.bevel_region",
+                        ),
+                        "invalid_region_id",
+                        "Generated bevel region IDs must be non-zero.",
+                    );
+                }
+                validate_cut_loop_pair(
+                    definition.id,
+                    operation_id,
+                    "bevel_boundary_loop.replacement",
+                    *outer_replacement_loop,
+                    *inner_replacement_loop,
+                    report,
+                );
+                if *target_loop == *outer_replacement_loop
+                    || *target_loop == *inner_replacement_loop
+                {
+                    push_issue(
+                        report,
+                        operation_subject(
+                            definition.id,
+                            operation_id,
+                            "bevel_boundary_loop.target_loop",
+                        ),
+                        "boundary_loop_dependency_self_output",
+                        "Bevel replacement loops must differ from the consumed target loop.",
+                    );
+                }
+            }
             ModelingOperationSpec::MirrorInstances {
                 plane_normal,
                 plane_offset,
@@ -4933,6 +5060,18 @@ fn get_operation_scalar(
             ModelingOperationSpec::CircularThroughCut { rim_width, .. },
             ["circular_through_cut", "rim_width"],
         ) => Ok(*rim_width),
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { width, .. },
+            ["bevel_boundary_loop", "width"],
+        ) => Ok(*width),
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { segments, .. },
+            ["bevel_boundary_loop", "segments"],
+        ) => Ok(*segments as f32),
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { profile, .. },
+            ["bevel_boundary_loop", "profile"],
+        ) => Ok(*profile),
         (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {
             Ok(*count as f32)
         }
@@ -5259,6 +5398,27 @@ fn set_operation_scalar(
             ["circular_through_cut", "rim_width"],
         ) => {
             *rim_width = value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { width, .. },
+            ["bevel_boundary_loop", "width"],
+        ) => {
+            *width = value;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { segments, .. },
+            ["bevel_boundary_loop", "segments"],
+        ) => {
+            *segments = scalar_to_u32(path, value)?;
+            Ok(())
+        }
+        (
+            ModelingOperationSpec::BevelBoundaryLoop { profile, .. },
+            ["bevel_boundary_loop", "profile"],
+        ) => {
+            *profile = value;
             Ok(())
         }
         (ModelingOperationSpec::LinearArray { count, .. }, ["linear_array", "count"]) => {

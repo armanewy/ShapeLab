@@ -290,6 +290,7 @@ pub fn generate_plate(
         ));
     };
     let cut_operations = cut_operations(definition);
+    let boundary_loop_bevels = boundary_loop_bevel_operations(definition)?;
     if let Some(operation) = cut_operations.first().copied() {
         let (bevel_radius, _) = bevel_profile(definition, 0.0, 0);
         if bevel_radius > EPSILON {
@@ -299,9 +300,23 @@ pub fn generate_plate(
             });
         }
         if cut_operations.len() > 1 {
-            return build_multi_cut_plate(size, thickness, &cut_operations, context);
+            return build_multi_cut_plate(
+                size,
+                thickness,
+                &cut_operations,
+                &boundary_loop_bevels,
+                context,
+            );
         }
-        return build_cut_plate(size, thickness, operation, context);
+        return build_cut_plate(size, thickness, operation, &boundary_loop_bevels, context);
+    }
+    if let Some(bevel) = boundary_loop_bevels.first() {
+        return Err(ModelingError::UnsupportedOperation {
+            operation: bevel.operation,
+            reason:
+                "BevelBoundaryLoop requires a supported cut operation in the same Plate definition"
+                    .to_owned(),
+        });
     }
     let (bevel_radius, bevel_segments) = bevel_profile(definition, 0.0, 0);
     let params = PlateParams {
@@ -530,10 +545,27 @@ fn cut_operations(definition: &PartDefinition) -> Vec<&ModelingOperationSpec> {
         .collect()
 }
 
+fn boundary_loop_bevel_operations(
+    definition: &PartDefinition,
+) -> Result<Vec<BoundaryLoopBevelPlan>, ModelingError> {
+    definition
+        .geometry
+        .operations
+        .iter()
+        .filter_map(|operation| match operation {
+            ModelingOperationSpec::BevelBoundaryLoop { .. } => {
+                Some(BoundaryLoopBevelPlan::from_operation(operation))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn build_cut_plate(
     size: [f32; 2],
     thickness: f32,
     operation: &ModelingOperationSpec,
+    bevels: &[BoundaryLoopBevelPlan],
     context: &GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
     let width = finite_positive(size[0], "plate.width")?;
@@ -542,7 +574,8 @@ fn build_cut_plate(
     let half_x = width * 0.5;
     let half_z = height * 0.5;
     let half_y = thickness * 0.5;
-    let cut = PlateCutPlan::from_operation(operation, half_x, half_z, thickness)?;
+    let mut cut = PlateCutPlan::from_operation(operation, half_x, half_z, thickness)?;
+    apply_boundary_loop_bevels(std::slice::from_mut(&mut cut), bevels, thickness)?;
     let face_sign = planar_plate_face_sign(cut.face, cut.operation)?;
     let (entry_region, opposite_region) = plate_cut_face_regions(cut.face, cut.operation)?;
     if cut.target_region != entry_region || cut.outer_region != entry_region {
@@ -581,8 +614,46 @@ fn build_cut_plate(
             } else {
                 outside_frame_ring.clone()
             };
-            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
-            let floor_inner = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+            let entry_surface_points = cut
+                .entry_bevel
+                .as_ref()
+                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (outside_inner, wall_top_ring) = if let Some(bevel) = &cut.entry_bevel {
+                add_boundary_loop_bevel_band(
+                    &mut builder,
+                    outside_y,
+                    &entry_surface_points,
+                    outside_y - face_sign * bevel.width,
+                    &cut.inner_points,
+                    outside_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
+            let floor_surface_points = cut
+                .secondary_bevel
+                .as_ref()
+                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, -bevel.width))
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (wall_bottom_ring, floor_inner) = if let Some(bevel) = &cut.secondary_bevel {
+                add_boundary_loop_bevel_band(
+                    &mut builder,
+                    floor_y + face_sign * bevel.width,
+                    &cut.inner_points,
+                    floor_y,
+                    &floor_surface_points,
+                    outside_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
 
             add_host_to_ring_cap(
                 &mut builder,
@@ -616,7 +687,7 @@ fn build_cut_plate(
                 &outside_rim_ring,
                 &outside_inner,
                 &cut.rim_points,
-                &cut.inner_points,
+                &entry_surface_points,
                 outside_normal,
                 context,
                 cut.operation,
@@ -625,8 +696,8 @@ fn build_cut_plate(
             );
             add_cut_wall_band(
                 &mut builder,
-                &outside_inner,
-                &floor_inner,
+                &wall_top_ring,
+                &wall_bottom_ring,
                 &cut.inner_points,
                 cut.center,
                 context,
@@ -659,19 +730,23 @@ fn build_cut_plate(
             );
 
             let mut mesh = builder.finish()?;
-            mark_boundary_loop(
+            mark_cut_or_bevel_boundary_loop(
                 &mut mesh,
                 &outside_inner,
+                &wall_top_ring,
                 cut.operation,
                 cut.entry_loop,
                 cut.edge_treatment,
+                cut.entry_bevel.as_ref(),
             );
-            mark_boundary_loop(
+            mark_cut_or_bevel_boundary_loop(
                 &mut mesh,
+                &wall_bottom_ring,
                 &floor_inner,
                 cut.operation,
                 cut.secondary_loop,
                 cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
             );
             let mut regions = plate_regions();
             insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
@@ -687,6 +762,8 @@ fn build_cut_plate(
                 "recess_floor",
                 SurfaceRole::Interior,
             );
+            insert_boundary_bevel_region(&mut regions, cut.entry_bevel.as_ref());
+            insert_boundary_bevel_region(&mut regions, cut.secondary_bevel.as_ref());
             Ok(part(
                 mesh,
                 regions,
@@ -718,14 +795,52 @@ fn build_cut_plate(
             } else {
                 outside_frame_ring.clone()
             };
-            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
             let opposite_frame_ring = builder.add_plate_ring(opposite_y, &frame_ring)?;
             let opposite_rim_ring = if cut.has_host_surface_band {
                 builder.add_plate_ring(opposite_y, &cut.rim_points)?
             } else {
                 opposite_frame_ring.clone()
             };
-            let opposite_inner = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
+            let entry_surface_points = cut
+                .entry_bevel
+                .as_ref()
+                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (outside_inner, wall_front_ring) = if let Some(bevel) = &cut.entry_bevel {
+                add_boundary_loop_bevel_band(
+                    &mut builder,
+                    outside_y,
+                    &entry_surface_points,
+                    outside_y - face_sign * bevel.width,
+                    &cut.inner_points,
+                    outside_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_plate_ring(outside_y, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
+            let exit_surface_points = cut
+                .secondary_bevel
+                .as_ref()
+                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (opposite_inner, wall_back_ring) = if let Some(bevel) = &cut.secondary_bevel {
+                add_boundary_loop_bevel_band(
+                    &mut builder,
+                    opposite_y,
+                    &exit_surface_points,
+                    opposite_y + face_sign * bevel.width,
+                    &cut.inner_points,
+                    opposite_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
 
             add_host_to_ring_cap(
                 &mut builder,
@@ -759,7 +874,7 @@ fn build_cut_plate(
                 &outside_rim_ring,
                 &outside_inner,
                 &cut.rim_points,
-                &cut.inner_points,
+                &entry_surface_points,
                 outside_normal,
                 context,
                 cut.operation,
@@ -798,7 +913,7 @@ fn build_cut_plate(
                 &opposite_rim_ring,
                 &opposite_inner,
                 &cut.rim_points,
-                &cut.inner_points,
+                &exit_surface_points,
                 opposite_normal,
                 context,
                 cut.operation,
@@ -807,8 +922,8 @@ fn build_cut_plate(
             );
             add_cut_wall_band(
                 &mut builder,
-                &outside_inner,
-                &opposite_inner,
+                &wall_front_ring,
+                &wall_back_ring,
                 &cut.inner_points,
                 cut.center,
                 context,
@@ -817,19 +932,23 @@ fn build_cut_plate(
             );
 
             let mut mesh = builder.finish()?;
-            mark_boundary_loop(
+            mark_cut_or_bevel_boundary_loop(
                 &mut mesh,
                 &outside_inner,
+                &wall_front_ring,
                 cut.operation,
                 cut.entry_loop,
                 cut.edge_treatment,
+                cut.entry_bevel.as_ref(),
             );
-            mark_boundary_loop(
+            mark_cut_or_bevel_boundary_loop(
                 &mut mesh,
                 &opposite_inner,
+                &wall_back_ring,
                 cut.operation,
                 cut.secondary_loop,
                 cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
             );
             let mut regions = plate_regions();
             insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
@@ -839,6 +958,8 @@ fn build_cut_plate(
                 "cut_wall",
                 SurfaceRole::CutWall,
             );
+            insert_boundary_bevel_region(&mut regions, cut.entry_bevel.as_ref());
+            insert_boundary_bevel_region(&mut regions, cut.secondary_bevel.as_ref());
             Ok(part(
                 mesh,
                 regions,
@@ -869,6 +990,7 @@ fn build_multi_cut_plate(
     size: [f32; 2],
     thickness: f32,
     operations: &[&ModelingOperationSpec],
+    bevels: &[BoundaryLoopBevelPlan],
     context: &GeneratorContext,
 ) -> Result<GeneratedPart, ModelingError> {
     let width = finite_positive(size[0], "plate.width")?;
@@ -877,10 +999,11 @@ fn build_multi_cut_plate(
     let half_x = width * 0.5;
     let half_z = height * 0.5;
     let half_y = thickness * 0.5;
-    let cuts = operations
+    let mut cuts = operations
         .iter()
         .map(|operation| PlateCutPlan::from_operation(operation, half_x, half_z, thickness))
         .collect::<Result<Vec<_>, _>>()?;
+    apply_boundary_loop_bevels(&mut cuts, bevels, thickness)?;
 
     let first = cuts.first().ok_or_else(|| {
         ModelingError::InvalidInput(
@@ -969,8 +1092,10 @@ fn build_multi_cut_plate(
 
     let mut boundary_marks = Vec::new();
     let mut regions = plate_regions();
+    let mut entry_wall_rings: BTreeMap<OperationId, Vec<u32>> = BTreeMap::new();
+    let mut secondary_wall_rings: BTreeMap<OperationId, Vec<u32>> = BTreeMap::new();
     for cut in &cuts {
-        add_cut_features_for_face(
+        let (entry_surface_ring, entry_wall_ring) = add_cut_features_for_face(
             &mut builder,
             cut,
             outside_y,
@@ -979,10 +1104,20 @@ fn build_multi_cut_plate(
             &zs,
             entry_region,
             context,
-            &mut boundary_marks,
+            cut.entry_bevel.as_ref(),
         )?;
+        push_cut_or_bevel_boundary_marks(
+            &mut boundary_marks,
+            entry_surface_ring.clone(),
+            entry_wall_ring.clone(),
+            cut.operation,
+            cut.entry_loop,
+            cut.edge_treatment,
+            cut.entry_bevel.as_ref(),
+        );
+        entry_wall_rings.insert(cut.operation, entry_wall_ring);
         if matches!(cut.kind, PlateCutKind::Through) {
-            add_cut_features_for_face(
+            let (secondary_surface_ring, secondary_wall_ring) = add_cut_features_for_face(
                 &mut builder,
                 cut,
                 opposite_y,
@@ -991,8 +1126,18 @@ fn build_multi_cut_plate(
                 &zs,
                 opposite_region,
                 context,
-                &mut boundary_marks,
+                cut.secondary_bevel.as_ref(),
             )?;
+            push_cut_or_bevel_boundary_marks(
+                &mut boundary_marks,
+                secondary_surface_ring.clone(),
+                secondary_wall_ring.clone(),
+                cut.operation,
+                cut.secondary_loop,
+                cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
+            );
+            secondary_wall_rings.insert(cut.operation, secondary_wall_ring);
         }
         if let PlateCutKind::Recessed {
             depth,
@@ -1000,12 +1145,34 @@ fn build_multi_cut_plate(
         } = cut.kind
         {
             let floor_y = outside_y - face_sign * depth;
-            let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
-            let floor_inner = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+            let outside_inner = entry_wall_rings
+                .get(&cut.operation)
+                .cloned()
+                .expect("entry wall ring should be generated before recessed wall");
+            let floor_surface_points = cut
+                .secondary_bevel
+                .as_ref()
+                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, -bevel.width))
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (wall_bottom_ring, floor_inner) = if let Some(bevel) = &cut.secondary_bevel {
+                add_boundary_loop_bevel_band(
+                    &mut builder,
+                    floor_y + face_sign * bevel.width,
+                    &cut.inner_points,
+                    floor_y,
+                    &floor_surface_points,
+                    outside_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_plate_ring(floor_y, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
             add_cut_wall_band(
                 &mut builder,
                 &outside_inner,
-                &floor_inner,
+                &wall_bottom_ring,
                 &cut.inner_points,
                 cut.center,
                 context,
@@ -1024,18 +1191,15 @@ fn build_multi_cut_plate(
                     None,
                 ),
             );
-            boundary_marks.push(BoundaryLoopMark {
-                ring: outside_inner,
-                operation: cut.operation,
-                boundary_loop: cut.entry_loop,
-                treatment: cut.edge_treatment,
-            });
-            boundary_marks.push(BoundaryLoopMark {
-                ring: floor_inner,
-                operation: cut.operation,
-                boundary_loop: cut.secondary_loop,
-                treatment: cut.edge_treatment,
-            });
+            push_cut_or_bevel_boundary_marks(
+                &mut boundary_marks,
+                wall_bottom_ring,
+                floor_inner,
+                cut.operation,
+                cut.secondary_loop,
+                cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
+            );
             insert_cut_region(
                 &mut regions,
                 floor_region,
@@ -1050,36 +1214,30 @@ fn build_multi_cut_plate(
             "cut_wall",
             SurfaceRole::CutWall,
         );
+        insert_boundary_bevel_region(&mut regions, cut.entry_bevel.as_ref());
+        insert_boundary_bevel_region(&mut regions, cut.secondary_bevel.as_ref());
     }
 
     for cut in cuts
         .iter()
         .filter(|cut| matches!(cut.kind, PlateCutKind::Through))
     {
-        let outside_inner = builder.add_plate_ring(outside_y, &cut.inner_points)?;
-        let opposite_inner = builder.add_plate_ring(opposite_y, &cut.inner_points)?;
+        let outside_inner = entry_wall_rings
+            .get(&cut.operation)
+            .expect("entry wall ring should be generated before through wall");
+        let opposite_inner = secondary_wall_rings
+            .get(&cut.operation)
+            .expect("secondary wall ring should be generated before through wall");
         add_cut_wall_band(
             &mut builder,
-            &outside_inner,
-            &opposite_inner,
+            outside_inner,
+            opposite_inner,
             &cut.inner_points,
             cut.center,
             context,
             cut.operation,
             cut.wall_region,
         );
-        boundary_marks.push(BoundaryLoopMark {
-            ring: outside_inner,
-            operation: cut.operation,
-            boundary_loop: cut.entry_loop,
-            treatment: cut.edge_treatment,
-        });
-        boundary_marks.push(BoundaryLoopMark {
-            ring: opposite_inner,
-            operation: cut.operation,
-            boundary_loop: cut.secondary_loop,
-            treatment: cut.edge_treatment,
-        });
     }
 
     let mut mesh = builder.finish()?;
@@ -1376,6 +1534,8 @@ struct PlateCutPlan {
     rim_region: RegionId,
     wall_region: RegionId,
     edge_treatment: CutEdgeTreatment,
+    entry_bevel: Option<BoundaryLoopBevelPlan>,
+    secondary_bevel: Option<BoundaryLoopBevelPlan>,
 }
 
 struct BoundaryLoopMark {
@@ -1383,6 +1543,48 @@ struct BoundaryLoopMark {
     operation: OperationId,
     boundary_loop: BoundaryLoopId,
     treatment: CutEdgeTreatment,
+}
+
+#[derive(Debug, Clone)]
+struct BoundaryLoopBevelPlan {
+    operation: OperationId,
+    target_loop: BoundaryLoopId,
+    width: f32,
+    segments: u32,
+    profile: f32,
+    bevel_region: RegionId,
+    outer_replacement_loop: BoundaryLoopId,
+    inner_replacement_loop: BoundaryLoopId,
+}
+
+impl BoundaryLoopBevelPlan {
+    fn from_operation(operation: &ModelingOperationSpec) -> Result<Self, ModelingError> {
+        let ModelingOperationSpec::BevelBoundaryLoop {
+            operation,
+            target_loop,
+            width,
+            segments,
+            profile,
+            bevel_region,
+            outer_replacement_loop,
+            inner_replacement_loop,
+        } = operation
+        else {
+            return Err(ModelingError::InvalidInput(
+                "expected BevelBoundaryLoop operation".to_owned(),
+            ));
+        };
+        Ok(Self {
+            operation: *operation,
+            target_loop: *target_loop,
+            width: finite_positive(*width, "bevel_boundary_loop.width")?,
+            segments: (*segments).max(1),
+            profile: finite_positive(*profile, "bevel_boundary_loop.profile")?,
+            bevel_region: *bevel_region,
+            outer_replacement_loop: *outer_replacement_loop,
+            inner_replacement_loop: *inner_replacement_loop,
+        })
+    }
 }
 
 impl PlateCutPlan {
@@ -1452,6 +1654,8 @@ impl PlateCutPlan {
                     rim_region: *rim_region,
                     wall_region: *wall_region,
                     edge_treatment: *edge_treatment,
+                    entry_bevel: None,
+                    secondary_bevel: None,
                 })
             }
             ModelingOperationSpec::RectangularThroughCut {
@@ -1502,6 +1706,8 @@ impl PlateCutPlan {
                     rim_region: *rim_region,
                     wall_region: *wall_region,
                     edge_treatment: *edge_treatment,
+                    entry_bevel: None,
+                    secondary_bevel: None,
                 })
             }
             ModelingOperationSpec::CircularThroughCut {
@@ -1560,6 +1766,8 @@ impl PlateCutPlan {
                     rim_region: *rim_region,
                     wall_region: *wall_region,
                     edge_treatment: *edge_treatment,
+                    entry_bevel: None,
+                    secondary_bevel: None,
                 })
             }
             _ => Err(ModelingError::InvalidInput(
@@ -1567,6 +1775,105 @@ impl PlateCutPlan {
             )),
         }
     }
+}
+
+fn apply_boundary_loop_bevels(
+    cuts: &mut [PlateCutPlan],
+    bevels: &[BoundaryLoopBevelPlan],
+    thickness: f32,
+) -> Result<(), ModelingError> {
+    for bevel in bevels {
+        let mut matched = false;
+        for cut in cuts.iter_mut() {
+            if cut.entry_loop == bevel.target_loop {
+                validate_plate_loop_bevel(cut, bevel, true, thickness)?;
+                cut.entry_bevel = Some(bevel.clone());
+                matched = true;
+                break;
+            }
+            if cut.secondary_loop == bevel.target_loop {
+                validate_plate_loop_bevel(cut, bevel, false, thickness)?;
+                cut.secondary_bevel = Some(bevel.clone());
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return Err(ModelingError::UnsupportedOperation {
+                operation: bevel.operation,
+                reason: format!(
+                    "BevelBoundaryLoop target {} is not a supported Plate cut loop",
+                    bevel.target_loop.0
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_plate_loop_bevel(
+    cut: &PlateCutPlan,
+    bevel: &BoundaryLoopBevelPlan,
+    entry_loop: bool,
+    thickness: f32,
+) -> Result<(), ModelingError> {
+    if bevel.width >= cut.rim_width - EPSILON {
+        return Err(ModelingError::UnsupportedOperation {
+            operation: bevel.operation,
+            reason: "boundary-loop bevel width must be smaller than the authored cut rim width"
+                .to_owned(),
+        });
+    }
+    let loop_radius = minimum_loop_radius(&cut.inner_points, cut.center);
+    if bevel.width >= loop_radius * 0.5 {
+        return Err(ModelingError::UnsupportedOperation {
+            operation: bevel.operation,
+            reason: "boundary-loop bevel width is too large for the target loop radius".to_owned(),
+        });
+    }
+    match cut.kind {
+        PlateCutKind::Recessed { depth, .. } => {
+            if entry_loop {
+                if bevel.width >= depth - EPSILON {
+                    return Err(ModelingError::UnsupportedOperation {
+                        operation: bevel.operation,
+                        reason: "entry bevel width must leave vertical cut wall height".to_owned(),
+                    });
+                }
+            } else if bevel.width >= depth - EPSILON {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: bevel.operation,
+                    reason: "floor bevel width must be smaller than recess depth".to_owned(),
+                });
+            }
+        }
+        PlateCutKind::Through => {
+            let entry_width = if entry_loop {
+                bevel.width
+            } else {
+                cut.entry_bevel.as_ref().map_or(0.0, |entry| entry.width)
+            };
+            let exit_width = if entry_loop {
+                cut.secondary_bevel.as_ref().map_or(0.0, |exit| exit.width)
+            } else {
+                bevel.width
+            };
+            if entry_width + exit_width >= thickness - EPSILON {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: bevel.operation,
+                    reason: "opposing through-cut bevels must leave cut wall height".to_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn minimum_loop_radius(points: &[[f32; 2]], center: [f32; 2]) -> f32 {
+    points
+        .iter()
+        .map(|point| ((point[0] - center[0]).powi(2) + (point[1] - center[1]).powi(2)).sqrt())
+        .fold(f32::INFINITY, f32::min)
 }
 
 fn validate_cut_frame_clearance(cuts: &[PlateCutPlan]) -> Result<(), ModelingError> {
@@ -1688,19 +1995,22 @@ fn add_cut_features_for_face(
     zs: &[f32],
     host_region: RegionId,
     context: &GeneratorContext,
-    _boundary_marks: &mut Vec<BoundaryLoopMark>,
-) -> Result<(), ModelingError> {
+    bevel: Option<&BoundaryLoopBevelPlan>,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
     let window_points = frame_boundary_points(cut.frame, xs, zs);
     let window_ring = builder.add_plate_ring(y, &window_points)?;
-    let inner_ring = builder.add_plate_ring(y, &cut.inner_points)?;
+    let surface_points = bevel
+        .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+        .unwrap_or_else(|| cut.inner_points.clone());
+    let surface_ring = builder.add_plate_ring(y, &surface_points)?;
 
     if !cut.has_host_surface_band {
         add_frame_boundary_to_ring_cap(
             builder,
             &window_ring,
             &window_points,
-            &inner_ring,
-            &cut.inner_points,
+            &surface_ring,
+            &surface_points,
             cut.frame,
             desired_normal,
             context,
@@ -1708,7 +2018,21 @@ fn add_cut_features_for_face(
             cut.rim_region,
             SurfaceRole::Rim,
         )?;
-        return Ok(());
+        return if let Some(bevel) = bevel {
+            add_boundary_loop_bevel_band_from_outer(
+                builder,
+                surface_ring,
+                y,
+                &surface_points,
+                y - desired_normal[1] * bevel.width,
+                &cut.inner_points,
+                desired_normal,
+                context,
+                bevel,
+            )
+        } else {
+            Ok((surface_ring.clone(), surface_ring))
+        };
     }
 
     let rim_ring = builder.add_plate_ring(y, &cut.rim_points)?;
@@ -1728,16 +2052,30 @@ fn add_cut_features_for_face(
     add_matched_ring_band(
         builder,
         &rim_ring,
-        &inner_ring,
+        &surface_ring,
         &cut.rim_points,
-        &cut.inner_points,
+        &surface_points,
         desired_normal,
         context,
         cut.operation,
         cut.rim_region,
         SurfaceRole::Rim,
     );
-    Ok(())
+    if let Some(bevel) = bevel {
+        add_boundary_loop_bevel_band_from_outer(
+            builder,
+            surface_ring,
+            y,
+            &surface_points,
+            y - desired_normal[1] * bevel.width,
+            &cut.inner_points,
+            desired_normal,
+            context,
+            bevel,
+        )
+    } else {
+        Ok((surface_ring.clone(), surface_ring))
+    }
 }
 
 fn frame_boundary_points(frame: Rect2, xs: &[f32], zs: &[f32]) -> Vec<[f32; 2]> {
@@ -2364,6 +2702,109 @@ fn add_matched_ring_band(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn add_boundary_loop_bevel_band(
+    builder: &mut MeshBuilder,
+    outer_y: f32,
+    outer_points: &[[f32; 2]],
+    inner_y: f32,
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    bevel: &BoundaryLoopBevelPlan,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
+    if outer_points.len() != inner_points.len() {
+        return Err(ModelingError::InvalidInput(
+            "boundary-loop bevel replacement loops must have matching topology".to_owned(),
+        ));
+    }
+    let outer_ring = builder.add_plate_ring(outer_y, outer_points)?;
+    add_boundary_loop_bevel_band_from_outer(
+        builder,
+        outer_ring,
+        outer_y,
+        outer_points,
+        inner_y,
+        inner_points,
+        desired_normal,
+        context,
+        bevel,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_boundary_loop_bevel_band_from_outer(
+    builder: &mut MeshBuilder,
+    outer_ring: Vec<u32>,
+    outer_y: f32,
+    outer_points: &[[f32; 2]],
+    inner_y: f32,
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    bevel: &BoundaryLoopBevelPlan,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
+    if outer_points.len() != inner_points.len() {
+        return Err(ModelingError::InvalidInput(
+            "boundary-loop bevel replacement loops must have matching topology".to_owned(),
+        ));
+    }
+    let mut previous_points = outer_points.to_vec();
+    let mut previous_ring = outer_ring.clone();
+    let profile = bevel.profile.clamp(0.05, 8.0);
+    for step in 1..=bevel.segments {
+        let t = (step as f32 / bevel.segments as f32).powf(profile);
+        let current_points = lerp_loop_points(outer_points, inner_points, t);
+        let current_y = lerp(outer_y, inner_y, t);
+        let current_ring = builder.add_plate_ring(current_y, &current_points)?;
+        add_matched_ring_band(
+            builder,
+            &previous_ring,
+            &current_ring,
+            &previous_points,
+            &current_points,
+            desired_normal,
+            context,
+            bevel.operation,
+            bevel.bevel_region,
+            SurfaceRole::BevelBand,
+        );
+        previous_points = current_points;
+        previous_ring = current_ring;
+    }
+    Ok((outer_ring, previous_ring))
+}
+
+fn lerp_loop_points(from: &[[f32; 2]], to: &[[f32; 2]], t: f32) -> Vec<[f32; 2]> {
+    from.iter()
+        .zip(to)
+        .map(|(from, to)| [lerp(from[0], to[0], t), lerp(from[1], to[1], t)])
+        .collect()
+}
+
+fn offset_loop_points(points: &[[f32; 2]], center: [f32; 2], offset: f32) -> Vec<[f32; 2]> {
+    points
+        .iter()
+        .map(|point| {
+            let direction =
+                normalize_or_2d([point[0] - center[0], point[1] - center[1]], [1.0, 0.0]);
+            [
+                point[0] + direction[0] * offset,
+                point[1] + direction[1] * offset,
+            ]
+        })
+        .collect()
+}
+
+fn normalize_or_2d(value: [f32; 2], fallback: [f32; 2]) -> [f32; 2] {
+    let length = (value[0] * value[0] + value[1] * value[1]).sqrt();
+    if length <= EPSILON {
+        fallback
+    } else {
+        [value[0] / length, value[1] / length]
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn add_cut_wall_band(
     builder: &mut MeshBuilder,
     front_ring: &[u32],
@@ -2485,6 +2926,69 @@ fn mark_boundary_loop(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn mark_cut_or_bevel_boundary_loop(
+    mesh: &mut PolygonMesh,
+    outer_ring: &[u32],
+    inner_ring: &[u32],
+    cut_operation: OperationId,
+    source_loop: BoundaryLoopId,
+    treatment: CutEdgeTreatment,
+    bevel: Option<&BoundaryLoopBevelPlan>,
+) {
+    if let Some(bevel) = bevel {
+        mark_boundary_loop(
+            mesh,
+            outer_ring,
+            bevel.operation,
+            bevel.outer_replacement_loop,
+            CutEdgeTreatment::Hard,
+        );
+        mark_boundary_loop(
+            mesh,
+            inner_ring,
+            bevel.operation,
+            bevel.inner_replacement_loop,
+            CutEdgeTreatment::Hard,
+        );
+    } else {
+        mark_boundary_loop(mesh, outer_ring, cut_operation, source_loop, treatment);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_cut_or_bevel_boundary_marks(
+    marks: &mut Vec<BoundaryLoopMark>,
+    outer_ring: Vec<u32>,
+    inner_ring: Vec<u32>,
+    cut_operation: OperationId,
+    source_loop: BoundaryLoopId,
+    treatment: CutEdgeTreatment,
+    bevel: Option<&BoundaryLoopBevelPlan>,
+) {
+    if let Some(bevel) = bevel {
+        marks.push(BoundaryLoopMark {
+            ring: outer_ring,
+            operation: bevel.operation,
+            boundary_loop: bevel.outer_replacement_loop,
+            treatment: CutEdgeTreatment::Hard,
+        });
+        marks.push(BoundaryLoopMark {
+            ring: inner_ring,
+            operation: bevel.operation,
+            boundary_loop: bevel.inner_replacement_loop,
+            treatment: CutEdgeTreatment::Hard,
+        });
+    } else {
+        marks.push(BoundaryLoopMark {
+            ring: outer_ring,
+            operation: cut_operation,
+            boundary_loop: source_loop,
+            treatment,
+        });
+    }
+}
+
 fn insert_cut_region(
     regions: &mut BTreeMap<RegionId, SurfaceRegionSpec>,
     id: RegionId,
@@ -2502,6 +3006,20 @@ fn insert_cut_region(
             tags,
         }
     });
+}
+
+fn insert_boundary_bevel_region(
+    regions: &mut BTreeMap<RegionId, SurfaceRegionSpec>,
+    bevel: Option<&BoundaryLoopBevelPlan>,
+) {
+    if let Some(bevel) = bevel {
+        insert_cut_region(
+            regions,
+            bevel.bevel_region,
+            "boundary_loop_bevel",
+            SurfaceRole::BevelBand,
+        );
+    }
 }
 
 fn normalize_or(value: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {

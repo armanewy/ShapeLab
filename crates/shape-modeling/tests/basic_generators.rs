@@ -388,6 +388,48 @@ fn plate_rectangular_through_cut_is_closed_semantic_and_loop_tagged() {
 }
 
 #[test]
+fn plate_boundary_loop_bevel_consumes_source_and_emits_replacements() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(40),
+        target_loop: BoundaryLoopId(9),
+        width: 0.035,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(27),
+        outer_replacement_loop: BoundaryLoopId(30),
+        inner_replacement_loop: BoundaryLoopId(31),
+    };
+    let part = generate_cut_plate_with_operations(vec![cut, bevel], [3.0, 2.0], 0.30)
+        .expect("beveled cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_role(&part, RegionId(27), SurfaceRole::BevelBand);
+    assert_no_boundary_loop(&part.mesh, BoundaryLoopId(9));
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(10), OperationId(31), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(30), OperationId(40), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(31), OperationId(40), false);
+    assert_face_operation_present(&part.mesh, OperationId(31));
+    assert_face_operation_present(&part.mesh, OperationId(40));
+}
+
+#[test]
 fn plate_circular_through_cut_is_deterministic_and_loop_tagged() {
     let operation = ModelingOperationSpec::CircularThroughCut {
         operation: OperationId(32),
@@ -613,6 +655,65 @@ fn plate_multiple_same_face_cuts_compose_closed_semantic_geometry() {
         part.generator_signature
             .contains("plate_multi_cut:w=4.000000:h=2.000000:t=0.300000")
     );
+}
+
+#[test]
+fn plate_multi_cut_boundary_bevel_replaces_target_loop() {
+    let operations = vec![
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(50),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [-0.55, -0.20],
+            radius: 0.10,
+            radial_segments: 12,
+            rim_width: 0.05,
+            entry_loop: BoundaryLoopId(50),
+            exit_loop: BoundaryLoopId(51),
+            outer_region: RegionId(1),
+            rim_region: RegionId(150),
+            wall_region: RegionId(151),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        },
+        ModelingOperationSpec::RectangularThroughCut {
+            operation: OperationId(60),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.60, 0.35],
+            size: [0.28, 0.08],
+            corner_radius: 0.01,
+            rim_width: 0.04,
+            corner_segments: 3,
+            entry_loop: BoundaryLoopId(70),
+            exit_loop: BoundaryLoopId(71),
+            outer_region: RegionId(1),
+            rim_region: RegionId(170),
+            wall_region: RegionId(171),
+            edge_treatment: CutEdgeTreatment::Hard,
+        },
+        ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(90),
+            target_loop: BoundaryLoopId(50),
+            width: 0.02,
+            segments: 2,
+            profile: 1.0,
+            bevel_region: RegionId(190),
+            outer_replacement_loop: BoundaryLoopId(92),
+            inner_replacement_loop: BoundaryLoopId(93),
+        },
+    ];
+
+    let part = generate_cut_plate_with_operations(operations, [3.0, 2.0], 0.30)
+        .expect("multi-cut bevel should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_role(&part, RegionId(190), SurfaceRole::BevelBand);
+    assert_no_boundary_loop(&part.mesh, BoundaryLoopId(50));
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(51), OperationId(50), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(92), OperationId(90), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(93), OperationId(90), false);
+    assert_face_operation_present(&part.mesh, OperationId(90));
 }
 
 #[test]
@@ -966,6 +1067,15 @@ fn assert_boundary_loop(
             && !metadata.seam_candidate
             && metadata.bevel_eligible == bevel_eligible
     }));
+}
+
+fn assert_no_boundary_loop(mesh: &PolygonMesh, boundary_loop: BoundaryLoopId) {
+    assert!(
+        mesh.edge_metadata
+            .values()
+            .all(|metadata| metadata.boundary_loop != Some(boundary_loop)),
+        "boundary loop {boundary_loop:?} should have been consumed"
+    );
 }
 
 fn assert_face_operation_present(mesh: &PolygonMesh, operation: OperationId) {

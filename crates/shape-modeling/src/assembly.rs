@@ -94,6 +94,7 @@ impl AssemblyPlan {
                     | ModelingOperationSpec::RecessedPanelCut { .. }
                     | ModelingOperationSpec::RectangularThroughCut { .. }
                     | ModelingOperationSpec::CircularThroughCut { .. }
+                    | ModelingOperationSpec::BevelBoundaryLoop { .. }
                     | ModelingOperationSpec::ReservedBoolean { .. }
                     | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}
                 }

@@ -788,6 +788,66 @@ pub fn multi_cut_panel_recipe() -> AssetRecipe {
                     wall_region: RegionId(35),
                     edge_treatment: CutEdgeTreatment::Hard,
                 },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(9),
+                    target_loop: BoundaryLoopId(1),
+                    width: 0.022,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(40),
+                    outer_replacement_loop: BoundaryLoopId(17),
+                    inner_replacement_loop: BoundaryLoopId(18),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(10),
+                    target_loop: BoundaryLoopId(2),
+                    width: 0.018,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(41),
+                    outer_replacement_loop: BoundaryLoopId(19),
+                    inner_replacement_loop: BoundaryLoopId(20),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(11),
+                    target_loop: BoundaryLoopId(3),
+                    width: 0.015,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(42),
+                    outer_replacement_loop: BoundaryLoopId(21),
+                    inner_replacement_loop: BoundaryLoopId(22),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(12),
+                    target_loop: BoundaryLoopId(5),
+                    width: 0.015,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(43),
+                    outer_replacement_loop: BoundaryLoopId(23),
+                    inner_replacement_loop: BoundaryLoopId(24),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(13),
+                    target_loop: BoundaryLoopId(7),
+                    width: 0.015,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(44),
+                    outer_replacement_loop: BoundaryLoopId(25),
+                    inner_replacement_loop: BoundaryLoopId(26),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(14),
+                    target_loop: BoundaryLoopId(9),
+                    width: 0.015,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(45),
+                    outer_replacement_loop: BoundaryLoopId(27),
+                    inner_replacement_loop: BoundaryLoopId(28),
+                },
             ],
             plate_regions(),
             BTreeMap::new(),
@@ -941,7 +1001,7 @@ pub fn multi_cut_panel_recipe() -> AssetRecipe {
         },
     );
     recipe.root_instances.push(PartInstanceId(1));
-    finish_ids(&mut recipe, 2, 2, 9, 1);
+    finish_ids(&mut recipe, 2, 2, 15, 1);
     recipe
 }
 
@@ -1952,5 +2012,37 @@ mod tests {
         assert_eq!(mount_holes.role, CutGroupRole::MountHoles);
         assert_eq!(vents.operations.len(), 3);
         assert_eq!(vents.role, CutGroupRole::Vents);
+    }
+
+    #[test]
+    fn multi_cut_panel_authors_boundary_loop_bevels() {
+        let recipe = multi_cut_panel_recipe();
+        let definition = recipe
+            .definitions
+            .get(&PartDefinitionId(1))
+            .expect("panel definition should exist");
+        let bevels = definition
+            .geometry
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    target_loop,
+                    outer_replacement_loop,
+                    inner_replacement_loop,
+                    ..
+                } => Some((
+                    *target_loop,
+                    *outer_replacement_loop,
+                    *inner_replacement_loop,
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(bevels.len(), 6);
+        assert!(bevels.contains(&(BoundaryLoopId(1), BoundaryLoopId(17), BoundaryLoopId(18))));
+        assert!(bevels.contains(&(BoundaryLoopId(2), BoundaryLoopId(19), BoundaryLoopId(20))));
+        assert!(bevels.contains(&(BoundaryLoopId(3), BoundaryLoopId(21), BoundaryLoopId(22))));
     }
 }

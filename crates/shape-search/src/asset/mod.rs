@@ -798,6 +798,32 @@ fn collect_definition_opportunities(
                         opportunities,
                     );
                 }
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation,
+                    width,
+                    segments,
+                    ..
+                } => {
+                    opportunities.push(EditOpportunity::BoundaryBevelWidth {
+                        definition: *definition_id,
+                        operation: *operation,
+                        current: *width,
+                    });
+                    push_topology_opportunity(
+                        recipe,
+                        mode,
+                        skipped,
+                        *definition_id,
+                        EditOpportunity::DetailDensity(
+                            DetailDensityTarget::BoundaryBevelSegmentCount {
+                                definition: *definition_id,
+                                operation: *operation,
+                                current: *segments,
+                            },
+                        ),
+                        opportunities,
+                    );
+                }
                 ModelingOperationSpec::LinearArray {
                     operation,
                     count,
@@ -1147,6 +1173,11 @@ enum EditOpportunity {
         operation: OperationId,
         current: f32,
     },
+    BoundaryBevelWidth {
+        definition: PartDefinitionId,
+        operation: OperationId,
+        current: f32,
+    },
     SweepProfilePoint {
         definition: PartDefinitionId,
         index: usize,
@@ -1329,6 +1360,7 @@ impl EditOpportunity {
             | Self::Transform { .. }
             | Self::Dimension(_)
             | Self::BevelRadius { .. }
+            | Self::BoundaryBevelWidth { .. }
             | Self::SweepProfilePoint { .. }
             | Self::SweepPathFrame { .. }
             | Self::LatheProfilePoint { .. }
@@ -1372,6 +1404,16 @@ impl EditOpportunity {
                 operation: *operation,
                 radius: Some(mutate_non_negative(*current, mode, rng)),
                 segments: None,
+            }]),
+            Self::BoundaryBevelWidth {
+                definition,
+                operation,
+                current,
+            } => Some(vec![AssetEdit::SetOperationScalar {
+                definition: *definition,
+                operation: *operation,
+                field: "bevel_boundary_loop.width".to_owned(),
+                value: mutate_non_negative(*current, mode, rng).max(0.001),
             }]),
             Self::SweepProfilePoint {
                 definition,
@@ -1547,7 +1589,9 @@ impl EditOpportunity {
             Self::ScalarParameter { .. } => AssetCandidateEditKind::Parameter,
             Self::Transform { .. } => AssetCandidateEditKind::Transform,
             Self::Dimension(_) => AssetCandidateEditKind::GeneratorDimension,
-            Self::BevelRadius { .. } => AssetCandidateEditKind::Bevel,
+            Self::BevelRadius { .. } | Self::BoundaryBevelWidth { .. } => {
+                AssetCandidateEditKind::Bevel
+            }
             Self::SweepProfilePoint { .. } | Self::SweepPathFrame { .. } => {
                 AssetCandidateEditKind::Sweep
             }
@@ -1576,6 +1620,14 @@ impl EditOpportunity {
                 ..
             } => format!(
                 "definition.{}.operation.{}.bevel.radius",
+                definition.0, operation.0
+            ),
+            Self::BoundaryBevelWidth {
+                definition,
+                operation,
+                ..
+            } => format!(
+                "definition.{}.operation.{}.bevel_boundary_loop.width",
                 definition.0, operation.0
             ),
             Self::SweepProfilePoint {
@@ -1871,6 +1923,11 @@ enum DetailDensityTarget {
         operation: OperationId,
         current: u32,
     },
+    BoundaryBevelSegmentCount {
+        definition: PartDefinitionId,
+        operation: OperationId,
+        current: u32,
+    },
 }
 
 impl DetailDensityTarget {
@@ -1913,6 +1970,16 @@ impl DetailDensityTarget {
                 radius: None,
                 segments: Some(mutate_detail_count(*current, 1, rng)?),
             }),
+            Self::BoundaryBevelSegmentCount {
+                definition,
+                operation,
+                current,
+            } => Some(AssetEdit::SetOperationScalar {
+                definition: *definition,
+                operation: *operation,
+                field: "bevel_boundary_loop.segments".to_owned(),
+                value: mutate_detail_count(*current, 1, rng)? as f32,
+            }),
         }
     }
 
@@ -1939,6 +2006,14 @@ impl DetailDensityTarget {
                 ..
             } => format!(
                 "definition.{}.operation.{}.bevel.segments",
+                definition.0, operation.0
+            ),
+            Self::BoundaryBevelSegmentCount {
+                definition,
+                operation,
+                ..
+            } => format!(
+                "definition.{}.operation.{}.bevel_boundary_loop.segments",
                 definition.0, operation.0
             ),
         }
@@ -2421,6 +2496,7 @@ fn operation_label(operation: &ModelingOperationSpec) -> &'static str {
         ModelingOperationSpec::RecessedPanelCut { .. } => "recessed panel cut",
         ModelingOperationSpec::RectangularThroughCut { .. } => "rectangular through cut",
         ModelingOperationSpec::CircularThroughCut { .. } => "circular through cut",
+        ModelingOperationSpec::BevelBoundaryLoop { .. } => "boundary loop bevel",
         ModelingOperationSpec::MirrorInstances { .. } => "mirror",
         ModelingOperationSpec::LinearArray { .. } => "linear array",
         ModelingOperationSpec::RadialArray { .. } => "radial array",

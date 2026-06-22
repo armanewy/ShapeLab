@@ -238,6 +238,7 @@ pub fn compile_asset(recipe: &AssetRecipe) -> Result<AssetArtifact, CompileError
         });
     }
     let evaluation = evaluate_assembly(recipe)?;
+    let boundary_loop_lifecycles = boundary_loop_lifecycle_by_definition(recipe);
     let mut compiled_parts = Vec::new();
 
     for occurrence in &evaluation.instances {
@@ -282,7 +283,10 @@ pub fn compile_asset(recipe: &AssetRecipe) -> Result<AssetArtifact, CompileError
             sockets_world,
             validation_report: CompileValidationReport::default(),
         };
-        compiled.validation_report = validate_compiled_part(&compiled);
+        compiled.validation_report = validate_compiled_part(
+            &compiled,
+            boundary_loop_lifecycles.get(&occurrence.definition_id),
+        );
         compiled_parts.push(compiled);
     }
 
@@ -748,7 +752,10 @@ fn ensure_valid_recipe(recipe: &AssetRecipe) -> Result<(), CompileError> {
     }
 }
 
-fn validate_compiled_part(part: &CompiledPart) -> CompileValidationReport {
+fn validate_compiled_part(
+    part: &CompiledPart,
+    boundary_loop_lifecycle: Option<&BoundaryLoopLifecycle>,
+) -> CompileValidationReport {
     let mut report = CompileValidationReport::default();
     append_poly_report(
         &mut report,
@@ -780,6 +787,7 @@ fn validate_compiled_part(part: &CompiledPart) -> CompileValidationReport {
         Some(format!("part.{}.world", part.instance_id.0)),
         part,
         &part.world_mesh,
+        boundary_loop_lifecycle,
     );
     report
 }
@@ -879,6 +887,7 @@ fn validate_boundary_loop_structure(
     subject: Option<String>,
     part: &CompiledPart,
     mesh: &PolygonMesh,
+    boundary_loop_lifecycle: Option<&BoundaryLoopLifecycle>,
 ) {
     let Ok(adjacency) = build_adjacency(mesh) else {
         return;
@@ -892,6 +901,8 @@ fn validate_boundary_loop_structure(
 
     for (boundary_loop, edges) in loop_edges {
         let loop_subject = boundary_loop_subject(&subject, boundary_loop);
+        let replacement_loop = boundary_loop_lifecycle
+            .is_some_and(|lifecycle| lifecycle.replacement_outputs.contains_key(&boundary_loop));
         if edges.len() < 3 {
             push_issue(
                 report,
@@ -1002,7 +1013,8 @@ fn validate_boundary_loop_structure(
                         loop_part_instance = Some(face_part);
                     }
                 }
-                if let Some(edge_operation) = metadata.operation
+                if !replacement_loop
+                    && let Some(edge_operation) = metadata.operation
                     && face_metadata.operation != Some(edge_operation)
                     && !reported_face_operation
                 {
@@ -1657,6 +1669,16 @@ mod tests {
         );
     }
 
+    fn assert_no_compiled_boundary_loop(part: &CompiledPart, boundary_loop: BoundaryLoopId) {
+        assert!(
+            part.world_mesh
+                .edge_metadata
+                .values()
+                .all(|metadata| metadata.boundary_loop != Some(boundary_loop)),
+            "boundary loop {boundary_loop:?} should not be emitted"
+        );
+    }
+
     fn manual_artifact() -> AssetArtifact {
         let mesh = polygon_mesh_from_faces(
             vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -1817,7 +1839,7 @@ mod tests {
         }
         assert!(removed, "fixture should emit entry boundary loop");
 
-        let report = validate_compiled_part(&part);
+        let report = validate_compiled_part(&part, None);
         let codes = compile_issue_codes(&report);
 
         assert!(codes.contains("invalid_boundary_loop_vertex_degree"));
@@ -1842,6 +1864,49 @@ mod tests {
 
         assert_compiled_boundary_loop(part, BoundaryLoopId(9), OperationId(31));
         assert_compiled_boundary_loop(part, BoundaryLoopId(10), OperationId(31));
+    }
+
+    #[test]
+    fn boundary_loop_bevel_replacements_compile_as_live_loops() {
+        let mut recipe = through_cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(32),
+                target_loop: BoundaryLoopId(9),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(25),
+                outer_replacement_loop: BoundaryLoopId(11),
+                inner_replacement_loop: BoundaryLoopId(12),
+            });
+        recipe.next_ids.operation = 33;
+        recipe.next_ids.region = 26;
+        recipe.next_ids.boundary_loop = 13;
+
+        let artifact = compile_asset(&recipe).expect("beveled through cut should compile");
+        assert!(
+            artifact.validation_report.is_valid(),
+            "asset issues: {:?}; part issues: {:?}",
+            artifact.validation_report.issues,
+            artifact
+                .compiled_parts
+                .iter()
+                .map(|part| &part.validation_report.issues)
+                .collect::<Vec<_>>()
+        );
+        let part = &artifact.compiled_parts[0];
+
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(9));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(10), OperationId(31));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(11), OperationId(32));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(12), OperationId(32));
     }
 
     #[test]

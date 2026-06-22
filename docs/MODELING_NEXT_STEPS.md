@@ -14,9 +14,11 @@
 
 2. Boundary-loop bevels
    - Present: boundary-loop lifecycle metadata distinguishes direct outputs, dependency replacement outputs, all declared outputs, historically produced loops, live loops required in the final mesh, consumed loops, and replacement outputs.
-   - Add boundary-loop-targeted bevel operations for cut entry, exit, floor, and rim loops.
-   - Propagate bevels through `bevel_eligible` boundary-loop metadata without overloading UV seam metadata.
-   - Emit bevel-band regions, replacement loops, safe-width diagnostics, deterministic topology, and complete provenance.
+   - Present: `BevelBoundaryLoop` consumes supported Plate cut entry, exit, and recess-floor loops, emits two replacement loops, and generates bevel-band faces with deterministic segment/profile controls.
+   - Present: multi-cut-panel demonstrates recess entry/floor bevels, grouped mounting-hole entry bevels, and hard-edged vents.
+   - Present: Explore can vary targeted bevel width and segment count through descriptor-free operation scalar edits.
+   - Next: broaden safe-width diagnostics around neighboring cuts and host-boundary clearances beyond the current rim/depth/radius checks.
+   - Next: propagate bevels through more generated boundary families without overloading UV seam metadata.
 
 3. Rounded-box face cuts
    - Extend the controlled cut path to flat primary patches of rounded-box faces.

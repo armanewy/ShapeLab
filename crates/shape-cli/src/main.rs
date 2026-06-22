@@ -168,7 +168,7 @@ struct AssetVisualBenchmarkArgs {
     #[arg(long, default_value_t = DEFAULT_SEED)]
     seed: u64,
     /// Number of semantic proposals to compile and score for each mode.
-    #[arg(long, default_value_t = 96)]
+    #[arg(long, default_value_t = 192)]
     proposal_count: usize,
     /// Number of representative candidates to render per mode.
     #[arg(long, default_value_t = DEFAULT_RESULT_COUNT)]
@@ -1660,6 +1660,16 @@ fn operation_label(operation: &ModelingOperationSpec) -> String {
             ..
         } => format!(
             "circular through cut face={face:?} center={center:?} radius={radius:.4} rim={rim_width:.4} segments={radial_segments}"
+        ),
+        ModelingOperationSpec::BevelBoundaryLoop {
+            target_loop,
+            width,
+            segments,
+            profile,
+            ..
+        } => format!(
+            "bevel boundary loop target={} width={width:.4} segments={segments} profile={profile:.3}",
+            target_loop.0
         ),
         ModelingOperationSpec::MirrorInstances {
             plane_normal,
