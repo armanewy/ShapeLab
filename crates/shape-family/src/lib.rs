@@ -10,13 +10,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 /// Current schema version for asset-family documents.
 pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 3;
 
 /// Current schema version for style-kit documents.
-pub const STYLE_KIT_SCHEMA_VERSION: u32 = 3;
+pub const STYLE_KIT_SCHEMA_VERSION: u32 = 4;
+const LEGACY_STYLE_KIT_SCHEMA_VERSION: u32 = 3;
 
 /// Theme-neutral functional grammar for one class of assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -354,7 +355,7 @@ pub enum LengthValue {
 }
 
 /// Concrete visual language that can be applied to compatible families.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StyleKit {
     /// Style-kit schema version.
     pub schema_version: u32,
@@ -364,19 +365,10 @@ pub struct StyleKit {
     pub display_name: String,
     /// Family IDs this kit can style.
     pub compatible_families: Vec<String>,
-    /// Optional legacy/global per-role proportion guidance. Family-scoped data lives in facets.
-    #[serde(default)]
-    pub proportions: Vec<RoleProportion>,
     /// Global bevel guidance.
     pub bevel_policy: BevelPolicy,
     /// Preferred profile and curve vocabulary.
     pub profile_language: ProfileLanguage,
-    /// Optional legacy/global part prototypes. Family-scoped data lives in facets.
-    #[serde(default)]
-    pub part_prototypes: Vec<PartPrototype>,
-    /// Optional legacy/global detail modules. Family-scoped data lives in facets.
-    #[serde(default)]
-    pub detail_modules: Vec<DetailModule>,
     /// Repetition density and rhythm.
     pub repetition: RepetitionPolicy,
     /// Symmetry preferences.
@@ -390,8 +382,144 @@ pub struct StyleKit {
     pub tags: Vec<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StyleKitWire {
+    schema_version: u32,
+    id: String,
+    display_name: String,
+    compatible_families: Vec<String>,
+    #[serde(default)]
+    proportions: Option<Vec<RoleProportion>>,
+    bevel_policy: BevelPolicy,
+    profile_language: ProfileLanguage,
+    #[serde(default)]
+    part_prototypes: Option<Vec<PartPrototype>>,
+    #[serde(default)]
+    detail_modules: Option<Vec<DetailModule>>,
+    repetition: RepetitionPolicy,
+    symmetry: SymmetryPolicy,
+    exaggeration: ExaggerationPolicy,
+    #[serde(default)]
+    family_facets: BTreeMap<String, FamilyStyleFacet>,
+    tags: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for StyleKit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = StyleKitWire::deserialize(deserializer)?;
+        migrate_style_kit_wire(wire).map_err(de::Error::custom)
+    }
+}
+
+fn migrate_style_kit_wire(mut wire: StyleKitWire) -> Result<StyleKit, String> {
+    match wire.schema_version {
+        STYLE_KIT_SCHEMA_VERSION
+            if wire.proportions.is_some()
+                || wire.part_prototypes.is_some()
+                || wire.detail_modules.is_some() =>
+        {
+            return Err(
+                "style kit schema v4 must not contain legacy global role-scoped fields".to_owned(),
+            );
+        }
+        STYLE_KIT_SCHEMA_VERSION => {}
+        LEGACY_STYLE_KIT_SCHEMA_VERSION => {
+            migrate_style_kit_v3_role_data(&mut wire)?;
+            wire.schema_version = STYLE_KIT_SCHEMA_VERSION;
+        }
+        _ => {}
+    }
+    Ok(StyleKit {
+        schema_version: wire.schema_version,
+        id: wire.id,
+        display_name: wire.display_name,
+        compatible_families: wire.compatible_families,
+        bevel_policy: wire.bevel_policy,
+        profile_language: wire.profile_language,
+        repetition: wire.repetition,
+        symmetry: wire.symmetry,
+        exaggeration: wire.exaggeration,
+        family_facets: wire.family_facets,
+        tags: wire.tags,
+    })
+}
+
+fn migrate_style_kit_v3_role_data(wire: &mut StyleKitWire) -> Result<(), String> {
+    let global_proportions = wire.proportions.take();
+    let global_part_prototypes = wire.part_prototypes.take();
+    let global_detail_modules = wire.detail_modules.take();
+    let has_global_data = global_proportions
+        .as_ref()
+        .is_some_and(|values| !values.is_empty())
+        || global_part_prototypes
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+        || global_detail_modules
+            .as_ref()
+            .is_some_and(|values| !values.is_empty());
+    if !has_global_data {
+        return Ok(());
+    }
+    if wire.compatible_families.len() != 1 {
+        return Err(
+            "style kit schema v3 global role-scoped data is ambiguous for multiple compatible families"
+                .to_owned(),
+        );
+    }
+    let family_id = wire.compatible_families[0].clone();
+    let facet = wire
+        .family_facets
+        .entry(family_id.clone())
+        .or_insert_with(|| FamilyStyleFacet {
+            family_id: family_id.clone(),
+            proportions: Vec::new(),
+            part_prototypes: Vec::new(),
+            detail_modules: Vec::new(),
+            policy_overrides: FamilyStylePolicyOverrides::default(),
+        });
+    if facet.family_id != family_id {
+        return Err("style kit schema v3 facet key and family_id disagree".to_owned());
+    }
+    if let Some(proportions) = global_proportions
+        && !proportions.is_empty()
+    {
+        if !facet.proportions.is_empty() && facet.proportions != proportions {
+            return Err("style kit schema v3 global and facet proportions disagree".to_owned());
+        }
+        if facet.proportions.is_empty() {
+            facet.proportions = proportions;
+        }
+    }
+    if let Some(part_prototypes) = global_part_prototypes
+        && !part_prototypes.is_empty()
+    {
+        if !facet.part_prototypes.is_empty() && facet.part_prototypes != part_prototypes {
+            return Err("style kit schema v3 global and facet part prototypes disagree".to_owned());
+        }
+        if facet.part_prototypes.is_empty() {
+            facet.part_prototypes = part_prototypes;
+        }
+    }
+    if let Some(detail_modules) = global_detail_modules
+        && !detail_modules.is_empty()
+    {
+        if !facet.detail_modules.is_empty() && facet.detail_modules != detail_modules {
+            return Err("style kit schema v3 global and facet detail modules disagree".to_owned());
+        }
+        if facet.detail_modules.is_empty() {
+            facet.detail_modules = detail_modules;
+        }
+    }
+    Ok(())
+}
+
 /// Family-scoped portion of a style kit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FamilyStyleFacet {
     /// Family ID this facet styles.
     pub family_id: String,
@@ -404,9 +532,21 @@ pub struct FamilyStyleFacet {
     /// Optional detail modules for this family.
     #[serde(default)]
     pub detail_modules: Vec<DetailModule>,
-    /// Descriptive default-provider hints by role; executable defaults live in StyleImplementation.
+    /// Optional per-family overrides for global style policies.
     #[serde(default)]
-    pub default_role_providers: BTreeMap<String, String>,
+    pub policy_overrides: FamilyStylePolicyOverrides,
+}
+
+/// Optional style-policy overrides scoped to a family facet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FamilyStylePolicyOverrides {
+    /// Family-local bevel override.
+    #[serde(default)]
+    pub bevel_policy: Option<BevelPolicy>,
+    /// Family-local repetition override.
+    #[serde(default)]
+    pub repetition: Option<RepetitionPolicy>,
 }
 
 /// Per-role proportion guidance.
@@ -647,11 +787,8 @@ pub fn validate_style_kit(kit: &StyleKit) -> FamilyValidationReport {
         &kit.compatible_families,
         "invalid_compatible_family",
     );
-    validate_role_proportions(kit, &mut report);
     validate_bevel_policy(&kit.bevel_policy, &mut report);
     validate_profile_language(&kit.profile_language, &mut report);
-    validate_part_prototypes(kit, &mut report);
-    validate_detail_modules(kit, &mut report);
     validate_repetition_policy(&kit.repetition, &mut report);
     validate_symmetry_policy(&kit.symmetry, &mut report);
     validate_exaggeration_policy(&kit.exaggeration, &mut report);
@@ -1508,10 +1645,6 @@ fn validate_runtime_metadata_requirements(
     }
 }
 
-fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport) {
-    validate_role_proportion_list(&kit.proportions, "proportions", report);
-}
-
 fn validate_role_proportion_list(
     proportions: &[RoleProportion],
     subject: &str,
@@ -1557,23 +1690,31 @@ fn validate_role_proportion_list(
 }
 
 fn validate_bevel_policy(policy: &BevelPolicy, report: &mut FamilyValidationReport) {
+    validate_bevel_policy_scoped(policy, "bevel_policy", report);
+}
+
+fn validate_bevel_policy_scoped(
+    policy: &BevelPolicy,
+    subject: &str,
+    report: &mut FamilyValidationReport,
+) {
     validate_global_length_value(
         report,
-        Some("bevel_policy.width"),
+        Some(format!("{subject}.width")),
         &policy.width,
         "invalid_bevel_width",
     );
     if policy.segments == 0 {
         push_issue(
             report,
-            Some("bevel_policy.segments"),
+            Some(format!("{subject}.segments")),
             "invalid_bevel_segments",
             "Bevel policy must request at least one segment.",
         );
     }
     validate_fraction(
         report,
-        Some("bevel_policy.profile.normalized"),
+        Some(format!("{subject}.profile.normalized")),
         policy.profile.normalized,
         "invalid_bevel_profile",
     );
@@ -1612,10 +1753,6 @@ fn validate_profile_language(language: &ProfileLanguage, report: &mut FamilyVali
         &language.allowed_profiles,
         "invalid_allowed_profile",
     );
-}
-
-fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport) {
-    validate_part_prototype_list(&kit.part_prototypes, "part_prototypes", report);
 }
 
 fn validate_part_prototype_list(
@@ -1718,10 +1855,6 @@ fn validate_operation_tags(
     }
 }
 
-fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) {
-    validate_detail_module_list(&kit.detail_modules, "detail_modules", report);
-}
-
 fn validate_detail_module_list(
     modules: &[DetailModule],
     subject: &str,
@@ -1804,22 +1937,30 @@ fn validate_detail_module_list(
 }
 
 fn validate_repetition_policy(policy: &RepetitionPolicy, report: &mut FamilyValidationReport) {
+    validate_repetition_policy_scoped(policy, "repetition", report);
+}
+
+fn validate_repetition_policy_scoped(
+    policy: &RepetitionPolicy,
+    subject: &str,
+    report: &mut FamilyValidationReport,
+) {
     validate_fraction(
         report,
-        Some("repetition.density"),
+        Some(format!("{subject}.density")),
         policy.density,
         "invalid_repetition_density",
     );
     validate_global_length_value(
         report,
-        Some("repetition.preferred_spacing"),
+        Some(format!("{subject}.preferred_spacing")),
         &policy.preferred_spacing,
         "invalid_repetition_spacing",
     );
     if policy.maximum_default_count == 0 {
         push_issue(
             report,
-            Some("repetition.maximum_default_count"),
+            Some(format!("{subject}.maximum_default_count")),
             "invalid_repetition_count",
             "Maximum default repetition count must be greater than zero.",
         );
@@ -1917,48 +2058,28 @@ fn validate_family_style_facets(kit: &StyleKit, report: &mut FamilyValidationRep
             &format!("family_facets.{family_id}.detail_modules"),
             report,
         );
-        validate_facet_default_providers(family_id, facet, report);
+        validate_family_style_policy_overrides(family_id, &facet.policy_overrides, report);
     }
 }
 
-fn validate_facet_default_providers(
+fn validate_family_style_policy_overrides(
     family_id: &str,
-    facet: &FamilyStyleFacet,
+    overrides: &FamilyStylePolicyOverrides,
     report: &mut FamilyValidationReport,
 ) {
-    let prototypes = facet
-        .part_prototypes
-        .iter()
-        .map(|prototype| (prototype.id.as_str(), prototype.role.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    for (role, prototype_id) in &facet.default_role_providers {
-        validate_identifier(
+    if let Some(policy) = &overrides.bevel_policy {
+        validate_bevel_policy_scoped(
+            policy,
+            &format!("family_facets.{family_id}.policy_overrides.bevel_policy"),
             report,
-            Some(format!(
-                "family_facets.{family_id}.default_role_providers.{role}"
-            )),
-            role,
-            "invalid_facet_default_provider_role",
         );
-        match prototypes.get(prototype_id.as_str()) {
-            Some(prototype_role) if *prototype_role == role.as_str() => {}
-            Some(_) => push_issue(
-                report,
-                Some(format!(
-                    "family_facets.{family_id}.default_role_providers.{role}"
-                )),
-                "facet_default_provider_role_mismatch",
-                "Family facet default provider prototype role must match the map role.",
-            ),
-            None => push_issue(
-                report,
-                Some(format!(
-                    "family_facets.{family_id}.default_role_providers.{role}"
-                )),
-                "unknown_facet_default_provider_prototype",
-                "Family facet default providers must refer to a prototype in the same facet.",
-            ),
-        }
+    }
+    if let Some(policy) = &overrides.repetition {
+        validate_repetition_policy_scoped(
+            policy,
+            &format!("family_facets.{family_id}.policy_overrides.repetition"),
+            report,
+        );
     }
 }
 

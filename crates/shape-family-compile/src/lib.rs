@@ -7,12 +7,15 @@
 //! presence/prototype choices, and unsupported fragment features are rejected
 //! instead of implicitly remapped.
 
+pub mod identity;
+pub mod remap;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetId, AssetRecipe, AssetValidationReport, ParameterDescriptor, PartDefinitionId,
-    PartInstanceId, RegionId, SurfaceRegionSpec, validate_asset_recipe,
+    AssetId, AssetRecipe, AssetValidationReport, AttachmentMode, ParameterDescriptor,
+    PartDefinitionId, PartInstanceId, RegionId, SocketId, SurfaceRegionSpec, validate_asset_recipe,
 };
 use shape_compile::{AssetArtifact, CompileError, CompileValidationReport, compile_asset};
 use shape_family::{
@@ -23,17 +26,23 @@ use shape_family::{
 };
 use thiserror::Error;
 
+use crate::identity::{
+    ArtifactFingerprint, FingerprintError, FoundryIntentFingerprint, GeometryInputFingerprint,
+    RecipeFingerprint, fingerprint_serializable,
+};
+
 /// Current schema version for executable family implementations.
-pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
+pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 2;
 
 /// Current schema version for executable style implementations.
-pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 2;
+pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 3;
 
 /// Current schema version for executable recipe fragments.
-pub const RECIPE_FRAGMENT_SCHEMA_VERSION: u32 = 1;
+pub const RECIPE_FRAGMENT_SCHEMA_VERSION: u32 = 2;
 
 /// Executable family binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FamilyImplementation {
     /// Executable family implementation schema version.
     pub schema_version: u32,
@@ -41,45 +50,26 @@ pub struct FamilyImplementation {
     pub family_id: String,
     /// Base recipe used as the deterministic merge target.
     pub base_recipe: AssetRecipe,
-    /// Optional role-level binding metadata.
-    pub role_bindings: BTreeMap<String, RoleBinding>,
     /// Parameter bindings applied after fragments are merged.
     pub parameter_bindings: Vec<ParameterBinding>,
-    /// Placeholder variant binding keys reserved for later search integration.
-    pub variant_bindings: BTreeMap<String, VariantBinding>,
     /// Family-owned default providers keyed by role ID.
     pub default_role_providers: BTreeMap<String, String>,
     /// Family-owned recipe fragments keyed by fragment ID.
     pub fragments: BTreeMap<String, RecipeFragment>,
-}
-
-/// Role binding metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoleBinding {
-    /// Family role ID.
-    pub role: String,
-    /// Whether the role may be omitted when not required.
-    pub optional: bool,
-}
-
-/// Variant binding placeholder.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VariantBinding {
-    /// Variant rule ID.
-    pub rule: String,
-    /// Human-readable binding note.
-    pub note: String,
+    /// Explicit cross-fragment attachment bindings resolved through exported ports.
+    #[serde(default)]
+    pub attachment_bindings: Vec<FragmentAttachmentBinding>,
 }
 
 /// Executable style binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StyleImplementation {
     /// Executable style implementation schema version.
     pub schema_version: u32,
     /// Style kit ID implemented by this binding.
     pub style_kit_id: String,
     /// Family ID this style implementation targets.
-    #[serde(default)]
     pub family_id: String,
     /// Explicit default style providers keyed by family role ID.
     pub default_role_providers: BTreeMap<String, String>,
@@ -91,6 +81,7 @@ pub struct StyleImplementation {
 
 /// Concrete fragment that can provide a family role.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecipeFragment {
     /// Executable fragment schema version.
     pub schema_version: u32,
@@ -98,12 +89,101 @@ pub struct RecipeFragment {
     pub id: String,
     /// Family role provided by this fragment.
     pub provided_role: String,
-    /// Root instances that count as externally visible role occurrences.
-    pub role_occurrence_roots: Vec<PartInstanceId>,
-    /// Internal instances that do not count toward role cardinality.
-    pub internal_instances: Vec<PartInstanceId>,
+    /// Explicit ports and occurrence roots exported by this fragment.
+    pub exports: RecipeFragmentExports,
     /// Source recipe whose roots will be merged into the target recipe.
     pub recipe: AssetRecipe,
+}
+
+/// Explicit exports from a self-contained recipe fragment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeFragmentExports {
+    /// Root instances that count as externally visible role occurrences.
+    pub role_occurrence_roots: Vec<PartInstanceId>,
+    /// Internal helper roots that do not count toward role cardinality.
+    #[serde(default)]
+    pub internal_roots: Vec<PartInstanceId>,
+    /// Socket ports that other fragments may attach to.
+    #[serde(default)]
+    pub socket_ports: Vec<FragmentSocketPort>,
+    /// Surface ports that other fragments may use for placement or conformance.
+    #[serde(default)]
+    pub surface_ports: Vec<FragmentSurfacePort>,
+}
+
+/// Exported socket port on a fragment-local occurrence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentSocketPort {
+    /// Stable port ID within this fragment.
+    pub id: String,
+    /// Local occurrence root exposing the socket.
+    pub local_occurrence_root: PartInstanceId,
+    /// Socket ID on the occurrence definition.
+    pub local_socket: SocketId,
+    /// Compatibility tags used by attachment bindings.
+    pub compatibility_tags: Vec<String>,
+}
+
+/// Exported surface port on a fragment-local definition or occurrence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentSurfacePort {
+    /// Stable port ID within this fragment.
+    pub id: String,
+    /// Fragment-local surface target.
+    pub target: FragmentSurfaceTarget,
+    /// Local region ID exposed by the target.
+    pub local_region: RegionId,
+    /// Semantic tags used by conformance or placement.
+    pub semantic_tags: Vec<String>,
+}
+
+/// Local target for an exported surface port.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum FragmentSurfaceTarget {
+    /// Surface region on a definition.
+    Definition(PartDefinitionId),
+    /// Surface region on an occurrence's definition.
+    Occurrence(PartInstanceId),
+}
+
+/// Binding that assembles selected fragments through exported ports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentAttachmentBinding {
+    /// Family attachment-rule ID this binding implements.
+    pub family_attachment_rule: String,
+    /// Source family role.
+    pub source_role: String,
+    /// Source fragment port ID.
+    pub source_port: String,
+    /// Destination family role.
+    pub destination_role: String,
+    /// Destination fragment port ID.
+    pub destination_port: String,
+    /// Pairing policy for repeated occurrences.
+    pub pairing: FragmentAttachmentPairing,
+    /// Finite offset applied after port alignment.
+    pub offset: [f32; 3],
+    /// Attachment mode applied to generated instance attachments.
+    pub attachment_mode: AttachmentMode,
+}
+
+/// Pairing policy for cross-fragment port bindings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum FragmentAttachmentPairing {
+    /// Every source occurrence pairs with every destination occurrence.
+    AllPairs,
+    /// Pair occurrences by deterministic ordinal.
+    ByOccurrenceIndex,
+    /// Pair each source to the nearest available destination.
+    NearestOneToOne,
+    /// Explicit source/destination occurrence ordinals.
+    ExplicitOrdinalPairs(Vec<(u32, u32)>),
 }
 
 /// Request to instantiate one family/style pair.
@@ -164,6 +244,16 @@ pub enum ParameterBinding {
     },
 }
 
+impl ParameterBinding {
+    fn slot(&self) -> &str {
+        match self {
+            Self::Scalar { slot, .. }
+            | Self::TogglePartPresence { slot, .. }
+            | Self::ChoiceToPrototype { slot, .. } => slot,
+        }
+    }
+}
+
 /// Supported scalar binding transforms.
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ScalarTransform {
@@ -209,10 +299,20 @@ pub struct FamilyInstantiationReport {
     pub selected_providers: BTreeMap<String, String>,
     /// Applied parameter bindings.
     pub parameter_applications: Vec<ParameterApplication>,
+    /// Typed fragment remaps used while merging providers.
+    pub fragment_remaps: Vec<remap::FragmentRemapReport>,
     /// Stable source recipe hash from the compiled artifact.
     pub source_recipe_hash: u64,
     /// Canonical content fingerprint used to derive the recipe ID.
     pub instantiation_fingerprint: String,
+    /// Fingerprint for all semantic request intent, including advisory/runtime values.
+    pub foundry_intent_fingerprint: String,
+    /// Fingerprint for values consumed by executable geometry generation.
+    pub geometry_input_fingerprint: String,
+    /// Fingerprint for the instantiated asset recipe.
+    pub recipe_fingerprint: String,
+    /// Fingerprint for the compiled artifact contract.
+    pub artifact_fingerprint: String,
     /// Number of compiled part occurrences.
     pub compiled_part_count: u64,
 }
@@ -364,7 +464,7 @@ pub fn instantiate_family(
         &presence_overrides,
     )?;
     let mut recipe = family_impl.base_recipe.clone();
-    let fingerprint = derive_instantiation_fingerprint(
+    let fingerprints = derive_instantiation_fingerprints(
         family,
         style_kit,
         family_impl,
@@ -372,7 +472,7 @@ pub fn instantiate_family(
         &effective_request,
         &selected_providers,
     )?;
-    recipe.id = AssetId(fingerprint.asset_id());
+    recipe.id = AssetId(fingerprints.geometry_input.0.to_nonzero_u64());
     recipe.title = format!("{} / {}", family.display_name, style_kit.display_name);
 
     let mut merge_state = MergeState::default();
@@ -395,12 +495,20 @@ pub fn instantiate_family(
     if !asset_report.is_valid() {
         return Err(FamilyCompileError::AssetValidationFailed(asset_report));
     }
+    let recipe_fingerprint = RecipeFingerprint(
+        fingerprint_serializable("shape-lab.recipe.v1", "instantiated_recipe", &recipe)
+            .map_err(fingerprint_error)?,
+    );
     let artifact = compile_asset(&recipe)?;
     if !artifact.validation_report.is_valid() {
         return Err(FamilyCompileError::CompileValidationFailed(
             artifact.validation_report.clone(),
         ));
     }
+    let artifact_fingerprint = ArtifactFingerprint(
+        fingerprint_serializable("shape-lab.artifact.v1", "compiled_artifact", &artifact)
+            .map_err(fingerprint_error)?,
+    );
 
     let report = FamilyInstantiationReport {
         family_id: family.id.clone(),
@@ -410,8 +518,13 @@ pub fn instantiate_family(
             .map(|(role, selection)| (role.clone(), selection.fragment.clone()))
             .collect(),
         parameter_applications,
+        fragment_remaps: merge_state.remap_reports,
         source_recipe_hash: artifact.source_recipe_hash,
-        instantiation_fingerprint: fingerprint.to_hex(),
+        instantiation_fingerprint: fingerprints.geometry_input.0.to_hex(),
+        foundry_intent_fingerprint: fingerprints.foundry_intent.0.to_hex(),
+        geometry_input_fingerprint: fingerprints.geometry_input.0.to_hex(),
+        recipe_fingerprint: recipe_fingerprint.0.to_hex(),
+        artifact_fingerprint: artifact_fingerprint.0.to_hex(),
         compiled_part_count: artifact.statistics.part_count,
     };
     Ok(FamilyInstantiation {
@@ -434,9 +547,7 @@ fn ensure_ids_match(
             implementation: family_impl.family_id.clone(),
         });
     }
-    if style_impl.schema_version == STYLE_IMPLEMENTATION_SCHEMA_VERSION
-        && family.id != style_impl.family_id
-    {
+    if family.id != style_impl.family_id {
         return Err(FamilyCompileError::FamilyImplementationMismatch {
             expected: family.id.clone(),
             implementation: style_impl.family_id.clone(),
@@ -478,125 +589,220 @@ fn family_value_from_default(default_value: &FamilyDefaultValue) -> FamilyValue 
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-struct InstantiationFingerprint {
-    high: u64,
-    low: u64,
+struct InstantiationFingerprints {
+    foundry_intent: FoundryIntentFingerprint,
+    geometry_input: GeometryInputFingerprint,
 }
 
-impl InstantiationFingerprint {
-    fn asset_id(self) -> u64 {
-        if self.low == 0 { 1 } else { self.low }
-    }
-
-    fn to_hex(self) -> String {
-        format!("{:016x}{:016x}", self.high, self.low)
-    }
+#[derive(Serialize)]
+struct FoundryIntentFingerprintPayload<'a> {
+    family: &'a AssetFamilySchema,
+    style_kit: &'a StyleKit,
+    family_implementation: &'a FamilyImplementation,
+    style_implementation: &'a StyleImplementation,
+    effective_parameters: &'a BTreeMap<String, FamilyValue>,
+    seed: u64,
+    selected_providers: Vec<SelectedProviderFingerprint<'a>>,
 }
 
-fn derive_instantiation_fingerprint(
+#[derive(Serialize)]
+struct GeometryInputFingerprintPayload<'a> {
+    family_id: &'a str,
+    family_schema_version: u32,
+    style_kit_id: &'a str,
+    style_kit_schema_version: u32,
+    family_part_roles: serde_json::Value,
+    family_attachment_rules: serde_json::Value,
+    family_constraints: serde_json::Value,
+    required_parameter_slots: serde_json::Value,
+    style_family_facet: serde_json::Value,
+    style_bevel_policy: &'a shape_family::BevelPolicy,
+    style_profile_language: &'a shape_family::ProfileLanguage,
+    style_repetition: &'a shape_family::RepetitionPolicy,
+    style_symmetry: &'a shape_family::SymmetryPolicy,
+    style_exaggeration: &'a shape_family::ExaggerationPolicy,
+    base_recipe: serde_json::Value,
+    required_parameter_bindings: Vec<&'a ParameterBinding>,
+    family_default_role_providers: &'a BTreeMap<String, String>,
+    style_default_role_providers: &'a BTreeMap<String, String>,
+    selected_providers: Vec<SelectedProviderFingerprint<'a>>,
+    executable_parameters: BTreeMap<String, FamilyValue>,
+    seed: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct SelectedProviderFingerprint<'a> {
+    role: &'a str,
+    fragment: &'a str,
+    source: &'static str,
+    fragment_contract: Option<&'a RecipeFragment>,
+}
+
+fn derive_instantiation_fingerprints(
     family: &AssetFamilySchema,
     style_kit: &StyleKit,
     family_impl: &FamilyImplementation,
     style_impl: &StyleImplementation,
     request: &FamilyInstantiationRequest,
     selected_providers: &BTreeMap<String, ProviderSelection>,
-) -> Result<InstantiationFingerprint, FamilyCompileError> {
-    let mut builder = FingerprintBuilder::new("shape-lab.family-instantiation.v2");
-    builder.hash_serializable("family_document", family)?;
-    builder.hash_serializable("style_kit_document", style_kit)?;
-    builder.hash_serializable("family_implementation", family_impl)?;
-    builder.hash_serializable("style_implementation", style_impl)?;
-    builder.hash_serializable("base_recipe", &family_impl.base_recipe)?;
-    builder.hash_serializable("effective_parameters", &request.parameters)?;
-    builder.hash_u64("seed", request.seed);
-    for (role, selection) in selected_providers {
-        builder.hash_str("selected_role", role);
-        builder.hash_str("selected_fragment", &selection.fragment);
-        builder.hash_u64(
-            "selected_source",
-            match selection.source {
-                ProviderSource::FamilyDefault => 1,
-                ProviderSource::StylePrototype => 2,
+) -> Result<InstantiationFingerprints, FamilyCompileError> {
+    let selected_provider_payload =
+        selected_provider_fingerprints(family_impl, style_impl, selected_providers);
+    let foundry_payload = FoundryIntentFingerprintPayload {
+        family,
+        style_kit,
+        family_implementation: family_impl,
+        style_implementation: style_impl,
+        effective_parameters: &request.parameters,
+        seed: request.seed,
+        selected_providers: selected_provider_payload.clone(),
+    };
+    let foundry_intent = FoundryIntentFingerprint(
+        fingerprint_serializable(
+            "shape-lab.foundry-intent.v1",
+            "foundry_intent",
+            &foundry_payload,
+        )
+        .map_err(fingerprint_error)?,
+    );
+
+    let required_parameter_slots = family
+        .parameter_slots
+        .iter()
+        .filter(|slot| slot.execution_policy == ParameterExecutionPolicy::RequiredBinding)
+        .collect::<Vec<_>>();
+    let required_parameter_bindings =
+        executable_parameter_bindings(family, &family_impl.parameter_bindings);
+    let executable_parameters = executable_parameter_values(family, request);
+    let style_family_facet = style_kit.family_facets.get(&family.id);
+    let geometry_payload = GeometryInputFingerprintPayload {
+        family_id: &family.id,
+        family_schema_version: family.schema_version,
+        style_kit_id: &style_kit.id,
+        style_kit_schema_version: style_kit.schema_version,
+        family_part_roles: fingerprint_value("family.part_roles", &family.part_roles)?,
+        family_attachment_rules: fingerprint_value(
+            "family.attachment_rules",
+            &family.attachment_rules,
+        )?,
+        family_constraints: fingerprint_value("family.constraints", &family.constraints)?,
+        required_parameter_slots: fingerprint_value(
+            "family.required_parameter_slots",
+            &required_parameter_slots,
+        )?,
+        style_family_facet: fingerprint_value("style.family_facet", &style_family_facet)?,
+        style_bevel_policy: &style_kit.bevel_policy,
+        style_profile_language: &style_kit.profile_language,
+        style_repetition: &style_kit.repetition,
+        style_symmetry: &style_kit.symmetry,
+        style_exaggeration: &style_kit.exaggeration,
+        base_recipe: fingerprint_value(
+            "family_implementation.base_recipe.geometry_inputs",
+            &geometry_base_recipe(&family_impl.base_recipe),
+        )?,
+        required_parameter_bindings,
+        family_default_role_providers: &family_impl.default_role_providers,
+        style_default_role_providers: &style_impl.default_role_providers,
+        selected_providers: selected_provider_payload,
+        executable_parameters,
+        seed: request.seed,
+    };
+    let geometry_input = GeometryInputFingerprint(
+        fingerprint_serializable(
+            "shape-lab.geometry-input.v1",
+            "geometry_input",
+            &geometry_payload,
+        )
+        .map_err(fingerprint_error)?,
+    );
+    Ok(InstantiationFingerprints {
+        foundry_intent,
+        geometry_input,
+    })
+}
+
+fn geometry_base_recipe(base_recipe: &AssetRecipe) -> AssetRecipe {
+    let mut recipe = base_recipe.clone();
+    recipe.id = AssetId(0);
+    recipe.title.clear();
+    recipe
+}
+
+fn selected_provider_fingerprints<'a>(
+    family_impl: &'a FamilyImplementation,
+    style_impl: &'a StyleImplementation,
+    selected_providers: &'a BTreeMap<String, ProviderSelection>,
+) -> Vec<SelectedProviderFingerprint<'a>> {
+    selected_providers
+        .iter()
+        .map(|(role, selection)| SelectedProviderFingerprint {
+            role,
+            fragment: &selection.fragment,
+            source: match selection.source {
+                ProviderSource::FamilyDefault => "family_default",
+                ProviderSource::StylePrototype => "style_prototype",
             },
-        );
-        if let Some(fragment) = find_selected_fragment_for_hash(family_impl, style_impl, selection)
-        {
-            builder.hash_serializable("selected_fragment_recipe", &fragment.recipe)?;
+            fragment_contract: find_selected_fragment_for_hash(family_impl, style_impl, selection),
+        })
+        .collect()
+}
+
+fn executable_parameter_bindings<'a>(
+    family: &'a AssetFamilySchema,
+    bindings: &'a [ParameterBinding],
+) -> Vec<&'a ParameterBinding> {
+    let executable_slots = family
+        .parameter_slots
+        .iter()
+        .filter(|slot| slot.execution_policy == ParameterExecutionPolicy::RequiredBinding)
+        .map(|slot| slot.id.as_str())
+        .collect::<BTreeSet<_>>();
+    bindings
+        .iter()
+        .filter(|binding| executable_slots.contains(binding.slot()))
+        .collect()
+}
+
+fn executable_parameter_values(
+    family: &AssetFamilySchema,
+    request: &FamilyInstantiationRequest,
+) -> BTreeMap<String, FamilyValue> {
+    let executable_slots = family
+        .parameter_slots
+        .iter()
+        .filter(|slot| slot.execution_policy == ParameterExecutionPolicy::RequiredBinding)
+        .map(|slot| slot.id.as_str())
+        .collect::<BTreeSet<_>>();
+    request
+        .parameters
+        .iter()
+        .filter(|(slot, _)| executable_slots.contains(slot.as_str()))
+        .map(|(slot, value)| (slot.clone(), value.clone()))
+        .collect()
+}
+
+fn fingerprint_value<T: Serialize>(
+    subject: &str,
+    value: &T,
+) -> Result<serde_json::Value, FamilyCompileError> {
+    serde_json::to_value(value).map_err(|error| {
+        FamilyCompileError::FingerprintSerializationFailed {
+            subject: subject.to_owned(),
+            error: error.to_string(),
         }
-    }
-    Ok(builder.finish())
+    })
 }
 
-const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-const FNV_OFFSET_HIGH: u64 = 0x8422_2325_cbf2_9ce4;
-
-struct FingerprintBuilder {
-    high: u64,
-    low: u64,
-}
-
-impl FingerprintBuilder {
-    fn new(domain: &str) -> Self {
-        let mut builder = Self {
-            high: FNV_OFFSET_HIGH,
-            low: FNV_OFFSET,
-        };
-        builder.hash_str("domain", domain);
-        builder
-    }
-
-    fn hash_serializable<T: Serialize>(
-        &mut self,
-        subject: &str,
-        value: &T,
-    ) -> Result<(), FamilyCompileError> {
-        let bytes = serde_json::to_vec(value).map_err(|error| {
+fn fingerprint_error(error: FingerprintError) -> FamilyCompileError {
+    match error {
+        FingerprintError::Serialization { subject, error } => {
+            FamilyCompileError::FingerprintSerializationFailed { subject, error }
+        }
+        FingerprintError::NonFiniteNumber { subject } => {
             FamilyCompileError::FingerprintSerializationFailed {
-                subject: subject.to_owned(),
-                error: error.to_string(),
+                subject,
+                error: "canonical fingerprint input contained a non-finite number".to_owned(),
             }
-        })?;
-        self.hash_str("subject", subject);
-        self.hash_bytes(&bytes);
-        Ok(())
-    }
-
-    fn hash_str(&mut self, subject: &str, value: &str) {
-        self.hash_bytes(subject.as_bytes());
-        self.hash_u64_raw(value.len() as u64);
-        self.hash_bytes(value.as_bytes());
-    }
-
-    fn hash_u64(&mut self, subject: &str, value: u64) {
-        self.hash_bytes(subject.as_bytes());
-        self.hash_u64_raw(value);
-    }
-
-    fn hash_bytes(&mut self, bytes: &[u8]) {
-        self.hash_u64_raw(bytes.len() as u64);
-        for byte in bytes {
-            self.hash_u8(*byte);
-        }
-    }
-
-    fn hash_u64_raw(&mut self, value: u64) {
-        for byte in value.to_le_bytes() {
-            self.hash_u8(byte);
-        }
-    }
-
-    fn hash_u8(&mut self, value: u8) {
-        self.low ^= u64::from(value);
-        self.low = self.low.wrapping_mul(FNV_PRIME);
-        self.high ^= u64::from(value.rotate_left(1));
-        self.high = self.high.wrapping_mul(FNV_PRIME);
-    }
-
-    fn finish(self) -> InstantiationFingerprint {
-        InstantiationFingerprint {
-            high: self.high,
-            low: self.low,
         }
     }
 }
@@ -669,15 +875,6 @@ fn validate_implementations(
         .iter()
         .map(|module| module.id.as_str())
         .collect::<BTreeSet<_>>();
-
-    if !family_impl.role_bindings.is_empty() {
-        push_report_issue(
-            &mut report,
-            Some("family_implementation.role_bindings"),
-            "inactive_role_bindings",
-            "Role bindings are reserved and must stay empty until executable semantics are added.",
-        );
-    }
 
     for (id, fragment) in &style_impl.prototypes {
         validate_recipe_fragment_exports(
@@ -877,11 +1074,87 @@ fn validate_implementations(
         );
     }
     validate_parameter_binding_coverage(family, &family_impl.parameter_bindings, &mut report);
+    validate_attachment_bindings(family, family_impl, &roles, &mut report);
 
     if report.is_valid() {
         Ok(())
     } else {
         Err(FamilyCompileError::ImplementationValidationFailed(report))
+    }
+}
+
+fn validate_attachment_bindings(
+    family: &AssetFamilySchema,
+    family_impl: &FamilyImplementation,
+    roles: &BTreeMap<&str, &PartRole>,
+    report: &mut FamilyValidationReport,
+) {
+    let rules = family
+        .attachment_rules
+        .iter()
+        .map(|rule| (rule.id.as_str(), rule))
+        .collect::<BTreeMap<_, _>>();
+    for (index, binding) in family_impl.attachment_bindings.iter().enumerate() {
+        let subject = format!("family_implementation.attachment_bindings.{index}");
+        push_report_issue(
+            report,
+            Some(subject.clone()),
+            "unsupported_fragment_attachment_binding",
+            "Fragment attachment bindings are declared but not executable until port remapping is implemented.",
+        );
+        validate_identifier_report(
+            report,
+            Some(format!("{subject}.source_port")),
+            &binding.source_port,
+            "invalid_fragment_attachment_port",
+        );
+        validate_identifier_report(
+            report,
+            Some(format!("{subject}.destination_port")),
+            &binding.destination_port,
+            "invalid_fragment_attachment_port",
+        );
+        if !roles.contains_key(binding.source_role.as_str()) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.source_role")),
+                "unknown_fragment_attachment_source_role",
+                "Fragment attachment bindings must reference declared family roles.",
+            );
+        }
+        if !roles.contains_key(binding.destination_role.as_str()) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.destination_role")),
+                "unknown_fragment_attachment_destination_role",
+                "Fragment attachment bindings must reference declared family roles.",
+            );
+        }
+        let Some(rule) = rules.get(binding.family_attachment_rule.as_str()) else {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.family_attachment_rule")),
+                "unknown_fragment_attachment_rule",
+                "Fragment attachment bindings must implement a declared family attachment rule.",
+            );
+            continue;
+        };
+        if rule.from_role != binding.source_role || rule.to_role != binding.destination_role {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.family_attachment_rule")),
+                "fragment_attachment_rule_role_mismatch",
+                "Fragment attachment binding roles must match the family attachment rule direction.",
+            );
+        }
+        if binding.offset.iter().any(|value| !value.is_finite()) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.offset")),
+                "non_finite_fragment_attachment_offset",
+                "Fragment attachment offsets must be finite.",
+            );
+        }
     }
 }
 
@@ -898,10 +1171,11 @@ fn validate_recipe_fragment_exports(
             "Recipe fragment schema version is not supported.",
         );
     }
-    if fragment.role_occurrence_roots.is_empty() {
+    let exports = &fragment.exports;
+    if exports.role_occurrence_roots.is_empty() {
         push_report_issue(
             report,
-            Some(format!("{subject}.role_occurrence_roots")),
+            Some(format!("{subject}.exports.role_occurrence_roots")),
             "missing_role_occurrence_root",
             "Recipe fragments must export at least one role occurrence root.",
         );
@@ -913,11 +1187,11 @@ fn validate_recipe_fragment_exports(
         .copied()
         .collect::<BTreeSet<_>>();
     let mut root_ids = BTreeSet::new();
-    for root in &fragment.role_occurrence_roots {
+    for root in &exports.role_occurrence_roots {
         if !root_ids.insert(*root) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.role_occurrence_roots")),
+                Some(format!("{subject}.exports.role_occurrence_roots")),
                 "duplicate_role_occurrence_root",
                 "Role occurrence roots must be unique within one fragment.",
             );
@@ -925,18 +1199,18 @@ fn validate_recipe_fragment_exports(
         if !instance_ids.contains(root) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.role_occurrence_roots")),
+                Some(format!("{subject}.exports.role_occurrence_roots")),
                 "unknown_role_occurrence_root",
                 "Role occurrence roots must exist in the fragment recipe.",
             );
         }
     }
     let mut internal_ids = BTreeSet::new();
-    for internal in &fragment.internal_instances {
+    for internal in &exports.internal_roots {
         if !internal_ids.insert(*internal) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.internal_instances")),
+                Some(format!("{subject}.exports.internal_roots")),
                 "duplicate_internal_instance",
                 "Internal instances must be unique within one fragment.",
             );
@@ -944,7 +1218,7 @@ fn validate_recipe_fragment_exports(
         if !instance_ids.contains(internal) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.internal_instances")),
+                Some(format!("{subject}.exports.internal_roots")),
                 "unknown_internal_instance",
                 "Internal instances must exist in the fragment recipe.",
             );
@@ -952,7 +1226,7 @@ fn validate_recipe_fragment_exports(
         if root_ids.contains(internal) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.internal_instances")),
+                Some(format!("{subject}.exports.internal_roots")),
                 "fragment_export_root_marked_internal",
                 "A role occurrence root cannot also be listed as an internal instance.",
             );
@@ -961,31 +1235,34 @@ fn validate_recipe_fragment_exports(
     validate_disjoint_fragment_roots(
         report,
         subject,
-        "role_occurrence_roots",
+        "exports.role_occurrence_roots",
         &fragment.recipe,
-        &fragment.role_occurrence_roots,
+        &exports.role_occurrence_roots,
     );
     validate_disjoint_fragment_roots(
         report,
         subject,
-        "internal_instances",
+        "exports.internal_roots",
         &fragment.recipe,
-        &fragment.internal_instances,
+        &exports.internal_roots,
     );
     validate_disjoint_root_sets(
         report,
         subject,
         &fragment.recipe,
-        &fragment.role_occurrence_roots,
-        &fragment.internal_instances,
+        &exports.role_occurrence_roots,
+        &exports.internal_roots,
     );
+    validate_fragment_socket_ports(report, subject, fragment);
+    validate_fragment_surface_ports(report, subject, fragment);
+    validate_fragment_port_namespace(report, subject, fragment);
     let mut covered_instances = BTreeSet::new();
-    for root in &fragment.role_occurrence_roots {
+    for root in &exports.role_occurrence_roots {
         if instance_ids.contains(root) {
             covered_instances.extend(collect_subtree_instances(&fragment.recipe, *root));
         }
     }
-    for internal in &fragment.internal_instances {
+    for internal in &exports.internal_roots {
         if instance_ids.contains(internal) {
             covered_instances.extend(collect_subtree_instances(&fragment.recipe, *internal));
         }
@@ -994,12 +1271,330 @@ fn validate_recipe_fragment_exports(
         if !covered_instances.contains(&instance) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.internal_instances")),
+                Some(format!("{subject}.exports.internal_roots")),
                 "unclassified_fragment_instance",
                 "Every fragment instance must be under a role occurrence root or explicitly internal.",
             );
         }
     }
+    validate_supported_fragment_contract(report, subject, fragment);
+}
+
+fn validate_fragment_socket_ports(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    fragment: &RecipeFragment,
+) {
+    let mut port_ids = BTreeSet::new();
+    for (index, port) in fragment.exports.socket_ports.iter().enumerate() {
+        validate_fragment_port_id(
+            report,
+            format!("{subject}.exports.socket_ports.{index}.id"),
+            &port.id,
+            &mut port_ids,
+            "duplicate_fragment_socket_port",
+        );
+        validate_identifier_list_report(
+            report,
+            &format!("{subject}.exports.socket_ports.{index}.compatibility_tags"),
+            &port.compatibility_tags,
+            "invalid_fragment_socket_port_tag",
+        );
+        let Some(instance) = fragment.recipe.instances.get(&port.local_occurrence_root) else {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "{subject}.exports.socket_ports.{index}.local_occurrence_root"
+                )),
+                "unknown_fragment_socket_port_occurrence",
+                "Socket ports must reference an occurrence inside the fragment recipe.",
+            );
+            continue;
+        };
+        let Some(definition) = fragment.recipe.definitions.get(&instance.definition) else {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "{subject}.exports.socket_ports.{index}.local_occurrence_root"
+                )),
+                "fragment_socket_port_external_definition",
+                "Socket port occurrence must reference a definition inside the fragment recipe.",
+            );
+            continue;
+        };
+        if !definition.sockets.contains_key(&port.local_socket) {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "{subject}.exports.socket_ports.{index}.local_socket"
+                )),
+                "unknown_fragment_socket_port_socket",
+                "Socket ports must reference a socket on the local occurrence definition.",
+            );
+        }
+    }
+}
+
+fn validate_fragment_surface_ports(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    fragment: &RecipeFragment,
+) {
+    let mut port_ids = BTreeSet::new();
+    for (index, port) in fragment.exports.surface_ports.iter().enumerate() {
+        validate_fragment_port_id(
+            report,
+            format!("{subject}.exports.surface_ports.{index}.id"),
+            &port.id,
+            &mut port_ids,
+            "duplicate_fragment_surface_port",
+        );
+        validate_identifier_list_report(
+            report,
+            &format!("{subject}.exports.surface_ports.{index}.semantic_tags"),
+            &port.semantic_tags,
+            "invalid_fragment_surface_port_tag",
+        );
+        let definition_id = match &port.target {
+            FragmentSurfaceTarget::Definition(definition) => Some(*definition),
+            FragmentSurfaceTarget::Occurrence(instance) => fragment
+                .recipe
+                .instances
+                .get(instance)
+                .map(|part| part.definition),
+        };
+        let Some(definition_id) = definition_id else {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.exports.surface_ports.{index}.target")),
+                "unknown_fragment_surface_port_occurrence",
+                "Surface ports must reference a definition or occurrence inside the fragment recipe.",
+            );
+            continue;
+        };
+        let Some(definition) = fragment.recipe.definitions.get(&definition_id) else {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.exports.surface_ports.{index}.target")),
+                "unknown_fragment_surface_port_definition",
+                "Surface ports must reference a definition inside the fragment recipe.",
+            );
+            continue;
+        };
+        if !definition.regions.contains_key(&port.local_region) {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "{subject}.exports.surface_ports.{index}.local_region"
+                )),
+                "unknown_fragment_surface_port_region",
+                "Surface ports must reference a region on the local target definition.",
+            );
+        }
+    }
+}
+
+fn validate_fragment_port_namespace(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    fragment: &RecipeFragment,
+) {
+    let mut port_ids = BTreeMap::<&str, &'static str>::new();
+    for port in &fragment.exports.socket_ports {
+        port_ids.insert(port.id.as_str(), "socket");
+    }
+    for (index, port) in fragment.exports.surface_ports.iter().enumerate() {
+        if let Some(previous_kind) = port_ids.insert(port.id.as_str(), "surface") {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.exports.surface_ports.{index}.id")),
+                "duplicate_fragment_port_id",
+                format!(
+                    "Fragment port ID `{}` is already used by a {previous_kind} port.",
+                    port.id
+                ),
+            );
+        }
+    }
+}
+
+fn validate_fragment_port_id(
+    report: &mut FamilyValidationReport,
+    subject: String,
+    id: &str,
+    seen: &mut BTreeSet<String>,
+    duplicate_code: &'static str,
+) {
+    validate_non_empty_report(report, Some(subject.clone()), id, "empty_fragment_port_id");
+    validate_identifier_report(
+        report,
+        Some(subject.clone()),
+        id,
+        "invalid_fragment_port_id",
+    );
+    if !seen.insert(id.to_owned()) {
+        push_report_issue(
+            report,
+            Some(subject),
+            duplicate_code,
+            "Fragment port IDs must be unique within one port kind.",
+        );
+    }
+}
+
+fn validate_supported_fragment_contract(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    fragment: &RecipeFragment,
+) {
+    if !fragment.recipe.constraints.is_empty()
+        || !fragment.recipe.relationships.is_empty()
+        || !fragment.recipe.instance_locks.is_empty()
+        || !fragment.recipe.subtree_locks.is_empty()
+        || !fragment.recipe.topology_locks.is_empty()
+        || !fragment.recipe.variation.optional_instances.is_empty()
+        || !fragment.recipe.variation.replacement_groups.is_empty()
+        || !fragment.recipe.variation.count_ranges.is_empty()
+        || !fragment
+            .recipe
+            .variation
+            .parameter_range_overrides
+            .is_empty()
+        || !fragment.recipe.variation.semantic_cut_groups.is_empty()
+    {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.recipe")),
+            "unsupported_recipe_fragment_metadata",
+            "Constraints, relationships, locks, and variation metadata are not remapped yet.",
+        );
+    }
+    for (definition_id, definition) in &fragment.recipe.definitions {
+        if !definition.geometry.operations.is_empty() {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.recipe.definitions.{}", definition_id.0)),
+                "unsupported_recipe_fragment_modeling_operations",
+                "Modeling operations are not remapped yet.",
+            );
+        }
+        if !definition.sockets.is_empty() {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "{subject}.recipe.definitions.{}.sockets",
+                    definition_id.0
+                )),
+                "unsupported_recipe_fragment_sockets",
+                "Fragment sockets are not remapped yet.",
+            );
+        }
+    }
+    if !fragment.exports.socket_ports.is_empty() {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.exports.socket_ports")),
+            "unsupported_fragment_socket_ports",
+            "Socket port exports are declared but not executable until socket remapping is implemented.",
+        );
+    }
+    if fragment
+        .recipe
+        .instances
+        .values()
+        .any(|instance| instance.generated_by.is_some())
+    {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.recipe.instances")),
+            "unsupported_recipe_fragment_generated_provenance",
+            "Generated-instance provenance is not remapped yet.",
+        );
+    }
+}
+
+fn validate_identifier_list_report(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    values: &[String],
+    code: &'static str,
+) {
+    let mut seen = BTreeSet::new();
+    for (index, value) in values.iter().enumerate() {
+        validate_identifier_report(report, Some(format!("{subject}.{index}")), value, code);
+        if !seen.insert(value.as_str()) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.{index}")),
+                "duplicate_identifier",
+                "Identifier values must be unique.",
+            );
+        }
+    }
+}
+
+fn validate_identifier_report(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &str,
+    code: &'static str,
+) {
+    if !stable_identifier_is_valid(value) {
+        push_report_issue(
+            report,
+            subject,
+            code,
+            "Stable identifiers must start with a lowercase ASCII letter, end with an alphanumeric character, and use non-repeated lowercase ASCII letters, digits, `_`, `-`, `.`, or `:` separators.",
+        );
+    }
+}
+
+fn validate_non_empty_report(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &str,
+    code: &'static str,
+) {
+    if value.trim().is_empty() {
+        push_report_issue(report, subject, code, "Value cannot be empty.");
+    }
+}
+
+fn stable_identifier_is_valid(value: &str) -> bool {
+    if value.trim() != value || value.is_empty() || value == "." || value == ".." {
+        return false;
+    }
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let mut previous_was_separator = false;
+    let mut last = first;
+    for character in std::iter::once(first).chain(chars) {
+        if !is_identifier_char(character) {
+            return false;
+        }
+        let is_separator = is_identifier_separator(character);
+        if is_separator && previous_was_separator {
+            return false;
+        }
+        previous_was_separator = is_separator;
+        last = character;
+    }
+    last.is_ascii_lowercase() || last.is_ascii_digit()
+}
+
+fn is_identifier_char(character: char) -> bool {
+    character.is_ascii_lowercase()
+        || character.is_ascii_digit()
+        || matches!(character, '_' | '-' | '.' | ':')
+}
+
+fn is_identifier_separator(character: char) -> bool {
+    matches!(character, '_' | '-' | '.' | ':')
 }
 
 fn validate_disjoint_fragment_roots(
@@ -1054,14 +1649,14 @@ fn validate_disjoint_root_sets(
             if occurrence_subtree.contains(internal) || internal_subtree.contains(occurrence) {
                 push_report_issue(
                     report,
-                    Some(format!("{subject}.internal_instances")),
+                    Some(format!("{subject}.exports.internal_roots")),
                     "internal_instance_overlaps_occurrence_root",
                     "Internal roots must describe helper subtrees outside exported occurrence roots.",
                 );
             } else if !occurrence_subtree.is_disjoint(&internal_subtree) {
                 push_report_issue(
                     report,
-                    Some(format!("{subject}.internal_instances")),
+                    Some(format!("{subject}.exports.internal_roots")),
                     "internal_instance_overlaps_occurrence_root",
                     "Internal root subtrees must not overlap exported occurrence root subtrees.",
                 );
@@ -1096,6 +1691,7 @@ fn validate_parameter_binding(
                 );
                 return;
             };
+            validate_executable_parameter_binding(report, index, parameter_slot);
             validate_binding_role(report, index, role, roles);
             let valid = matches!(
                 (&parameter_slot.kind, transform),
@@ -1132,6 +1728,7 @@ fn validate_parameter_binding(
                 );
                 return;
             };
+            validate_executable_parameter_binding(report, index, parameter_slot);
             validate_binding_role(report, index, role, roles);
             if !matches!(parameter_slot.kind, FamilyParameterKind::Toggle) {
                 push_report_issue(
@@ -1158,6 +1755,7 @@ fn validate_parameter_binding(
                 );
                 return;
             };
+            validate_executable_parameter_binding(report, index, parameter_slot);
             validate_binding_role(report, index, role, roles);
             let FamilyParameterKind::Choice(declared_choices) = &parameter_slot.kind else {
                 push_report_issue(
@@ -1230,6 +1828,23 @@ fn validate_parameter_binding(
                 }
             }
         }
+    }
+}
+
+fn validate_executable_parameter_binding(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    slot: &shape_family::FamilyParameterSlot,
+) {
+    if slot.execution_policy != ParameterExecutionPolicy::RequiredBinding {
+        push_report_issue(
+            report,
+            Some(format!(
+                "family_implementation.parameter_bindings.{index}.slot"
+            )),
+            "non_executable_parameter_binding",
+            "Only RequiredBinding family parameters may be consumed by executable geometry bindings.",
+        );
     }
 }
 
@@ -1645,6 +2260,7 @@ struct MergeState {
     scalar_paths: BTreeMap<(String, String), String>,
     role_occurrence_roots: BTreeMap<String, Vec<PartInstanceId>>,
     role_internal_instances: BTreeMap<String, Vec<PartInstanceId>>,
+    remap_reports: Vec<remap::FragmentRemapReport>,
 }
 
 fn merge_fragment(
@@ -1661,51 +2277,47 @@ fn merge_fragment(
         });
     }
 
-    let mut definition_map = BTreeMap::new();
-    let mut instance_map = BTreeMap::new();
-    let mut region_map = BTreeMap::new();
-
-    for definition_id in fragment.recipe.definitions.keys() {
-        definition_map.insert(*definition_id, target.allocate_part_definition_id());
-    }
-    for instance_id in fragment.recipe.instances.keys() {
-        instance_map.insert(*instance_id, target.allocate_part_instance_id());
-    }
-    for definition in fragment.recipe.definitions.values() {
-        for region_id in definition.regions.keys() {
-            region_map.insert(*region_id, target.allocate_region_id());
-        }
-    }
+    let prepared_remap = remap::ids::prepare_fragment_id_remap(target, fragment);
+    let fragment_remap = &prepared_remap.remap;
 
     for (old_id, definition) in &fragment.recipe.definitions {
         let mut cloned = definition.clone();
-        cloned.id = *definition_map
+        cloned.id = *fragment_remap
+            .definitions
             .get(old_id)
             .ok_or_else(|| unsupported_fragment(&fragment.id, "definition ID was not allocated"))?;
-        cloned.regions = remap_regions(&definition.regions, &region_map);
+        cloned.regions = remap_regions(&definition.regions, &fragment_remap.regions);
         target.definitions.insert(cloned.id, cloned);
     }
 
     for (old_id, instance) in &fragment.recipe.instances {
         let mut cloned = instance.clone();
-        cloned.id = *instance_map
+        cloned.id = *fragment_remap
+            .instances
             .get(old_id)
             .ok_or_else(|| unsupported_fragment(&fragment.id, "instance ID was not allocated"))?;
-        cloned.definition = *definition_map.get(&instance.definition).ok_or_else(|| {
-            unsupported_fragment(&fragment.id, "instance references an unmapped definition")
-        })?;
+        cloned.definition = *fragment_remap
+            .definitions
+            .get(&instance.definition)
+            .ok_or_else(|| {
+                unsupported_fragment(&fragment.id, "instance references an unmapped definition")
+            })?;
         cloned.parent = instance
             .parent
             .map(|parent| {
-                instance_map.get(&parent).copied().ok_or_else(|| {
-                    unsupported_fragment(&fragment.id, "instance references an unmapped parent")
-                })
+                fragment_remap
+                    .instances
+                    .get(&parent)
+                    .copied()
+                    .ok_or_else(|| {
+                        unsupported_fragment(&fragment.id, "instance references an unmapped parent")
+                    })
             })
             .transpose()?;
         target.instances.insert(cloned.id, cloned.clone());
     }
     for root in &fragment.recipe.root_instances {
-        let Some(root) = instance_map.get(root).copied() else {
+        let Some(root) = fragment_remap.instances.get(root).copied() else {
             return Err(unsupported_fragment(
                 &fragment.id,
                 "root instance was not remapped",
@@ -1715,14 +2327,14 @@ fn merge_fragment(
     }
     let occurrence_roots = remap_fragment_instance_list(
         fragment,
-        &fragment.role_occurrence_roots,
-        &instance_map,
+        &fragment.exports.role_occurrence_roots,
+        &fragment_remap.instances,
         "role occurrence root",
     )?;
     let internal_instances = remap_fragment_instance_list(
         fragment,
-        &fragment.internal_instances,
-        &instance_map,
+        &fragment.exports.internal_roots,
+        &fragment_remap.instances,
         "internal instance",
     )?;
     state
@@ -1738,8 +2350,15 @@ fn merge_fragment(
 
     for (old_id, parameter) in &fragment.recipe.parameters {
         let mut cloned = parameter.clone();
-        cloned.id = target.allocate_parameter_id();
-        cloned.path = remap_scalar_path(&parameter.path, &definition_map, &instance_map)?;
+        cloned.id = *fragment_remap
+            .parameters
+            .get(old_id)
+            .ok_or_else(|| unsupported_fragment(&fragment.id, "parameter ID was not allocated"))?;
+        cloned.path = remap_scalar_path(
+            &parameter.path,
+            &fragment_remap.definitions,
+            &fragment_remap.instances,
+        )?;
         let new_parameter_id = cloned.id;
         state.scalar_paths.insert(
             (fragment.provided_role.clone(), parameter.path.clone()),
@@ -1750,6 +2369,12 @@ fn merge_fragment(
             target.locks.insert(new_parameter_id);
         }
     }
+    state.remap_reports.push(remap::FragmentRemapReport {
+        fragment_id: fragment.id.clone(),
+        remap: prepared_remap.remap,
+        allocated: prepared_remap.allocated,
+        warnings: Vec::new(),
+    });
     Ok(())
 }
 

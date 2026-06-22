@@ -4,11 +4,11 @@ use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, DetailModule, ExaggerationPolicy, ExportRequirement,
     FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet,
-    GeometricConstraint, LengthUnit, LengthValue, NormalizedBevelProfile, ParameterExecutionPolicy,
-    ParameterRange, PartPrototype, PartRole, ProfileLanguage, ReadabilityThreshold,
-    RepetitionPolicy, RoleMultiplicity, RoleProportion, RoleProvision, RuntimeMetadataRequirement,
-    STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode, VariantRule,
-    validate_asset_family_schema, validate_family_style_compatibility,
+    FamilyStylePolicyOverrides, GeometricConstraint, LengthUnit, LengthValue,
+    NormalizedBevelProfile, ParameterExecutionPolicy, ParameterRange, PartPrototype, PartRole,
+    ProfileLanguage, ReadabilityThreshold, RepetitionPolicy, RoleMultiplicity, RoleProportion,
+    RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
+    VariantMode, VariantRule, validate_asset_family_schema, validate_family_style_compatibility,
     validate_family_style_completeness, validate_style_kit,
 };
 
@@ -220,7 +220,6 @@ fn industrial_style_kit() -> StyleKit {
         id: "industrial_steel".to_owned(),
         display_name: "Industrial Steel".to_owned(),
         compatible_families: vec!["bridge".to_owned()],
-        proportions: proportions.clone(),
         bevel_policy: BevelPolicy {
             width: LengthValue::FamilyUnits(0.04),
             segments: 2,
@@ -231,8 +230,6 @@ fn industrial_style_kit() -> StyleKit {
             allowed_profiles: vec!["box".to_owned(), "tube".to_owned(), "channel".to_owned()],
             allow_asymmetry: false,
         },
-        part_prototypes: part_prototypes.clone(),
-        detail_modules: detail_modules.clone(),
         repetition: RepetitionPolicy {
             density: 0.65,
             preferred_spacing: LengthValue::FamilyUnits(0.25),
@@ -253,7 +250,7 @@ fn industrial_style_kit() -> StyleKit {
                 proportions,
                 part_prototypes,
                 detail_modules,
-                default_role_providers: BTreeMap::new(),
+                policy_overrides: FamilyStylePolicyOverrides::default(),
             },
         )]),
         tags: vec!["hard_surface".to_owned()],
@@ -492,7 +489,7 @@ fn style_facets_scope_role_references_to_the_selected_family() {
                 style_tags: vec!["crate".to_owned()],
             }],
             detail_modules: Vec::new(),
-            default_role_providers: BTreeMap::new(),
+            policy_overrides: FamilyStylePolicyOverrides::default(),
         },
     );
 
@@ -544,7 +541,7 @@ fn global_style_policies_cannot_reference_family_roles() {
 #[test]
 fn older_style_kit_payloads_deserialize_before_schema_validation() {
     let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
-    value["schema_version"] = serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 1);
+    value["schema_version"] = serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 2);
     value
         .as_object_mut()
         .expect("style kit object")
@@ -558,31 +555,125 @@ fn older_style_kit_payloads_deserialize_before_schema_validation() {
 }
 
 #[test]
+fn schema_v3_style_kit_migrates_global_role_data_into_single_family_facet() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let object = value.as_object_mut().expect("style kit object");
+    let bridge_facet = object
+        .get_mut("family_facets")
+        .and_then(|facets| facets.get_mut("bridge"))
+        .and_then(|facet| facet.as_object_mut())
+        .expect("bridge facet");
+    let proportions = bridge_facet.remove("proportions").expect("proportions");
+    let prototypes = bridge_facet
+        .remove("part_prototypes")
+        .expect("part prototypes");
+    let details = bridge_facet.remove("detail_modules").expect("details");
+    object.insert(
+        "schema_version".to_owned(),
+        serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 1),
+    );
+    object.insert("proportions".to_owned(), proportions);
+    object.insert("part_prototypes".to_owned(), prototypes);
+    object.insert("detail_modules".to_owned(), details);
+    object.remove("family_facets");
+
+    let kit: StyleKit = serde_json::from_value(value).expect("legacy v3 kit should migrate");
+    assert_eq!(kit.schema_version, STYLE_KIT_SCHEMA_VERSION);
+    assert!(
+        kit.family_facets
+            .get("bridge")
+            .expect("bridge facet")
+            .part_prototypes
+            .iter()
+            .any(|prototype| prototype.id == "box_support")
+    );
+}
+
+#[test]
+fn schema_v3_style_kit_migrates_partial_global_role_data_without_false_facet_conflicts() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let object = value.as_object_mut().expect("style kit object");
+    let bridge_facet = object
+        .get_mut("family_facets")
+        .and_then(|facets| facets.get_mut("bridge"))
+        .and_then(|facet| facet.as_object_mut())
+        .expect("bridge facet");
+    let prototypes = bridge_facet
+        .remove("part_prototypes")
+        .expect("part prototypes");
+    object.insert(
+        "schema_version".to_owned(),
+        serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 1),
+    );
+    object.insert("part_prototypes".to_owned(), prototypes);
+
+    let kit: StyleKit =
+        serde_json::from_value(value).expect("partial legacy v3 kit should migrate");
+    let facet = kit.family_facets.get("bridge").expect("bridge facet");
+    assert!(!facet.proportions.is_empty());
+    assert!(
+        facet
+            .part_prototypes
+            .iter()
+            .any(|prototype| prototype.id == "box_support")
+    );
+}
+
+#[test]
+fn schema_v4_rejects_legacy_global_role_data() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let object = value.as_object_mut().expect("style kit object");
+    object.insert(
+        "proportions".to_owned(),
+        serde_json::json!([{
+            "role": "support",
+            "preferred_scale": [
+                {"FamilyUnits": 1.0},
+                {"FamilyUnits": 1.0},
+                {"FamilyUnits": 1.0}
+            ],
+            "taper": 0.0
+        }]),
+    );
+
+    let result = serde_json::from_value::<StyleKit>(value);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn schema_v4_rejects_empty_legacy_global_role_fields() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    value
+        .as_object_mut()
+        .expect("style kit object")
+        .insert("part_prototypes".to_owned(), serde_json::json!([]));
+
+    let result = serde_json::from_value::<StyleKit>(value);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn family_style_facets_reject_removed_default_provider_field() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    value["family_facets"]["bridge"]["default_role_providers"] = serde_json::json!({});
+
+    let result = serde_json::from_value::<StyleKit>(value);
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn facet_only_style_kits_deserialize_and_validate() {
     let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
     let object = value.as_object_mut().expect("style kit object");
     object.remove("proportions");
     object.remove("part_prototypes");
     object.remove("detail_modules");
-    let bridge_facet = object
-        .get_mut("family_facets")
-        .and_then(|facets| facets.get_mut("bridge"))
-        .and_then(|facet| facet.as_object_mut())
-        .expect("bridge facet");
-    bridge_facet.remove("default_role_providers");
 
     let kit: StyleKit = serde_json::from_value(value).expect("facet-only kit should deserialize");
 
-    assert!(kit.proportions.is_empty());
-    assert!(kit.part_prototypes.is_empty());
-    assert!(kit.detail_modules.is_empty());
-    assert!(
-        kit.family_facets
-            .get("bridge")
-            .expect("bridge facet")
-            .default_role_providers
-            .is_empty()
-    );
     assert!(validate_style_kit(&kit).is_valid());
     assert!(
         validate_family_style_compatibility(&bridge_family("industrial_steel"), &kit).is_valid()
@@ -619,8 +710,9 @@ fn prototype_operations_must_be_allowed_by_family() {
 #[test]
 fn duplicate_style_prototype_and_detail_ids_are_rejected() {
     let mut kit = industrial_style_kit();
-    kit.part_prototypes[1].id = kit.part_prototypes[0].id.clone();
-    kit.detail_modules.push(kit.detail_modules[0].clone());
+    let facet = kit.family_facets.get_mut("bridge").expect("bridge facet");
+    facet.part_prototypes[1].id = facet.part_prototypes[0].id.clone();
+    facet.detail_modules.push(facet.detail_modules[0].clone());
     kit.tags.push("hard_surface".to_owned());
 
     let report = validate_style_kit(&kit);

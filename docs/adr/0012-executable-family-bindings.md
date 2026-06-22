@@ -47,13 +47,13 @@ Implementation validation rejects unbound required slots, duplicate provider-sel
 
 Provider selection must not depend on map order. Style implementations declare `default_role_providers` explicitly, while family implementations retain explicit family defaults. Style-required roles use the style default unless a choice binding overrides them. Family-or-style roles prefer style defaults and fall back to family defaults.
 
-Facet-level default-provider maps are descriptive hints for style authoring. Executable default provider selection is controlled by `StyleImplementation::default_role_providers`.
+Style kit schema v4 removes flat, global role-scoped style data. `RoleProportion`, `PartPrototype`, and `DetailModule` records live under `StyleKit::family_facets`, so one kit can support unrelated families without a shared role namespace. Top-level legacy fields are rejected even when empty. Per-family global-policy differences use `FamilyStyleFacet::policy_overrides`.
 
-Recipe fragments declare exported `role_occurrence_roots` separately from `internal_instances`. Role cardinality counts exported occurrence roots only. Presence toggles operate on those roots and their subtrees. This keeps helper geometry inside a fragment from becoming an accidental family-role occurrence.
+Recipe fragments declare `RecipeFragmentExports`, which contains exported `role_occurrence_roots`, `internal_roots`, socket ports, and surface ports. Role cardinality counts exported occurrence roots only. Presence toggles operate on those roots and their subtrees. This keeps helper geometry inside a fragment from becoming an accidental family-role occurrence.
 
-Export roots must be disjoint. A fragment cannot list nested occurrence roots, overlapping occurrence roots, internal roots inside exported occurrence subtrees, or exported occurrence roots inside internal subtrees. Cardinality uses effective enabled state through ancestor chains.
+Export roots must be disjoint. A fragment cannot list nested occurrence roots, overlapping occurrence roots, internal roots inside exported occurrence subtrees, or exported occurrence roots inside internal subtrees. Cardinality uses effective enabled state through ancestor chains. Unsupported fragment metadata is rejected during implementation validation for every executable fragment, not only for fragments selected by the current request.
 
-The compiler derives the instantiated `AssetId` from a canonical content fingerprint covering the family document, style-kit document, family implementation, style implementation, base recipe, selected fragment recipes, effective semantic parameters, and seed. The seed remains an input, not the ID. The instantiation report retains the 128-bit fingerprint even though the recipe still stores a compact `AssetId`.
+The compiler derives the instantiated `AssetId` from a domain-separated BLAKE3 geometry-input fingerprint. Geometry identity includes executable geometry contracts, selected providers, selected fragment content, required-binding parameter values, and seed. Advisory and runtime-only parameter values are part of the foundry-intent fingerprint but are not allowed to drive geometry and do not change `AssetId`. Instantiation reports expose separate foundry-intent, geometry-input, recipe, and artifact fingerprints as 64-character lowercase hex strings.
 
 The initial binding language deliberately supports only direct scalar, scale-offset, ratio, integer count, choice-to-prototype, and toggle-to-part-presence mappings.
 

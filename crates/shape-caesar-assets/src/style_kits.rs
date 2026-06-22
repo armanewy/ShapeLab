@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 
 use shape_family::{
     AllowedOperationKind, BevelPolicy, DetailModule, ExaggerationPolicy, FamilyStyleFacet,
-    LengthValue, NormalizedBevelProfile, PartPrototype, ProfileLanguage, ReadabilityThreshold,
-    RepetitionPolicy, RoleProportion, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
+    FamilyStylePolicyOverrides, LengthValue, NormalizedBevelProfile, PartPrototype,
+    ProfileLanguage, ReadabilityThreshold, RepetitionPolicy, RoleProportion,
+    STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
 };
 
 /// Roman field-engineering geometry language for Project Caesar dogfooding.
@@ -105,7 +106,6 @@ pub fn roman_timber_engineering_style_kit() -> StyleKit {
         id: "roman_timber_engineering".to_owned(),
         display_name: "Roman Timber Engineering".to_owned(),
         compatible_families: vec!["bridge".to_owned()],
-        proportions: proportions.clone(),
         bevel_policy: BevelPolicy {
             width: LengthValue::FamilyUnits(0.025),
             segments: 1,
@@ -121,8 +121,6 @@ pub fn roman_timber_engineering_style_kit() -> StyleKit {
             ],
             allow_asymmetry: true,
         },
-        part_prototypes: part_prototypes.clone(),
-        detail_modules: detail_modules.clone(),
         repetition: RepetitionPolicy {
             density: 0.7,
             preferred_spacing: LengthValue::FamilyUnits(0.18),
@@ -143,7 +141,7 @@ pub fn roman_timber_engineering_style_kit() -> StyleKit {
                 proportions,
                 part_prototypes,
                 detail_modules,
-                default_role_providers: BTreeMap::new(),
+                policy_overrides: FamilyStylePolicyOverrides::default(),
             },
         )]),
         tags: vec![

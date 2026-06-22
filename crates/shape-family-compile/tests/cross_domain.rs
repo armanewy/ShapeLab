@@ -1,26 +1,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, OperationId, PartDefinition,
-    PartDefinitionId, PartInstance, PartInstanceId, Transform3, definition_scalar_path, get_scalar,
-    validate_asset_recipe,
+    AssetId, AssetRecipe, AttachmentMode, Frame3, GeometryRecipe, GeometrySource, OperationId,
+    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec,
+    Transform3, definition_scalar_path, get_scalar, validate_asset_recipe,
 };
 use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_compile::export::write_grouped_obj_export;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, ExaggerationPolicy, ExportRequirement, FamilyDefaultValue,
-    FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet, GeometricConstraint, LengthUnit,
-    LengthValue, NormalizedBevelProfile, ParameterExecutionPolicy, ParameterRange, PartPrototype,
-    PartRole, ProfileLanguage, RepetitionPolicy, RoleMultiplicity, RoleProvision,
-    RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode,
-    VariantRule,
+    FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet, FamilyStylePolicyOverrides,
+    GeometricConstraint, LengthUnit, LengthValue, NormalizedBevelProfile, ParameterExecutionPolicy,
+    ParameterRange, PartPrototype, PartRole, ProfileLanguage, RepetitionPolicy, RoleMultiplicity,
+    RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
+    VariantMode, VariantRule,
 };
 use shape_family_compile::{
     FAMILY_IMPLEMENTATION_SCHEMA_VERSION, FamilyCompileError, FamilyImplementation,
-    FamilyInstantiationRequest, FamilyValue, ParameterBinding, RECIPE_FRAGMENT_SCHEMA_VERSION,
-    RecipeFragment, STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform, StyleImplementation,
-    instantiate_family, scalar_parameter,
+    FamilyInstantiationRequest, FamilyValue, FragmentAttachmentBinding, FragmentAttachmentPairing,
+    FragmentSocketPort, FragmentSurfacePort, FragmentSurfaceTarget, ParameterBinding,
+    RECIPE_FRAGMENT_SCHEMA_VERSION, RecipeFragment, RecipeFragmentExports,
+    STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform, StyleImplementation, instantiate_family,
+    scalar_parameter,
 };
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
@@ -454,7 +456,7 @@ fn role_cardinality_counts_exported_occurrence_roots_not_internal_fragments() {
         },
     );
     body.recipe.root_instances.push(PartInstanceId(93));
-    body.internal_instances.push(PartInstanceId(93));
+    body.exports.internal_roots.push(PartInstanceId(93));
     body.recipe.next_ids.part_definition = 92;
     body.recipe.next_ids.part_instance = 94;
 
@@ -536,28 +538,8 @@ fn executable_binding_schema_versions_are_enforced() {
         .as_object_mut()
         .expect("style implementation object")
         .remove("family_id");
-    let old_style: StyleImplementation =
-        serde_json::from_value(value).expect("old style implementation should deserialize");
-    assert!(old_style.family_id.is_empty());
-
-    let error = instantiate_family(
-        &crate_family(),
-        &scifi_industrial_style_kit(),
-        &crate_implementation(),
-        &old_style,
-        &request("crate", "sci_fi_industrial", []),
-    )
-    .expect_err("old executable style schema should fail validation, not deserialization");
-
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
-    };
-    assert!(
-        report
-            .issues
-            .iter()
-            .any(|issue| { issue.code == "unsupported_style_implementation_schema" })
-    );
+    serde_json::from_value::<StyleImplementation>(value)
+        .expect_err("v3 style implementation requires an explicit family_id");
 
     let mut style = scifi_industrial_style_implementation();
     style
@@ -587,6 +569,205 @@ fn executable_binding_schema_versions_are_enforced() {
 }
 
 #[test]
+fn removed_executable_binding_placeholders_are_rejected_by_strict_schemas() {
+    let mut family_impl_json =
+        serde_json::to_value(crate_implementation()).expect("family implementation json");
+    family_impl_json
+        .as_object_mut()
+        .expect("family implementation object")
+        .insert("role_bindings".to_owned(), serde_json::json!({}));
+    serde_json::from_value::<FamilyImplementation>(family_impl_json)
+        .expect_err("family implementation v2 must reject removed role_bindings");
+
+    let mut fragment_json =
+        serde_json::to_value(rounded_box_fragment("body", "body", [1.0, 0.5, 0.5], 0.05))
+            .expect("fragment json");
+    fragment_json
+        .as_object_mut()
+        .expect("fragment object")
+        .insert(
+            "role_occurrence_roots".to_owned(),
+            serde_json::json!([LOCAL_INSTANCE]),
+        );
+    serde_json::from_value::<RecipeFragment>(fragment_json)
+        .expect_err("fragment v2 must reject removed direct root exports");
+}
+
+#[test]
+fn unsupported_metadata_in_unselected_fragments_is_rejected_by_implementation_validation() {
+    let mut style = industrial_bridge_style_implementation();
+    style
+        .prototypes
+        .get_mut("round_support")
+        .expect("unselected support fragment")
+        .recipe
+        .instance_locks
+        .insert(LOCAL_INSTANCE);
+
+    let error = instantiate_family(
+        &bridge_family(&["industrial_steel"]),
+        &industrial_bridge_style_kit(),
+        &industrial_bridge_implementation(),
+        &style,
+        &request("bridge", "industrial_steel", []),
+    )
+    .expect_err(
+        "unsupported metadata on unselected fragment should fail implementation validation",
+    );
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_metadata"));
+}
+
+#[test]
+fn fragment_ports_validate_stable_ids_and_local_references() {
+    let mut style = scifi_industrial_style_implementation();
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .exports
+        .socket_ports
+        .push(FragmentSocketPort {
+            id: "Bad Port".to_owned(),
+            local_occurrence_root: PartInstanceId(999),
+            local_socket: SocketId(1),
+            compatibility_tags: vec!["mount".to_owned()],
+        });
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("invalid fragment port should fail implementation validation");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    let codes = issue_codes(&report);
+    assert!(codes.contains(&"invalid_fragment_port_id"));
+    assert!(codes.contains(&"unknown_fragment_socket_port_occurrence"));
+}
+
+#[test]
+fn selected_fragment_socket_ports_are_rejected_until_socket_remap_is_executable() {
+    let mut style = scifi_industrial_style_implementation();
+    let body = style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment");
+    body.recipe
+        .definitions
+        .get_mut(&LOCAL_DEFINITION)
+        .expect("body definition")
+        .sockets
+        .insert(
+            SocketId(7),
+            SocketSpec {
+                id: SocketId(7),
+                name: "Mount".to_owned(),
+                local_frame: Frame3::default(),
+                role: "mount".to_owned(),
+                tags: BTreeSet::from(["mount".to_owned()]),
+            },
+        );
+    body.exports.socket_ports.push(FragmentSocketPort {
+        id: "mount".to_owned(),
+        local_occurrence_root: LOCAL_INSTANCE,
+        local_socket: SocketId(7),
+        compatibility_tags: vec!["mount".to_owned()],
+    });
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("socket ports should fail until socket remap is executable");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    let codes = issue_codes(&report);
+    assert!(codes.contains(&"unsupported_fragment_socket_ports"));
+    assert!(codes.contains(&"unsupported_recipe_fragment_sockets"));
+    assert!(!codes.contains(&"unknown_fragment_socket_port_socket"));
+}
+
+#[test]
+fn socket_and_surface_port_ids_share_one_fragment_namespace() {
+    let mut style = scifi_industrial_style_implementation();
+    let body = style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment");
+    body.exports.socket_ports.push(FragmentSocketPort {
+        id: "mount".to_owned(),
+        local_occurrence_root: LOCAL_INSTANCE,
+        local_socket: SocketId(7),
+        compatibility_tags: Vec::new(),
+    });
+    body.exports.surface_ports.push(FragmentSurfacePort {
+        id: "mount".to_owned(),
+        target: FragmentSurfaceTarget::Definition(LOCAL_DEFINITION),
+        local_region: RegionId(1),
+        semantic_tags: Vec::new(),
+    });
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("duplicate port namespace should fail implementation validation");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"duplicate_fragment_port_id"));
+}
+
+#[test]
+fn fragment_attachment_bindings_are_rejected_until_port_remap_is_executable() {
+    let mut implementation = bridge_implementation();
+    implementation
+        .attachment_bindings
+        .push(FragmentAttachmentBinding {
+            family_attachment_rule: "support_span".to_owned(),
+            source_role: "support".to_owned(),
+            source_port: "support_socket".to_owned(),
+            destination_role: "span".to_owned(),
+            destination_port: "span_socket".to_owned(),
+            pairing: FragmentAttachmentPairing::ByOccurrenceIndex,
+            offset: [0.0, 0.0, 0.0],
+            attachment_mode: AttachmentMode::RigidSeparate,
+        });
+
+    let error = instantiate_family(
+        &bridge_family(&["roman_timber_engineering"]),
+        &roman_timber_engineering_style_kit(),
+        &implementation,
+        &roman_timber_style_implementation(),
+        &request("bridge", "roman_timber_engineering", []),
+    )
+    .expect_err("attachment binding should fail until port remap is executable");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"unsupported_fragment_attachment_binding"));
+}
+
+#[test]
 fn asset_id_is_hash_derived_from_seed_and_semantic_parameters() {
     let family = crate_family();
     let kit = scifi_industrial_style_kit();
@@ -612,7 +793,70 @@ fn asset_id_is_hash_derived_from_seed_and_semantic_parameters() {
     assert_ne!(zero.recipe.id, AssetId(1));
     assert_ne!(zero.recipe.id, one.recipe.id);
     assert_ne!(zero.recipe.id, wider.recipe.id);
-    assert_eq!(zero.report.instantiation_fingerprint.len(), 32);
+    assert_eq!(zero.report.instantiation_fingerprint.len(), 64);
+    assert_eq!(zero.report.geometry_input_fingerprint.len(), 64);
+    assert_eq!(zero.report.foundry_intent_fingerprint.len(), 64);
+    assert_eq!(
+        zero.report.instantiation_fingerprint,
+        zero.report.geometry_input_fingerprint
+    );
+}
+
+#[test]
+fn export_requirements_do_not_change_geometry_identity() {
+    let family = crate_family();
+    let mut export_changed = family.clone();
+    export_changed.export_requirements.push(ExportRequirement {
+        profile: "runtime-packaging".to_owned(),
+        required_metadata: vec![RuntimeMetadataRequirement::Pivot],
+        triangle_budget_hint: Some(1_024),
+    });
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let style = scifi_industrial_style_implementation();
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&export_changed, &kit, &implementation, &style, &request)
+        .expect("export requirement changed should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+}
+
+#[test]
+fn base_recipe_placeholder_id_and_title_do_not_change_geometry_identity() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let mut placeholder_changed = implementation.clone();
+    placeholder_changed.base_recipe.id = AssetId(999);
+    placeholder_changed.base_recipe.title = "Different placeholder".to_owned();
+    let style = scifi_industrial_style_implementation();
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &kit, &placeholder_changed, &style, &request)
+        .expect("placeholder changed should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
 }
 
 #[test]
@@ -852,7 +1096,7 @@ fn presence_toggle_disables_selected_occurrence_subtree() {
         },
     );
     handle.recipe.root_instances.push(PartInstanceId(93));
-    handle.internal_instances.push(PartInstanceId(93));
+    handle.exports.internal_roots.push(PartInstanceId(93));
     handle.recipe.next_ids.part_instance = 94;
 
     let output = instantiate_family(
@@ -923,6 +1167,7 @@ fn invalid_fragment_export_lists_are_rejected_before_merge() {
         .prototypes
         .get_mut("armored_body")
         .expect("body fragment")
+        .exports
         .role_occurrence_roots = vec![PartInstanceId(999)];
 
     let error = instantiate_family(
@@ -967,7 +1212,7 @@ fn nested_role_occurrence_roots_are_rejected_before_merge() {
         },
     );
     body.recipe.next_ids.part_instance = 93;
-    body.role_occurrence_roots = vec![LOCAL_INSTANCE, PartInstanceId(92)];
+    body.exports.role_occurrence_roots = vec![LOCAL_INSTANCE, PartInstanceId(92)];
 
     let error = instantiate_family(
         &crate_family(),
@@ -1006,7 +1251,7 @@ fn internal_fragment_roots_cannot_overlap_exported_occurrences() {
         },
     );
     body.recipe.next_ids.part_instance = 93;
-    body.internal_instances = vec![PartInstanceId(92)];
+    body.exports.internal_roots = vec![PartInstanceId(92)];
 
     let error = instantiate_family(
         &crate_family(),
@@ -1045,10 +1290,10 @@ fn selected_fragment_generated_provenance_is_rejected_until_remapped() {
     )
     .expect_err("generated provenance should remain unsupported until remapped");
 
-    assert!(matches!(
-        error,
-        FamilyCompileError::UnsupportedFragment { .. }
-    ));
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_generated_provenance"));
 }
 
 #[test]
@@ -1124,6 +1369,122 @@ fn advisory_and_runtime_parameter_slots_may_be_unbound() {
         &request("crate", "sci_fi_industrial", []),
     )
     .expect("advisory and runtime-only parameters should not require executable bindings");
+}
+
+#[test]
+fn advisory_and_runtime_values_do_not_change_geometry_identity() {
+    let mut family = crate_family();
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "style_hint".to_owned(),
+        label: "Style Hint".to_owned(),
+        target_role: Some("panel".to_owned()),
+        kind: FamilyParameterKind::Ratio,
+        range: Some(ParameterRange {
+            minimum: 0.0,
+            maximum: 1.0,
+            step: 0.05,
+        }),
+        default_value: Some(FamilyDefaultValue::Scalar(0.5)),
+        execution_policy: ParameterExecutionPolicy::AdvisoryOnly,
+        topology_changing: false,
+    });
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "runtime_lod".to_owned(),
+        label: "Runtime LOD".to_owned(),
+        target_role: None,
+        kind: FamilyParameterKind::Count,
+        range: Some(ParameterRange {
+            minimum: 1.0,
+            maximum: 4.0,
+            step: 1.0,
+        }),
+        default_value: Some(FamilyDefaultValue::Integer(2)),
+        execution_policy: ParameterExecutionPolicy::RuntimeOnly,
+        topology_changing: false,
+    });
+    let mut baseline_request = request("crate", "sci_fi_industrial", []);
+    baseline_request
+        .parameters
+        .insert("style_hint".to_owned(), FamilyValue::Scalar(0.2));
+    baseline_request
+        .parameters
+        .insert("runtime_lod".to_owned(), FamilyValue::Integer(1));
+    let mut advisory_changed = baseline_request.clone();
+    advisory_changed
+        .parameters
+        .insert("style_hint".to_owned(), FamilyValue::Scalar(0.8));
+    advisory_changed
+        .parameters
+        .insert("runtime_lod".to_owned(), FamilyValue::Integer(4));
+
+    let baseline = instantiate_family(
+        &family,
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &scifi_industrial_style_implementation(),
+        &baseline_request,
+    )
+    .expect("baseline should instantiate");
+    let changed = instantiate_family(
+        &family,
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &scifi_industrial_style_implementation(),
+        &advisory_changed,
+    )
+    .expect("advisory/runtime change should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+}
+
+#[test]
+fn non_required_parameter_bindings_are_rejected_as_non_executable() {
+    let mut family = crate_family();
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "style_hint".to_owned(),
+        label: "Style Hint".to_owned(),
+        target_role: Some("body".to_owned()),
+        kind: FamilyParameterKind::Ratio,
+        range: Some(ParameterRange {
+            minimum: 0.0,
+            maximum: 1.0,
+            step: 0.05,
+        }),
+        default_value: Some(FamilyDefaultValue::Scalar(0.5)),
+        execution_policy: ParameterExecutionPolicy::AdvisoryOnly,
+        topology_changing: false,
+    });
+    let mut implementation = crate_implementation();
+    implementation
+        .parameter_bindings
+        .push(ParameterBinding::Scalar {
+            slot: "style_hint".to_owned(),
+            role: "body".to_owned(),
+            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.rounded_box.radius"),
+            transform: ScalarTransform::Direct,
+        });
+
+    let error = instantiate_family(
+        &family,
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("advisory binding should fail implementation validation");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"non_executable_parameter_binding"));
 }
 
 #[test]
@@ -1356,10 +1717,10 @@ fn unsupported_fragment_metadata_is_rejected_instead_of_dropped() {
     )
     .expect_err("unsupported fragment metadata should fail");
 
-    assert!(matches!(
-        error,
-        FamilyCompileError::UnsupportedFragment { .. }
-    ));
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_metadata"));
 }
 
 fn assert_concrete_exportable(output: &shape_family_compile::FamilyInstantiation) {
@@ -1657,7 +2018,6 @@ fn style_kit(
             .iter()
             .map(|family| (*family).to_owned())
             .collect(),
-        proportions: Vec::new(),
         bevel_policy: BevelPolicy {
             width: LengthValue::FamilyUnits(0.03),
             segments: 1,
@@ -1668,8 +2028,6 @@ fn style_kit(
             allowed_profiles: vec!["box".to_owned(), "round".to_owned()],
             allow_asymmetry: false,
         },
-        part_prototypes: Vec::new(),
-        detail_modules: Vec::new(),
         repetition: RepetitionPolicy {
             density: 0.5,
             preferred_spacing: LengthValue::FamilyUnits(0.2),
@@ -1690,7 +2048,7 @@ fn style_kit(
                 proportions: Vec::new(),
                 part_prototypes,
                 detail_modules: Vec::new(),
-                default_role_providers: BTreeMap::new(),
+                policy_overrides: FamilyStylePolicyOverrides::default(),
             },
         )]),
         tags: vec![id.to_owned()],
@@ -1702,7 +2060,6 @@ fn bridge_implementation() -> FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "bridge".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Bridge base"),
-        role_bindings: BTreeMap::new(),
         parameter_bindings: vec![
             ParameterBinding::Scalar {
                 slot: "span_length".to_owned(),
@@ -1722,9 +2079,9 @@ fn bridge_implementation() -> FamilyImplementation {
                 ]),
             },
         ],
-        variant_bindings: BTreeMap::new(),
         default_role_providers: BTreeMap::new(),
         fragments: BTreeMap::new(),
+        attachment_bindings: Vec::new(),
     }
 }
 
@@ -1750,7 +2107,6 @@ fn crate_implementation() -> FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "crate".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Crate base"),
-        role_bindings: BTreeMap::new(),
         parameter_bindings: vec![
             ParameterBinding::Scalar {
                 slot: "body_width".to_owned(),
@@ -1775,9 +2131,9 @@ fn crate_implementation() -> FamilyImplementation {
                 transform: ScalarTransform::IntegerCount,
             },
         ],
-        variant_bindings: BTreeMap::new(),
         default_role_providers: BTreeMap::new(),
         fragments: BTreeMap::new(),
+        attachment_bindings: Vec::new(),
     }
 }
 
@@ -1786,7 +2142,6 @@ fn lamp_implementation() -> FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "lamp".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Lamp base"),
-        role_bindings: BTreeMap::new(),
         parameter_bindings: vec![
             ParameterBinding::Scalar {
                 slot: "shade_scale".to_owned(),
@@ -1807,9 +2162,9 @@ fn lamp_implementation() -> FamilyImplementation {
                 },
             },
         ],
-        variant_bindings: BTreeMap::new(),
         default_role_providers: BTreeMap::new(),
         fragments: BTreeMap::new(),
+        attachment_bindings: Vec::new(),
     }
 }
 
@@ -2054,8 +2409,12 @@ fn fragment(
         schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
         id: id.to_owned(),
         provided_role: role.to_owned(),
-        role_occurrence_roots: vec![LOCAL_INSTANCE],
-        internal_instances: Vec::new(),
+        exports: RecipeFragmentExports {
+            role_occurrence_roots: vec![LOCAL_INSTANCE],
+            internal_roots: Vec::new(),
+            socket_ports: Vec::new(),
+            surface_ports: Vec::new(),
+        },
         recipe,
     }
 }
