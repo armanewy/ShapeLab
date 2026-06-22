@@ -152,8 +152,23 @@ pub struct FamilyParameterSlot {
     pub kind: FamilyParameterKind,
     /// Optional numeric range.
     pub range: Option<ParameterRange>,
+    /// Semantic default value used when an instantiation request omits this slot.
+    pub default_value: Option<FamilyDefaultValue>,
     /// Whether edits to this slot can change topology.
     pub topology_changing: bool,
+}
+
+/// Default value for a theme-neutral family parameter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FamilyDefaultValue {
+    /// Floating-point scalar.
+    Scalar(f32),
+    /// Integer count.
+    Integer(u32),
+    /// Boolean toggle.
+    Toggle(bool),
+    /// Symbolic choice.
+    Choice(String),
 }
 
 /// Theme-neutral parameter kind.
@@ -920,6 +935,7 @@ fn validate_parameter_slots(
             );
         }
         validate_parameter_kind(report, role_ids, index, slot);
+        validate_parameter_default(report, index, slot);
     }
 }
 
@@ -1120,6 +1136,92 @@ fn validate_positive_parameter_range(
 
 fn is_integral(value: f32) -> bool {
     value.is_finite() && (value.fract().abs() <= f32::EPSILON)
+}
+
+fn validate_parameter_default(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    slot: &FamilyParameterSlot,
+) {
+    let Some(default_value) = &slot.default_value else {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.default_value")),
+            "missing_parameter_default",
+            "Parameter slots must declare a semantic default value.",
+        );
+        return;
+    };
+    match (&slot.kind, default_value) {
+        (
+            FamilyParameterKind::Length { .. } | FamilyParameterKind::Angle { .. },
+            FamilyDefaultValue::Scalar(value),
+        ) => validate_default_numeric(report, index, slot, *value),
+        (FamilyParameterKind::Ratio, FamilyDefaultValue::Scalar(value)) => {
+            validate_default_numeric(report, index, slot, *value);
+            if !(0.0..=1.0).contains(value) {
+                push_issue(
+                    report,
+                    Some(format!("parameter_slots.{index}.default_value")),
+                    "default_ratio_out_of_range",
+                    "Ratio defaults must stay within 0..1.",
+                );
+            }
+        }
+        (FamilyParameterKind::Count, FamilyDefaultValue::Integer(value)) => {
+            validate_default_numeric(report, index, slot, *value as f32);
+        }
+        (FamilyParameterKind::Toggle, FamilyDefaultValue::Toggle(_)) => {}
+        (FamilyParameterKind::Choice(choices), FamilyDefaultValue::Choice(value)) => {
+            if !choices.iter().any(|choice| choice == value) {
+                push_issue(
+                    report,
+                    Some(format!("parameter_slots.{index}.default_value")),
+                    "default_choice_not_declared",
+                    "Choice defaults must be declared by the parameter slot.",
+                );
+            }
+        }
+        (FamilyParameterKind::Custom(_), FamilyDefaultValue::Scalar(value)) => {
+            validate_default_numeric(report, index, slot, *value);
+        }
+        (FamilyParameterKind::Custom(_), FamilyDefaultValue::Integer(value)) => {
+            validate_default_numeric(report, index, slot, *value as f32);
+        }
+        _ => push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.default_value")),
+            "default_parameter_type_mismatch",
+            "Default parameter value type must match the family parameter kind.",
+        ),
+    }
+}
+
+fn validate_default_numeric(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    slot: &FamilyParameterSlot,
+    value: f32,
+) {
+    if !value.is_finite() {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.default_value")),
+            "default_parameter_non_finite",
+            "Default numeric values must be finite.",
+        );
+        return;
+    }
+    if let Some(range) = slot.range
+        && (value < range.minimum || value > range.maximum)
+    {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.default_value")),
+            "default_parameter_out_of_range",
+            "Default parameter value must fall within the parameter range.",
+        );
+    }
 }
 
 fn validate_constraints(

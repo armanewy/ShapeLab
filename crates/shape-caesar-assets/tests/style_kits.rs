@@ -1,10 +1,10 @@
 use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
-    ConstraintKind, ExportRequirement, FamilyParameterKind, FamilyParameterSlot,
-    GeometricConstraint, LengthUnit, ParameterRange, PartRole, RoleMultiplicity, RoleProvision,
-    RuntimeMetadataRequirement, VariantMode, VariantRule, validate_family_style_compatibility,
-    validate_style_kit,
+    ConstraintKind, ExportRequirement, FamilyDefaultValue, FamilyParameterKind,
+    FamilyParameterSlot, GeometricConstraint, LengthUnit, ParameterRange, PartRole,
+    RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement, VariantMode, VariantRule,
+    validate_family_style_compatibility, validate_style_kit,
 };
 
 fn generic_bridge_family() -> AssetFamilySchema {
@@ -47,6 +47,7 @@ fn generic_bridge_family() -> AssetFamilySchema {
                 maximum: 6.0,
                 step: 0.25,
             }),
+            default_value: Some(FamilyDefaultValue::Scalar(3.0)),
             topology_changing: false,
         }],
         constraints: vec![GeometricConstraint {

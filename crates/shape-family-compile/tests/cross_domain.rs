@@ -1,24 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, PartDefinition, PartDefinitionId,
-    PartInstance, PartInstanceId, Transform3, definition_scalar_path, get_scalar,
+    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, OperationId, PartDefinition,
+    PartDefinitionId, PartInstance, PartInstanceId, Transform3, definition_scalar_path, get_scalar,
     validate_asset_recipe,
 };
 use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_compile::export::write_grouped_obj_export;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
-    BevelPolicy, ConstraintKind, ExaggerationPolicy, ExportRequirement, FamilyParameterKind,
-    FamilyParameterSlot, GeometricConstraint, LengthUnit, LengthValue, NormalizedBevelProfile,
-    ParameterRange, PartPrototype, PartRole, ProfileLanguage, RepetitionPolicy, RoleMultiplicity,
-    RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
-    VariantMode, VariantRule,
+    BevelPolicy, ConstraintKind, ExaggerationPolicy, ExportRequirement, FamilyDefaultValue,
+    FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, LengthUnit, LengthValue,
+    NormalizedBevelProfile, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
+    RepetitionPolicy, RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement,
+    STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode, VariantRule,
 };
 use shape_family_compile::{
-    FamilyCompileError, FamilyImplementation, FamilyInstantiationRequest, FamilyValue,
-    ParameterBinding, RecipeFragment, ScalarTransform, StyleImplementation, instantiate_family,
-    scalar_parameter,
+    FAMILY_IMPLEMENTATION_SCHEMA_VERSION, FamilyCompileError, FamilyImplementation,
+    FamilyInstantiationRequest, FamilyValue, ParameterBinding, RECIPE_FRAGMENT_SCHEMA_VERSION,
+    RecipeFragment, STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform, StyleImplementation,
+    instantiate_family, scalar_parameter,
 };
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
@@ -290,6 +291,292 @@ fn ids_are_deterministically_remapped_and_instantiation_repeats_identically() {
 }
 
 #[test]
+fn omitted_request_values_use_family_parameter_defaults() {
+    let output = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect("defaulted request should instantiate");
+
+    assert_eq!(
+        output.report.selected_providers.get("body"),
+        Some(&"armored_body".to_owned())
+    );
+    assert!(
+        !output.report.selected_providers.contains_key("handle"),
+        "default false presence toggle should not merge the optional handle"
+    );
+    assert!(
+        output
+            .report
+            .parameter_applications
+            .iter()
+            .any(|application| {
+                application.slot == "body_width" && application.value == "1.200000"
+            })
+    );
+    assert!(
+        output
+            .report
+            .parameter_applications
+            .iter()
+            .any(|application| {
+                application.slot == "bolt_segments" && application.value == "16.000000"
+            })
+    );
+}
+
+#[test]
+fn style_default_provider_is_explicit_not_map_ordered() {
+    let family = bridge_family(&["industrial_steel"]);
+    let mut kit = industrial_bridge_style_kit();
+    kit.part_prototypes.push(PartPrototype {
+        id: "aaa_round_support".to_owned(),
+        display_name: "Alphabetically First Support".to_owned(),
+        role: "support".to_owned(),
+        operation_tags: vec![AllowedOperationKind::Primitive],
+        style_tags: vec!["test".to_owned()],
+    });
+    let mut style = industrial_bridge_style_implementation();
+    style.prototypes.insert(
+        "aaa_round_support".to_owned(),
+        cylinder_fragment("aaa_round_support", "support", 0.2, 2.0, 18),
+    );
+
+    let output = instantiate_family(
+        &family,
+        &kit,
+        &bridge_implementation(),
+        &style,
+        &request(
+            "bridge",
+            "industrial_steel",
+            [("span_length", FamilyValue::Scalar(3.0))],
+        ),
+    )
+    .expect("explicit default should instantiate");
+
+    assert_eq!(
+        output.report.selected_providers.get("support"),
+        Some(&"box_support".to_owned())
+    );
+}
+
+#[test]
+fn missing_required_style_default_provider_is_rejected() {
+    let mut style = scifi_industrial_style_implementation();
+    style.default_role_providers.remove("body");
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("required style role without explicit default should fail");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "missing_required_style_default_provider" })
+    );
+}
+
+#[test]
+fn role_cardinality_counts_exported_occurrence_roots_not_internal_fragments() {
+    let mut style = scifi_industrial_style_implementation();
+    let body = style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment");
+    body.recipe.definitions.insert(
+        PartDefinitionId(91),
+        PartDefinition {
+            id: PartDefinitionId(91),
+            name: "internal rib definition".to_owned(),
+            tags: BTreeSet::from(["body".to_owned(), "internal".to_owned()]),
+            geometry: GeometryRecipe {
+                source: GeometrySource::RoundedBox {
+                    half_extents: [0.08, 0.02, 0.3],
+                    radius: 0.01,
+                },
+                operations: Vec::new(),
+            },
+            regions: BTreeMap::new(),
+            sockets: BTreeMap::new(),
+            local_pivot: Frame3::default(),
+            variant_group: None,
+            production_hints: None,
+        },
+    );
+    body.recipe.instances.insert(
+        PartInstanceId(92),
+        PartInstance {
+            id: PartInstanceId(92),
+            definition: PartDefinitionId(91),
+            name: "internal body rib".to_owned(),
+            parent: Some(LOCAL_INSTANCE),
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::from(["body".to_owned(), "internal".to_owned()]),
+            generated_by: None,
+        },
+    );
+    body.recipe.instances.insert(
+        PartInstanceId(93),
+        PartInstance {
+            id: PartInstanceId(93),
+            definition: PartDefinitionId(91),
+            name: "internal helper root".to_owned(),
+            parent: None,
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::from(["body".to_owned(), "internal".to_owned()]),
+            generated_by: None,
+        },
+    );
+    body.recipe.root_instances.push(PartInstanceId(93));
+    body.internal_instances.push(PartInstanceId(93));
+    body.recipe.next_ids.part_definition = 92;
+    body.recipe.next_ids.part_instance = 94;
+
+    let output = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect("single exported body occurrence should satisfy cardinality");
+
+    assert!(
+        output
+            .recipe
+            .instances
+            .values()
+            .any(|instance| { instance.name == "internal body rib" && instance.enabled })
+    );
+    assert!(
+        output
+            .recipe
+            .instances
+            .values()
+            .any(|instance| { instance.name == "internal helper root" && instance.enabled })
+    );
+}
+
+#[test]
+fn executable_binding_schema_versions_are_enforced() {
+    let mut implementation = crate_implementation();
+    implementation.schema_version = FAMILY_IMPLEMENTATION_SCHEMA_VERSION + 1;
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("unsupported family implementation version should fail");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "unsupported_family_implementation_schema" })
+    );
+
+    let mut style = scifi_industrial_style_implementation();
+    style.schema_version = STYLE_IMPLEMENTATION_SCHEMA_VERSION + 1;
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("unsupported style implementation version should fail");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "unsupported_style_implementation_schema" })
+    );
+
+    let mut style = scifi_industrial_style_implementation();
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .schema_version = RECIPE_FRAGMENT_SCHEMA_VERSION + 1;
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("unsupported fragment version should fail");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "unsupported_recipe_fragment_schema" })
+    );
+}
+
+#[test]
+fn asset_id_is_hash_derived_from_seed_and_semantic_parameters() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let style = scifi_industrial_style_implementation();
+    let mut seed_zero = request("crate", "sci_fi_industrial", []);
+    seed_zero.seed = 0;
+    let mut seed_one = seed_zero.clone();
+    seed_one.seed = 1;
+    let mut wider = seed_zero.clone();
+    wider
+        .parameters
+        .insert("body_width".to_owned(), FamilyValue::Scalar(1.6));
+
+    let zero =
+        instantiate_family(&family, &kit, &implementation, &style, &seed_zero).expect("seed zero");
+    let one =
+        instantiate_family(&family, &kit, &implementation, &style, &seed_one).expect("seed one");
+    let wider =
+        instantiate_family(&family, &kit, &implementation, &style, &wider).expect("wider body");
+
+    assert_ne!(zero.recipe.id, AssetId(0));
+    assert_ne!(zero.recipe.id, AssetId(1));
+    assert_ne!(zero.recipe.id, one.recipe.id);
+    assert_ne!(zero.recipe.id, wider.recipe.id);
+}
+
+#[test]
 fn incompatible_family_style_pair_is_rejected_before_geometry() {
     let family = crate_family();
     let error = instantiate_family(
@@ -389,6 +676,7 @@ fn required_roles_cannot_be_disabled_by_toggle_bindings() {
         target_role: Some("body".to_owned()),
         kind: FamilyParameterKind::Toggle,
         range: None,
+        default_value: Some(FamilyDefaultValue::Toggle(true)),
         topology_changing: true,
     });
     let mut implementation = crate_implementation();
@@ -427,6 +715,76 @@ fn required_roles_cannot_be_disabled_by_toggle_bindings() {
 }
 
 #[test]
+fn presence_toggle_disables_selected_occurrence_subtree() {
+    let mut family = crate_family();
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "handle_choice".to_owned(),
+        label: "Handle Choice".to_owned(),
+        target_role: Some("handle".to_owned()),
+        kind: FamilyParameterKind::Choice(vec!["side".to_owned()]),
+        range: None,
+        default_value: Some(FamilyDefaultValue::Choice("side".to_owned())),
+        topology_changing: true,
+    });
+    let mut implementation = crate_implementation();
+    implementation
+        .parameter_bindings
+        .push(ParameterBinding::ChoiceToPrototype {
+            slot: "handle_choice".to_owned(),
+            role: "handle".to_owned(),
+            choices: BTreeMap::from([("side".to_owned(), "side_handle".to_owned())]),
+        });
+    let mut style = scifi_industrial_style_implementation();
+    let handle = style
+        .prototypes
+        .get_mut("side_handle")
+        .expect("handle fragment");
+    handle.recipe.instances.insert(
+        PartInstanceId(92),
+        PartInstance {
+            id: PartInstanceId(92),
+            definition: LOCAL_DEFINITION,
+            name: "handle child detail".to_owned(),
+            parent: Some(LOCAL_INSTANCE),
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::from(["handle".to_owned(), "detail".to_owned()]),
+            generated_by: None,
+        },
+    );
+    handle.recipe.next_ids.part_instance = 93;
+
+    let output = instantiate_family(
+        &family,
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &style,
+        &request(
+            "crate",
+            "sci_fi_industrial",
+            [("has_handle", FamilyValue::Toggle(false))],
+        ),
+    )
+    .expect("choice-selected optional handle can be disabled by presence toggle");
+
+    assert_eq!(
+        output.report.selected_providers.get("handle"),
+        Some(&"side_handle".to_owned())
+    );
+    let handle_instances = output
+        .recipe
+        .instances
+        .values()
+        .filter(|instance| {
+            instance.name.contains("side_handle") || instance.name == "handle child detail"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(handle_instances.len(), 2);
+    assert!(handle_instances.iter().all(|instance| !instance.enabled));
+}
+
+#[test]
 fn malformed_fragments_return_validation_reports_instead_of_panicking() {
     let mut style = scifi_industrial_style_implementation();
     style
@@ -457,6 +815,63 @@ fn malformed_fragments_return_validation_reports_instead_of_panicking() {
 }
 
 #[test]
+fn invalid_fragment_export_lists_are_rejected_before_merge() {
+    let mut style = scifi_industrial_style_implementation();
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .role_occurrence_roots = vec![PartInstanceId(999)];
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("bad fragment exports should fail implementation validation");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "unknown_role_occurrence_root" })
+    );
+}
+
+#[test]
+fn selected_fragment_generated_provenance_is_rejected_until_remapped() {
+    let mut style = scifi_industrial_style_implementation();
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .recipe
+        .instances
+        .get_mut(&LOCAL_INSTANCE)
+        .expect("body root")
+        .generated_by = Some(OperationId(777));
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("generated provenance should remain unsupported until remapped");
+
+    assert!(matches!(
+        error,
+        FamilyCompileError::UnsupportedFragment { .. }
+    ));
+}
+
+#[test]
 fn family_default_provider_is_not_shadowed_by_same_named_style_prototype() {
     let mut family = crate_family();
     family.part_roles[0].provision = RoleProvision::FamilyDefault;
@@ -480,6 +895,7 @@ fn family_default_provider_is_not_shadowed_by_same_named_style_prototype() {
     );
 
     let mut style = scifi_industrial_style_implementation();
+    style.default_role_providers.remove("body");
     style.prototypes.insert(
         "family_body".to_owned(),
         rounded_box_fragment("family_body", "body", [1.8, 0.9, 0.9], 0.08),
@@ -511,6 +927,37 @@ fn family_default_provider_is_not_shadowed_by_same_named_style_prototype() {
         panic!("expected rounded family body");
     };
     assert_eq!(half_extents[1], 0.22);
+}
+
+#[test]
+fn invalid_family_default_provider_role_provision_is_rejected() {
+    let mut implementation = crate_implementation();
+    implementation
+        .default_role_providers
+        .insert("body".to_owned(), "family_body".to_owned());
+    implementation.fragments.insert(
+        "family_body".to_owned(),
+        rounded_box_fragment("family_body", "body", [0.33, 0.22, 0.11], 0.01),
+    );
+
+    let error = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("style-required body should not accept a family default entry");
+
+    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
+        panic!("expected implementation validation failure");
+    };
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "family_default_provider_invalid_role_provision" })
+    );
 }
 
 #[test]
@@ -628,6 +1075,7 @@ fn bridge_family(style_kits: &[&str]) -> AssetFamilySchema {
                     maximum: 8.0,
                     step: 0.25,
                 }),
+                default_value: Some(FamilyDefaultValue::Scalar(3.0)),
                 topology_changing: false,
             },
             FamilyParameterSlot {
@@ -636,6 +1084,7 @@ fn bridge_family(style_kits: &[&str]) -> AssetFamilySchema {
                 target_role: Some("support".to_owned()),
                 kind: FamilyParameterKind::Choice(vec!["box".to_owned(), "round".to_owned()]),
                 range: None,
+                default_value: Some(FamilyDefaultValue::Choice("box".to_owned())),
                 topology_changing: true,
             },
         ],
@@ -692,6 +1141,7 @@ fn crate_family() -> AssetFamilySchema {
                     maximum: 2.0,
                     step: 0.05,
                 }),
+                default_value: Some(FamilyDefaultValue::Scalar(1.2)),
                 topology_changing: false,
             },
             FamilyParameterSlot {
@@ -700,6 +1150,7 @@ fn crate_family() -> AssetFamilySchema {
                 target_role: Some("handle".to_owned()),
                 kind: FamilyParameterKind::Toggle,
                 range: None,
+                default_value: Some(FamilyDefaultValue::Toggle(false)),
                 topology_changing: true,
             },
             FamilyParameterSlot {
@@ -712,6 +1163,7 @@ fn crate_family() -> AssetFamilySchema {
                     maximum: 32.0,
                     step: 1.0,
                 }),
+                default_value: Some(FamilyDefaultValue::Integer(16)),
                 topology_changing: true,
             },
         ],
@@ -747,6 +1199,7 @@ fn lamp_family() -> AssetFamilySchema {
                     maximum: 1.0,
                     step: 0.05,
                 }),
+                default_value: Some(FamilyDefaultValue::Scalar(0.5)),
                 topology_changing: false,
             },
             FamilyParameterSlot {
@@ -761,6 +1214,7 @@ fn lamp_family() -> AssetFamilySchema {
                     maximum: 2.0,
                     step: 0.05,
                 }),
+                default_value: Some(FamilyDefaultValue::Scalar(1.0)),
                 topology_changing: false,
             },
         ],
@@ -883,6 +1337,7 @@ fn style_kit(
 
 fn bridge_implementation() -> FamilyImplementation {
     FamilyImplementation {
+        schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "bridge".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Bridge base"),
         role_bindings: BTreeMap::new(),
@@ -918,6 +1373,7 @@ fn industrial_bridge_implementation() -> FamilyImplementation {
 
 fn crate_implementation() -> FamilyImplementation {
     FamilyImplementation {
+        schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "crate".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Crate base"),
         role_bindings: BTreeMap::new(),
@@ -953,6 +1409,7 @@ fn crate_implementation() -> FamilyImplementation {
 
 fn lamp_implementation() -> FamilyImplementation {
     FamilyImplementation {
+        schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
         family_id: "lamp".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Lamp base"),
         role_bindings: BTreeMap::new(),
@@ -984,7 +1441,13 @@ fn lamp_implementation() -> FamilyImplementation {
 
 fn roman_timber_style_implementation() -> StyleImplementation {
     StyleImplementation {
+        schema_version: STYLE_IMPLEMENTATION_SCHEMA_VERSION,
         style_kit_id: "roman_timber_engineering".to_owned(),
+        default_role_providers: BTreeMap::from([
+            ("deck".to_owned(), "lashed_deck_plank".to_owned()),
+            ("span".to_owned(), "hewn_span_beam".to_owned()),
+            ("support".to_owned(), "pointed_round_pile".to_owned()),
+        ]),
         prototypes: BTreeMap::from([
             (
                 "pointed_round_pile".to_owned(),
@@ -1005,7 +1468,13 @@ fn roman_timber_style_implementation() -> StyleImplementation {
 
 fn industrial_bridge_style_implementation() -> StyleImplementation {
     StyleImplementation {
+        schema_version: STYLE_IMPLEMENTATION_SCHEMA_VERSION,
         style_kit_id: "industrial_steel".to_owned(),
+        default_role_providers: BTreeMap::from([
+            ("deck".to_owned(), "deck_plate".to_owned()),
+            ("span".to_owned(), "box_span".to_owned()),
+            ("support".to_owned(), "box_support".to_owned()),
+        ]),
         prototypes: BTreeMap::from([
             (
                 "box_support".to_owned(),
@@ -1030,7 +1499,14 @@ fn industrial_bridge_style_implementation() -> StyleImplementation {
 
 fn scifi_industrial_style_implementation() -> StyleImplementation {
     StyleImplementation {
+        schema_version: STYLE_IMPLEMENTATION_SCHEMA_VERSION,
         style_kit_id: "sci_fi_industrial".to_owned(),
+        default_role_providers: BTreeMap::from([
+            ("body".to_owned(), "armored_body".to_owned()),
+            ("fastener".to_owned(), "bolt_head".to_owned()),
+            ("handle".to_owned(), "side_handle".to_owned()),
+            ("panel".to_owned(), "inset_panel".to_owned()),
+        ]),
         prototypes: BTreeMap::from([
             (
                 "armored_body".to_owned(),
@@ -1055,7 +1531,13 @@ fn scifi_industrial_style_implementation() -> StyleImplementation {
 
 fn stylized_furniture_style_implementation() -> StyleImplementation {
     StyleImplementation {
+        schema_version: STYLE_IMPLEMENTATION_SCHEMA_VERSION,
         style_kit_id: "stylized_furniture".to_owned(),
+        default_role_providers: BTreeMap::from([
+            ("base".to_owned(), "rounded_base".to_owned()),
+            ("shade".to_owned(), "soft_shade".to_owned()),
+            ("stem".to_owned(), "tapered_stem".to_owned()),
+        ]),
         prototypes: BTreeMap::from([
             (
                 "rounded_base".to_owned(),
@@ -1191,8 +1673,11 @@ fn fragment(
     recipe.next_ids.parameter = scalar_paths.len() as u64 + 1;
     assert!(validate_asset_recipe(&recipe).is_valid());
     RecipeFragment {
+        schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
         id: id.to_owned(),
-        role: role.to_owned(),
+        provided_role: role.to_owned(),
+        role_occurrence_roots: vec![LOCAL_INSTANCE],
+        internal_instances: Vec::new(),
         recipe,
     }
 }

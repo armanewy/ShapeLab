@@ -16,15 +16,26 @@ use shape_asset::{
 };
 use shape_compile::{AssetArtifact, CompileError, CompileValidationReport, compile_asset};
 use shape_family::{
-    AssetFamilySchema, FamilyParameterKind, FamilyValidationIssue, FamilyValidationReport,
-    ParameterRange, PartRole, RoleMultiplicity, RoleProvision, StyleKit,
+    AssetFamilySchema, FamilyDefaultValue, FamilyParameterKind, FamilyValidationIssue,
+    FamilyValidationReport, ParameterRange, PartRole, RoleMultiplicity, RoleProvision, StyleKit,
     validate_family_style_compatibility, validate_family_style_completeness,
 };
 use thiserror::Error;
 
+/// Current schema version for executable family implementations.
+pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
+
+/// Current schema version for executable style implementations.
+pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
+
+/// Current schema version for executable recipe fragments.
+pub const RECIPE_FRAGMENT_SCHEMA_VERSION: u32 = 1;
+
 /// Executable family binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FamilyImplementation {
+    /// Executable family implementation schema version.
+    pub schema_version: u32,
     /// Family ID implemented by this binding.
     pub family_id: String,
     /// Base recipe used as the deterministic merge target.
@@ -62,8 +73,12 @@ pub struct VariantBinding {
 /// Executable style binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StyleImplementation {
+    /// Executable style implementation schema version.
+    pub schema_version: u32,
     /// Style kit ID implemented by this binding.
     pub style_kit_id: String,
+    /// Explicit default style providers keyed by family role ID.
+    pub default_role_providers: BTreeMap<String, String>,
     /// Style prototypes keyed by prototype ID.
     pub prototypes: BTreeMap<String, RecipeFragment>,
     /// Detail fragments keyed by detail module ID.
@@ -73,10 +88,16 @@ pub struct StyleImplementation {
 /// Concrete fragment that can provide a family role.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeFragment {
+    /// Executable fragment schema version.
+    pub schema_version: u32,
     /// Fragment ID.
     pub id: String,
     /// Family role provided by this fragment.
-    pub role: String,
+    pub provided_role: String,
+    /// Root instances that count as externally visible role occurrences.
+    pub role_occurrence_roots: Vec<PartInstanceId>,
+    /// Internal instances that do not count toward role cardinality.
+    pub internal_instances: Vec<PartInstanceId>,
     /// Source recipe whose roots will be merged into the target recipe.
     pub recipe: AssetRecipe,
 }
@@ -311,11 +332,16 @@ pub fn instantiate_family(
         return Err(FamilyCompileError::SchemaValidationFailed(completeness));
     }
     validate_implementations(family, style_kit, family_impl, style_impl)?;
-    validate_request(family, request)?;
+    let effective_request = effective_request(family, request);
+    validate_request(family, &effective_request)?;
 
-    let choice_overrides =
-        resolve_choice_overrides(style_impl, &family_impl.parameter_bindings, request)?;
-    let presence_overrides = resolve_presence_overrides(&family_impl.parameter_bindings, request)?;
+    let choice_overrides = resolve_choice_overrides(
+        style_impl,
+        &family_impl.parameter_bindings,
+        &effective_request,
+    )?;
+    let presence_overrides =
+        resolve_presence_overrides(&family_impl.parameter_bindings, &effective_request)?;
     let selected_providers = select_role_providers(
         family,
         family_impl,
@@ -324,7 +350,14 @@ pub fn instantiate_family(
         &presence_overrides,
     )?;
     let mut recipe = family_impl.base_recipe.clone();
-    recipe.id = AssetId(request.seed.max(1));
+    recipe.id = AssetId(derived_asset_id(
+        family,
+        style_kit,
+        family_impl,
+        style_impl,
+        &effective_request,
+        &selected_providers,
+    ));
     recipe.title = format!("{} / {}", family.display_name, style_kit.display_name);
 
     let mut merge_state = MergeState::default();
@@ -337,7 +370,7 @@ pub fn instantiate_family(
     apply_parameter_bindings(
         &mut recipe,
         &family_impl.parameter_bindings,
-        request,
+        &effective_request,
         &merge_state,
         &mut parameter_applications,
     )?;
@@ -394,6 +427,126 @@ fn ensure_ids_match(
     Ok(())
 }
 
+fn effective_request(
+    family: &AssetFamilySchema,
+    request: &FamilyInstantiationRequest,
+) -> FamilyInstantiationRequest {
+    let mut effective = request.clone();
+    for slot in &family.parameter_slots {
+        if !effective.parameters.contains_key(&slot.id)
+            && let Some(default_value) = &slot.default_value
+        {
+            effective
+                .parameters
+                .insert(slot.id.clone(), family_value_from_default(default_value));
+        }
+    }
+    effective
+}
+
+fn family_value_from_default(default_value: &FamilyDefaultValue) -> FamilyValue {
+    match default_value {
+        FamilyDefaultValue::Scalar(value) => FamilyValue::Scalar(*value),
+        FamilyDefaultValue::Integer(value) => FamilyValue::Integer(*value),
+        FamilyDefaultValue::Toggle(value) => FamilyValue::Toggle(*value),
+        FamilyDefaultValue::Choice(value) => FamilyValue::Choice(value.clone()),
+    }
+}
+
+fn derived_asset_id(
+    family: &AssetFamilySchema,
+    style_kit: &StyleKit,
+    family_impl: &FamilyImplementation,
+    style_impl: &StyleImplementation,
+    request: &FamilyInstantiationRequest,
+    selected_providers: &BTreeMap<String, ProviderSelection>,
+) -> u64 {
+    let mut hash = FNV_OFFSET;
+    hash_str(&mut hash, "shape-lab.family-instantiation.v1");
+    hash_str(&mut hash, &family.id);
+    hash_u64(&mut hash, u64::from(family.schema_version));
+    hash_str(&mut hash, &style_kit.id);
+    hash_u64(&mut hash, u64::from(style_kit.schema_version));
+    hash_str(&mut hash, &family_impl.family_id);
+    hash_u64(&mut hash, u64::from(family_impl.schema_version));
+    hash_str(&mut hash, &style_impl.style_kit_id);
+    hash_u64(&mut hash, u64::from(style_impl.schema_version));
+    hash_u64(&mut hash, request.seed);
+    for (slot, value) in &request.parameters {
+        hash_str(&mut hash, slot);
+        hash_family_value(&mut hash, value);
+    }
+    for (role, selection) in selected_providers {
+        hash_str(&mut hash, role);
+        hash_str(&mut hash, &selection.fragment);
+        hash_u64(
+            &mut hash,
+            match selection.source {
+                ProviderSource::FamilyDefault => 1,
+                ProviderSource::StylePrototype => 2,
+            },
+        );
+        if let Some(fragment) = find_selected_fragment_for_hash(family_impl, style_impl, selection)
+        {
+            hash_u64(&mut hash, u64::from(fragment.schema_version));
+        }
+    }
+    if hash == 0 { 1 } else { hash }
+}
+
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn hash_u8(hash: &mut u64, value: u8) {
+    *hash ^= u64::from(value);
+    *hash = hash.wrapping_mul(FNV_PRIME);
+}
+
+fn hash_u64(hash: &mut u64, value: u64) {
+    for byte in value.to_le_bytes() {
+        hash_u8(hash, byte);
+    }
+}
+
+fn hash_str(hash: &mut u64, value: &str) {
+    hash_u64(hash, value.len() as u64);
+    for byte in value.as_bytes() {
+        hash_u8(hash, *byte);
+    }
+}
+
+fn hash_family_value(hash: &mut u64, value: &FamilyValue) {
+    match value {
+        FamilyValue::Scalar(value) => {
+            hash_str(hash, "scalar");
+            hash_u64(hash, u64::from(value.to_bits()));
+        }
+        FamilyValue::Integer(value) => {
+            hash_str(hash, "integer");
+            hash_u64(hash, u64::from(*value));
+        }
+        FamilyValue::Toggle(value) => {
+            hash_str(hash, "toggle");
+            hash_u64(hash, if *value { 1 } else { 0 });
+        }
+        FamilyValue::Choice(value) => {
+            hash_str(hash, "choice");
+            hash_str(hash, value);
+        }
+    }
+}
+
+fn find_selected_fragment_for_hash<'a>(
+    family_impl: &'a FamilyImplementation,
+    style_impl: &'a StyleImplementation,
+    selection: &ProviderSelection,
+) -> Option<&'a RecipeFragment> {
+    match selection.source {
+        ProviderSource::FamilyDefault => family_impl.fragments.get(&selection.fragment),
+        ProviderSource::StylePrototype => style_impl.prototypes.get(&selection.fragment),
+    }
+}
+
 fn validate_implementations(
     family: &AssetFamilySchema,
     style_kit: &StyleKit,
@@ -401,6 +554,22 @@ fn validate_implementations(
     style_impl: &StyleImplementation,
 ) -> Result<(), FamilyCompileError> {
     let mut report = FamilyValidationReport::default();
+    if family_impl.schema_version != FAMILY_IMPLEMENTATION_SCHEMA_VERSION {
+        push_report_issue(
+            &mut report,
+            Some("family_implementation.schema_version"),
+            "unsupported_family_implementation_schema",
+            "Family implementation schema version is not supported.",
+        );
+    }
+    if style_impl.schema_version != STYLE_IMPLEMENTATION_SCHEMA_VERSION {
+        push_report_issue(
+            &mut report,
+            Some("style_implementation.schema_version"),
+            "unsupported_style_implementation_schema",
+            "Style implementation schema version is not supported.",
+        );
+    }
     let role_ids = family
         .part_roles
         .iter()
@@ -428,6 +597,11 @@ fn validate_implementations(
         .collect::<BTreeSet<_>>();
 
     for (id, fragment) in &style_impl.prototypes {
+        validate_recipe_fragment_exports(
+            &mut report,
+            &format!("style_implementation.prototypes.{id}"),
+            fragment,
+        );
         if fragment.id != *id {
             push_report_issue(
                 &mut report,
@@ -437,10 +611,12 @@ fn validate_implementations(
             );
         }
         match style_prototypes.get(id.as_str()) {
-            Some(role) if *role == fragment.role => {}
+            Some(role) if *role == fragment.provided_role => {}
             Some(_) => push_report_issue(
                 &mut report,
-                Some(format!("style_implementation.prototypes.{id}.role")),
+                Some(format!(
+                    "style_implementation.prototypes.{id}.provided_role"
+                )),
                 "executable_style_prototype_role_mismatch",
                 "Executable style prototype role must match the style-kit prototype role.",
             ),
@@ -453,6 +629,11 @@ fn validate_implementations(
         }
     }
     for (id, fragment) in &style_impl.detail_modules {
+        validate_recipe_fragment_exports(
+            &mut report,
+            &format!("style_implementation.detail_modules.{id}"),
+            fragment,
+        );
         if fragment.id != *id {
             push_report_issue(
                 &mut report,
@@ -471,6 +652,67 @@ fn validate_implementations(
         }
     }
 
+    for (role, fragment_id) in &style_impl.default_role_providers {
+        if !role_ids.contains(role.as_str()) {
+            push_report_issue(
+                &mut report,
+                Some(format!(
+                    "style_implementation.default_role_providers.{role}"
+                )),
+                "unknown_style_default_provider_role",
+                "Style default provider role is not declared by the family.",
+            );
+        }
+        if matches!(
+            roles.get(role.as_str()).map(|role| role.provision),
+            Some(RoleProvision::FamilyDefault | RoleProvision::Derived)
+        ) {
+            push_report_issue(
+                &mut report,
+                Some(format!(
+                    "style_implementation.default_role_providers.{role}"
+                )),
+                "style_default_provider_invalid_role_provision",
+                "Style defaults can only provide style-required or style-optional roles.",
+            );
+        }
+        match style_impl.prototypes.get(fragment_id) {
+            Some(fragment) if fragment.provided_role == *role => {}
+            Some(_) => push_report_issue(
+                &mut report,
+                Some(format!(
+                    "style_implementation.default_role_providers.{role}"
+                )),
+                "style_default_provider_role_mismatch",
+                "Style default provider fragment role must match its family role.",
+            ),
+            None => push_report_issue(
+                &mut report,
+                Some(format!(
+                    "style_implementation.default_role_providers.{role}"
+                )),
+                "unknown_style_default_provider_fragment",
+                "Style default provider fragment is not present in the style implementation.",
+            ),
+        }
+    }
+    for role in &family.part_roles {
+        if role.required
+            && role.provision == RoleProvision::StyleRequired
+            && !style_impl.default_role_providers.contains_key(&role.id)
+        {
+            push_report_issue(
+                &mut report,
+                Some(format!(
+                    "style_implementation.default_role_providers.{}",
+                    role.id
+                )),
+                "missing_required_style_default_provider",
+                "Style-required roles must declare an explicit executable default provider.",
+            );
+        }
+    }
+
     for (role, fragment_id) in &family_impl.default_role_providers {
         if !role_ids.contains(role.as_str()) {
             push_report_issue(
@@ -482,8 +724,21 @@ fn validate_implementations(
                 "Default provider role is not declared by the family.",
             );
         }
+        if matches!(
+            roles.get(role.as_str()).map(|role| role.provision),
+            Some(RoleProvision::StyleRequired | RoleProvision::Derived)
+        ) {
+            push_report_issue(
+                &mut report,
+                Some(format!(
+                    "family_implementation.default_role_providers.{role}"
+                )),
+                "family_default_provider_invalid_role_provision",
+                "Family defaults can only provide family-default or style-optional roles.",
+            );
+        }
         match family_impl.fragments.get(fragment_id) {
-            Some(fragment) if fragment.role == *role => {}
+            Some(fragment) if fragment.provided_role == *role => {}
             Some(_) => push_report_issue(
                 &mut report,
                 Some(format!(
@@ -503,6 +758,11 @@ fn validate_implementations(
         }
     }
     for (id, fragment) in &family_impl.fragments {
+        validate_recipe_fragment_exports(
+            &mut report,
+            &format!("family_implementation.fragments.{id}"),
+            fragment,
+        );
         if fragment.id != *id {
             push_report_issue(
                 &mut report,
@@ -511,10 +771,12 @@ fn validate_implementations(
                 "Recipe fragment ID must match its map key.",
             );
         }
-        if !role_ids.contains(fragment.role.as_str()) {
+        if !role_ids.contains(fragment.provided_role.as_str()) {
             push_report_issue(
                 &mut report,
-                Some(format!("family_implementation.fragments.{id}.role")),
+                Some(format!(
+                    "family_implementation.fragments.{id}.provided_role"
+                )),
                 "unknown_family_fragment_role",
                 "Family-owned recipe fragments must provide a declared family role.",
             );
@@ -536,6 +798,98 @@ fn validate_implementations(
         Ok(())
     } else {
         Err(FamilyCompileError::ImplementationValidationFailed(report))
+    }
+}
+
+fn validate_recipe_fragment_exports(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    fragment: &RecipeFragment,
+) {
+    if fragment.schema_version != RECIPE_FRAGMENT_SCHEMA_VERSION {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.schema_version")),
+            "unsupported_recipe_fragment_schema",
+            "Recipe fragment schema version is not supported.",
+        );
+    }
+    if fragment.role_occurrence_roots.is_empty() {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.role_occurrence_roots")),
+            "missing_role_occurrence_root",
+            "Recipe fragments must export at least one role occurrence root.",
+        );
+    }
+    let instance_ids = fragment
+        .recipe
+        .instances
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut root_ids = BTreeSet::new();
+    for root in &fragment.role_occurrence_roots {
+        if !root_ids.insert(*root) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.role_occurrence_roots")),
+                "duplicate_role_occurrence_root",
+                "Role occurrence roots must be unique within one fragment.",
+            );
+        }
+        if !instance_ids.contains(root) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.role_occurrence_roots")),
+                "unknown_role_occurrence_root",
+                "Role occurrence roots must exist in the fragment recipe.",
+            );
+        }
+    }
+    let mut internal_ids = BTreeSet::new();
+    for internal in &fragment.internal_instances {
+        if !internal_ids.insert(*internal) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.internal_instances")),
+                "duplicate_internal_instance",
+                "Internal instances must be unique within one fragment.",
+            );
+        }
+        if !instance_ids.contains(internal) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.internal_instances")),
+                "unknown_internal_instance",
+                "Internal instances must exist in the fragment recipe.",
+            );
+        }
+        if root_ids.contains(internal) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.internal_instances")),
+                "fragment_export_root_marked_internal",
+                "A role occurrence root cannot also be listed as an internal instance.",
+            );
+        }
+    }
+    let mut covered_instances = BTreeSet::new();
+    for root in root_ids {
+        if instance_ids.contains(&root) {
+            covered_instances.extend(collect_subtree_instances(&fragment.recipe, root));
+        }
+    }
+    covered_instances.extend(internal_ids);
+    for instance in instance_ids {
+        if !covered_instances.contains(&instance) {
+            push_report_issue(
+                report,
+                Some(format!("{subject}.internal_instances")),
+                "unclassified_fragment_instance",
+                "Every fragment instance must be under a role occurrence root or explicitly internal.",
+            );
+        }
     }
 }
 
@@ -666,7 +1020,7 @@ fn validate_parameter_binding(
                     continue;
                 };
                 match style_prototypes.get(fragment_id) {
-                    Some(fragment) if fragment.role == *role => {}
+                    Some(fragment) if fragment.provided_role == *role => {}
                     Some(_) => push_report_issue(
                         report,
                         Some(format!(
@@ -860,7 +1214,7 @@ fn resolve_choice_overrides(
             return Err(FamilyCompileError::IncompatibleParameterValue { slot: slot.clone() });
         };
         match style_impl.prototypes.get(fragment_id) {
-            Some(fragment) if fragment.role == *role => {}
+            Some(fragment) if fragment.provided_role == *role => {}
             _ => {
                 return Err(FamilyCompileError::UnknownFragment {
                     role: role.clone(),
@@ -927,15 +1281,18 @@ fn select_role_providers(
                         fragment: fragment.clone(),
                         source: ProviderSource::FamilyDefault,
                     }),
-                RoleProvision::StyleRequired => {
-                    first_style_provider(style_impl, &role.id).map(|fragment| ProviderSelection {
-                        fragment,
-                        source: ProviderSource::StylePrototype,
-                    })
-                }
-                RoleProvision::FamilyOrStyle => first_style_provider(style_impl, &role.id)
+                RoleProvision::StyleRequired => style_impl
+                    .default_role_providers
+                    .get(&role.id)
                     .map(|fragment| ProviderSelection {
-                        fragment,
+                        fragment: fragment.clone(),
+                        source: ProviderSource::StylePrototype,
+                    }),
+                RoleProvision::FamilyOrStyle => style_impl
+                    .default_role_providers
+                    .get(&role.id)
+                    .map(|fragment| ProviderSelection {
+                        fragment: fragment.clone(),
                         source: ProviderSource::StylePrototype,
                     })
                     .or_else(|| {
@@ -971,13 +1328,6 @@ struct ProviderSelection {
     source: ProviderSource,
 }
 
-fn first_style_provider(style_impl: &StyleImplementation, role: &str) -> Option<String> {
-    style_impl
-        .prototypes
-        .iter()
-        .find_map(|(id, fragment)| (fragment.role == role).then(|| id.clone()))
-}
-
 fn find_fragment<'a>(
     family_impl: &'a FamilyImplementation,
     style_impl: &'a StyleImplementation,
@@ -989,7 +1339,7 @@ fn find_fragment<'a>(
         ProviderSource::StylePrototype => style_impl.prototypes.get(&selection.fragment),
     };
     fragment
-        .filter(|fragment| fragment.role == role)
+        .filter(|fragment| fragment.provided_role == role)
         .ok_or_else(|| FamilyCompileError::UnknownFragment {
             role: role.to_owned(),
             fragment: selection.fragment.clone(),
@@ -999,7 +1349,8 @@ fn find_fragment<'a>(
 #[derive(Default)]
 struct MergeState {
     scalar_paths: BTreeMap<(String, String), String>,
-    role_instances: BTreeMap<String, Vec<PartInstanceId>>,
+    role_occurrence_roots: BTreeMap<String, Vec<PartInstanceId>>,
+    role_internal_instances: BTreeMap<String, Vec<PartInstanceId>>,
 }
 
 fn merge_fragment(
@@ -1041,7 +1392,6 @@ fn merge_fragment(
         target.definitions.insert(cloned.id, cloned);
     }
 
-    let mut merged_instances = Vec::new();
     for (old_id, instance) in &fragment.recipe.instances {
         let mut cloned = instance.clone();
         cloned.id = *instance_map
@@ -1059,7 +1409,6 @@ fn merge_fragment(
             })
             .transpose()?;
         target.instances.insert(cloned.id, cloned.clone());
-        merged_instances.push(cloned.id);
     }
     for root in &fragment.recipe.root_instances {
         let Some(root) = instance_map.get(root).copied() else {
@@ -1070,11 +1419,28 @@ fn merge_fragment(
         };
         target.root_instances.push(root);
     }
+    let occurrence_roots = remap_fragment_instance_list(
+        fragment,
+        &fragment.role_occurrence_roots,
+        &instance_map,
+        "role occurrence root",
+    )?;
+    let internal_instances = remap_fragment_instance_list(
+        fragment,
+        &fragment.internal_instances,
+        &instance_map,
+        "internal instance",
+    )?;
     state
-        .role_instances
-        .entry(fragment.role.clone())
+        .role_occurrence_roots
+        .entry(fragment.provided_role.clone())
         .or_default()
-        .extend(merged_instances);
+        .extend(occurrence_roots);
+    state
+        .role_internal_instances
+        .entry(fragment.provided_role.clone())
+        .or_default()
+        .extend(internal_instances);
 
     for (old_id, parameter) in &fragment.recipe.parameters {
         let mut cloned = parameter.clone();
@@ -1082,7 +1448,7 @@ fn merge_fragment(
         cloned.path = remap_scalar_path(&parameter.path, &definition_map, &instance_map)?;
         let new_parameter_id = cloned.id;
         state.scalar_paths.insert(
-            (fragment.role.clone(), parameter.path.clone()),
+            (fragment.provided_role.clone(), parameter.path.clone()),
             cloned.path.clone(),
         );
         target.parameters.insert(new_parameter_id, cloned);
@@ -1091,6 +1457,25 @@ fn merge_fragment(
         }
     }
     Ok(())
+}
+
+fn remap_fragment_instance_list(
+    fragment: &RecipeFragment,
+    local_instances: &[PartInstanceId],
+    instance_map: &BTreeMap<PartInstanceId, PartInstanceId>,
+    label: &str,
+) -> Result<Vec<PartInstanceId>, FamilyCompileError> {
+    local_instances
+        .iter()
+        .map(|instance| {
+            instance_map.get(instance).copied().ok_or_else(|| {
+                unsupported_fragment(
+                    &fragment.id,
+                    &format!("{label} was not remapped from the fragment recipe"),
+                )
+            })
+        })
+        .collect()
 }
 
 fn validate_supported_fragment(fragment: &RecipeFragment) -> Result<(), FamilyCompileError> {
@@ -1121,6 +1506,17 @@ fn validate_supported_fragment(fragment: &RecipeFragment) -> Result<(), FamilyCo
                 "modeling operations and sockets are not remapped yet",
             ));
         }
+    }
+    if fragment
+        .recipe
+        .instances
+        .values()
+        .any(|instance| instance.generated_by.is_some())
+    {
+        return Err(unsupported_fragment(
+            &fragment.id,
+            "generated-instance provenance is not remapped yet",
+        ));
     }
     Ok(())
 }
@@ -1228,9 +1624,13 @@ fn apply_parameter_bindings(
                         slot: slot.clone(),
                     });
                 };
-                if let Some(instances) = state.role_instances.get(role) {
+                if let Some(roots) = state.role_occurrence_roots.get(role) {
+                    let instances = roots
+                        .iter()
+                        .flat_map(|root| collect_subtree_instances(recipe, *root))
+                        .collect::<Vec<_>>();
                     for instance in instances {
-                        if let Some(part) = recipe.instances.get_mut(instance) {
+                        if let Some(part) = recipe.instances.get_mut(&instance) {
                             part.enabled = *enabled;
                         }
                     }
@@ -1263,10 +1663,10 @@ fn validate_role_cardinality(
             continue;
         }
         let count = state
-            .role_instances
+            .role_occurrence_roots
             .get(&role.id)
             .into_iter()
-            .flat_map(|instances| instances.iter())
+            .flat_map(|roots| roots.iter())
             .filter(|instance| {
                 recipe
                     .instances
@@ -1281,6 +1681,24 @@ fn validate_role_cardinality(
     } else {
         Err(FamilyCompileError::RoleValidationFailed(report))
     }
+}
+
+fn collect_subtree_instances(recipe: &AssetRecipe, root: PartInstanceId) -> Vec<PartInstanceId> {
+    let mut result = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![root];
+    while let Some(instance_id) = stack.pop() {
+        if !seen.insert(instance_id) || !recipe.instances.contains_key(&instance_id) {
+            continue;
+        }
+        result.push(instance_id);
+        for (child_id, child) in &recipe.instances {
+            if child.parent == Some(instance_id) {
+                stack.push(*child_id);
+            }
+        }
+    }
+    result
 }
 
 fn validate_role_count(report: &mut FamilyValidationReport, role: &PartRole, count: u32) {

@@ -20,7 +20,7 @@ Family documents contain:
 - part roles
 - attachment rules
 - allowed modeling operation classes
-- parameter slots and valid ranges
+- parameter slots, valid ranges, and semantic default values
 - variant-generation rules
 - geometric constraints
 - export requirements
@@ -65,12 +65,22 @@ That crate binds:
 
 - an `AssetFamilySchema`
 - a compatible `StyleKit`
+- versioned `FamilyImplementation`, `StyleImplementation`, and `RecipeFragment` documents
 - family-owned default recipe fragments
+- explicit style default providers keyed by family role
 - style-owned prototype recipe fragments
+- exported role-occurrence roots for each fragment
+- internal fragment instances that should not count toward role cardinality
 - simple semantic parameter bindings
 - a concrete `FamilyInstantiationRequest`
 
-The compiler then validates the family/style pair, resolves required role providers, deterministically remaps fragment IDs into one `AssetRecipe`, applies semantic controls to concrete scalar paths or part presence, validates the recipe, compiles geometry, and returns an instantiation report.
+The compiler then validates the family/style pair, resolves required role providers, deterministically remaps fragment IDs into one `AssetRecipe`, applies semantic controls to concrete scalar paths or part presence, validates the recipe, compiles geometry, and returns an instantiation report. Omitted request parameters are filled from the family slot defaults before provider choice, presence toggles, and scalar bindings run.
+
+Provider selection is explicit. A style-required role uses `StyleImplementation::default_role_providers` unless a choice binding selects a specific style prototype. A family-default role uses `FamilyImplementation::default_role_providers`. A family-or-style role prefers the style default and falls back to the family default. This avoids accidental selection changes when prototype IDs or `BTreeMap` ordering change.
+
+Recipe fragments declare `role_occurrence_roots` separately from `internal_instances`. Cardinality checks and presence toggles operate on occurrence roots and their subtrees, so internal ribs, fasteners, helper geometry, or local construction pieces do not accidentally count as separate role occurrences.
+
+Instantiated recipes derive `AssetId` from a deterministic hash of the family ID, style ID, effective semantic parameters, seed, implementation schema versions, and selected fragment versions. The ID is not the seed.
 
 The first binding language is intentionally small:
 

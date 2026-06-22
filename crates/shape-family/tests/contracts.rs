@@ -1,8 +1,8 @@
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, DetailModule, ExaggerationPolicy, ExportRequirement,
-    FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, LengthUnit, LengthValue,
-    NormalizedBevelProfile, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
+    FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, LengthUnit,
+    LengthValue, NormalizedBevelProfile, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
     ReadabilityThreshold, RepetitionPolicy, RoleMultiplicity, RoleProportion, RoleProvision,
     RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode,
     VariantRule, validate_asset_family_schema, validate_family_style_compatibility,
@@ -77,6 +77,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                     maximum: 8.0,
                     step: 0.25,
                 }),
+                default_value: Some(FamilyDefaultValue::Scalar(3.0)),
                 topology_changing: false,
             },
             FamilyParameterSlot {
@@ -89,6 +90,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                     maximum: 16.0,
                     step: 1.0,
                 }),
+                default_value: Some(FamilyDefaultValue::Integer(4)),
                 topology_changing: true,
             },
         ],
@@ -322,6 +324,7 @@ fn parameter_kind_semantics_are_rejected() {
             maximum: 1.0,
             step: 1.0,
         }),
+        default_value: Some(FamilyDefaultValue::Toggle(true)),
         topology_changing: true,
     });
 
@@ -330,6 +333,38 @@ fn parameter_kind_semantics_are_rejected() {
 
     assert!(codes.contains(&"non_integral_count_parameter_range"));
     assert!(codes.contains(&"toggle_parameter_has_range"));
+}
+
+#[test]
+fn parameter_default_semantics_are_rejected() {
+    let mut family = bridge_family("industrial_steel");
+    family.parameter_slots[0].default_value = Some(FamilyDefaultValue::Scalar(99.0));
+    family.parameter_slots[1].default_value = Some(FamilyDefaultValue::Choice("many".to_owned()));
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "mystery".to_owned(),
+        label: "Mystery".to_owned(),
+        target_role: None,
+        kind: FamilyParameterKind::Custom("mystery".to_owned()),
+        range: None,
+        default_value: Some(FamilyDefaultValue::Toggle(true)),
+        topology_changing: false,
+    });
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "has_rails".to_owned(),
+        label: "Has Rails".to_owned(),
+        target_role: Some("deck".to_owned()),
+        kind: FamilyParameterKind::Toggle,
+        range: None,
+        default_value: None,
+        topology_changing: true,
+    });
+
+    let report = validate_asset_family_schema(&family);
+    let codes = issue_codes(&report);
+
+    assert!(codes.contains(&"default_parameter_out_of_range"));
+    assert!(codes.contains(&"default_parameter_type_mismatch"));
+    assert!(codes.contains(&"missing_parameter_default"));
 }
 
 #[test]
