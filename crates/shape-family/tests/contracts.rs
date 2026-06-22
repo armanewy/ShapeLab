@@ -1,11 +1,14 @@
+use std::collections::BTreeMap;
+
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, DetailModule, ExaggerationPolicy, ExportRequirement,
-    FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, LengthUnit,
-    LengthValue, NormalizedBevelProfile, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
-    ReadabilityThreshold, RepetitionPolicy, RoleMultiplicity, RoleProportion, RoleProvision,
-    RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode,
-    VariantRule, validate_asset_family_schema, validate_family_style_compatibility,
+    FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet,
+    GeometricConstraint, LengthUnit, LengthValue, NormalizedBevelProfile, ParameterExecutionPolicy,
+    ParameterRange, PartPrototype, PartRole, ProfileLanguage, ReadabilityThreshold,
+    RepetitionPolicy, RoleMultiplicity, RoleProportion, RoleProvision, RuntimeMetadataRequirement,
+    STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode, VariantRule,
+    validate_asset_family_schema, validate_family_style_compatibility,
     validate_family_style_completeness, validate_style_kit,
 };
 
@@ -78,6 +81,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                     step: 0.25,
                 }),
                 default_value: Some(FamilyDefaultValue::Scalar(3.0)),
+                execution_policy: ParameterExecutionPolicy::RequiredBinding,
                 topology_changing: false,
             },
             FamilyParameterSlot {
@@ -91,6 +95,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                     step: 1.0,
                 }),
                 default_value: Some(FamilyDefaultValue::Integer(4)),
+                execution_policy: ParameterExecutionPolicy::RequiredBinding,
                 topology_changing: true,
             },
         ],
@@ -157,36 +162,67 @@ fn role(
 }
 
 fn industrial_style_kit() -> StyleKit {
+    let proportions = vec![
+        RoleProportion {
+            role: "support".to_owned(),
+            preferred_scale: [
+                LengthValue::FamilyUnits(0.35),
+                LengthValue::FamilyUnits(0.35),
+                LengthValue::FamilyUnits(1.8),
+            ],
+            taper: 0.0,
+        },
+        RoleProportion {
+            role: "span".to_owned(),
+            preferred_scale: [
+                LengthValue::FamilyUnits(3.0),
+                LengthValue::FamilyUnits(0.8),
+                LengthValue::FamilyUnits(0.25),
+            ],
+            taper: 0.0,
+        },
+    ];
+    let part_prototypes = vec![
+        PartPrototype {
+            id: "box_support".to_owned(),
+            display_name: "Box support".to_owned(),
+            role: "support".to_owned(),
+            operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Bevel],
+            style_tags: vec!["structural".to_owned()],
+        },
+        PartPrototype {
+            id: "deck_plate".to_owned(),
+            display_name: "Deck plate".to_owned(),
+            role: "deck".to_owned(),
+            operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Cut],
+            style_tags: vec!["surface".to_owned()],
+        },
+        PartPrototype {
+            id: "box_span".to_owned(),
+            display_name: "Box span".to_owned(),
+            role: "span".to_owned(),
+            operation_tags: vec![AllowedOperationKind::Primitive],
+            style_tags: vec!["structural".to_owned()],
+        },
+    ];
+    let detail_modules = vec![DetailModule {
+        id: "bolt_row".to_owned(),
+        display_name: "Bolt row".to_owned(),
+        target_roles: vec!["deck".to_owned(), "connector".to_owned()],
+        minimum_readability: ReadabilityThreshold {
+            pixels: 24,
+            camera_profile: "oblique".to_owned(),
+        },
+        tags: vec!["fastener".to_owned()],
+    }];
     StyleKit {
         schema_version: STYLE_KIT_SCHEMA_VERSION,
         id: "industrial_steel".to_owned(),
         display_name: "Industrial Steel".to_owned(),
-        compatible_families: vec!["bridge".to_owned(), "crate".to_owned()],
-        proportions: vec![
-            RoleProportion {
-                role: "support".to_owned(),
-                preferred_scale: [
-                    LengthValue::FamilyUnits(0.35),
-                    LengthValue::FamilyUnits(0.35),
-                    LengthValue::FamilyUnits(1.8),
-                ],
-                taper: 0.0,
-            },
-            RoleProportion {
-                role: "span".to_owned(),
-                preferred_scale: [
-                    LengthValue::FamilyUnits(3.0),
-                    LengthValue::FamilyUnits(0.8),
-                    LengthValue::FamilyUnits(0.25),
-                ],
-                taper: 0.0,
-            },
-        ],
+        compatible_families: vec!["bridge".to_owned()],
+        proportions: proportions.clone(),
         bevel_policy: BevelPolicy {
-            width: LengthValue::RelativeToRole {
-                role: "span".to_owned(),
-                ratio: 0.04,
-            },
+            width: LengthValue::FamilyUnits(0.04),
             segments: 2,
             profile: NormalizedBevelProfile { normalized: 0.5 },
         },
@@ -195,39 +231,8 @@ fn industrial_style_kit() -> StyleKit {
             allowed_profiles: vec!["box".to_owned(), "tube".to_owned(), "channel".to_owned()],
             allow_asymmetry: false,
         },
-        part_prototypes: vec![
-            PartPrototype {
-                id: "box_support".to_owned(),
-                display_name: "Box support".to_owned(),
-                role: "support".to_owned(),
-                operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Bevel],
-                style_tags: vec!["structural".to_owned()],
-            },
-            PartPrototype {
-                id: "deck_plate".to_owned(),
-                display_name: "Deck plate".to_owned(),
-                role: "deck".to_owned(),
-                operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Cut],
-                style_tags: vec!["surface".to_owned()],
-            },
-            PartPrototype {
-                id: "box_span".to_owned(),
-                display_name: "Box span".to_owned(),
-                role: "span".to_owned(),
-                operation_tags: vec![AllowedOperationKind::Primitive],
-                style_tags: vec!["structural".to_owned()],
-            },
-        ],
-        detail_modules: vec![DetailModule {
-            id: "bolt_row".to_owned(),
-            display_name: "Bolt row".to_owned(),
-            target_roles: vec!["deck".to_owned(), "connector".to_owned()],
-            minimum_readability: ReadabilityThreshold {
-                pixels: 24,
-                camera_profile: "oblique".to_owned(),
-            },
-            tags: vec!["fastener".to_owned()],
-        }],
+        part_prototypes: part_prototypes.clone(),
+        detail_modules: detail_modules.clone(),
         repetition: RepetitionPolicy {
             density: 0.65,
             preferred_spacing: LengthValue::FamilyUnits(0.25),
@@ -241,6 +246,16 @@ fn industrial_style_kit() -> StyleKit {
             silhouette: 0.2,
             detail: 0.45,
         },
+        family_facets: BTreeMap::from([(
+            "bridge".to_owned(),
+            FamilyStyleFacet {
+                family_id: "bridge".to_owned(),
+                proportions,
+                part_prototypes,
+                detail_modules,
+                default_role_providers: BTreeMap::new(),
+            },
+        )]),
         tags: vec!["hard_surface".to_owned()],
     }
 }
@@ -325,6 +340,7 @@ fn parameter_kind_semantics_are_rejected() {
             step: 1.0,
         }),
         default_value: Some(FamilyDefaultValue::Toggle(true)),
+        execution_policy: ParameterExecutionPolicy::RequiredBinding,
         topology_changing: true,
     });
 
@@ -347,6 +363,7 @@ fn parameter_default_semantics_are_rejected() {
         kind: FamilyParameterKind::Custom("mystery".to_owned()),
         range: None,
         default_value: Some(FamilyDefaultValue::Toggle(true)),
+        execution_policy: ParameterExecutionPolicy::RequiredBinding,
         topology_changing: false,
     });
     family.parameter_slots.push(FamilyParameterSlot {
@@ -356,6 +373,7 @@ fn parameter_default_semantics_are_rejected() {
         kind: FamilyParameterKind::Toggle,
         range: None,
         default_value: None,
+        execution_policy: ParameterExecutionPolicy::RequiredBinding,
         topology_changing: true,
     });
 
@@ -443,7 +461,10 @@ fn duplicate_set_like_fields_are_rejected() {
 fn compatibility_and_provider_completeness_are_separate_reports() {
     let family = bridge_family("industrial_steel");
     let mut kit = industrial_style_kit();
-    kit.part_prototypes
+    kit.family_facets
+        .get_mut("bridge")
+        .expect("bridge facet")
+        .part_prototypes
         .retain(|prototype| prototype.role != "deck");
 
     let compatibility = validate_family_style_compatibility(&family, &kit);
@@ -451,6 +472,121 @@ fn compatibility_and_provider_completeness_are_separate_reports() {
 
     assert!(compatibility.is_valid());
     assert!(issue_codes(&completeness).contains(&"missing_style_required_role_provider"));
+}
+
+#[test]
+fn style_facets_scope_role_references_to_the_selected_family() {
+    let family = bridge_family("industrial_steel");
+    let mut kit = industrial_style_kit();
+    kit.compatible_families.push("crate".to_owned());
+    kit.family_facets.insert(
+        "crate".to_owned(),
+        FamilyStyleFacet {
+            family_id: "crate".to_owned(),
+            proportions: Vec::new(),
+            part_prototypes: vec![PartPrototype {
+                id: "armored_body".to_owned(),
+                display_name: "Armored Body".to_owned(),
+                role: "body".to_owned(),
+                operation_tags: vec![AllowedOperationKind::Primitive],
+                style_tags: vec!["crate".to_owned()],
+            }],
+            detail_modules: Vec::new(),
+            default_role_providers: BTreeMap::new(),
+        },
+    );
+
+    let bridge_report = validate_family_style_compatibility(&family, &kit);
+    assert!(
+        bridge_report.is_valid(),
+        "crate-only role references should not poison bridge compatibility"
+    );
+
+    kit.family_facets
+        .get_mut("bridge")
+        .expect("bridge facet")
+        .part_prototypes
+        .push(PartPrototype {
+            id: "bad_bridge_body".to_owned(),
+            display_name: "Bad Bridge Body".to_owned(),
+            role: "body".to_owned(),
+            operation_tags: vec![AllowedOperationKind::Primitive],
+            style_tags: vec!["invalid".to_owned()],
+        });
+    let bad_bridge_report = validate_family_style_compatibility(&family, &kit);
+    assert!(issue_codes(&bad_bridge_report).contains(&"unknown_style_prototype_role"));
+}
+
+#[test]
+fn global_style_policies_cannot_reference_family_roles() {
+    let mut kit = industrial_style_kit();
+    kit.bevel_policy.width = LengthValue::RelativeToRole {
+        role: "span".to_owned(),
+        ratio: 0.05,
+    };
+    kit.repetition.preferred_spacing = LengthValue::RelativeToRole {
+        role: "deck".to_owned(),
+        ratio: 0.2,
+    };
+
+    let report = validate_style_kit(&kit);
+    let codes = issue_codes(&report);
+
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|code| **code == "global_style_policy_relative_to_role")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn older_style_kit_payloads_deserialize_before_schema_validation() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    value["schema_version"] = serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 1);
+    value
+        .as_object_mut()
+        .expect("style kit object")
+        .remove("family_facets");
+
+    let kit: StyleKit = serde_json::from_value(value).expect("old payload should deserialize");
+    assert!(kit.family_facets.is_empty());
+
+    let report = validate_style_kit(&kit);
+    assert!(issue_codes(&report).contains(&"unsupported_style_kit_schema"));
+}
+
+#[test]
+fn facet_only_style_kits_deserialize_and_validate() {
+    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let object = value.as_object_mut().expect("style kit object");
+    object.remove("proportions");
+    object.remove("part_prototypes");
+    object.remove("detail_modules");
+    let bridge_facet = object
+        .get_mut("family_facets")
+        .and_then(|facets| facets.get_mut("bridge"))
+        .and_then(|facet| facet.as_object_mut())
+        .expect("bridge facet");
+    bridge_facet.remove("default_role_providers");
+
+    let kit: StyleKit = serde_json::from_value(value).expect("facet-only kit should deserialize");
+
+    assert!(kit.proportions.is_empty());
+    assert!(kit.part_prototypes.is_empty());
+    assert!(kit.detail_modules.is_empty());
+    assert!(
+        kit.family_facets
+            .get("bridge")
+            .expect("bridge facet")
+            .default_role_providers
+            .is_empty()
+    );
+    assert!(validate_style_kit(&kit).is_valid());
+    assert!(
+        validate_family_style_compatibility(&bridge_family("industrial_steel"), &kit).is_valid()
+    );
 }
 
 #[test]
@@ -468,7 +604,10 @@ fn incompatible_style_and_family_are_rejected() {
 fn prototype_operations_must_be_allowed_by_family() {
     let family = bridge_family("industrial_steel");
     let mut kit = industrial_style_kit();
-    kit.part_prototypes[0]
+    kit.family_facets
+        .get_mut("bridge")
+        .expect("bridge facet")
+        .part_prototypes[0]
         .operation_tags
         .push(AllowedOperationKind::Lathe);
 

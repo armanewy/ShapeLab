@@ -17,8 +17,9 @@ use shape_asset::{
 use shape_compile::{AssetArtifact, CompileError, CompileValidationReport, compile_asset};
 use shape_family::{
     AssetFamilySchema, FamilyDefaultValue, FamilyParameterKind, FamilyValidationIssue,
-    FamilyValidationReport, ParameterRange, PartRole, RoleMultiplicity, RoleProvision, StyleKit,
-    validate_family_style_compatibility, validate_family_style_completeness,
+    FamilyValidationReport, ParameterExecutionPolicy, ParameterRange, PartRole, RoleMultiplicity,
+    RoleProvision, StyleKit, validate_family_style_compatibility,
+    validate_family_style_completeness,
 };
 use thiserror::Error;
 
@@ -26,7 +27,7 @@ use thiserror::Error;
 pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
 
 /// Current schema version for executable style implementations.
-pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
+pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 2;
 
 /// Current schema version for executable recipe fragments.
 pub const RECIPE_FRAGMENT_SCHEMA_VERSION: u32 = 1;
@@ -77,6 +78,9 @@ pub struct StyleImplementation {
     pub schema_version: u32,
     /// Style kit ID implemented by this binding.
     pub style_kit_id: String,
+    /// Family ID this style implementation targets.
+    #[serde(default)]
+    pub family_id: String,
     /// Explicit default style providers keyed by family role ID.
     pub default_role_providers: BTreeMap<String, String>,
     /// Style prototypes keyed by prototype ID.
@@ -207,6 +211,8 @@ pub struct FamilyInstantiationReport {
     pub parameter_applications: Vec<ParameterApplication>,
     /// Stable source recipe hash from the compiled artifact.
     pub source_recipe_hash: u64,
+    /// Canonical content fingerprint used to derive the recipe ID.
+    pub instantiation_fingerprint: String,
     /// Number of compiled part occurrences.
     pub compiled_part_count: u64,
 }
@@ -303,6 +309,14 @@ pub enum FamilyCompileError {
         /// Scalar path.
         path: String,
     },
+    /// Canonical fingerprint serialization failed.
+    #[error("failed to serialize `{subject}` for instantiation fingerprint: {error}")]
+    FingerprintSerializationFailed {
+        /// Fingerprinted subject.
+        subject: String,
+        /// Serialization error.
+        error: String,
+    },
     /// Asset recipe validation failed.
     #[error("instantiated asset recipe validation failed")]
     AssetValidationFailed(AssetValidationReport),
@@ -350,14 +364,15 @@ pub fn instantiate_family(
         &presence_overrides,
     )?;
     let mut recipe = family_impl.base_recipe.clone();
-    recipe.id = AssetId(derived_asset_id(
+    let fingerprint = derive_instantiation_fingerprint(
         family,
         style_kit,
         family_impl,
         style_impl,
         &effective_request,
         &selected_providers,
-    ));
+    )?;
+    recipe.id = AssetId(fingerprint.asset_id());
     recipe.title = format!("{} / {}", family.display_name, style_kit.display_name);
 
     let mut merge_state = MergeState::default();
@@ -396,6 +411,7 @@ pub fn instantiate_family(
             .collect(),
         parameter_applications,
         source_recipe_hash: artifact.source_recipe_hash,
+        instantiation_fingerprint: fingerprint.to_hex(),
         compiled_part_count: artifact.statistics.part_count,
     };
     Ok(FamilyInstantiation {
@@ -416,6 +432,14 @@ fn ensure_ids_match(
         return Err(FamilyCompileError::FamilyImplementationMismatch {
             expected: family.id.clone(),
             implementation: family_impl.family_id.clone(),
+        });
+    }
+    if style_impl.schema_version == STYLE_IMPLEMENTATION_SCHEMA_VERSION
+        && family.id != style_impl.family_id
+    {
+        return Err(FamilyCompileError::FamilyImplementationMismatch {
+            expected: family.id.clone(),
+            implementation: style_impl.family_id.clone(),
         });
     }
     if style_kit.id != request.style_kit_id || style_kit.id != style_impl.style_kit_id {
@@ -453,34 +477,43 @@ fn family_value_from_default(default_value: &FamilyDefaultValue) -> FamilyValue 
     }
 }
 
-fn derived_asset_id(
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct InstantiationFingerprint {
+    high: u64,
+    low: u64,
+}
+
+impl InstantiationFingerprint {
+    fn asset_id(self) -> u64 {
+        if self.low == 0 { 1 } else { self.low }
+    }
+
+    fn to_hex(self) -> String {
+        format!("{:016x}{:016x}", self.high, self.low)
+    }
+}
+
+fn derive_instantiation_fingerprint(
     family: &AssetFamilySchema,
     style_kit: &StyleKit,
     family_impl: &FamilyImplementation,
     style_impl: &StyleImplementation,
     request: &FamilyInstantiationRequest,
     selected_providers: &BTreeMap<String, ProviderSelection>,
-) -> u64 {
-    let mut hash = FNV_OFFSET;
-    hash_str(&mut hash, "shape-lab.family-instantiation.v1");
-    hash_str(&mut hash, &family.id);
-    hash_u64(&mut hash, u64::from(family.schema_version));
-    hash_str(&mut hash, &style_kit.id);
-    hash_u64(&mut hash, u64::from(style_kit.schema_version));
-    hash_str(&mut hash, &family_impl.family_id);
-    hash_u64(&mut hash, u64::from(family_impl.schema_version));
-    hash_str(&mut hash, &style_impl.style_kit_id);
-    hash_u64(&mut hash, u64::from(style_impl.schema_version));
-    hash_u64(&mut hash, request.seed);
-    for (slot, value) in &request.parameters {
-        hash_str(&mut hash, slot);
-        hash_family_value(&mut hash, value);
-    }
+) -> Result<InstantiationFingerprint, FamilyCompileError> {
+    let mut builder = FingerprintBuilder::new("shape-lab.family-instantiation.v2");
+    builder.hash_serializable("family_document", family)?;
+    builder.hash_serializable("style_kit_document", style_kit)?;
+    builder.hash_serializable("family_implementation", family_impl)?;
+    builder.hash_serializable("style_implementation", style_impl)?;
+    builder.hash_serializable("base_recipe", &family_impl.base_recipe)?;
+    builder.hash_serializable("effective_parameters", &request.parameters)?;
+    builder.hash_u64("seed", request.seed);
     for (role, selection) in selected_providers {
-        hash_str(&mut hash, role);
-        hash_str(&mut hash, &selection.fragment);
-        hash_u64(
-            &mut hash,
+        builder.hash_str("selected_role", role);
+        builder.hash_str("selected_fragment", &selection.fragment);
+        builder.hash_u64(
+            "selected_source",
             match selection.source {
                 ProviderSource::FamilyDefault => 1,
                 ProviderSource::StylePrototype => 2,
@@ -488,50 +521,82 @@ fn derived_asset_id(
         );
         if let Some(fragment) = find_selected_fragment_for_hash(family_impl, style_impl, selection)
         {
-            hash_u64(&mut hash, u64::from(fragment.schema_version));
+            builder.hash_serializable("selected_fragment_recipe", &fragment.recipe)?;
         }
     }
-    if hash == 0 { 1 } else { hash }
+    Ok(builder.finish())
 }
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+const FNV_OFFSET_HIGH: u64 = 0x8422_2325_cbf2_9ce4;
 
-fn hash_u8(hash: &mut u64, value: u8) {
-    *hash ^= u64::from(value);
-    *hash = hash.wrapping_mul(FNV_PRIME);
+struct FingerprintBuilder {
+    high: u64,
+    low: u64,
 }
 
-fn hash_u64(hash: &mut u64, value: u64) {
-    for byte in value.to_le_bytes() {
-        hash_u8(hash, byte);
+impl FingerprintBuilder {
+    fn new(domain: &str) -> Self {
+        let mut builder = Self {
+            high: FNV_OFFSET_HIGH,
+            low: FNV_OFFSET,
+        };
+        builder.hash_str("domain", domain);
+        builder
     }
-}
 
-fn hash_str(hash: &mut u64, value: &str) {
-    hash_u64(hash, value.len() as u64);
-    for byte in value.as_bytes() {
-        hash_u8(hash, *byte);
+    fn hash_serializable<T: Serialize>(
+        &mut self,
+        subject: &str,
+        value: &T,
+    ) -> Result<(), FamilyCompileError> {
+        let bytes = serde_json::to_vec(value).map_err(|error| {
+            FamilyCompileError::FingerprintSerializationFailed {
+                subject: subject.to_owned(),
+                error: error.to_string(),
+            }
+        })?;
+        self.hash_str("subject", subject);
+        self.hash_bytes(&bytes);
+        Ok(())
     }
-}
 
-fn hash_family_value(hash: &mut u64, value: &FamilyValue) {
-    match value {
-        FamilyValue::Scalar(value) => {
-            hash_str(hash, "scalar");
-            hash_u64(hash, u64::from(value.to_bits()));
+    fn hash_str(&mut self, subject: &str, value: &str) {
+        self.hash_bytes(subject.as_bytes());
+        self.hash_u64_raw(value.len() as u64);
+        self.hash_bytes(value.as_bytes());
+    }
+
+    fn hash_u64(&mut self, subject: &str, value: u64) {
+        self.hash_bytes(subject.as_bytes());
+        self.hash_u64_raw(value);
+    }
+
+    fn hash_bytes(&mut self, bytes: &[u8]) {
+        self.hash_u64_raw(bytes.len() as u64);
+        for byte in bytes {
+            self.hash_u8(*byte);
         }
-        FamilyValue::Integer(value) => {
-            hash_str(hash, "integer");
-            hash_u64(hash, u64::from(*value));
+    }
+
+    fn hash_u64_raw(&mut self, value: u64) {
+        for byte in value.to_le_bytes() {
+            self.hash_u8(byte);
         }
-        FamilyValue::Toggle(value) => {
-            hash_str(hash, "toggle");
-            hash_u64(hash, if *value { 1 } else { 0 });
-        }
-        FamilyValue::Choice(value) => {
-            hash_str(hash, "choice");
-            hash_str(hash, value);
+    }
+
+    fn hash_u8(&mut self, value: u8) {
+        self.low ^= u64::from(value);
+        self.low = self.low.wrapping_mul(FNV_PRIME);
+        self.high ^= u64::from(value.rotate_left(1));
+        self.high = self.high.wrapping_mul(FNV_PRIME);
+    }
+
+    fn finish(self) -> InstantiationFingerprint {
+        InstantiationFingerprint {
+            high: self.high,
+            low: self.low,
         }
     }
 }
@@ -585,16 +650,34 @@ fn validate_implementations(
         .iter()
         .map(|slot| (slot.id.as_str(), slot))
         .collect::<BTreeMap<_, _>>();
-    let style_prototypes = style_kit
+    let Some(style_facet) = style_kit.family_facets.get(&family.id) else {
+        push_report_issue(
+            &mut report,
+            Some(format!("style_kit.family_facets.{}", family.id)),
+            "missing_family_style_facet",
+            "Style kit must declare a family-scoped facet for the selected family.",
+        );
+        return Err(FamilyCompileError::ImplementationValidationFailed(report));
+    };
+    let style_prototypes = style_facet
         .part_prototypes
         .iter()
         .map(|prototype| (prototype.id.as_str(), prototype.role.as_str()))
         .collect::<BTreeMap<_, _>>();
-    let style_details = style_kit
+    let style_details = style_facet
         .detail_modules
         .iter()
         .map(|module| module.id.as_str())
         .collect::<BTreeSet<_>>();
+
+    if !family_impl.role_bindings.is_empty() {
+        push_report_issue(
+            &mut report,
+            Some("family_implementation.role_bindings"),
+            "inactive_role_bindings",
+            "Role bindings are reserved and must stay empty until executable semantics are added.",
+        );
+    }
 
     for (id, fragment) in &style_impl.prototypes {
         validate_recipe_fragment_exports(
@@ -793,6 +876,7 @@ fn validate_implementations(
             &mut report,
         );
     }
+    validate_parameter_binding_coverage(family, &family_impl.parameter_bindings, &mut report);
 
     if report.is_valid() {
         Ok(())
@@ -874,13 +958,38 @@ fn validate_recipe_fragment_exports(
             );
         }
     }
+    validate_disjoint_fragment_roots(
+        report,
+        subject,
+        "role_occurrence_roots",
+        &fragment.recipe,
+        &fragment.role_occurrence_roots,
+    );
+    validate_disjoint_fragment_roots(
+        report,
+        subject,
+        "internal_instances",
+        &fragment.recipe,
+        &fragment.internal_instances,
+    );
+    validate_disjoint_root_sets(
+        report,
+        subject,
+        &fragment.recipe,
+        &fragment.role_occurrence_roots,
+        &fragment.internal_instances,
+    );
     let mut covered_instances = BTreeSet::new();
-    for root in root_ids {
-        if instance_ids.contains(&root) {
-            covered_instances.extend(collect_subtree_instances(&fragment.recipe, root));
+    for root in &fragment.role_occurrence_roots {
+        if instance_ids.contains(root) {
+            covered_instances.extend(collect_subtree_instances(&fragment.recipe, *root));
         }
     }
-    covered_instances.extend(internal_ids);
+    for internal in &fragment.internal_instances {
+        if instance_ids.contains(internal) {
+            covered_instances.extend(collect_subtree_instances(&fragment.recipe, *internal));
+        }
+    }
     for instance in instance_ids {
         if !covered_instances.contains(&instance) {
             push_report_issue(
@@ -889,6 +998,74 @@ fn validate_recipe_fragment_exports(
                 "unclassified_fragment_instance",
                 "Every fragment instance must be under a role occurrence root or explicitly internal.",
             );
+        }
+    }
+}
+
+fn validate_disjoint_fragment_roots(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    field: &str,
+    recipe: &AssetRecipe,
+    roots: &[PartInstanceId],
+) {
+    for (left_index, left) in roots.iter().enumerate() {
+        let left_subtree = collect_subtree_instances(recipe, *left)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        for right in roots.iter().skip(left_index + 1) {
+            let right_subtree = collect_subtree_instances(recipe, *right)
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            if left_subtree.contains(right) || right_subtree.contains(left) {
+                push_report_issue(
+                    report,
+                    Some(format!("{subject}.{field}")),
+                    "nested_fragment_export_root",
+                    "Fragment export roots must not be descendants of other export roots.",
+                );
+            } else if !left_subtree.is_disjoint(&right_subtree) {
+                push_report_issue(
+                    report,
+                    Some(format!("{subject}.{field}")),
+                    "overlapping_fragment_export_root",
+                    "Fragment export root subtrees must be pairwise disjoint.",
+                );
+            }
+        }
+    }
+}
+
+fn validate_disjoint_root_sets(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    recipe: &AssetRecipe,
+    occurrence_roots: &[PartInstanceId],
+    internal_roots: &[PartInstanceId],
+) {
+    for occurrence in occurrence_roots {
+        let occurrence_subtree = collect_subtree_instances(recipe, *occurrence)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        for internal in internal_roots {
+            let internal_subtree = collect_subtree_instances(recipe, *internal)
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            if occurrence_subtree.contains(internal) || internal_subtree.contains(occurrence) {
+                push_report_issue(
+                    report,
+                    Some(format!("{subject}.internal_instances")),
+                    "internal_instance_overlaps_occurrence_root",
+                    "Internal roots must describe helper subtrees outside exported occurrence roots.",
+                );
+            } else if !occurrence_subtree.is_disjoint(&internal_subtree) {
+                push_report_issue(
+                    report,
+                    Some(format!("{subject}.internal_instances")),
+                    "internal_instance_overlaps_occurrence_root",
+                    "Internal root subtrees must not overlap exported occurrence root subtrees.",
+                );
+            }
         }
     }
 }
@@ -941,6 +1118,7 @@ fn validate_parameter_binding(
                     "Scalar bindings must match the semantic parameter kind.",
                 );
             }
+            validate_scalar_transform(report, index, *transform);
         }
         ParameterBinding::TogglePartPresence { slot, role } => {
             let Some(parameter_slot) = slots.get(slot.as_str()) else {
@@ -1051,6 +1229,122 @@ fn validate_parameter_binding(
                     );
                 }
             }
+        }
+    }
+}
+
+fn validate_scalar_transform(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    transform: ScalarTransform,
+) {
+    match transform {
+        ScalarTransform::Direct | ScalarTransform::IntegerCount => {}
+        ScalarTransform::ScaleOffset { scale, offset } => {
+            if !scale.is_finite() || !offset.is_finite() {
+                push_report_issue(
+                    report,
+                    Some(format!(
+                        "family_implementation.parameter_bindings.{index}.transform"
+                    )),
+                    "non_finite_scalar_transform",
+                    "Scalar transform values must be finite.",
+                );
+            }
+            if scale == 0.0 {
+                push_report_issue(
+                    report,
+                    Some(format!(
+                        "family_implementation.parameter_bindings.{index}.transform"
+                    )),
+                    "degenerate_scalar_transform",
+                    "Scale-offset bindings must not collapse every input to a constant.",
+                );
+            }
+        }
+        ScalarTransform::Ratio { minimum, maximum } => {
+            if !minimum.is_finite() || !maximum.is_finite() {
+                push_report_issue(
+                    report,
+                    Some(format!(
+                        "family_implementation.parameter_bindings.{index}.transform"
+                    )),
+                    "non_finite_scalar_transform",
+                    "Scalar transform values must be finite.",
+                );
+            }
+            if minimum >= maximum {
+                push_report_issue(
+                    report,
+                    Some(format!(
+                        "family_implementation.parameter_bindings.{index}.transform"
+                    )),
+                    "degenerate_scalar_transform",
+                    "Ratio bindings must map into a non-empty increasing output range.",
+                );
+            }
+        }
+    }
+}
+
+fn validate_parameter_binding_coverage(
+    family: &AssetFamilySchema,
+    bindings: &[ParameterBinding],
+    report: &mut FamilyValidationReport,
+) {
+    let mut bound_slots = BTreeSet::new();
+    let mut provider_roles = BTreeMap::<&str, usize>::new();
+    let mut presence_roles = BTreeMap::<&str, usize>::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        match binding {
+            ParameterBinding::Scalar { slot, .. } => {
+                bound_slots.insert(slot.as_str());
+            }
+            ParameterBinding::TogglePartPresence { slot, role } => {
+                bound_slots.insert(slot.as_str());
+                if let Some(previous) = presence_roles.insert(role.as_str(), index) {
+                    push_report_issue(
+                        report,
+                        Some(format!(
+                            "family_implementation.parameter_bindings.{index}.role"
+                        )),
+                        "conflicting_presence_binding",
+                        format!(
+                            "Role `{role}` already has a presence binding at index {previous}."
+                        ),
+                    );
+                }
+            }
+            ParameterBinding::ChoiceToPrototype { slot, role, .. } => {
+                bound_slots.insert(slot.as_str());
+                if let Some(previous) = provider_roles.insert(role.as_str(), index) {
+                    push_report_issue(
+                        report,
+                        Some(format!(
+                            "family_implementation.parameter_bindings.{index}.role"
+                        )),
+                        "conflicting_provider_selection_binding",
+                        format!(
+                            "Role `{role}` already has a provider-selection binding at index {previous}."
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    for slot in &family.parameter_slots {
+        if slot.execution_policy == ParameterExecutionPolicy::RequiredBinding
+            && !bound_slots.contains(slot.id.as_str())
+        {
+            push_report_issue(
+                report,
+                Some(format!(
+                    "family_implementation.parameter_bindings.{}",
+                    slot.id
+                )),
+                "missing_required_parameter_binding",
+                "Required family parameter slots must have at least one executable binding.",
+            );
         }
     }
 }
@@ -1625,10 +1919,17 @@ fn apply_parameter_bindings(
                     });
                 };
                 if let Some(roots) = state.role_occurrence_roots.get(role) {
-                    let instances = roots
+                    let mut instances = roots
                         .iter()
                         .flat_map(|root| collect_subtree_instances(recipe, *root))
-                        .collect::<Vec<_>>();
+                        .collect::<BTreeSet<_>>();
+                    if let Some(internal_roots) = state.role_internal_instances.get(role) {
+                        instances.extend(
+                            internal_roots
+                                .iter()
+                                .flat_map(|root| collect_subtree_instances(recipe, *root)),
+                        );
+                    }
                     for instance in instances {
                         if let Some(part) = recipe.instances.get_mut(&instance) {
                             part.enabled = *enabled;
@@ -1667,12 +1968,7 @@ fn validate_role_cardinality(
             .get(&role.id)
             .into_iter()
             .flat_map(|roots| roots.iter())
-            .filter(|instance| {
-                recipe
-                    .instances
-                    .get(instance)
-                    .is_some_and(|part| part.enabled)
-            })
+            .filter(|instance| is_effectively_enabled(recipe, **instance))
             .count() as u32;
         validate_role_count(&mut report, role, count);
     }
@@ -1699,6 +1995,24 @@ fn collect_subtree_instances(recipe: &AssetRecipe, root: PartInstanceId) -> Vec<
         }
     }
     result
+}
+
+fn is_effectively_enabled(recipe: &AssetRecipe, instance: PartInstanceId) -> bool {
+    let mut current = Some(instance);
+    let mut seen = BTreeSet::new();
+    while let Some(instance_id) = current {
+        if !seen.insert(instance_id) {
+            return false;
+        }
+        let Some(part) = recipe.instances.get(&instance_id) else {
+            return false;
+        };
+        if !part.enabled {
+            return false;
+        }
+        current = part.parent;
+    }
+    true
 }
 
 fn validate_role_count(report: &mut FamilyValidationReport, role: &PartRole, count: u32) {

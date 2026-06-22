@@ -13,10 +13,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 /// Current schema version for asset-family documents.
-pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 2;
+pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 3;
 
 /// Current schema version for style-kit documents.
-pub const STYLE_KIT_SCHEMA_VERSION: u32 = 2;
+pub const STYLE_KIT_SCHEMA_VERSION: u32 = 3;
 
 /// Theme-neutral functional grammar for one class of assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,8 +154,23 @@ pub struct FamilyParameterSlot {
     pub range: Option<ParameterRange>,
     /// Semantic default value used when an instantiation request omits this slot.
     pub default_value: Option<FamilyDefaultValue>,
+    /// Whether this parameter must have executable compiler bindings.
+    #[serde(default)]
+    pub execution_policy: ParameterExecutionPolicy,
     /// Whether edits to this slot can change topology.
     pub topology_changing: bool,
+}
+
+/// Execution policy for a theme-neutral family parameter.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ParameterExecutionPolicy {
+    /// The executable family implementation must bind this slot.
+    #[default]
+    RequiredBinding,
+    /// The slot guides search or presentation but does not directly edit geometry yet.
+    AdvisoryOnly,
+    /// The slot is consumed by a runtime/export adapter rather than the asset compiler.
+    RuntimeOnly,
 }
 
 /// Default value for a theme-neutral family parameter.
@@ -349,15 +364,18 @@ pub struct StyleKit {
     pub display_name: String,
     /// Family IDs this kit can style.
     pub compatible_families: Vec<String>,
-    /// Per-role proportion guidance.
+    /// Optional legacy/global per-role proportion guidance. Family-scoped data lives in facets.
+    #[serde(default)]
     pub proportions: Vec<RoleProportion>,
     /// Global bevel guidance.
     pub bevel_policy: BevelPolicy,
     /// Preferred profile and curve vocabulary.
     pub profile_language: ProfileLanguage,
-    /// Concrete part prototypes exposed to compatible families.
+    /// Optional legacy/global part prototypes. Family-scoped data lives in facets.
+    #[serde(default)]
     pub part_prototypes: Vec<PartPrototype>,
-    /// Optional detail modules.
+    /// Optional legacy/global detail modules. Family-scoped data lives in facets.
+    #[serde(default)]
     pub detail_modules: Vec<DetailModule>,
     /// Repetition density and rhythm.
     pub repetition: RepetitionPolicy,
@@ -365,8 +383,30 @@ pub struct StyleKit {
     pub symmetry: SymmetryPolicy,
     /// Shape exaggeration preferences.
     pub exaggeration: ExaggerationPolicy,
+    /// Family-scoped role vocabulary for every compatible family.
+    #[serde(default)]
+    pub family_facets: BTreeMap<String, FamilyStyleFacet>,
     /// Search and catalog tags.
     pub tags: Vec<String>,
+}
+
+/// Family-scoped portion of a style kit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FamilyStyleFacet {
+    /// Family ID this facet styles.
+    pub family_id: String,
+    /// Per-role proportion guidance for this family.
+    #[serde(default)]
+    pub proportions: Vec<RoleProportion>,
+    /// Concrete part prototypes exposed to this family.
+    #[serde(default)]
+    pub part_prototypes: Vec<PartPrototype>,
+    /// Optional detail modules for this family.
+    #[serde(default)]
+    pub detail_modules: Vec<DetailModule>,
+    /// Descriptive default-provider hints by role; executable defaults live in StyleImplementation.
+    #[serde(default)]
+    pub default_role_providers: BTreeMap<String, String>,
 }
 
 /// Per-role proportion guidance.
@@ -615,6 +655,7 @@ pub fn validate_style_kit(kit: &StyleKit) -> FamilyValidationReport {
     validate_repetition_policy(&kit.repetition, &mut report);
     validate_symmetry_policy(&kit.symmetry, &mut report);
     validate_exaggeration_policy(&kit.exaggeration, &mut report);
+    validate_family_style_facets(kit, &mut report);
     validate_identifier_list(&mut report, "tags", &kit.tags, "invalid_style_kit_tag");
     validate_unique_strings(&mut report, "tags", &kit.tags, "duplicate_style_kit_tag");
     report
@@ -652,8 +693,17 @@ pub fn validate_family_style_compatibility(
         .iter()
         .map(|role| role.id.as_str())
         .collect::<BTreeSet<_>>();
-    validate_kit_role_references(kit, &role_ids, &mut report);
-    validate_kit_operation_compatibility(family, kit, &mut report);
+    let Some(facet) = kit.family_facets.get(&family.id) else {
+        push_issue(
+            &mut report,
+            Some(format!("style_kit.family_facets.{}", family.id)),
+            "missing_family_style_facet",
+            "Style kit must declare a family-scoped facet for the selected family.",
+        );
+        return report;
+    };
+    validate_kit_role_references(&family.id, facet, &role_ids, &mut report);
+    validate_kit_operation_compatibility(family, &family.id, facet, &mut report);
     report
 }
 
@@ -664,7 +714,16 @@ pub fn validate_family_style_completeness(
     kit: &StyleKit,
 ) -> FamilyValidationReport {
     let mut report = FamilyValidationReport::default();
-    validate_style_required_role_providers(family, kit, &mut report);
+    if let Some(facet) = kit.family_facets.get(&family.id) {
+        validate_style_required_role_providers(family, &family.id, facet, &mut report);
+    } else {
+        push_issue(
+            &mut report,
+            Some(format!("style_kit.family_facets.{}", family.id)),
+            "missing_family_style_facet",
+            "Style kit must declare a family-scoped facet for the selected family.",
+        );
+    }
     report
 }
 
@@ -1450,24 +1509,32 @@ fn validate_runtime_metadata_requirements(
 }
 
 fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    validate_role_proportion_list(&kit.proportions, "proportions", report);
+}
+
+fn validate_role_proportion_list(
+    proportions: &[RoleProportion],
+    subject: &str,
+    report: &mut FamilyValidationReport,
+) {
     let mut roles = BTreeSet::new();
-    for (index, proportion) in kit.proportions.iter().enumerate() {
+    for (index, proportion) in proportions.iter().enumerate() {
         validate_non_empty(
             report,
-            Some(format!("proportions.{index}.role")),
+            Some(format!("{subject}.{index}.role")),
             &proportion.role,
             "empty_proportion_role",
         );
         validate_identifier(
             report,
-            Some(format!("proportions.{index}.role")),
+            Some(format!("{subject}.{index}.role")),
             &proportion.role,
             "invalid_proportion_role",
         );
         if !roles.insert(proportion.role.as_str()) {
             push_issue(
                 report,
-                Some(format!("proportions.{index}.role")),
+                Some(format!("{subject}.{index}.role")),
                 "duplicate_role_proportion",
                 "A style kit can declare at most one proportion policy per role.",
             );
@@ -1475,14 +1542,14 @@ fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport
         for (axis, value) in proportion.preferred_scale.iter().enumerate() {
             validate_length_value(
                 report,
-                Some(format!("proportions.{index}.preferred_scale.{axis}")),
+                Some(format!("{subject}.{index}.preferred_scale.{axis}")),
                 value,
                 "invalid_role_preferred_scale",
             );
         }
         validate_fraction(
             report,
-            Some(format!("proportions.{index}.taper")),
+            Some(format!("{subject}.{index}.taper")),
             proportion.taper,
             "invalid_role_taper",
         );
@@ -1490,7 +1557,7 @@ fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport
 }
 
 fn validate_bevel_policy(policy: &BevelPolicy, report: &mut FamilyValidationReport) {
-    validate_length_value(
+    validate_global_length_value(
         report,
         Some("bevel_policy.width"),
         &policy.width,
@@ -1548,42 +1615,50 @@ fn validate_profile_language(language: &ProfileLanguage, report: &mut FamilyVali
 }
 
 fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    validate_part_prototype_list(&kit.part_prototypes, "part_prototypes", report);
+}
+
+fn validate_part_prototype_list(
+    prototypes: &[PartPrototype],
+    subject: &str,
+    report: &mut FamilyValidationReport,
+) {
     let mut ids = BTreeSet::new();
-    for (index, prototype) in kit.part_prototypes.iter().enumerate() {
+    for (index, prototype) in prototypes.iter().enumerate() {
         validate_non_empty(
             report,
-            Some(format!("part_prototypes.{index}.id")),
+            Some(format!("{subject}.{index}.id")),
             &prototype.id,
             "empty_part_prototype_id",
         );
         validate_identifier(
             report,
-            Some(format!("part_prototypes.{index}.id")),
+            Some(format!("{subject}.{index}.id")),
             &prototype.id,
             "invalid_part_prototype_id",
         );
         validate_non_empty(
             report,
-            Some(format!("part_prototypes.{index}.display_name")),
+            Some(format!("{subject}.{index}.display_name")),
             &prototype.display_name,
             "empty_part_prototype_display_name",
         );
         validate_non_empty(
             report,
-            Some(format!("part_prototypes.{index}.role")),
+            Some(format!("{subject}.{index}.role")),
             &prototype.role,
             "empty_part_prototype_role",
         );
         validate_identifier(
             report,
-            Some(format!("part_prototypes.{index}.role")),
+            Some(format!("{subject}.{index}.role")),
             &prototype.role,
             "invalid_part_prototype_role",
         );
         if !ids.insert(prototype.id.as_str()) {
             push_issue(
                 report,
-                Some(format!("part_prototypes.{index}.id")),
+                Some(format!("{subject}.{index}.id")),
                 "duplicate_part_prototype_id",
                 "Part prototype IDs must be unique within one style kit.",
             );
@@ -1591,21 +1666,21 @@ fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport)
         if prototype.operation_tags.is_empty() {
             push_issue(
                 report,
-                Some(format!("part_prototypes.{index}.operation_tags")),
+                Some(format!("{subject}.{index}.operation_tags")),
                 "missing_part_prototype_operation_tag",
                 "Part prototypes must declare at least one expected operation class.",
             );
         }
-        validate_operation_tags(report, index, &prototype.operation_tags);
+        validate_operation_tags(report, subject, index, &prototype.operation_tags);
         validate_identifier_list(
             report,
-            &format!("part_prototypes.{index}.style_tags"),
+            &format!("{subject}.{index}.style_tags"),
             &prototype.style_tags,
             "invalid_part_prototype_style_tag",
         );
         validate_unique_strings(
             report,
-            &format!("part_prototypes.{index}.style_tags"),
+            &format!("{subject}.{index}.style_tags"),
             &prototype.style_tags,
             "duplicate_part_prototype_style_tag",
         );
@@ -1614,6 +1689,7 @@ fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport)
 
 fn validate_operation_tags(
     report: &mut FamilyValidationReport,
+    subject: &str,
     prototype_index: usize,
     operations: &[AllowedOperationKind],
 ) {
@@ -1623,7 +1699,7 @@ fn validate_operation_tags(
             push_issue(
                 report,
                 Some(format!(
-                    "part_prototypes.{prototype_index}.operation_tags.{index}"
+                    "{subject}.{prototype_index}.operation_tags.{index}"
                 )),
                 "duplicate_part_prototype_operation_tag",
                 "Part prototype operation tags must be unique.",
@@ -1633,7 +1709,7 @@ fn validate_operation_tags(
             validate_identifier(
                 report,
                 Some(format!(
-                    "part_prototypes.{prototype_index}.operation_tags.{index}"
+                    "{subject}.{prototype_index}.operation_tags.{index}"
                 )),
                 key,
                 "invalid_custom_operation_tag",
@@ -1643,30 +1719,38 @@ fn validate_operation_tags(
 }
 
 fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    validate_detail_module_list(&kit.detail_modules, "detail_modules", report);
+}
+
+fn validate_detail_module_list(
+    modules: &[DetailModule],
+    subject: &str,
+    report: &mut FamilyValidationReport,
+) {
     let mut ids = BTreeSet::new();
-    for (index, module) in kit.detail_modules.iter().enumerate() {
+    for (index, module) in modules.iter().enumerate() {
         validate_non_empty(
             report,
-            Some(format!("detail_modules.{index}.id")),
+            Some(format!("{subject}.{index}.id")),
             &module.id,
             "empty_detail_module_id",
         );
         validate_identifier(
             report,
-            Some(format!("detail_modules.{index}.id")),
+            Some(format!("{subject}.{index}.id")),
             &module.id,
             "invalid_detail_module_id",
         );
         validate_non_empty(
             report,
-            Some(format!("detail_modules.{index}.display_name")),
+            Some(format!("{subject}.{index}.display_name")),
             &module.display_name,
             "empty_detail_module_display_name",
         );
         if !ids.insert(module.id.as_str()) {
             push_issue(
                 report,
-                Some(format!("detail_modules.{index}.id")),
+                Some(format!("{subject}.{index}.id")),
                 "duplicate_detail_module_id",
                 "Detail module IDs must be unique within one style kit.",
             );
@@ -1674,45 +1758,45 @@ fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) 
         if module.target_roles.is_empty() {
             push_issue(
                 report,
-                Some(format!("detail_modules.{index}.target_roles")),
+                Some(format!("{subject}.{index}.target_roles")),
                 "missing_detail_target_role",
                 "Detail modules must target at least one role.",
             );
         }
         validate_identifier_list(
             report,
-            &format!("detail_modules.{index}.target_roles"),
+            &format!("{subject}.{index}.target_roles"),
             &module.target_roles,
             "invalid_detail_target_role",
         );
         validate_unique_strings(
             report,
-            &format!("detail_modules.{index}.target_roles"),
+            &format!("{subject}.{index}.target_roles"),
             &module.target_roles,
             "duplicate_detail_target_role",
         );
         validate_readability_threshold(
             report,
-            Some(format!("detail_modules.{index}.minimum_readability")),
+            Some(format!("{subject}.{index}.minimum_readability")),
             &module.minimum_readability,
         );
         if module.minimum_readability.pixels == 0 {
             push_issue(
                 report,
-                Some(format!("detail_modules.{index}.minimum_readability.pixels")),
+                Some(format!("{subject}.{index}.minimum_readability.pixels")),
                 "invalid_detail_minimum_readability",
                 "Detail modules must declare a positive readability threshold.",
             );
         }
         validate_identifier_list(
             report,
-            &format!("detail_modules.{index}.tags"),
+            &format!("{subject}.{index}.tags"),
             &module.tags,
             "invalid_detail_tag",
         );
         validate_unique_strings(
             report,
-            &format!("detail_modules.{index}.tags"),
+            &format!("{subject}.{index}.tags"),
             &module.tags,
             "duplicate_detail_tag",
         );
@@ -1726,7 +1810,7 @@ fn validate_repetition_policy(policy: &RepetitionPolicy, report: &mut FamilyVali
         policy.density,
         "invalid_repetition_density",
     );
-    validate_length_value(
+    validate_global_length_value(
         report,
         Some("repetition.preferred_spacing"),
         &policy.preferred_spacing,
@@ -1780,16 +1864,115 @@ fn validate_exaggeration_policy(policy: &ExaggerationPolicy, report: &mut Family
     );
 }
 
+fn validate_family_style_facets(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    for family_id in &kit.compatible_families {
+        if !kit.family_facets.contains_key(family_id) {
+            push_issue(
+                report,
+                Some(format!("family_facets.{family_id}")),
+                "missing_family_style_facet",
+                "Every compatible family must have a family-scoped style facet.",
+            );
+        }
+    }
+    for (family_id, facet) in &kit.family_facets {
+        validate_identifier(
+            report,
+            Some(format!("family_facets.{family_id}")),
+            family_id,
+            "invalid_family_style_facet_key",
+        );
+        if facet.family_id != *family_id {
+            push_issue(
+                report,
+                Some(format!("family_facets.{family_id}.family_id")),
+                "family_style_facet_id_mismatch",
+                "Family style facet ID must match its map key.",
+            );
+        }
+        if !kit
+            .compatible_families
+            .iter()
+            .any(|compatible| compatible == family_id)
+        {
+            push_issue(
+                report,
+                Some(format!("family_facets.{family_id}")),
+                "undeclared_family_style_facet",
+                "Family style facets must target a declared compatible family.",
+            );
+        }
+        validate_role_proportion_list(
+            &facet.proportions,
+            &format!("family_facets.{family_id}.proportions"),
+            report,
+        );
+        validate_part_prototype_list(
+            &facet.part_prototypes,
+            &format!("family_facets.{family_id}.part_prototypes"),
+            report,
+        );
+        validate_detail_module_list(
+            &facet.detail_modules,
+            &format!("family_facets.{family_id}.detail_modules"),
+            report,
+        );
+        validate_facet_default_providers(family_id, facet, report);
+    }
+}
+
+fn validate_facet_default_providers(
+    family_id: &str,
+    facet: &FamilyStyleFacet,
+    report: &mut FamilyValidationReport,
+) {
+    let prototypes = facet
+        .part_prototypes
+        .iter()
+        .map(|prototype| (prototype.id.as_str(), prototype.role.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    for (role, prototype_id) in &facet.default_role_providers {
+        validate_identifier(
+            report,
+            Some(format!(
+                "family_facets.{family_id}.default_role_providers.{role}"
+            )),
+            role,
+            "invalid_facet_default_provider_role",
+        );
+        match prototypes.get(prototype_id.as_str()) {
+            Some(prototype_role) if *prototype_role == role.as_str() => {}
+            Some(_) => push_issue(
+                report,
+                Some(format!(
+                    "family_facets.{family_id}.default_role_providers.{role}"
+                )),
+                "facet_default_provider_role_mismatch",
+                "Family facet default provider prototype role must match the map role.",
+            ),
+            None => push_issue(
+                report,
+                Some(format!(
+                    "family_facets.{family_id}.default_role_providers.{role}"
+                )),
+                "unknown_facet_default_provider_prototype",
+                "Family facet default providers must refer to a prototype in the same facet.",
+            ),
+        }
+    }
+}
+
 fn validate_kit_role_references(
-    kit: &StyleKit,
+    family_id: &str,
+    facet: &FamilyStyleFacet,
     role_ids: &BTreeSet<&str>,
     report: &mut FamilyValidationReport,
 ) {
-    for (index, proportion) in kit.proportions.iter().enumerate() {
+    for (index, proportion) in facet.proportions.iter().enumerate() {
         validate_role_reference(
             report,
             role_ids,
-            format!("style_kit.proportions.{index}.role"),
+            format!("style_kit.family_facets.{family_id}.proportions.{index}.role"),
             &proportion.role,
             "unknown_style_proportion_role",
         );
@@ -1797,61 +1980,50 @@ fn validate_kit_role_references(
             validate_length_value_role_reference(
                 report,
                 role_ids,
-                format!("style_kit.proportions.{index}.preferred_scale.{axis}"),
+                format!(
+                    "style_kit.family_facets.{family_id}.proportions.{index}.preferred_scale.{axis}"
+                ),
                 value,
                 "unknown_style_relative_length_role",
             );
         }
     }
-    for (index, prototype) in kit.part_prototypes.iter().enumerate() {
+    for (index, prototype) in facet.part_prototypes.iter().enumerate() {
         validate_role_reference(
             report,
             role_ids,
-            format!("style_kit.part_prototypes.{index}.role"),
+            format!("style_kit.family_facets.{family_id}.part_prototypes.{index}.role"),
             &prototype.role,
             "unknown_style_prototype_role",
         );
     }
-    for (index, module) in kit.detail_modules.iter().enumerate() {
+    for (index, module) in facet.detail_modules.iter().enumerate() {
         for role in &module.target_roles {
             validate_role_reference(
                 report,
                 role_ids,
-                format!("style_kit.detail_modules.{index}.target_roles"),
+                format!("style_kit.family_facets.{family_id}.detail_modules.{index}.target_roles"),
                 role,
                 "unknown_style_detail_role",
             );
         }
     }
-    validate_length_value_role_reference(
-        report,
-        role_ids,
-        "style_kit.bevel_policy.width",
-        &kit.bevel_policy.width,
-        "unknown_style_relative_length_role",
-    );
-    validate_length_value_role_reference(
-        report,
-        role_ids,
-        "style_kit.repetition.preferred_spacing",
-        &kit.repetition.preferred_spacing,
-        "unknown_style_relative_length_role",
-    );
 }
 
 fn validate_kit_operation_compatibility(
     family: &AssetFamilySchema,
-    kit: &StyleKit,
+    family_id: &str,
+    facet: &FamilyStyleFacet,
     report: &mut FamilyValidationReport,
 ) {
     let allowed = family.allowed_operations.iter().collect::<BTreeSet<_>>();
-    for (prototype_index, prototype) in kit.part_prototypes.iter().enumerate() {
+    for (prototype_index, prototype) in facet.part_prototypes.iter().enumerate() {
         for (operation_index, operation) in prototype.operation_tags.iter().enumerate() {
             if !allowed.contains(operation) {
                 push_issue(
                     report,
                     Some(format!(
-                        "style_kit.part_prototypes.{prototype_index}.operation_tags.{operation_index}"
+                        "style_kit.family_facets.{family_id}.part_prototypes.{prototype_index}.operation_tags.{operation_index}"
                     )),
                     "style_prototype_operation_not_allowed",
                     "Style-kit prototype requires an operation not allowed by the family.",
@@ -1863,22 +2035,25 @@ fn validate_kit_operation_compatibility(
 
 fn validate_style_required_role_providers(
     family: &AssetFamilySchema,
-    kit: &StyleKit,
+    family_id: &str,
+    facet: &FamilyStyleFacet,
     report: &mut FamilyValidationReport,
 ) {
-    let style_roles = kit
+    let style_roles = facet
         .part_prototypes
         .iter()
         .map(|prototype| prototype.role.as_str())
         .collect::<BTreeSet<_>>();
-    for (index, role) in family.part_roles.iter().enumerate() {
+    for role in &family.part_roles {
         if role.required
             && role.provision == RoleProvision::StyleRequired
             && !style_roles.contains(role.id.as_str())
         {
             push_issue(
                 report,
-                Some(format!("family.part_roles.{index}.provision")),
+                Some(format!(
+                    "style_kit.family_facets.{family_id}.part_prototypes"
+                )),
                 "missing_style_required_role_provider",
                 "Required style-provided roles need at least one style-kit prototype.",
             );
@@ -1925,6 +2100,24 @@ fn validate_angle_unit(
     _subject: Option<impl Into<String>>,
     _unit: AngleUnit,
 ) {
+}
+
+fn validate_global_length_value(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &LengthValue,
+    code: &'static str,
+) {
+    let subject = subject.map(Into::into);
+    validate_length_value(report, subject.clone(), value, code);
+    if matches!(value, LengthValue::RelativeToRole { .. }) {
+        push_issue(
+            report,
+            subject,
+            "global_style_policy_relative_to_role",
+            "Global style policies must use absolute style lengths; role-relative lengths belong in family-scoped facets.",
+        );
+    }
 }
 
 fn validate_length_value(

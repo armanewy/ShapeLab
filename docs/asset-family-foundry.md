@@ -44,18 +44,21 @@ Examples:
 
 Style kits contain:
 
-- role proportion guidance
 - bevel policy
 - taper and profile language
-- part prototypes
-- ornament and detail modules
 - repetition density
 - symmetry preferences
 - silhouette and detail exaggeration
+- family-scoped facets containing role proportion guidance
+- family-scoped facets containing part prototypes
+- family-scoped facets containing ornament and detail modules
+- family-scoped descriptive default role-provider hints
 
 Materials can later attach to this layer, but geometry style exists before texturing.
 
 Style kits are also descriptive contracts. A `PartPrototype` names a compatible role and expected operation vocabulary; it is not itself executable geometry.
+
+Role-specific style data is scoped through `StyleKit::family_facets`. A kit can support unrelated families such as bridge, crate, and lamp without forcing one flat role namespace to validate against every family. Compatibility validation reads only the facet for the family being compiled. Global policies such as bevel and repetition remain shared style policy and must use role-independent lengths.
 
 ## Executable Bindings
 
@@ -68,6 +71,7 @@ That crate binds:
 - versioned `FamilyImplementation`, `StyleImplementation`, and `RecipeFragment` documents
 - family-owned default recipe fragments
 - explicit style default providers keyed by family role
+- executable style implementations keyed to one family ID
 - style-owned prototype recipe fragments
 - exported role-occurrence roots for each fragment
 - internal fragment instances that should not count toward role cardinality
@@ -78,9 +82,13 @@ The compiler then validates the family/style pair, resolves required role provid
 
 Provider selection is explicit. A style-required role uses `StyleImplementation::default_role_providers` unless a choice binding selects a specific style prototype. A family-default role uses `FamilyImplementation::default_role_providers`. A family-or-style role prefers the style default and falls back to the family default. This avoids accidental selection changes when prototype IDs or `BTreeMap` ordering change.
 
-Recipe fragments declare `role_occurrence_roots` separately from `internal_instances`. Cardinality checks and presence toggles operate on occurrence roots and their subtrees, so internal ribs, fasteners, helper geometry, or local construction pieces do not accidentally count as separate role occurrences.
+`FamilyStyleFacet::default_role_providers` is descriptive kit metadata for authoring tools. Executable provider selection comes from `StyleImplementation::default_role_providers` so compiled output is governed by versioned binding data.
 
-Instantiated recipes derive `AssetId` from a deterministic hash of the family ID, style ID, effective semantic parameters, seed, implementation schema versions, and selected fragment versions. The ID is not the seed.
+Recipe fragments declare `role_occurrence_roots` separately from `internal_instances`. Cardinality checks and presence toggles operate on occurrence roots and their subtrees, so internal ribs, fasteners, helper geometry, or local construction pieces do not accidentally count as separate role occurrences. Exported occurrence roots must be pairwise disjoint, cannot be nested under one another, and cannot overlap internal roots. Cardinality checks use the effective enabled state through each occurrence root's ancestor chain.
+
+Family parameter slots declare a `ParameterExecutionPolicy`. `RequiredBinding` is the default and requires at least one executable binding in the implementation. `AdvisoryOnly` and `RuntimeOnly` slots can be accepted and hashed without directly editing recipe geometry. The compiler rejects unbound required slots, conflicting provider-selection bindings, conflicting presence bindings, and non-finite or degenerate scalar transforms.
+
+Instantiated recipes derive `AssetId` from a canonical instantiation fingerprint covering the family document, style-kit document, family implementation, style implementation, base recipe, selected fragment recipes, effective semantic parameters, and seed. The report retains the 128-bit fingerprint as hex even though `AssetId` remains a compact runtime identifier. The ID is not the seed and does not rely on schema-version bumps to detect content changes.
 
 The first binding language is intentionally small:
 
