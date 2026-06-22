@@ -1873,6 +1873,11 @@ mod tests {
             .definitions
             .get_mut(&PartDefinitionId(1))
             .expect("cut definition should exist");
+        if let ModelingOperationSpec::RectangularThroughCut { edge_treatment, .. } =
+            &mut definition.geometry.operations[0]
+        {
+            *edge_treatment = CutEdgeTreatment::BevelEligible;
+        }
         definition
             .geometry
             .operations

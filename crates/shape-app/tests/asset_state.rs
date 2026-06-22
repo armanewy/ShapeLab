@@ -563,6 +563,309 @@ fn descriptor_free_cut_operation_edit_schedules_compile() {
 }
 
 #[test]
+fn edge_treatment_controls_reflect_and_edit_boundary_bevels() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let (definition, operation) = first_circular_cut(&state.recipe);
+    let part = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .expect("definition should have an instance")
+        .id;
+    state.selected_part_instance = Some(part);
+    state.selected_cut_operation = Some(operation);
+
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    let reflected_cut = ui_state
+        .cut_operations
+        .iter()
+        .find(|candidate| candidate.operation == operation)
+        .expect("selected cut should be reflected");
+    assert!(
+        !reflected_cut.edge_treatments.is_empty(),
+        "multi-cut panel circular cuts should expose beveled edge treatments"
+    );
+    let treatment = &reflected_cut.edge_treatments[0];
+    assert_eq!(treatment.definition, definition);
+    assert_eq!(treatment.part, part);
+    assert_eq!(treatment.source_operation, operation);
+    assert!(treatment.label.contains("edge: Rounded"));
+    let source_loops = state.recipe.definitions[&definition]
+        .geometry
+        .operations
+        .iter()
+        .find(|candidate| candidate.operation_id() == operation)
+        .expect("source cut should exist")
+        .direct_boundary_loop_outputs();
+    assert!(
+        reflected_cut
+            .edge_treatments
+            .iter()
+            .all(|treatment| source_loops.contains(&treatment.target_loop)),
+        "reflected treatments should target direct loops from the selected cut"
+    );
+    let fields = treatment
+        .controls
+        .iter()
+        .map(|control| control.field.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        vec![
+            "bevel_boundary_loop.width",
+            "bevel_boundary_loop.segments",
+            "bevel_boundary_loop.profile"
+        ]
+    );
+    let width = &treatment.controls[0];
+    assert!(width.minimum > 0.0);
+    assert!(width.maximum >= width.value);
+    assert!(!width.topology_changing);
+    assert!(treatment.controls[1].topology_changing);
+    assert_eq!(treatment.controls[2].minimum, 0.05);
+    assert_eq!(treatment.controls[2].maximum, 8.0);
+
+    let effects = state
+        .handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: treatment.operation,
+            field: "bevel_boundary_loop.width".to_owned(),
+            value: (width.value * 0.5).max(width.minimum),
+        })
+        .expect("edge treatment width edit should apply");
+
+    assert_eq!(
+        state.selected_cut_operation,
+        Some(operation),
+        "editing a nested edge treatment should preserve the selected cut"
+    );
+    assert_eq!(
+        state.revision_history.revisions[&state.revision_history.current].label,
+        "Set edge treatment"
+    );
+    assert!(state.dirty);
+    assert!(matches!(
+        start_job(effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+}
+
+#[test]
+fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    state.selected_part_instance = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    let cuts = ui_state
+        .cut_operations
+        .iter()
+        .map(|cut| (cut.operation, cut))
+        .collect::<BTreeMap<_, _>>();
+
+    let recess = cuts
+        .get(&OperationId(1))
+        .expect("multi-cut panel should reflect recessed panel cut");
+    let recess_labels = edge_treatment_labels(recess);
+    assert_eq!(
+        recess_labels,
+        vec!["Entry edge: Rounded", "Floor edge: Rounded"]
+    );
+    for treatment in &recess.edge_treatments {
+        let width = edge_control(treatment, "bevel_boundary_loop.width");
+        assert_approx_eq(width.maximum, 0.063);
+        assert_eq!(
+            edge_control(treatment, "bevel_boundary_loop.segments").maximum,
+            8.0
+        );
+        assert_eq!(
+            edge_control(treatment, "bevel_boundary_loop.profile").maximum,
+            8.0
+        );
+    }
+
+    for operation in [2, 3, 4, 5] {
+        let cut = cuts
+            .get(&OperationId(operation))
+            .expect("multi-cut panel should reflect mounting-hole cut");
+        assert_eq!(edge_treatment_labels(cut), vec!["Entry edge: Rounded"]);
+        let width = edge_control(&cut.edge_treatments[0], "bevel_boundary_loop.width");
+        assert_approx_eq(width.maximum, 0.036);
+    }
+
+    for operation in [6, 7, 8] {
+        let cut = cuts
+            .get(&OperationId(operation))
+            .expect("multi-cut panel should reflect hard-edged vent cut");
+        assert!(
+            cut.edge_treatments.is_empty(),
+            "hard-edged vent operation {operation} should not show rounded edge controls"
+        );
+    }
+}
+
+#[test]
+fn edge_treatment_lock_rules_follow_topology_signature() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let (definition, operation) = first_circular_cut(&state.recipe);
+    let treatment = first_reflected_edge_treatment(&state, definition, operation);
+    let width = treatment.controls[0].clone();
+    let segments = treatment.controls[1].clone();
+    let profile = treatment.controls[2].clone();
+
+    state
+        .handle_command(AssetAppCommand::SetLock {
+            target: AssetLockTarget::Topology(definition),
+            locked: true,
+        })
+        .expect("topology lock should apply");
+
+    let width_effects = state
+        .handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: treatment.operation,
+            field: width.field.clone(),
+            value: (width.value * 0.5).max(width.minimum),
+        })
+        .expect("bevel width should remain editable under topology lock");
+    assert!(matches!(
+        start_job(width_effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+
+    let profile_value = if (profile.value - 1.25).abs() < 0.001 {
+        1.5
+    } else {
+        1.25
+    };
+    let profile_effects = state
+        .handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: treatment.operation,
+            field: profile.field.clone(),
+            value: profile_value,
+        })
+        .expect("bevel profile should remain editable under topology lock");
+    assert!(matches!(
+        start_job(profile_effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+
+    let segment_value = if (segments.value - 2.0).abs() < 0.001 {
+        3.0
+    } else {
+        2.0
+    };
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: treatment.operation,
+            field: segments.field.clone(),
+            value: segment_value,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("topology is locked")
+    ));
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::RemoveCutOperation {
+            definition,
+            operation: treatment.operation,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("topology is locked")
+    ));
+}
+
+#[test]
+fn remove_edge_treatment_preserves_selected_cut() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let (definition, operation) = first_circular_cut(&state.recipe);
+    let treatment = first_reflected_edge_treatment(&state, definition, operation);
+    state.selected_cut_operation = Some(operation);
+
+    let effects = state
+        .handle_command(AssetAppCommand::RemoveCutOperation {
+            definition,
+            operation: treatment.operation,
+        })
+        .expect("edge treatment removal should apply");
+
+    let remaining_operations = &state.recipe.definitions[&definition].geometry.operations;
+    assert!(
+        remaining_operations
+            .iter()
+            .any(|candidate| candidate.operation_id() == operation),
+        "source cut should remain after removing its edge treatment"
+    );
+    assert!(
+        remaining_operations
+            .iter()
+            .all(|candidate| candidate.operation_id() != treatment.operation),
+        "edge treatment operation should be removed"
+    );
+    assert_eq!(state.selected_cut_operation, Some(operation));
+    assert_eq!(
+        state.revision_history.revisions[&state.revision_history.current].label,
+        "Remove edge treatment"
+    );
+    assert!(state.dirty);
+    assert!(matches!(
+        start_job(effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+}
+
+#[test]
+fn remove_cut_operation_cascades_dependent_edge_treatments() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let (definition, operation) = first_circular_cut(&state.recipe);
+    let dependent_bevels = dependent_bevel_operations(&state.recipe, definition, operation);
+    assert!(
+        !dependent_bevels.is_empty(),
+        "multi-cut panel should bevel at least one circular cut"
+    );
+
+    let effects = state
+        .handle_command(AssetAppCommand::RemoveCutOperation {
+            definition,
+            operation,
+        })
+        .expect("cut removal should cascade dependent edge treatments");
+
+    let remaining_operations = &state.recipe.definitions[&definition].geometry.operations;
+    assert!(
+        remaining_operations
+            .iter()
+            .all(|candidate| candidate.operation_id() != operation)
+    );
+    for dependent in dependent_bevels {
+        assert!(
+            remaining_operations
+                .iter()
+                .all(|candidate| candidate.operation_id() != dependent),
+            "dependent bevel {dependent:?} should be removed"
+        );
+    }
+    assert_ne!(state.selected_cut_operation, Some(operation));
+    assert!(state.dirty);
+    assert!(matches!(
+        start_job(effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+}
+
+#[test]
 fn project_snapshot_round_trip_preserves_branch_history() {
     let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
         .expect("stool template should load");
@@ -677,6 +980,87 @@ fn first_circular_cut(recipe: &AssetRecipe) -> (PartDefinitionId, OperationId) {
             })
         })
         .expect("benchmark should include a circular cut")
+}
+
+fn dependent_bevel_operations(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Vec<OperationId> {
+    let definition = &recipe.definitions[&definition];
+    let source_loops = definition
+        .geometry
+        .operations
+        .iter()
+        .find(|candidate| candidate.operation_id() == operation)
+        .expect("source operation should exist")
+        .direct_boundary_loop_outputs();
+    definition
+        .geometry
+        .operations
+        .iter()
+        .filter_map(|candidate| {
+            let ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                ..
+            } = candidate
+            else {
+                return None;
+            };
+            source_loops.contains(target_loop).then_some(*operation)
+        })
+        .collect()
+}
+
+fn first_reflected_edge_treatment(
+    state: &AssetAppState,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> asset::AssetEdgeTreatment {
+    let part = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .expect("definition should have an instance")
+        .id;
+    let mut state = state.clone();
+    state.selected_part_instance = Some(part);
+    state.selected_cut_operation = Some(operation);
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    ui_state
+        .cut_operations
+        .iter()
+        .find(|candidate| candidate.operation == operation)
+        .and_then(|cut| cut.edge_treatments.first())
+        .cloned()
+        .expect("selected cut should expose an edge treatment")
+}
+
+fn edge_treatment_labels(cut: &asset::AssetCutOperation) -> Vec<&str> {
+    cut.edge_treatments
+        .iter()
+        .map(|treatment| treatment.label.as_str())
+        .collect()
+}
+
+fn edge_control<'a>(
+    treatment: &'a asset::AssetEdgeTreatment,
+    field: &str,
+) -> &'a asset::AssetCutControl {
+    treatment
+        .controls
+        .iter()
+        .find(|control| control.field == field)
+        .unwrap_or_else(|| panic!("missing edge treatment control {field}"))
+}
+
+fn assert_approx_eq(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() <= 0.000_01,
+        "expected {actual} to equal {expected}"
+    );
 }
 
 fn unique_test_dir(stem: &str) -> PathBuf {

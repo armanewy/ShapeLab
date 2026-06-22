@@ -8,10 +8,11 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     ArraySpacingEdit, AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationReport,
-    BoundaryLoopId, CountRangeHint, CutGroupRole, Frame3, GeneratorDimensionEdit, GeometrySource,
-    ModelingOperationSpec, OperationId, ParameterDescriptor, PartDefinitionId, PartInstanceId,
-    RegionId, Transform3, apply_edit_program, definition_scalar_path, enumerate_parameters,
-    get_scalar, validate_asset_recipe,
+    BoundaryLoopId, CountRangeHint, CutGroupRole, DuplicateBoundaryBevelSpec, Frame3,
+    GeneratorDimensionEdit, GeometrySource, ModelingOperationSpec, OperationId,
+    ParameterDescriptor, PartDefinitionId, PartInstanceId, RegionId, Transform3,
+    apply_edit_program, definition_scalar_path, enumerate_parameters, get_scalar,
+    validate_asset_recipe,
 };
 use thiserror::Error;
 
@@ -1303,6 +1304,53 @@ impl CutDuplicateSource {
     }
 }
 
+fn duplicate_dependent_bevel_specs(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    source: OperationId,
+    ids: &mut ProposalIdAllocator,
+) -> Vec<DuplicateBoundaryBevelSpec> {
+    let Some(definition) = recipe.definitions.get(&definition) else {
+        return Vec::new();
+    };
+    let Some(source_operation) = definition
+        .geometry
+        .operations
+        .iter()
+        .find(|operation| operation.operation_id() == source)
+    else {
+        return Vec::new();
+    };
+    let source_loops = source_operation
+        .direct_boundary_loop_outputs()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    definition
+        .geometry
+        .operations
+        .iter()
+        .filter_map(|operation| {
+            let ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                ..
+            } = operation
+            else {
+                return None;
+            };
+            source_loops
+                .contains(target_loop)
+                .then(|| DuplicateBoundaryBevelSpec {
+                    source: *operation,
+                    operation: ids.operation(),
+                    bevel_region: ids.region(),
+                    outer_replacement_loop: ids.boundary_loop(),
+                    inner_replacement_loop: ids.boundary_loop(),
+                })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 struct ProposalIdAllocator {
     next_operation: u64,
@@ -1376,7 +1424,7 @@ impl EditOpportunity {
 
     fn build_edit(
         &self,
-        _recipe: &AssetRecipe,
+        recipe: &AssetRecipe,
         mode: AssetCandidateMode,
         rng: &mut ChaCha8Rng,
         ids: &mut ProposalIdAllocator,
@@ -1515,18 +1563,29 @@ impl EditOpportunity {
                 operation,
                 source,
                 source_group: _,
-            } => Some(vec![AssetEdit::DuplicateCutOperation {
-                definition: *definition,
-                source: *operation,
-                operation: ids.operation(),
-                entry_loop: ids.boundary_loop(),
-                secondary_loop: ids.boundary_loop(),
-                rim_region: ids.region(),
-                wall_region: ids.region(),
-                floor_region: source.requires_floor_region().then(|| ids.region()),
-                center_offset: source.center_offset(mode, rng),
-                group_membership: shape_asset::DuplicateCutGroupMembership::PreserveSource,
-            }]),
+            } => {
+                let duplicate_operation = ids.operation();
+                let entry_loop = ids.boundary_loop();
+                let secondary_loop = ids.boundary_loop();
+                let rim_region = ids.region();
+                let wall_region = ids.region();
+                let floor_region = source.requires_floor_region().then(|| ids.region());
+                let dependent_bevels =
+                    duplicate_dependent_bevel_specs(recipe, *definition, *operation, ids);
+                Some(vec![AssetEdit::DuplicateCutOperation {
+                    definition: *definition,
+                    source: *operation,
+                    operation: duplicate_operation,
+                    entry_loop,
+                    secondary_loop,
+                    rim_region,
+                    wall_region,
+                    floor_region,
+                    center_offset: source.center_offset(mode, rng),
+                    group_membership: shape_asset::DuplicateCutGroupMembership::PreserveSource,
+                    dependent_bevels,
+                }])
+            }
             Self::CutGroupScalar {
                 definition,
                 operations,

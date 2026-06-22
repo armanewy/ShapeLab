@@ -24,6 +24,8 @@ pub use parameters::*;
 
 /// Current schema version for asset recipes.
 pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 7;
+const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
+const BOUNDARY_BEVEL_PROFILE_MAX: f32 = 8.0;
 
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
@@ -2222,6 +2224,9 @@ pub enum AssetEdit {
         /// How the duplicated operation joins authored semantic cut groups.
         #[serde(default)]
         group_membership: DuplicateCutGroupMembership,
+        /// Dependent boundary-treatment operations to copy with explicit fresh IDs.
+        #[serde(default)]
+        dependent_bevels: Vec<DuplicateBoundaryBevelSpec>,
     },
     /// Move one modeling operation to a new ordered index.
     MoveModelingOperation {
@@ -2336,6 +2341,8 @@ pub enum OperationRemovalPolicy {
     RejectIfReferenced,
     /// Remove metadata owned by the operation before deleting it.
     CascadeOwnedMetadata,
+    /// Remove the operation, owned metadata, and operations depending on its generated loops.
+    CascadeDependentOperations,
 }
 
 /// Policy for semantic cut-group membership when duplicating a cut operation.
@@ -2348,6 +2355,21 @@ pub enum DuplicateCutGroupMembership {
     Ungrouped,
     /// Add the duplicate to one explicit semantic cut group.
     AddTo(String),
+}
+
+/// Explicit remap for duplicating a boundary-loop bevel dependent on a copied cut.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DuplicateBoundaryBevelSpec {
+    /// Source bevel operation to copy.
+    pub source: OperationId,
+    /// Fresh operation ID for the copied bevel.
+    pub operation: OperationId,
+    /// Fresh bevel-band region for the copied bevel.
+    pub bevel_region: RegionId,
+    /// Fresh outer replacement loop for the copied bevel.
+    pub outer_replacement_loop: BoundaryLoopId,
+    /// Fresh inner replacement loop for the copied bevel.
+    pub inner_replacement_loop: BoundaryLoopId,
 }
 
 /// Coarse execution phase for ordered modeling operations.
@@ -4494,6 +4516,13 @@ fn validate_operations(definition: &PartDefinition, report: &mut AssetValidation
                     operation_subject(definition.id, operation_id, "bevel_boundary_loop.profile"),
                     *profile,
                 );
+                validate_range(
+                    report,
+                    operation_subject(definition.id, operation_id, "bevel_boundary_loop.profile"),
+                    *profile,
+                    BOUNDARY_BEVEL_PROFILE_MIN,
+                    BOUNDARY_BEVEL_PROFILE_MAX,
+                );
                 if *bevel_region == RegionId(0) {
                     push_issue(
                         report,
@@ -4867,6 +4896,24 @@ fn validate_non_negative(report: &mut AssetValidationReport, subject: Option<Str
 fn validate_finite(report: &mut AssetValidationReport, subject: Option<String>, value: f32) {
     if !value.is_finite() {
         push_issue(report, subject, "non_finite", "Value must be finite.");
+    }
+}
+
+fn validate_range(
+    report: &mut AssetValidationReport,
+    subject: Option<String>,
+    value: f32,
+    minimum: f32,
+    maximum: f32,
+) {
+    validate_finite(report, subject.clone(), value);
+    if value.is_finite() && (value < minimum || value > maximum) {
+        push_issue(
+            report,
+            subject,
+            "value_out_of_range",
+            format!("Value must be between {minimum:.3} and {maximum:.3}."),
+        );
     }
 }
 
@@ -5656,6 +5703,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
             floor_region,
             center_offset,
             group_membership,
+            dependent_bevels,
         } => duplicate_cut_operation(
             recipe,
             *definition,
@@ -5669,6 +5717,7 @@ fn apply_edit(recipe: &mut AssetRecipe, edit: &AssetEdit) -> Result<(), AssetErr
                 floor_region: *floor_region,
                 center_offset: *center_offset,
                 group_membership: group_membership.clone(),
+                dependent_bevels: dependent_bevels.clone(),
             },
         ),
         AssetEdit::MoveModelingOperation {
@@ -6149,6 +6198,7 @@ struct DuplicateCutSpec {
     floor_region: Option<RegionId>,
     center_offset: [f32; 2],
     group_membership: DuplicateCutGroupMembership,
+    dependent_bevels: Vec<DuplicateBoundaryBevelSpec>,
 }
 
 fn insert_modeling_operation(
@@ -6193,20 +6243,12 @@ fn remove_modeling_operation(
     policy: OperationRemovalPolicy,
 ) -> Result<(), AssetError> {
     edits::ensure_topology_editable(recipe, definition)?;
-    let index = {
-        let definition_ref = recipe
-            .definitions
-            .get(&definition)
-            .ok_or(AssetError::UnknownDefinition(definition))?;
-        definition_ref
-            .geometry
-            .operations
-            .iter()
-            .position(|candidate| candidate.operation_id() == operation)
-            .ok_or_else(|| {
-                AssetError::UnsupportedEdit(format!("unknown operation {operation:?}"))
-            })?
-    };
+    let dependents = dependent_operation_closure(recipe, definition, operation)?;
+    let dependent_only = dependents
+        .iter()
+        .copied()
+        .filter(|dependent| *dependent != operation)
+        .collect::<Vec<_>>();
     let references = operation_metadata_references(recipe, definition, operation);
     match policy {
         OperationRemovalPolicy::RejectIfReferenced if !references.is_empty() => {
@@ -6217,7 +6259,19 @@ fn remove_modeling_operation(
             )));
         }
         OperationRemovalPolicy::CascadeOwnedMetadata => {
+            if !dependent_only.is_empty() {
+                return Err(AssetError::UnsupportedEdit(format!(
+                    "operation {:?} has dependent operation(s) {}",
+                    operation,
+                    operation_id_list(&dependent_only)
+                )));
+            }
             cascade_operation_metadata(recipe, definition, operation);
+        }
+        OperationRemovalPolicy::CascadeDependentOperations => {
+            for dependent in &dependents {
+                cascade_operation_metadata(recipe, definition, *dependent);
+            }
         }
         OperationRemovalPolicy::RejectIfReferenced => {}
     }
@@ -6225,7 +6279,10 @@ fn remove_modeling_operation(
         .definitions
         .get_mut(&definition)
         .ok_or(AssetError::UnknownDefinition(definition))?;
-    definition_ref.geometry.operations.remove(index);
+    definition_ref
+        .geometry
+        .operations
+        .retain(|candidate| !dependents.contains(&candidate.operation_id()));
     Ok(())
 }
 
@@ -6236,14 +6293,8 @@ fn duplicate_cut_operation(
     spec: DuplicateCutSpec,
 ) -> Result<(), AssetError> {
     edits::ensure_topology_editable(recipe, definition)?;
-    if operation_id_exists(recipe, spec.operation) {
-        return Err(AssetError::UnsupportedEdit(format!(
-            "duplicate operation {:?}",
-            spec.operation
-        )));
-    }
     let group_membership = spec.group_membership.clone();
-    let duplicate = {
+    let (duplicate, dependent_duplicates) = {
         let definition_ref = recipe
             .definitions
             .get(&definition)
@@ -6254,10 +6305,36 @@ fn duplicate_cut_operation(
             .iter()
             .find(|candidate| candidate.operation_id() == source)
             .ok_or_else(|| AssetError::UnsupportedEdit(format!("unknown operation {source:?}")))?;
-        remap_cut_operation(source_operation, spec)?
+        let duplicate = remap_cut_operation(source_operation, spec.clone())?;
+        let dependent_duplicates = remap_dependent_boundary_bevels(
+            &definition_ref.geometry.operations,
+            source_operation,
+            &duplicate,
+            &spec.dependent_bevels,
+        )?;
+        (duplicate, dependent_duplicates)
     };
-    ensure_new_boundary_loops_available(recipe, duplicate.boundary_loop_ids())?;
-    ensure_new_generated_regions_available(recipe, operation_detail_region_ids(&duplicate))?;
+    let mut operation_ids = vec![duplicate.operation_id()];
+    operation_ids.extend(
+        dependent_duplicates
+            .iter()
+            .map(ModelingOperationSpec::operation_id),
+    );
+    ensure_new_operation_ids_available(recipe, operation_ids)?;
+    let mut boundary_loop_ids = duplicate.boundary_loop_ids();
+    boundary_loop_ids.extend(
+        dependent_duplicates
+            .iter()
+            .flat_map(ModelingOperationSpec::boundary_loop_ids),
+    );
+    ensure_new_boundary_loops_available(recipe, boundary_loop_ids)?;
+    let mut generated_regions = operation_detail_region_ids(&duplicate);
+    generated_regions.extend(
+        dependent_duplicates
+            .iter()
+            .flat_map(operation_detail_region_ids),
+    );
+    ensure_new_generated_regions_available(recipe, generated_regions)?;
     let definition_ref = recipe
         .definitions
         .get_mut(&definition)
@@ -6273,10 +6350,30 @@ fn duplicate_cut_operation(
         .geometry
         .operations
         .insert(index, duplicate.clone());
+    let dependent_insert_index = definition_ref
+        .geometry
+        .operations
+        .iter()
+        .position(|operation| operation.phase() > OperationPhase::BoundaryTreatment)
+        .unwrap_or(definition_ref.geometry.operations.len());
+    for (offset, dependent) in dependent_duplicates.iter().enumerate() {
+        definition_ref
+            .geometry
+            .operations
+            .insert(dependent_insert_index + offset, dependent.clone());
+    }
     ensure_operation_phase_order(&definition_ref.geometry.operations).inspect_err(|_| {
-        definition_ref.geometry.operations.remove(index);
+        definition_ref.geometry.operations.retain(|operation| {
+            operation.operation_id() != duplicate.operation_id()
+                && !dependent_duplicates
+                    .iter()
+                    .any(|dependent| dependent.operation_id() == operation.operation_id())
+        });
     })?;
     bump_next_ids_for_operation(recipe, &duplicate);
+    for dependent in &dependent_duplicates {
+        bump_next_ids_for_operation(recipe, dependent);
+    }
     apply_duplicate_cut_group_membership(
         recipe,
         definition,
@@ -6402,6 +6499,14 @@ fn operation_metadata_references(
     if recipe.variation.count_ranges.contains_key(&operation) {
         references.push(format!("variation.count_range.{}", operation.0));
     }
+    if let Ok(dependents) = dependent_operation_closure(recipe, definition, operation) {
+        references.extend(
+            dependents
+                .into_iter()
+                .filter(|dependent| *dependent != operation)
+                .map(|dependent| format!("operation.{}.dependency", dependent.0)),
+        );
+    }
     references.extend(
         recipe
             .variation
@@ -6424,6 +6529,61 @@ fn operation_metadata_references(
             .map(|parameter| format!("variation.parameter_range.{}", parameter.0)),
     );
     references
+}
+
+fn dependent_operation_closure(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> Result<BTreeSet<OperationId>, AssetError> {
+    let definition_ref = recipe
+        .definitions
+        .get(&definition)
+        .ok_or(AssetError::UnknownDefinition(definition))?;
+    if !definition_ref
+        .geometry
+        .operations
+        .iter()
+        .any(|candidate| candidate.operation_id() == operation)
+    {
+        return Err(AssetError::UnsupportedEdit(format!(
+            "unknown operation {operation:?}"
+        )));
+    }
+    let mut removal = BTreeSet::from([operation]);
+    loop {
+        let produced_loops = definition_ref
+            .geometry
+            .operations
+            .iter()
+            .filter(|candidate| removal.contains(&candidate.operation_id()))
+            .flat_map(ModelingOperationSpec::all_declared_boundary_loop_outputs)
+            .collect::<BTreeSet<_>>();
+        let before = removal.len();
+        for candidate in &definition_ref.geometry.operations {
+            if removal.contains(&candidate.operation_id()) {
+                continue;
+            }
+            if candidate
+                .boundary_loop_dependencies()
+                .iter()
+                .any(|dependency| produced_loops.contains(&dependency.input))
+            {
+                removal.insert(candidate.operation_id());
+            }
+        }
+        if removal.len() == before {
+            return Ok(removal);
+        }
+    }
+}
+
+fn operation_id_list(operations: &[OperationId]) -> String {
+    operations
+        .iter()
+        .map(|operation| operation.0.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn cascade_operation_metadata(
@@ -6570,12 +6730,106 @@ fn remap_cut_operation(
     }
 }
 
+fn remap_dependent_boundary_bevels(
+    operations: &[ModelingOperationSpec],
+    source_cut: &ModelingOperationSpec,
+    duplicate_cut: &ModelingOperationSpec,
+    specs: &[DuplicateBoundaryBevelSpec],
+) -> Result<Vec<ModelingOperationSpec>, AssetError> {
+    let mut copied = Vec::with_capacity(specs.len());
+    let mut seen_sources = BTreeSet::new();
+    for spec in specs {
+        if !seen_sources.insert(spec.source) {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "duplicate dependent bevel source {:?}",
+                spec.source
+            )));
+        }
+        let source_bevel = operations
+            .iter()
+            .find(|operation| operation.operation_id() == spec.source)
+            .ok_or_else(|| {
+                AssetError::UnsupportedEdit(format!(
+                    "unknown dependent bevel operation {:?}",
+                    spec.source
+                ))
+            })?;
+        let ModelingOperationSpec::BevelBoundaryLoop {
+            target_loop,
+            width,
+            segments,
+            profile,
+            ..
+        } = source_bevel
+        else {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "dependent operation {:?} is not a boundary-loop bevel",
+                spec.source
+            )));
+        };
+        let Some(remapped_target_loop) =
+            remapped_cut_boundary_loop(source_cut, duplicate_cut, *target_loop)
+        else {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "dependent bevel {:?} does not target a loop produced by {:?}",
+                spec.source,
+                source_cut.operation_id()
+            )));
+        };
+        copied.push(ModelingOperationSpec::BevelBoundaryLoop {
+            operation: spec.operation,
+            target_loop: remapped_target_loop,
+            width: *width,
+            segments: *segments,
+            profile: *profile,
+            bevel_region: spec.bevel_region,
+            outer_replacement_loop: spec.outer_replacement_loop,
+            inner_replacement_loop: spec.inner_replacement_loop,
+        });
+    }
+    Ok(copied)
+}
+
+fn remapped_cut_boundary_loop(
+    source_cut: &ModelingOperationSpec,
+    duplicate_cut: &ModelingOperationSpec,
+    source_loop: BoundaryLoopId,
+) -> Option<BoundaryLoopId> {
+    let source_loops = source_cut.direct_boundary_loop_outputs();
+    let duplicate_loops = duplicate_cut.direct_boundary_loop_outputs();
+    source_loops
+        .iter()
+        .position(|candidate| *candidate == source_loop)
+        .and_then(|index| duplicate_loops.get(index).copied())
+}
+
 fn operation_id_exists(recipe: &AssetRecipe, operation: OperationId) -> bool {
     recipe
         .definitions
         .values()
         .flat_map(|definition| definition.geometry.operations.iter())
         .any(|candidate| candidate.operation_id() == operation)
+}
+
+fn ensure_new_operation_ids_available(
+    recipe: &AssetRecipe,
+    operations: Vec<OperationId>,
+) -> Result<(), AssetError> {
+    let mut used = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .map(ModelingOperationSpec::operation_id)
+        .collect::<BTreeSet<_>>();
+    let mut local = BTreeSet::new();
+    for operation in operations {
+        if !local.insert(operation) || !used.insert(operation) {
+            return Err(AssetError::UnsupportedEdit(format!(
+                "duplicate operation {operation:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn ensure_new_boundary_loops_available(
@@ -6648,6 +6902,7 @@ fn operation_detail_region_ids(operation: &ModelingOperationSpec) -> Vec<RegionI
             wall_region,
             ..
         } => vec![*rim_region, *wall_region],
+        ModelingOperationSpec::BevelBoundaryLoop { bevel_region, .. } => vec![*bevel_region],
         _ => Vec::new(),
     }
 }
@@ -7291,6 +7546,132 @@ mod tests {
         assert!(
             issue_codes(&report).contains("duplicate_direct_boundary_loop_output"),
             "{report:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_out_of_range_boundary_bevel_profile() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.geometry.source = GeometrySource::Plate {
+            size: [1.0, 1.0],
+            thickness: 0.1,
+        };
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition.geometry.operations = vec![
+            ModelingOperationSpec::CircularThroughCut {
+                operation: OperationId(2),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveY,
+                center: [0.0, 0.0],
+                radius: 0.08,
+                radial_segments: 12,
+                rim_width: 0.03,
+                entry_loop: BoundaryLoopId(1),
+                exit_loop: BoundaryLoopId(2),
+                outer_region: RegionId(1),
+                rim_region: RegionId(2),
+                wall_region: RegionId(3),
+                edge_treatment: CutEdgeTreatment::BevelEligible,
+            },
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(3),
+                target_loop: BoundaryLoopId(1),
+                width: 0.01,
+                segments: 2,
+                profile: 100.0,
+                bevel_region: RegionId(4),
+                outer_replacement_loop: BoundaryLoopId(3),
+                inner_replacement_loop: BoundaryLoopId(4),
+            },
+        ];
+        recipe.next_ids.operation = 4;
+        recipe.next_ids.region = 5;
+        recipe.next_ids.boundary_loop = 5;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(
+            issue_codes(&report).contains("value_out_of_range"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn inserting_boundary_bevel_rejects_reused_generated_region() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.geometry.source = GeometrySource::Plate {
+            size: [1.0, 1.0],
+            thickness: 0.1,
+        };
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition.geometry.operations = vec![ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(2),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(1),
+            exit_loop: BoundaryLoopId(2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(2),
+            wall_region: RegionId(3),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        }];
+        recipe.next_ids.operation = 3;
+        recipe.next_ids.region = 4;
+        recipe.next_ids.boundary_loop = 3;
+
+        let result = apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "reuse bevel region".to_owned(),
+                seed: 9,
+                operations: vec![AssetEdit::InsertModelingOperation {
+                    definition: PartDefinitionId(1),
+                    index: 1,
+                    operation: ModelingOperationSpec::BevelBoundaryLoop {
+                        operation: OperationId(3),
+                        target_loop: BoundaryLoopId(1),
+                        width: 0.01,
+                        segments: 2,
+                        profile: 1.0,
+                        bevel_region: RegionId(3),
+                        outer_replacement_loop: BoundaryLoopId(3),
+                        inner_replacement_loop: BoundaryLoopId(4),
+                    },
+                }],
+            },
+        );
+
+        assert!(
+            matches!(result, Err(AssetError::UnsupportedEdit(ref message)) if message.contains("duplicate generated region")),
+            "{result:?}"
         );
     }
 

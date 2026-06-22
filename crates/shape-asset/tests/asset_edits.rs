@@ -994,6 +994,7 @@ fn removing_cut_operation_cascades_semantic_cut_groups() {
                 floor_region: None,
                 center_offset: [0.4, 0.0],
                 group_membership: DuplicateCutGroupMembership::PreserveSource,
+                dependent_bevels: Vec::new(),
             }],
         },
     )
@@ -1171,6 +1172,7 @@ fn structural_modeling_operation_edits_update_history_and_ids() {
                     floor_region: None,
                     center_offset: [0.24, 0.0],
                     group_membership: DuplicateCutGroupMembership::PreserveSource,
+                    dependent_bevels: Vec::new(),
                 },
                 AssetEdit::MoveModelingOperation {
                     definition: PLATE,
@@ -1319,6 +1321,235 @@ fn remove_modeling_operation_rejects_or_cascades_owned_metadata() {
             .count_ranges
             .contains_key(&OperationId(10))
     );
+}
+
+#[test]
+fn removing_cut_can_cascade_dependent_boundary_treatments() {
+    let mut recipe = edit_recipe();
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(10),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.16, 0.08],
+        corner_radius: 0.0,
+        rim_width: 0.03,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(40),
+        wall_region: RegionId(41),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(11),
+        target_loop: BoundaryLoopId(11),
+        width: 0.01,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(42),
+        outer_replacement_loop: BoundaryLoopId(13),
+        inner_replacement_loop: BoundaryLoopId(14),
+    };
+    let bevel_dependent = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(12),
+        target_loop: BoundaryLoopId(13),
+        width: 0.005,
+        segments: 1,
+        profile: 1.0,
+        bevel_region: RegionId(43),
+        outer_replacement_loop: BoundaryLoopId(15),
+        inner_replacement_loop: BoundaryLoopId(16),
+    };
+    let plate = recipe.definitions.get_mut(&PLATE).expect("plate exists");
+    plate.regions.insert(
+        RegionId(1),
+        SurfaceRegionSpec {
+            id: RegionId(1),
+            name: "front".to_owned(),
+            role: SurfaceRole::PrimarySurface,
+            tags: BTreeSet::new(),
+        },
+    );
+    plate.geometry.operations = vec![cut, bevel, bevel_dependent];
+    recipe.next_ids.operation = 13;
+    recipe.next_ids.region = 44;
+    recipe.next_ids.boundary_loop = 17;
+    add_parameter(
+        &mut recipe,
+        ParameterSeed {
+            id: ParameterId(31),
+            path: definition_scalar_path(PLATE, "operation.12.bevel_boundary_loop.width"),
+            label: "Dependent bevel width",
+            group: "Cuts",
+            minimum: 0.001,
+            maximum: 0.05,
+            topology_changing: false,
+        },
+    );
+    recipe.locks.insert(ParameterId(31));
+    recipe.variation.parameter_range_overrides.insert(
+        ParameterId(31),
+        ParameterRangeOverride {
+            minimum: 0.001,
+            maximum: 0.03,
+            step: Some(0.001),
+            mutation_sigma: None,
+        },
+    );
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "metadata-only remove".to_owned(),
+                seed: 86,
+                operations: vec![AssetEdit::RemoveModelingOperation {
+                    definition: PLATE,
+                    operation: OperationId(10),
+                    policy: OperationRemovalPolicy::CascadeOwnedMetadata,
+                }],
+            },
+        ),
+        Err(AssetError::UnsupportedEdit(_))
+    ));
+
+    assert!(matches!(
+        apply_edit_program(
+            &recipe,
+            &AssetEditProgram {
+                label: "reject dependency remove".to_owned(),
+                seed: 87,
+                operations: vec![AssetEdit::RemoveModelingOperation {
+                    definition: PLATE,
+                    operation: OperationId(10),
+                    policy: OperationRemovalPolicy::RejectIfReferenced,
+                }],
+            },
+        ),
+        Err(AssetError::UnsupportedEdit(_))
+    ));
+
+    let edited = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "cascade dependent remove".to_owned(),
+            seed: 88,
+            operations: vec![AssetEdit::RemoveModelingOperation {
+                definition: PLATE,
+                operation: OperationId(10),
+                policy: OperationRemovalPolicy::CascadeDependentOperations,
+            }],
+        },
+    )
+    .expect("dependent bevel should cascade with removed cut");
+
+    assert!(edited.definitions[&PLATE].geometry.operations.is_empty());
+    assert!(!edited.parameters.contains_key(&ParameterId(31)));
+    assert!(!edited.locks.contains(&ParameterId(31)));
+    assert!(
+        !edited
+            .variation
+            .parameter_range_overrides
+            .contains_key(&ParameterId(31))
+    );
+}
+
+#[test]
+fn duplicate_cut_can_copy_dependent_boundary_bevel() {
+    let mut recipe = edit_recipe();
+    let cut = ModelingOperationSpec::CircularThroughCut {
+        operation: OperationId(10),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        radius: 0.08,
+        radial_segments: 12,
+        rim_width: 0.03,
+        entry_loop: BoundaryLoopId(11),
+        exit_loop: BoundaryLoopId(12),
+        outer_region: RegionId(1),
+        rim_region: RegionId(40),
+        wall_region: RegionId(41),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(11),
+        target_loop: BoundaryLoopId(11),
+        width: 0.01,
+        segments: 2,
+        profile: 1.25,
+        bevel_region: RegionId(42),
+        outer_replacement_loop: BoundaryLoopId(13),
+        inner_replacement_loop: BoundaryLoopId(14),
+    };
+    let plate = recipe.definitions.get_mut(&PLATE).expect("plate exists");
+    plate.regions.insert(
+        RegionId(1),
+        SurfaceRegionSpec {
+            id: RegionId(1),
+            name: "front".to_owned(),
+            role: SurfaceRole::PrimarySurface,
+            tags: BTreeSet::new(),
+        },
+    );
+    plate.geometry.operations = vec![cut, bevel];
+    recipe.next_ids.operation = 12;
+    recipe.next_ids.region = 43;
+    recipe.next_ids.boundary_loop = 15;
+
+    let edited = apply_edit_program(
+        &recipe,
+        &AssetEditProgram {
+            label: "duplicate beveled cut".to_owned(),
+            seed: 89,
+            operations: vec![AssetEdit::DuplicateCutOperation {
+                definition: PLATE,
+                source: OperationId(10),
+                operation: OperationId(12),
+                entry_loop: BoundaryLoopId(15),
+                secondary_loop: BoundaryLoopId(16),
+                rim_region: RegionId(43),
+                wall_region: RegionId(44),
+                floor_region: None,
+                center_offset: [0.24, 0.0],
+                group_membership: DuplicateCutGroupMembership::PreserveSource,
+                dependent_bevels: vec![DuplicateBoundaryBevelSpec {
+                    source: OperationId(11),
+                    operation: OperationId(13),
+                    bevel_region: RegionId(45),
+                    outer_replacement_loop: BoundaryLoopId(17),
+                    inner_replacement_loop: BoundaryLoopId(18),
+                }],
+            }],
+        },
+    )
+    .expect("duplicated cut should copy dependent bevel");
+
+    let operations = &edited.definitions[&PLATE].geometry.operations;
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(12),
+            entry_loop: BoundaryLoopId(15),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(13),
+            target_loop: BoundaryLoopId(15),
+            bevel_region: RegionId(45),
+            outer_replacement_loop: BoundaryLoopId(17),
+            inner_replacement_loop: BoundaryLoopId(18),
+            ..
+        }
+    )));
+    assert_eq!(edited.next_ids.operation, 14);
+    assert_eq!(edited.next_ids.region, 46);
+    assert_eq!(edited.next_ids.boundary_loop, 19);
 }
 
 #[test]

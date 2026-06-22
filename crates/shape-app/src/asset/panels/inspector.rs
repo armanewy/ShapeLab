@@ -5,9 +5,9 @@
 use egui::{RichText, Slider};
 
 use crate::asset::{
-    AssetAppCommand, AssetCutControl, AssetCutOperation, AssetLockTarget, AssetParameter,
-    AssetParameterGroup, AssetPart, AssetUiState, OperationId, ParameterId, PartDefinitionId,
-    PartInstanceId,
+    AssetAppCommand, AssetCutControl, AssetCutOperation, AssetEdgeTreatment, AssetLockTarget,
+    AssetParameter, AssetParameterGroup, AssetPart, AssetUiState, OperationId, ParameterId,
+    PartDefinitionId, PartInstanceId,
 };
 
 /// One reflected beginner parameter group.
@@ -114,11 +114,46 @@ pub(crate) fn cut_operation_scalar_command(
 
 /// Emit a cut removal command.
 #[must_use]
-pub(crate) fn cut_operation_remove_command(operation: &AssetCutOperation) -> AssetAppCommand {
-    AssetAppCommand::RemoveCutOperation {
+pub(crate) fn cut_operation_remove_command(
+    operation: &AssetCutOperation,
+    locked: bool,
+) -> Option<AssetAppCommand> {
+    (!locked).then_some(AssetAppCommand::RemoveCutOperation {
         definition: operation.definition,
         operation: operation.operation,
+    })
+}
+
+/// Emit an edge-treatment scalar command only for finite, changed values.
+#[must_use]
+pub(crate) fn edge_treatment_scalar_command(
+    treatment: &AssetEdgeTreatment,
+    control: &AssetCutControl,
+    proposed: f32,
+    locked: bool,
+) -> Option<AssetAppCommand> {
+    if locked || !proposed.is_finite() {
+        return None;
     }
+    let clamped = proposed.clamp(control.minimum, control.maximum);
+    cut_control_value_changed(control, clamped).then_some(AssetAppCommand::SetCutOperationScalar {
+        definition: treatment.definition,
+        operation: treatment.operation,
+        field: control.field.clone(),
+        value: clamped,
+    })
+}
+
+/// Emit an edge-treatment removal command.
+#[must_use]
+pub(crate) fn edge_treatment_remove_command(
+    treatment: &AssetEdgeTreatment,
+    locked: bool,
+) -> Option<AssetAppCommand> {
+    (!locked).then_some(AssetAppCommand::RemoveCutOperation {
+        definition: treatment.definition,
+        operation: treatment.operation,
+    })
 }
 
 /// Emit a scalar command only for unlocked, finite, meaningfully changed values.
@@ -277,8 +312,14 @@ fn render_cut_operations(
                         operation.operation,
                     ));
                 }
-                if operation.selected && ui.button("Remove").clicked() {
-                    commands.push(cut_operation_remove_command(operation));
+                let topology_locked = state.topology_locks.contains(&operation.definition);
+                if operation.selected
+                    && ui
+                        .add_enabled(!topology_locked, egui::Button::new("Remove"))
+                        .on_hover_text("Remove this cut and dependent edge treatments.")
+                        .clicked()
+                {
+                    commands.extend(cut_operation_remove_command(operation, topology_locked));
                 }
             });
 
@@ -286,6 +327,7 @@ fn render_cut_operations(
                 for control in &operation.controls {
                     commands.extend(render_cut_control_row(ui, state, operation, control));
                 }
+                commands.extend(render_edge_treatments(ui, state, operation));
             }
         }
     });
@@ -318,6 +360,82 @@ fn render_cut_control_row(
         if response.changed() {
             commands.extend(cut_operation_scalar_command(
                 operation, control, value, locked,
+            ));
+        }
+        if control.topology_changing {
+            ui.small("Topology")
+                .on_hover_text("This control can change generated topology.");
+        }
+    });
+
+    commands
+}
+
+fn render_edge_treatments(
+    ui: &mut egui::Ui,
+    state: &AssetUiState,
+    operation: &AssetCutOperation,
+) -> Vec<AssetAppCommand> {
+    let mut commands = Vec::new();
+    if operation.edge_treatments.is_empty() {
+        return commands;
+    }
+
+    ui.collapsing("Edge Treatments", |ui| {
+        for treatment in &operation.edge_treatments {
+            ui.horizontal(|ui| {
+                ui.label(&treatment.label).on_hover_text(format!(
+                    "definition.{}.operation.{} consumes loop.{} from operation.{}",
+                    treatment.definition.0,
+                    treatment.operation.0,
+                    treatment.target_loop.0,
+                    treatment.source_operation.0
+                ));
+                let topology_locked = state.topology_locks.contains(&treatment.definition);
+                if ui
+                    .add_enabled(!topology_locked, egui::Button::new("Remove"))
+                    .on_hover_text("Remove this edge treatment.")
+                    .clicked()
+                {
+                    commands.extend(edge_treatment_remove_command(treatment, topology_locked));
+                }
+            });
+            for control in &treatment.controls {
+                commands.extend(render_edge_treatment_control_row(
+                    ui, state, treatment, control,
+                ));
+            }
+        }
+    });
+    commands
+}
+
+fn render_edge_treatment_control_row(
+    ui: &mut egui::Ui,
+    state: &AssetUiState,
+    treatment: &AssetEdgeTreatment,
+    control: &AssetCutControl,
+) -> Vec<AssetAppCommand> {
+    let mut commands = Vec::new();
+    let mut value = control.value;
+    let locked = control.topology_changing && state.topology_locks.contains(&treatment.definition);
+
+    ui.horizontal(|ui| {
+        ui.label(&control.label).on_hover_text(format!(
+            "definition.{}.operation.{}.{}",
+            treatment.definition.0, treatment.operation.0, control.field
+        ));
+        ui.add_space(4.0);
+        ui.monospace(format!("{:.3}", control.value));
+        let response = ui.add_enabled(
+            !locked,
+            Slider::new(&mut value, control.minimum..=control.maximum)
+                .step_by(f64::from(control.step.max(f32::EPSILON)))
+                .show_value(false),
+        );
+        if response.changed() {
+            commands.extend(edge_treatment_scalar_command(
+                treatment, control, value, locked,
             ));
         }
         if control.topology_changing {

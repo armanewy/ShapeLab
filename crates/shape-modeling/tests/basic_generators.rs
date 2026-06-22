@@ -11,8 +11,8 @@ use shape_modeling::generators::basic::{
 };
 use shape_modeling::{GeneratedPart, GeneratorContext};
 use shape_poly::{
-    BoundaryRole, PolygonMesh, build_adjacency, compute_face_normals, compute_split_vertex_normals,
-    triangulate_polygon_mesh, validate_polygon_mesh,
+    BoundaryRole, EdgeClassification, EdgeKey, PolygonMesh, build_adjacency, compute_face_normals,
+    compute_split_vertex_normals, triangulate_polygon_mesh, validate_polygon_mesh,
 };
 
 const EPSILON: f32 = 1.0e-5;
@@ -427,6 +427,116 @@ fn plate_boundary_loop_bevel_consumes_source_and_emits_replacements() {
     assert_boundary_loop(&part.mesh, BoundaryLoopId(31), OperationId(40), false);
     assert_face_operation_present(&part.mesh, OperationId(31));
     assert_face_operation_present(&part.mesh, OperationId(40));
+}
+
+#[test]
+fn plate_boundary_loop_bevel_profile_curves_geometry_and_smooths_band() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let linear = generate_cut_plate_with_operations(
+        vec![
+            cut.clone(),
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(40),
+                target_loop: BoundaryLoopId(9),
+                width: 0.035,
+                segments: 3,
+                profile: 1.0,
+                bevel_region: RegionId(27),
+                outer_replacement_loop: BoundaryLoopId(30),
+                inner_replacement_loop: BoundaryLoopId(31),
+            },
+        ],
+        [3.0, 2.0],
+        0.30,
+    )
+    .expect("linear bevel should generate");
+    let curved = generate_cut_plate_with_operations(
+        vec![
+            cut,
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(40),
+                target_loop: BoundaryLoopId(9),
+                width: 0.035,
+                segments: 3,
+                profile: 2.0,
+                bevel_region: RegionId(27),
+                outer_replacement_loop: BoundaryLoopId(30),
+                inner_replacement_loop: BoundaryLoopId(31),
+            },
+        ],
+        [3.0, 2.0],
+        0.30,
+    )
+    .expect("curved bevel should generate");
+
+    assert_ne!(
+        operation_y_samples(&linear.mesh, OperationId(40)),
+        operation_y_samples(&curved.mesh, OperationId(40)),
+        "profile should change bevel-band depth samples, not only vertex spacing"
+    );
+    let smoothing_groups = operation_smoothing_groups(&curved.mesh, OperationId(40));
+    assert_eq!(
+        smoothing_groups.len(),
+        1,
+        "bevel band should use one smoothing group"
+    );
+    assert!(
+        smoothing_groups.iter().all(Option::is_some),
+        "bevel band faces should carry smoothing metadata"
+    );
+    assert!(
+        bevel_internal_smooth_edge_count(&curved.mesh, OperationId(40), RegionId(27)) > 0,
+        "multi-segment bevel should smooth internal band edges"
+    );
+    assert_boundary_loop(&curved.mesh, BoundaryLoopId(30), OperationId(40), false);
+    assert_boundary_loop(&curved.mesh, BoundaryLoopId(31), OperationId(40), false);
+}
+
+#[test]
+fn plate_boundary_loop_bevel_rejects_hard_only_loop() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(40),
+        target_loop: BoundaryLoopId(9),
+        width: 0.035,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(27),
+        outer_replacement_loop: BoundaryLoopId(30),
+        inner_replacement_loop: BoundaryLoopId(31),
+    };
+
+    assert!(generate_cut_plate_with_operations(vec![cut, bevel], [3.0, 2.0], 0.30).is_err());
 }
 
 #[test]
@@ -1063,6 +1173,7 @@ fn assert_boundary_loop(
     assert!(!edges.is_empty(), "missing boundary loop {boundary_loop:?}");
     assert!(edges.iter().all(|metadata| {
         metadata.boundary_role == BoundaryRole::Feature
+            && metadata.classification == EdgeClassification::Hard
             && metadata.operation == Some(operation)
             && !metadata.seam_candidate
             && metadata.bevel_eligible == bevel_eligible
@@ -1085,6 +1196,57 @@ fn assert_face_operation_present(mesh: &PolygonMesh, operation: OperationId) {
             .any(|metadata| metadata.operation == Some(operation)),
         "expected at least one face sourced by {operation:?}"
     );
+}
+
+fn operation_y_samples(mesh: &PolygonMesh, operation: OperationId) -> Vec<i64> {
+    let mut samples = BTreeSet::new();
+    for (face, metadata) in mesh.faces.iter().zip(&mesh.face_metadata) {
+        if metadata.operation == Some(operation) {
+            for vertex in &face.vertices {
+                samples.insert(quantize(mesh.positions[*vertex as usize][1]));
+            }
+        }
+    }
+    samples.into_iter().collect()
+}
+
+fn operation_smoothing_groups(mesh: &PolygonMesh, operation: OperationId) -> BTreeSet<Option<u32>> {
+    mesh.face_metadata
+        .iter()
+        .filter(|metadata| metadata.operation == Some(operation))
+        .map(|metadata| metadata.smoothing_group)
+        .collect()
+}
+
+fn bevel_internal_smooth_edge_count(
+    mesh: &PolygonMesh,
+    operation: OperationId,
+    region: RegionId,
+) -> usize {
+    let mut edge_faces: BTreeMap<EdgeKey, Vec<usize>> = BTreeMap::new();
+    for (face_index, face) in mesh.faces.iter().enumerate() {
+        for index in 0..face.vertices.len() {
+            let next = (index + 1) % face.vertices.len();
+            edge_faces
+                .entry(EdgeKey::new(face.vertices[index], face.vertices[next]))
+                .or_default()
+                .push(face_index);
+        }
+    }
+    edge_faces
+        .into_iter()
+        .filter(|(edge, faces)| {
+            faces.len() == 2
+                && faces.iter().all(|face| {
+                    let metadata = &mesh.face_metadata[*face];
+                    metadata.operation == Some(operation) && metadata.region == Some(region)
+                })
+                && mesh.edge_metadata.get(edge).is_some_and(|metadata| {
+                    metadata.boundary_role == BoundaryRole::Smooth
+                        && metadata.classification == EdgeClassification::Smooth
+                })
+        })
+        .count()
 }
 
 fn assert_socket_origin(part: &GeneratedPart, socket: SocketId, expected: [f32; 3]) {

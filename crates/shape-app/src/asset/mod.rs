@@ -5,7 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) use shape_asset::{
-    OperationId, ParameterId, PartDefinitionId, PartInstanceId, RevisionId as AssetRevisionId,
+    BoundaryLoopId, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
+    RevisionId as AssetRevisionId,
 };
 
 pub(crate) mod app;
@@ -160,7 +161,20 @@ pub(crate) struct AssetCutOperation {
     pub label: String,
     pub kind: AssetCutOperationKind,
     pub controls: Vec<AssetCutControl>,
+    pub edge_treatments: Vec<AssetEdgeTreatment>,
     pub selected: bool,
+}
+
+/// Reflected boundary treatment that consumes a cut boundary loop.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AssetEdgeTreatment {
+    pub definition: PartDefinitionId,
+    pub part: PartInstanceId,
+    pub source_operation: OperationId,
+    pub operation: OperationId,
+    pub target_loop: BoundaryLoopId,
+    pub label: String,
+    pub controls: Vec<AssetCutControl>,
 }
 
 /// Beginner-facing cut operation kind.

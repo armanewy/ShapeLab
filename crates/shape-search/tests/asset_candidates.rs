@@ -325,6 +325,50 @@ fn grouped_cut_recipe() -> AssetRecipe {
     recipe
 }
 
+fn beveled_cut_recipe() -> AssetRecipe {
+    let mut recipe = rich_recipe();
+    let definition = recipe
+        .definitions
+        .get_mut(&PartDefinitionId(7))
+        .expect("cut panel definition should exist");
+    definition.geometry.operations = vec![
+        ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(5),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(1),
+            exit_loop: BoundaryLoopId(2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(4),
+            wall_region: RegionId(5),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        },
+        ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(6),
+            target_loop: BoundaryLoopId(1),
+            width: 0.01,
+            segments: 2,
+            profile: 1.0,
+            bevel_region: RegionId(6),
+            outer_replacement_loop: BoundaryLoopId(3),
+            inner_replacement_loop: BoundaryLoopId(4),
+        },
+    ];
+    definition.regions.insert(
+        RegionId(6),
+        region(6, "entry bevel", SurfaceRole::BevelBand),
+    );
+    recipe.next_ids.operation = 7;
+    recipe.next_ids.region = 7;
+    recipe.next_ids.boundary_loop = 5;
+    assert!(validate_asset_recipe(&recipe).is_valid());
+    recipe
+}
+
 fn rectangular_cut(
     operation: OperationId,
     center: [f32; 2],
@@ -548,6 +592,7 @@ fn explore_generates_structural_cut_duplication() {
                 floor_region,
                 center_offset,
                 group_membership: _,
+                dependent_bevels: _,
             } => Some((
                 *definition,
                 *source,
@@ -572,6 +617,79 @@ fn explore_generates_structural_cut_duplication() {
     assert!(duplicate_cut.6.0 > duplicate_cut.5.0);
     assert_eq!(duplicate_cut.7, None);
     assert_ne!(duplicate_cut.8, [0.0, 0.0]);
+}
+
+#[test]
+fn explore_duplicate_cut_preserves_dependent_boundary_bevel() {
+    let recipe = beveled_cut_recipe();
+    let mut search_request = request(37, AssetCandidateMode::Explore);
+    search_request.proposal_count = 192;
+    search_request.result_count = 64;
+    let output =
+        generate_asset_candidates(&recipe, &search_request).expect("candidates should generate");
+
+    let duplicate = output
+        .candidates
+        .iter()
+        .flat_map(|candidate| {
+            candidate
+                .program
+                .operations
+                .iter()
+                .map(move |edit| (candidate, edit))
+        })
+        .find_map(|(candidate, edit)| match edit {
+            AssetEdit::DuplicateCutOperation {
+                operation,
+                entry_loop,
+                dependent_bevels,
+                ..
+            } if !dependent_bevels.is_empty() => Some((
+                candidate,
+                *operation,
+                *entry_loop,
+                dependent_bevels[0].clone(),
+            )),
+            _ => None,
+        })
+        .expect("Explore should duplicate dependent bevels with copied cuts");
+
+    let (candidate, duplicate_cut, duplicate_entry_loop, copied_bevel) = duplicate;
+    assert_ne!(duplicate_cut, copied_bevel.operation);
+    assert_eq!(copied_bevel.source, OperationId(6));
+    let operations = &candidate.recipe.definitions[&PartDefinitionId(7)]
+        .geometry
+        .operations;
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        ModelingOperationSpec::BevelBoundaryLoop {
+            operation,
+            target_loop,
+            bevel_region,
+            outer_replacement_loop,
+            inner_replacement_loop,
+            ..
+        } if *operation == copied_bevel.operation
+            && *target_loop == duplicate_entry_loop
+            && *bevel_region == copied_bevel.bevel_region
+            && *outer_replacement_loop == copied_bevel.outer_replacement_loop
+            && *inner_replacement_loop == copied_bevel.inner_replacement_loop
+    )));
+}
+
+#[test]
+fn beveled_cut_duplicate_search_is_deterministic() {
+    let recipe = beveled_cut_recipe();
+    let mut search_request = request(41, AssetCandidateMode::Explore);
+    search_request.proposal_count = 192;
+    search_request.result_count = 64;
+
+    let first = generate_asset_candidates(&recipe, &search_request)
+        .expect("first candidate generation should succeed");
+    let second = generate_asset_candidates(&recipe, &search_request)
+        .expect("second candidate generation should succeed");
+
+    assert_eq!(first, second);
 }
 
 #[test]

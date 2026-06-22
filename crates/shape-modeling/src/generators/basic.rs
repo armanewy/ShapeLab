@@ -28,6 +28,8 @@ const PLATE_FRONT_REGION: RegionId = RegionId(1);
 const PLATE_BACK_REGION: RegionId = RegionId(2);
 const PLATE_SIDE_REGION: RegionId = RegionId(3);
 const PLATE_BEVEL_REGION: RegionId = RegionId(4);
+const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
+const BOUNDARY_BEVEL_PROFILE_MAX: f32 = 8.0;
 
 const SOCKET_TOP: SocketId = SocketId(1);
 const SOCKET_BOTTOM: SocketId = SocketId(2);
@@ -1579,7 +1581,7 @@ impl BoundaryLoopBevelPlan {
             target_loop: *target_loop,
             width: finite_positive(*width, "bevel_boundary_loop.width")?,
             segments: (*segments).max(1),
-            profile: finite_positive(*profile, "bevel_boundary_loop.profile")?,
+            profile: boundary_bevel_profile(*profile)?,
             bevel_region: *bevel_region,
             outer_replacement_loop: *outer_replacement_loop,
             inner_replacement_loop: *inner_replacement_loop,
@@ -1817,6 +1819,12 @@ fn validate_plate_loop_bevel(
     entry_loop: bool,
     thickness: f32,
 ) -> Result<(), ModelingError> {
+    if !matches!(cut.edge_treatment, CutEdgeTreatment::BevelEligible) {
+        return Err(ModelingError::UnsupportedOperation {
+            operation: bevel.operation,
+            reason: "BevelBoundaryLoop target loop is authored as hard-only".to_owned(),
+        });
+    }
     if bevel.width >= cut.rim_width - EPSILON {
         return Err(ModelingError::UnsupportedOperation {
             operation: bevel.operation,
@@ -2702,6 +2710,50 @@ fn add_matched_ring_band(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn add_boundary_bevel_ring_band(
+    builder: &mut MeshBuilder,
+    outer_ring: &[u32],
+    inner_ring: &[u32],
+    outer_points: &[[f32; 2]],
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+    role: SurfaceRole,
+) {
+    let smoothing_group = Some(boundary_bevel_smoothing_group(operation));
+    for index in 0..outer_ring.len() {
+        let next = (index + 1) % outer_ring.len();
+        add_oriented_face(
+            builder,
+            vec![
+                outer_ring[index],
+                outer_ring[next],
+                inner_ring[next],
+                inner_ring[index],
+            ],
+            desired_normal,
+            cut_metadata(context, region, role.clone(), operation, smoothing_group),
+        );
+        let side_a = outer_points[index];
+        let side_b = outer_points[next];
+        if (side_a[0] - side_b[0]).abs() > EPSILON && (side_a[1] - side_b[1]).abs() > EPSILON {
+            let midpoint = [
+                (inner_points[index][0] + inner_points[next][0]) * 0.5,
+                0.0,
+                (inner_points[index][1] + inner_points[next][1]) * 0.5,
+            ];
+            let _ = midpoint;
+        }
+    }
+}
+
+fn boundary_bevel_smoothing_group(operation: OperationId) -> u32 {
+    10_000 + (operation.0 % 1_000_000) as u32
+}
+
+#[allow(clippy::too_many_arguments)]
 fn add_boundary_loop_bevel_band(
     builder: &mut MeshBuilder,
     outer_y: f32,
@@ -2750,13 +2802,13 @@ fn add_boundary_loop_bevel_band_from_outer(
     }
     let mut previous_points = outer_points.to_vec();
     let mut previous_ring = outer_ring.clone();
-    let profile = bevel.profile.clamp(0.05, 8.0);
     for step in 1..=bevel.segments {
-        let t = (step as f32 / bevel.segments as f32).powf(profile);
-        let current_points = lerp_loop_points(outer_points, inner_points, t);
-        let current_y = lerp(outer_y, inner_y, t);
+        let radial_t = step as f32 / bevel.segments as f32;
+        let depth_t = boundary_bevel_depth_t(radial_t, bevel.profile);
+        let current_points = lerp_loop_points(outer_points, inner_points, radial_t);
+        let current_y = lerp(outer_y, inner_y, depth_t);
         let current_ring = builder.add_plate_ring(current_y, &current_points)?;
-        add_matched_ring_band(
+        add_boundary_bevel_ring_band(
             builder,
             &previous_ring,
             &current_ring,
@@ -2772,6 +2824,32 @@ fn add_boundary_loop_bevel_band_from_outer(
         previous_ring = current_ring;
     }
     Ok((outer_ring, previous_ring))
+}
+
+fn boundary_bevel_profile(profile: f32) -> Result<f32, ModelingError> {
+    if !profile.is_finite()
+        || !(BOUNDARY_BEVEL_PROFILE_MIN..=BOUNDARY_BEVEL_PROFILE_MAX).contains(&profile)
+    {
+        return Err(ModelingError::InvalidInput(format!(
+            "bevel_boundary_loop.profile must be finite and between {BOUNDARY_BEVEL_PROFILE_MIN:.3} and {BOUNDARY_BEVEL_PROFILE_MAX:.3}"
+        )));
+    }
+    Ok(profile)
+}
+
+fn boundary_bevel_depth_t(radial_t: f32, profile: f32) -> f32 {
+    let t = radial_t.clamp(0.0, 1.0);
+    if t <= 0.0 || t >= 1.0 {
+        return t;
+    }
+    let forward = t.powf(profile);
+    let reverse = (1.0 - t).powf(profile);
+    let denominator = forward + reverse;
+    if denominator <= EPSILON || !denominator.is_finite() {
+        t
+    } else {
+        forward / denominator
+    }
 }
 
 fn lerp_loop_points(from: &[[f32; 2]], to: &[[f32; 2]], t: f32) -> Vec<[f32; 2]> {

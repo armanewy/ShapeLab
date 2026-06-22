@@ -607,9 +607,12 @@ impl AssetAppState {
         if !value.is_finite() {
             return Err(AssetAppStateError::NonFiniteOperationScalar(operation));
         }
-        self.selected_cut_operation = Some(operation);
+        if operation_is_cut_in_definition(&self.recipe, definition, operation) {
+            self.selected_cut_operation = Some(operation);
+        }
+        let label = operation_edit_label(&self.recipe, definition, operation, OperationEdit::Set);
         self.apply_edit(
-            "Set cut operation",
+            label,
             vec![AssetEdit::SetOperationScalar {
                 definition,
                 operation,
@@ -625,12 +628,14 @@ impl AssetAppState {
         definition: PartDefinitionId,
         operation: OperationId,
     ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        let label =
+            operation_edit_label(&self.recipe, definition, operation, OperationEdit::Remove);
         self.apply_edit(
-            "Remove cut operation",
+            label,
             vec![AssetEdit::RemoveModelingOperation {
                 definition,
                 operation,
-                policy: OperationRemovalPolicy::CascadeOwnedMetadata,
+                policy: OperationRemovalPolicy::CascadeDependentOperations,
             }],
             true,
         )
@@ -1280,6 +1285,59 @@ fn cut_operation_belongs_to_part(
                 candidate.operation_id() == operation && operation_is_cut(candidate)
             })
         })
+}
+
+fn operation_is_cut_in_definition(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+) -> bool {
+    recipe
+        .definitions
+        .get(&definition)
+        .is_some_and(|definition| {
+            definition.geometry.operations.iter().any(|candidate| {
+                candidate.operation_id() == operation && operation_is_cut(candidate)
+            })
+        })
+}
+
+#[derive(Debug, Copy, Clone)]
+enum OperationEdit {
+    Set,
+    Remove,
+}
+
+fn operation_edit_label(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    edit: OperationEdit,
+) -> &'static str {
+    let Some(operation) = recipe.definitions.get(&definition).and_then(|definition| {
+        definition
+            .geometry
+            .operations
+            .iter()
+            .find(|candidate| candidate.operation_id() == operation)
+    }) else {
+        return match edit {
+            OperationEdit::Set => "Set modeling operation",
+            OperationEdit::Remove => "Remove modeling operation",
+        };
+    };
+    match (edit, operation) {
+        (OperationEdit::Set, operation) if operation_is_cut(operation) => "Set cut operation",
+        (OperationEdit::Remove, operation) if operation_is_cut(operation) => "Remove cut operation",
+        (OperationEdit::Set, ModelingOperationSpec::BevelBoundaryLoop { .. }) => {
+            "Set edge treatment"
+        }
+        (OperationEdit::Remove, ModelingOperationSpec::BevelBoundaryLoop { .. }) => {
+            "Remove edge treatment"
+        }
+        (OperationEdit::Set, _) => "Set modeling operation",
+        (OperationEdit::Remove, _) => "Remove modeling operation",
+    }
 }
 
 fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {

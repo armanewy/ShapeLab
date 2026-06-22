@@ -11,10 +11,10 @@ use asset::panels::{candidate_gallery, history, inspector, part_tree};
 use asset::viewport as asset_viewport;
 use asset::{
     AssetAppCommand, AssetCandidate, AssetCandidateEdit, AssetCandidateId, AssetCutControl,
-    AssetCutOperation, AssetCutOperationKind, AssetHistoryRevision, AssetJobId, AssetJobProgress,
-    AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart, AssetRevisionId,
-    AssetUiJobKind, AssetUiState, AssetValidationState, GeneratedPartKind, OperationId,
-    ParameterId, PartDefinitionId, PartInstanceId,
+    AssetCutOperation, AssetCutOperationKind, AssetEdgeTreatment, AssetHistoryRevision, AssetJobId,
+    AssetJobProgress, AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart,
+    AssetRevisionId, AssetUiJobKind, AssetUiState, AssetValidationState, BoundaryLoopId,
+    GeneratedPartKind, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
 };
 use shape_render::OrbitCamera;
 use viewport::ViewportAction;
@@ -277,6 +277,8 @@ fn lock_behavior_blocks_edits_and_deduplicates_lock_commands() {
 fn cut_operation_helpers_emit_descriptor_free_commands() {
     let operation = cut_operation();
     let control = operation.controls[0].clone();
+    let treatment = operation.edge_treatments[0].clone();
+    let treatment_control = treatment.controls[0].clone();
 
     assert_eq!(
         inspector::cut_operation_select_command(None, operation.operation),
@@ -311,11 +313,48 @@ fn cut_operation_helpers_emit_descriptor_free_commands() {
         None
     );
     assert_eq!(
-        inspector::cut_operation_remove_command(&operation),
-        AssetAppCommand::RemoveCutOperation {
+        inspector::cut_operation_remove_command(&operation, false),
+        Some(AssetAppCommand::RemoveCutOperation {
             definition: operation.definition,
             operation: operation.operation,
-        }
+        })
+    );
+    assert_eq!(
+        inspector::cut_operation_remove_command(&operation, true),
+        None
+    );
+    assert_eq!(
+        inspector::edge_treatment_scalar_command(&treatment, &treatment_control, 0.025, false),
+        Some(AssetAppCommand::SetCutOperationScalar {
+            definition: treatment.definition,
+            operation: treatment.operation,
+            field: "bevel_boundary_loop.width".to_owned(),
+            value: 0.025,
+        })
+    );
+    assert_eq!(
+        inspector::edge_treatment_scalar_command(&treatment, &treatment_control, 3.5, false),
+        Some(AssetAppCommand::SetCutOperationScalar {
+            definition: treatment.definition,
+            operation: treatment.operation,
+            field: "bevel_boundary_loop.width".to_owned(),
+            value: 0.08,
+        })
+    );
+    assert_eq!(
+        inspector::edge_treatment_scalar_command(&treatment, &treatment_control, 0.025, true),
+        None
+    );
+    assert_eq!(
+        inspector::edge_treatment_remove_command(&treatment, false),
+        Some(AssetAppCommand::RemoveCutOperation {
+            definition: treatment.definition,
+            operation: treatment.operation,
+        })
+    );
+    assert_eq!(
+        inspector::edge_treatment_remove_command(&treatment, true),
+        None
     );
 }
 
@@ -429,6 +468,23 @@ fn cut_operation() -> AssetCutOperation {
             maximum: 2.0,
             step: 0.005,
             topology_changing: false,
+        }],
+        edge_treatments: vec![AssetEdgeTreatment {
+            definition: PartDefinitionId(2),
+            part: PartInstanceId(2),
+            source_operation: OperationId(42),
+            operation: OperationId(43),
+            target_loop: BoundaryLoopId(9),
+            label: "Entry edge: Rounded".to_owned(),
+            controls: vec![AssetCutControl {
+                field: "bevel_boundary_loop.width".to_owned(),
+                label: "Width".to_owned(),
+                value: 0.02,
+                minimum: 0.001,
+                maximum: 0.08,
+                step: 0.001,
+                topology_changing: false,
+            }],
         }],
         selected: true,
     }

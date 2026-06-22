@@ -9,10 +9,10 @@ use shape_asset::{
 
 use crate::asset::{
     AssetAppState, AssetCandidate, AssetCandidateEdit, AssetCutControl, AssetCutOperation,
-    AssetCutOperationKind, AssetHistoryRevision, AssetJobProgress, AssetParameter,
-    AssetParameterGroup, AssetPart, AssetUiJobKind, AssetUiState, AssetValidationMessage,
-    AssetValidationState, GeneratedPartKind, OperationId, ParameterId, PartDefinitionId,
-    PartInstanceId,
+    AssetCutOperationKind, AssetEdgeTreatment, AssetHistoryRevision, AssetJobProgress,
+    AssetParameter, AssetParameterGroup, AssetPart, AssetUiJobKind, AssetUiState,
+    AssetValidationMessage, AssetValidationState, BoundaryLoopId, GeneratedPartKind, OperationId,
+    ParameterId, PartDefinitionId, PartInstanceId,
 };
 use shape_search::asset::AssetCandidateEditKind;
 
@@ -107,6 +107,7 @@ fn cut_operations_for_recipe(
                 definition.id,
                 part_id,
                 operation,
+                &definition.geometry.operations,
                 selected_operation,
             )
         })
@@ -118,12 +119,13 @@ fn cut_operation_for_spec(
     definition: PartDefinitionId,
     part: PartInstanceId,
     operation: &ModelingOperationSpec,
+    operations: &[ModelingOperationSpec],
     selected_operation: Option<OperationId>,
 ) -> Option<AssetCutOperation> {
     let operation_id = operation.operation_id();
     let host = cut_host_bounds(recipe, definition);
     let topology_locked = recipe.topology_locks.contains(&definition);
-    let (kind, controls) = match operation {
+    let (kind, controls, loop_controls) = match operation {
         ModelingOperationSpec::RecessedPanelCut {
             center,
             size,
@@ -131,9 +133,12 @@ fn cut_operation_for_spec(
             corner_radius,
             rim_width,
             corner_segments,
+            entry_loop,
+            floor_loop,
             ..
         } => {
             let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
+            let bevel_limit = rect_loop_bevel_limit(*size, *rim_width, *depth);
             (
                 AssetCutOperationKind::RecessedPanel,
                 vec![
@@ -218,6 +223,10 @@ fn cut_operation_for_spec(
                         true,
                     ),
                 ],
+                vec![
+                    (*entry_loop, "Entry edge", bevel_limit),
+                    (*floor_loop, "Floor edge", bevel_limit),
+                ],
             )
         }
         ModelingOperationSpec::RectangularThroughCut {
@@ -226,9 +235,12 @@ fn cut_operation_for_spec(
             corner_radius,
             rim_width,
             corner_segments,
+            entry_loop,
+            exit_loop,
             ..
         } => {
             let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
+            let bevel_limit = rect_through_loop_bevel_limit(host, *size, *rim_width);
             (
                 AssetCutOperationKind::RectangularOpening,
                 vec![
@@ -304,6 +316,10 @@ fn cut_operation_for_spec(
                         true,
                     ),
                 ],
+                vec![
+                    (*entry_loop, "Entry edge", bevel_limit),
+                    (*exit_loop, "Exit edge", bevel_limit),
+                ],
             )
         }
         ModelingOperationSpec::CircularThroughCut {
@@ -311,9 +327,12 @@ fn cut_operation_for_spec(
             radius,
             radial_segments,
             rim_width,
+            entry_loop,
+            exit_loop,
             ..
         } => {
             let ranges = circular_cut_ranges(host, *center, *radius, *rim_width);
+            let bevel_limit = circular_through_loop_bevel_limit(host, *radius, *rim_width);
             (
                 AssetCutOperationKind::CircularOpening,
                 vec![
@@ -371,10 +390,22 @@ fn cut_operation_for_spec(
                         true,
                     ),
                 ],
+                vec![
+                    (*entry_loop, "Entry edge", bevel_limit),
+                    (*exit_loop, "Exit edge", bevel_limit),
+                ],
             )
         }
         _ => return None,
     };
+    let edge_treatments = edge_treatments_for_cut(
+        definition,
+        part,
+        operation_id,
+        operations,
+        &loop_controls,
+        topology_locked,
+    );
 
     Some(AssetCutOperation {
         definition,
@@ -383,8 +414,121 @@ fn cut_operation_for_spec(
         label: format!("{} {}", kind.label(), operation_id.0),
         kind,
         controls,
+        edge_treatments,
         selected: selected_operation == Some(operation_id),
     })
+}
+
+const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
+const BOUNDARY_BEVEL_PROFILE_MAX: f32 = 8.0;
+
+fn edge_treatments_for_cut(
+    definition: PartDefinitionId,
+    part: PartInstanceId,
+    source_operation: OperationId,
+    operations: &[ModelingOperationSpec],
+    loop_controls: &[(BoundaryLoopId, &'static str, f32)],
+    topology_locked: bool,
+) -> Vec<AssetEdgeTreatment> {
+    operations
+        .iter()
+        .filter_map(|operation| {
+            let ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+                ..
+            } = operation
+            else {
+                return None;
+            };
+            let (_, label, width_limit) = loop_controls
+                .iter()
+                .find(|(loop_id, _, _)| loop_id == target_loop)?;
+            Some(AssetEdgeTreatment {
+                definition,
+                part,
+                source_operation,
+                operation: *operation,
+                target_loop: *target_loop,
+                label: format!("{label}: Rounded"),
+                controls: vec![
+                    cut_control(
+                        "bevel_boundary_loop.width",
+                        "Width",
+                        *width,
+                        0.001,
+                        bevel_width_control_max(*width, *width_limit),
+                        0.001,
+                        false,
+                    ),
+                    cut_control(
+                        "bevel_boundary_loop.segments",
+                        "Segments",
+                        *segments as f32,
+                        if topology_locked {
+                            *segments as f32
+                        } else {
+                            1.0
+                        },
+                        if topology_locked {
+                            *segments as f32
+                        } else {
+                            8.0
+                        },
+                        1.0,
+                        true,
+                    ),
+                    cut_control(
+                        "bevel_boundary_loop.profile",
+                        "Profile",
+                        *profile,
+                        BOUNDARY_BEVEL_PROFILE_MIN,
+                        BOUNDARY_BEVEL_PROFILE_MAX,
+                        0.05,
+                        false,
+                    ),
+                ],
+            })
+        })
+        .collect()
+}
+
+fn bevel_width_control_max(current: f32, safe_limit: f32) -> f32 {
+    safe_limit.max(current).max(0.001)
+}
+
+fn rect_loop_bevel_limit(size: [f32; 2], rim_width: f32, depth: f32) -> f32 {
+    (rim_width.abs().min(depth.abs()).min(rect_loop_radius(size)) * 0.9).max(0.001)
+}
+
+fn rect_through_loop_bevel_limit(
+    host: Option<CutHostBounds>,
+    size: [f32; 2],
+    rim_width: f32,
+) -> f32 {
+    let thickness_limit = host.map_or(1.0, |host| host.thickness.abs() * 0.45);
+    (rim_width
+        .abs()
+        .min(rect_loop_radius(size))
+        .min(thickness_limit)
+        * 0.9)
+        .max(0.001)
+}
+
+fn circular_through_loop_bevel_limit(
+    host: Option<CutHostBounds>,
+    radius: f32,
+    rim_width: f32,
+) -> f32 {
+    let thickness_limit = host.map_or(1.0, |host| host.thickness.abs() * 0.45);
+    (rim_width.abs().min(radius.abs() * 0.5).min(thickness_limit) * 0.9).max(0.001)
+}
+
+fn rect_loop_radius(size: [f32; 2]) -> f32 {
+    size[0].abs().min(size[1].abs()) * 0.25
 }
 
 #[derive(Debug, Copy, Clone)]
