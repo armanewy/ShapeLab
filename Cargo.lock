@@ -3757,6 +3757,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "shape-family-compile"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shape-asset",
+ "shape-caesar-assets",
+ "shape-compile",
+ "shape-family",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "shape-field"
 version = "0.1.0"
 dependencies = [

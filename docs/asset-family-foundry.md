@@ -28,6 +28,8 @@ Family documents contain:
 
 The family layer must not contain Roman, sci-fi, furniture, concrete marketplace policy, or game-balance assumptions.
 
+Family schemas are descriptive contracts. They do not directly contain Shape Lab recipe fragments or generator code.
+
 ## Style Kit
 
 A style kit provides concrete shape language for one or more compatible families.
@@ -53,6 +55,43 @@ Style kits contain:
 
 Materials can later attach to this layer, but geometry style exists before texturing.
 
+Style kits are also descriptive contracts. A `PartPrototype` names a compatible role and expected operation vocabulary; it is not itself executable geometry.
+
+## Executable Bindings
+
+Executable family compilation lives in `shape-family-compile`, not in `shape-family`.
+
+That crate binds:
+
+- an `AssetFamilySchema`
+- a compatible `StyleKit`
+- family-owned default recipe fragments
+- style-owned prototype recipe fragments
+- simple semantic parameter bindings
+- a concrete `FamilyInstantiationRequest`
+
+The compiler then validates the family/style pair, resolves required role providers, deterministically remaps fragment IDs into one `AssetRecipe`, applies semantic controls to concrete scalar paths or part presence, validates the recipe, compiles geometry, and returns an instantiation report.
+
+The first binding language is intentionally small:
+
+- direct scalar
+- scale plus offset
+- ratio into range
+- integer count
+- choice-to-prototype
+- toggle-to-part-presence
+
+This avoids embedding an unrestricted expression language in pack data while still proving:
+
+```text
+bridge family
++ Roman timber style
++ span_length = 4
+-> concrete AssetRecipe
+```
+
+Cross-domain acceptance tests currently cover bridge plus Roman timber, crate plus sci-fi industrial, and lamp plus stylized furniture bindings.
+
 ## Runtime Or Export Profile
 
 Runtime and export profiles describe destination-specific metadata. This is optional and adapter-owned.
@@ -71,6 +110,7 @@ A decorative lamp should not carry walkable-surface metadata unless a runtime pr
 - Core crates do not contain Roman or Caesar-specific concepts.
 - Caesar-authored assets live in `shape-caesar-assets` and future content-pack locations.
 - Game/runtime contracts live in adapter-oriented crates such as `shape-gamekit`.
+- Executable recipe fragments and semantic parameter mappings live in `shape-family-compile` or content-pack binding crates, not in `shape-family`.
 - Adding a new family should normally be data and recipes, not engine changes.
 - A new modeling operator should serve at least two unrelated families before it is promoted into the general engine.
 - Gameplay balance remains outside Shape Lab.

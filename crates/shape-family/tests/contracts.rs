@@ -1,11 +1,12 @@
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, DetailModule, ExaggerationPolicy, ExportRequirement,
-    FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, ParameterRange, PartPrototype,
-    PartRole, ProfileLanguage, RepetitionPolicy, RoleMultiplicity, RoleProportion,
+    FamilyParameterKind, FamilyParameterSlot, GeometricConstraint, LengthUnit, LengthValue,
+    NormalizedBevelProfile, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
+    ReadabilityThreshold, RepetitionPolicy, RoleMultiplicity, RoleProportion, RoleProvision,
     RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode,
     VariantRule, validate_asset_family_schema, validate_family_style_compatibility,
-    validate_style_kit,
+    validate_family_style_completeness, validate_style_kit,
 };
 
 fn bridge_family(style_kit: &str) -> AssetFamilySchema {
@@ -68,7 +69,9 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                 id: "span_length".to_owned(),
                 label: "Span Length".to_owned(),
                 target_role: Some("span".to_owned()),
-                kind: FamilyParameterKind::Length,
+                kind: FamilyParameterKind::Length {
+                    unit: LengthUnit::Meters,
+                },
                 range: Some(ParameterRange {
                     minimum: 0.5,
                     maximum: 8.0,
@@ -142,6 +145,11 @@ fn role(
         display_name: id.replace('_', " "),
         required,
         multiplicity,
+        provision: if required {
+            RoleProvision::StyleRequired
+        } else {
+            RoleProvision::FamilyOrStyle
+        },
         semantic_tags: semantic_tags.iter().map(|tag| (*tag).to_owned()).collect(),
     }
 }
@@ -155,19 +163,30 @@ fn industrial_style_kit() -> StyleKit {
         proportions: vec![
             RoleProportion {
                 role: "support".to_owned(),
-                preferred_scale: [0.35, 0.35, 1.8],
+                preferred_scale: [
+                    LengthValue::FamilyUnits(0.35),
+                    LengthValue::FamilyUnits(0.35),
+                    LengthValue::FamilyUnits(1.8),
+                ],
                 taper: 0.0,
             },
             RoleProportion {
                 role: "span".to_owned(),
-                preferred_scale: [3.0, 0.8, 0.25],
+                preferred_scale: [
+                    LengthValue::FamilyUnits(3.0),
+                    LengthValue::FamilyUnits(0.8),
+                    LengthValue::FamilyUnits(0.25),
+                ],
                 taper: 0.0,
             },
         ],
         bevel_policy: BevelPolicy {
-            width_ratio: 0.04,
+            width: LengthValue::RelativeToRole {
+                role: "span".to_owned(),
+                ratio: 0.04,
+            },
             segments: 2,
-            profile: 0.5,
+            profile: NormalizedBevelProfile { normalized: 0.5 },
         },
         profile_language: ProfileLanguage {
             curve_family: "straight".to_owned(),
@@ -189,17 +208,27 @@ fn industrial_style_kit() -> StyleKit {
                 operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Cut],
                 style_tags: vec!["surface".to_owned()],
             },
+            PartPrototype {
+                id: "box_span".to_owned(),
+                display_name: "Box span".to_owned(),
+                role: "span".to_owned(),
+                operation_tags: vec![AllowedOperationKind::Primitive],
+                style_tags: vec!["structural".to_owned()],
+            },
         ],
         detail_modules: vec![DetailModule {
             id: "bolt_row".to_owned(),
             display_name: "Bolt row".to_owned(),
             target_roles: vec!["deck".to_owned(), "connector".to_owned()],
-            minimum_feature_size: 24,
+            minimum_readability: ReadabilityThreshold {
+                pixels: 24,
+                camera_profile: "oblique".to_owned(),
+            },
             tags: vec!["fastener".to_owned()],
         }],
         repetition: RepetitionPolicy {
             density: 0.65,
-            preferred_spacing: 0.25,
+            preferred_spacing: LengthValue::FamilyUnits(0.25),
             maximum_default_count: 12,
         },
         symmetry: SymmetryPolicy {
@@ -276,6 +305,61 @@ fn invalid_parameter_range_is_rejected() {
 }
 
 #[test]
+fn parameter_kind_semantics_are_rejected() {
+    let mut family = bridge_family("industrial_steel");
+    family.parameter_slots[1].range = Some(ParameterRange {
+        minimum: 2.5,
+        maximum: 16.0,
+        step: 1.0,
+    });
+    family.parameter_slots.push(FamilyParameterSlot {
+        id: "has_rails".to_owned(),
+        label: "Has Rails".to_owned(),
+        target_role: Some("deck".to_owned()),
+        kind: FamilyParameterKind::Toggle,
+        range: Some(ParameterRange {
+            minimum: 0.0,
+            maximum: 1.0,
+            step: 1.0,
+        }),
+        topology_changing: true,
+    });
+
+    let report = validate_asset_family_schema(&family);
+    let codes = issue_codes(&report);
+
+    assert!(codes.contains(&"non_integral_count_parameter_range"));
+    assert!(codes.contains(&"toggle_parameter_has_range"));
+}
+
+#[test]
+fn semantic_parameter_ranges_and_relative_roles_are_rejected() {
+    let mut family = bridge_family("industrial_steel");
+    family.parameter_slots[0].kind = FamilyParameterKind::Length {
+        unit: LengthUnit::RelativeToRole {
+            role: "missing".to_owned(),
+        },
+    };
+    family.parameter_slots[0].range = Some(ParameterRange {
+        minimum: -1.0,
+        maximum: 0.0,
+        step: 0.25,
+    });
+    family.parameter_slots[1].range = Some(ParameterRange {
+        minimum: -2.0,
+        maximum: 4.0,
+        step: 1.0,
+    });
+
+    let report = validate_asset_family_schema(&family);
+    let codes = issue_codes(&report);
+
+    assert!(codes.contains(&"unknown_relative_length_unit_role"));
+    assert!(codes.contains(&"non_positive_length_parameter_range"));
+    assert!(codes.contains(&"non_positive_count_parameter_range"));
+}
+
+#[test]
 fn contradictory_requiredness_is_rejected() {
     let mut family = bridge_family("industrial_steel");
     family.part_roles[3].required = true;
@@ -288,11 +372,50 @@ fn contradictory_requiredness_is_rejected() {
 #[test]
 fn unstable_identifier_format_is_rejected() {
     let mut family = bridge_family("industrial_steel");
-    family.part_roles[0].id = "support ".to_owned();
+    family.part_roles[0].id = "..".to_owned();
 
     let report = validate_asset_family_schema(&family);
 
     assert!(issue_codes(&report).contains(&"invalid_part_role_id"));
+}
+
+#[test]
+fn duplicate_set_like_fields_are_rejected() {
+    let mut family = bridge_family("industrial_steel");
+    family
+        .allowed_operations
+        .push(AllowedOperationKind::Primitive);
+    family.part_roles[0]
+        .semantic_tags
+        .push("support".to_owned());
+    family.tags.push("modular".to_owned());
+    family.constraints[0].roles.push("support".to_owned());
+    family.variant_rules[0]
+        .editable_roles
+        .push("span".to_owned());
+
+    let report = validate_asset_family_schema(&family);
+    let codes = issue_codes(&report);
+
+    assert!(codes.contains(&"duplicate_allowed_operation"));
+    assert!(codes.contains(&"duplicate_part_role_tag"));
+    assert!(codes.contains(&"duplicate_family_tag"));
+    assert!(codes.contains(&"duplicate_constraint_role"));
+    assert!(codes.contains(&"duplicate_variant_editable_role"));
+}
+
+#[test]
+fn compatibility_and_provider_completeness_are_separate_reports() {
+    let family = bridge_family("industrial_steel");
+    let mut kit = industrial_style_kit();
+    kit.part_prototypes
+        .retain(|prototype| prototype.role != "deck");
+
+    let compatibility = validate_family_style_compatibility(&family, &kit);
+    let completeness = validate_family_style_completeness(&family, &kit);
+
+    assert!(compatibility.is_valid());
+    assert!(issue_codes(&completeness).contains(&"missing_style_required_role_provider"));
 }
 
 #[test]
@@ -324,12 +447,14 @@ fn duplicate_style_prototype_and_detail_ids_are_rejected() {
     let mut kit = industrial_style_kit();
     kit.part_prototypes[1].id = kit.part_prototypes[0].id.clone();
     kit.detail_modules.push(kit.detail_modules[0].clone());
+    kit.tags.push("hard_surface".to_owned());
 
     let report = validate_style_kit(&kit);
     let codes = issue_codes(&report);
 
     assert!(codes.contains(&"duplicate_part_prototype_id"));
     assert!(codes.contains(&"duplicate_detail_module_id"));
+    assert!(codes.contains(&"duplicate_style_kit_tag"));
 }
 
 #[test]

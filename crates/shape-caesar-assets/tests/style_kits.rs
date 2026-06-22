@@ -2,8 +2,9 @@ use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     ConstraintKind, ExportRequirement, FamilyParameterKind, FamilyParameterSlot,
-    GeometricConstraint, ParameterRange, PartRole, RoleMultiplicity, RuntimeMetadataRequirement,
-    VariantMode, VariantRule, validate_family_style_compatibility, validate_style_kit,
+    GeometricConstraint, LengthUnit, ParameterRange, PartRole, RoleMultiplicity, RoleProvision,
+    RuntimeMetadataRequirement, VariantMode, VariantRule, validate_family_style_compatibility,
+    validate_style_kit,
 };
 
 fn generic_bridge_family() -> AssetFamilySchema {
@@ -13,11 +14,11 @@ fn generic_bridge_family() -> AssetFamilySchema {
         display_name: "Bridge".to_owned(),
         summary: "Theme-neutral crossing structure.".to_owned(),
         part_roles: vec![
-            role("support", RoleMultiplicity::Repeated),
-            role("span", RoleMultiplicity::Repeated),
-            role("deck", RoleMultiplicity::Repeated),
-            role("brace", RoleMultiplicity::Optional),
-            role("connector", RoleMultiplicity::Repeated),
+            role("support", RoleMultiplicity::Repeated, true),
+            role("span", RoleMultiplicity::Repeated, true),
+            role("deck", RoleMultiplicity::Repeated, true),
+            role("brace", RoleMultiplicity::Optional, false),
+            role("connector", RoleMultiplicity::Repeated, false),
         ],
         attachment_rules: vec![AttachmentRule {
             id: "support_span".to_owned(),
@@ -38,7 +39,9 @@ fn generic_bridge_family() -> AssetFamilySchema {
             id: "span_length".to_owned(),
             label: "Span Length".to_owned(),
             target_role: Some("span".to_owned()),
-            kind: FamilyParameterKind::Length,
+            kind: FamilyParameterKind::Length {
+                unit: LengthUnit::Meters,
+            },
             range: Some(ParameterRange {
                 minimum: 0.5,
                 maximum: 6.0,
@@ -72,12 +75,17 @@ fn generic_bridge_family() -> AssetFamilySchema {
     }
 }
 
-fn role(id: &str, multiplicity: RoleMultiplicity) -> PartRole {
+fn role(id: &str, multiplicity: RoleMultiplicity, required: bool) -> PartRole {
     PartRole {
         id: id.to_owned(),
         display_name: id.replace('_', " "),
-        required: !matches!(multiplicity, RoleMultiplicity::Optional),
+        required,
         multiplicity,
+        provision: if required {
+            RoleProvision::StyleRequired
+        } else {
+            RoleProvision::FamilyOrStyle
+        },
         semantic_tags: vec![id.to_owned()],
     }
 }

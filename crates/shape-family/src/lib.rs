@@ -13,10 +13,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 /// Current schema version for asset-family documents.
-pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 1;
+pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 2;
 
 /// Current schema version for style-kit documents.
-pub const STYLE_KIT_SCHEMA_VERSION: u32 = 1;
+pub const STYLE_KIT_SCHEMA_VERSION: u32 = 2;
 
 /// Theme-neutral functional grammar for one class of assets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +60,8 @@ pub struct PartRole {
     pub required: bool,
     /// Occurrence cardinality.
     pub multiplicity: RoleMultiplicity,
+    /// How this role is expected to receive an executable provider.
+    pub provision: RoleProvision,
     /// Functional tags, such as `support`, `panel`, or `handle`.
     pub semantic_tags: Vec<String>,
 }
@@ -80,6 +82,19 @@ pub enum RoleMultiplicity {
     },
     /// Any number of occurrences.
     Repeated,
+}
+
+/// How a family role is expected to be instantiated by executable bindings.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoleProvision {
+    /// The family implementation must provide a default fragment.
+    FamilyDefault,
+    /// The selected style kit must provide a prototype for this role.
+    StyleRequired,
+    /// Either the family implementation or selected style kit may provide it.
+    FamilyOrStyle,
+    /// The role is generated from other roles and does not need a direct provider.
+    Derived,
 }
 
 /// Rule describing how roles can attach or depend on each other.
@@ -145,19 +160,46 @@ pub struct FamilyParameterSlot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FamilyParameterKind {
     /// Length-like value.
-    Length,
+    Length {
+        /// Unit convention for this parameter.
+        unit: LengthUnit,
+    },
     /// Count-like value.
     Count,
     /// Unitless ratio.
     Ratio,
     /// Angle in radians unless the adapter says otherwise.
-    Angle,
+    Angle {
+        /// Unit convention for this parameter.
+        unit: AngleUnit,
+    },
     /// Binary setting.
     Toggle,
     /// Closed set of symbolic choices.
     Choice(Vec<String>),
     /// Pack-authored parameter kind.
     Custom(String),
+}
+
+/// Length unit convention for family parameters and style policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LengthUnit {
+    /// Meters in the exported model scale.
+    Meters,
+    /// Abstract family units interpreted by the family implementation.
+    FamilyUnits,
+    /// Ratio relative to another role.
+    RelativeToRole {
+        /// Reference role ID.
+        role: String,
+    },
+}
+
+/// Angle unit convention for family parameters.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AngleUnit {
+    /// Radians.
+    Radians,
 }
 
 /// Inclusive numeric range.
@@ -265,6 +307,22 @@ pub enum RuntimeMetadataRequirement {
     Custom(String),
 }
 
+/// Explicit length-like scalar used by style kits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LengthValue {
+    /// Meters in exported model scale.
+    Meters(f32),
+    /// Abstract family units.
+    FamilyUnits(f32),
+    /// Ratio relative to another role.
+    RelativeToRole {
+        /// Reference role ID.
+        role: String,
+        /// Relative value.
+        ratio: f32,
+    },
+}
+
 /// Concrete visual language that can be applied to compatible families.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StyleKit {
@@ -301,21 +359,28 @@ pub struct StyleKit {
 pub struct RoleProportion {
     /// Target family role.
     pub role: String,
-    /// Preferred width:depth:height scale.
-    pub preferred_scale: [f32; 3],
+    /// Preferred width:depth:height scale with explicit units.
+    pub preferred_scale: [LengthValue; 3],
     /// Optional taper from 0 to 1.
     pub taper: f32,
 }
 
 /// Global bevel guidance for a style kit.
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BevelPolicy {
-    /// Preferred bevel width as a fraction of local feature size.
-    pub width_ratio: f32,
+    /// Preferred bevel width.
+    pub width: LengthValue,
     /// Preferred bevel segment count.
     pub segments: u32,
-    /// Profile shape from 0 to 1.
-    pub profile: f32,
+    /// Normalized style profile from 0 to 1.
+    pub profile: NormalizedBevelProfile,
+}
+
+/// Normalized bevel profile independent from engine-specific ranges.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NormalizedBevelProfile {
+    /// Style profile from 0 to 1.
+    pub normalized: f32,
 }
 
 /// Style-level profile vocabulary.
@@ -353,19 +418,28 @@ pub struct DetailModule {
     pub display_name: String,
     /// Roles this detail can decorate.
     pub target_roles: Vec<String>,
-    /// Minimum feature size where this detail remains readable.
-    pub minimum_feature_size: u32,
+    /// Minimum rendered size where this detail remains readable.
+    pub minimum_readability: ReadabilityThreshold,
     /// Detail tags used by search.
     pub tags: Vec<String>,
 }
 
+/// Pixel threshold tied to an authored camera profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadabilityThreshold {
+    /// Minimum readable size in pixels.
+    pub pixels: u32,
+    /// Camera profile key used for the threshold.
+    pub camera_profile: String,
+}
+
 /// Repetition policy for style modules.
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepetitionPolicy {
     /// Preferred density from 0 to 1.
     pub density: f32,
-    /// Preferred spacing in local units.
-    pub preferred_spacing: f32,
+    /// Preferred spacing.
+    pub preferred_spacing: LengthValue,
     /// Maximum repeated count the kit should propose by default.
     pub maximum_default_count: u32,
 }
@@ -474,6 +548,7 @@ pub fn validate_asset_family_schema(family: &AssetFamilySchema) -> FamilyValidat
         "invalid_compatible_style_kit",
     );
     validate_identifier_list(&mut report, "tags", &family.tags, "invalid_family_tag");
+    validate_unique_strings(&mut report, "tags", &family.tags, "duplicate_family_tag");
     report
 }
 
@@ -526,6 +601,7 @@ pub fn validate_style_kit(kit: &StyleKit) -> FamilyValidationReport {
     validate_symmetry_policy(&kit.symmetry, &mut report);
     validate_exaggeration_policy(&kit.exaggeration, &mut report);
     validate_identifier_list(&mut report, "tags", &kit.tags, "invalid_style_kit_tag");
+    validate_unique_strings(&mut report, "tags", &kit.tags, "duplicate_style_kit_tag");
     report
 }
 
@@ -563,6 +639,17 @@ pub fn validate_family_style_compatibility(
         .collect::<BTreeSet<_>>();
     validate_kit_role_references(kit, &role_ids, &mut report);
     validate_kit_operation_compatibility(family, kit, &mut report);
+    report
+}
+
+/// Validate that a mutually compatible family/style pair can satisfy required roles.
+#[must_use]
+pub fn validate_family_style_completeness(
+    family: &AssetFamilySchema,
+    kit: &StyleKit,
+) -> FamilyValidationReport {
+    let mut report = FamilyValidationReport::default();
+    validate_style_required_role_providers(family, kit, &mut report);
     report
 }
 
@@ -622,6 +709,12 @@ fn validate_part_roles<'family>(
             &format!("part_roles.{index}.semantic_tags"),
             &role.semantic_tags,
             "invalid_part_role_tag",
+        );
+        validate_unique_strings(
+            report,
+            &format!("part_roles.{index}.semantic_tags"),
+            &role.semantic_tags,
+            "duplicate_part_role_tag",
         );
     }
     role_ids
@@ -739,6 +832,12 @@ fn validate_attachment_rules(
             &rule.compatibility_tags,
             "invalid_attachment_compatibility_tag",
         );
+        validate_unique_strings(
+            report,
+            &format!("attachment_rules.{index}.compatibility_tags"),
+            &rule.compatibility_tags,
+            "duplicate_attachment_compatibility_tag",
+        );
     }
 }
 
@@ -750,6 +849,25 @@ fn validate_allowed_operations(family: &AssetFamilySchema, report: &mut FamilyVa
             "missing_allowed_operation",
             "Asset family must declare at least one allowed operation.",
         );
+    }
+    let mut seen = BTreeSet::new();
+    for (index, operation) in family.allowed_operations.iter().enumerate() {
+        if !seen.insert(operation) {
+            push_issue(
+                report,
+                Some(format!("allowed_operations.{index}")),
+                "duplicate_allowed_operation",
+                "Allowed operations must be unique within one family.",
+            );
+        }
+        if let AllowedOperationKind::Custom(key) = operation {
+            validate_identifier(
+                report,
+                Some(format!("allowed_operations.{index}")),
+                key,
+                "invalid_custom_allowed_operation",
+            );
+        }
     }
 }
 
@@ -801,14 +919,102 @@ fn validate_parameter_slots(
                 "invalid_parameter_target_role",
             );
         }
-        if let Some(range) = slot.range {
-            validate_parameter_range(
+        validate_parameter_kind(report, role_ids, index, slot);
+    }
+}
+
+fn validate_parameter_kind(
+    report: &mut FamilyValidationReport,
+    role_ids: &BTreeSet<&str>,
+    index: usize,
+    slot: &FamilyParameterSlot,
+) {
+    match &slot.kind {
+        FamilyParameterKind::Length { unit } => {
+            validate_length_unit(
                 report,
-                Some(format!("parameter_slots.{index}.range")),
-                range,
+                Some(format!("parameter_slots.{index}.kind.unit")),
+                unit,
             );
+            validate_length_unit_role_reference(
+                report,
+                role_ids,
+                format!("parameter_slots.{index}.kind.unit"),
+                unit,
+                "unknown_relative_length_unit_role",
+            );
+            require_range(report, index, slot.range, "missing_length_parameter_range");
+            if let Some(range) = slot.range {
+                validate_parameter_range(
+                    report,
+                    Some(format!("parameter_slots.{index}.range")),
+                    range,
+                );
+                validate_positive_parameter_range(
+                    report,
+                    index,
+                    range,
+                    "non_positive_length_parameter_range",
+                    "Length parameter ranges must be greater than zero.",
+                );
+            }
         }
-        if let FamilyParameterKind::Choice(choices) = &slot.kind {
+        FamilyParameterKind::Count => {
+            require_range(report, index, slot.range, "missing_count_parameter_range");
+            if let Some(range) = slot.range {
+                validate_parameter_range(
+                    report,
+                    Some(format!("parameter_slots.{index}.range")),
+                    range,
+                );
+                validate_integral_parameter_range(report, index, range);
+                validate_positive_parameter_range(
+                    report,
+                    index,
+                    range,
+                    "non_positive_count_parameter_range",
+                    "Count parameter ranges must be greater than zero.",
+                );
+            }
+        }
+        FamilyParameterKind::Ratio => {
+            require_range(report, index, slot.range, "missing_ratio_parameter_range");
+            if let Some(range) = slot.range {
+                validate_parameter_range(
+                    report,
+                    Some(format!("parameter_slots.{index}.range")),
+                    range,
+                );
+                if range.minimum < 0.0 || range.maximum > 1.0 {
+                    push_issue(
+                        report,
+                        Some(format!("parameter_slots.{index}.range")),
+                        "ratio_parameter_range_outside_unit_interval",
+                        "Ratio parameter ranges must stay within 0..1.",
+                    );
+                }
+            }
+        }
+        FamilyParameterKind::Angle { unit } => {
+            validate_angle_unit(
+                report,
+                Some(format!("parameter_slots.{index}.kind.unit")),
+                *unit,
+            );
+            require_range(report, index, slot.range, "missing_angle_parameter_range");
+            if let Some(range) = slot.range {
+                validate_parameter_range(
+                    report,
+                    Some(format!("parameter_slots.{index}.range")),
+                    range,
+                );
+            }
+        }
+        FamilyParameterKind::Toggle => {
+            reject_range(report, index, slot.range, "toggle_parameter_has_range");
+        }
+        FamilyParameterKind::Choice(choices) => {
+            reject_range(report, index, slot.range, "choice_parameter_has_range");
             if choices.is_empty() {
                 push_issue(
                     report,
@@ -830,7 +1036,90 @@ fn validate_parameter_slots(
                 "invalid_parameter_choice",
             );
         }
+        FamilyParameterKind::Custom(key) => {
+            validate_identifier(
+                report,
+                Some(format!("parameter_slots.{index}.kind")),
+                key,
+                "invalid_custom_parameter_kind",
+            );
+            if let Some(range) = slot.range {
+                validate_parameter_range(
+                    report,
+                    Some(format!("parameter_slots.{index}.range")),
+                    range,
+                );
+            }
+        }
     }
+}
+
+fn require_range(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    range: Option<ParameterRange>,
+    code: &'static str,
+) {
+    if range.is_none() {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.range")),
+            code,
+            "This parameter kind requires an explicit numeric range.",
+        );
+    }
+}
+
+fn reject_range(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    range: Option<ParameterRange>,
+    code: &'static str,
+) {
+    if range.is_some() {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.range")),
+            code,
+            "This parameter kind must not declare a numeric range.",
+        );
+    }
+}
+
+fn validate_integral_parameter_range(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    range: ParameterRange,
+) {
+    if !is_integral(range.minimum) || !is_integral(range.maximum) || !is_integral(range.step) {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.range")),
+            "non_integral_count_parameter_range",
+            "Count parameter minimum, maximum, and step must be integral.",
+        );
+    }
+}
+
+fn validate_positive_parameter_range(
+    report: &mut FamilyValidationReport,
+    index: usize,
+    range: ParameterRange,
+    code: &'static str,
+    message: &'static str,
+) {
+    if range.minimum <= 0.0 || range.maximum <= 0.0 || range.step <= 0.0 {
+        push_issue(
+            report,
+            Some(format!("parameter_slots.{index}.range")),
+            code,
+            message,
+        );
+    }
+}
+
+fn is_integral(value: f32) -> bool {
+    value.is_finite() && (value.fract().abs() <= f32::EPSILON)
 }
 
 fn validate_constraints(
@@ -881,6 +1170,20 @@ fn validate_constraints(
                 Some(format!("constraints.{index}.roles")),
                 role,
                 "invalid_constraint_role",
+            );
+        }
+        validate_unique_strings(
+            report,
+            &format!("constraints.{index}.roles"),
+            &constraint.roles,
+            "duplicate_constraint_role",
+        );
+        if let ConstraintKind::Custom(key) = &constraint.kind {
+            validate_identifier(
+                report,
+                Some(format!("constraints.{index}.kind")),
+                key,
+                "invalid_custom_constraint_kind",
             );
         }
     }
@@ -942,12 +1245,32 @@ fn validate_variant_rules(
                 "invalid_variant_editable_role",
             );
         }
+        validate_unique_strings(
+            report,
+            &format!("variant_rules.{index}.editable_roles"),
+            &rule.editable_roles,
+            "duplicate_variant_editable_role",
+        );
         validate_identifier_list(
             report,
             &format!("variant_rules.{index}.locked_by_tags"),
             &rule.locked_by_tags,
             "invalid_variant_lock_tag",
         );
+        validate_unique_strings(
+            report,
+            &format!("variant_rules.{index}.locked_by_tags"),
+            &rule.locked_by_tags,
+            "duplicate_variant_lock_tag",
+        );
+        if let VariantMode::Custom(key) = &rule.mode {
+            validate_identifier(
+                report,
+                Some(format!("variant_rules.{index}.mode")),
+                key,
+                "invalid_custom_variant_mode",
+            );
+        }
     }
 }
 
@@ -999,7 +1322,18 @@ fn validate_runtime_metadata_requirements(
     export_index: usize,
     requirements: &[RuntimeMetadataRequirement],
 ) {
+    let mut seen = BTreeSet::new();
     for (index, requirement) in requirements.iter().enumerate() {
+        if !seen.insert(requirement) {
+            push_issue(
+                report,
+                Some(format!(
+                    "export_requirements.{export_index}.required_metadata.{index}"
+                )),
+                "duplicate_runtime_metadata_requirement",
+                "Runtime metadata requirements must be unique within one export profile.",
+            );
+        }
         if let RuntimeMetadataRequirement::Custom(key) = requirement {
             validate_identifier(
                 report,
@@ -1036,16 +1370,12 @@ fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport
                 "A style kit can declare at most one proportion policy per role.",
             );
         }
-        if !proportion
-            .preferred_scale
-            .iter()
-            .all(|value| value.is_finite() && *value > 0.0)
-        {
-            push_issue(
+        for (axis, value) in proportion.preferred_scale.iter().enumerate() {
+            validate_length_value(
                 report,
-                Some(format!("proportions.{index}.preferred_scale")),
+                Some(format!("proportions.{index}.preferred_scale.{axis}")),
+                value,
                 "invalid_role_preferred_scale",
-                "Preferred scale values must be finite and greater than zero.",
             );
         }
         validate_fraction(
@@ -1058,14 +1388,12 @@ fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport
 }
 
 fn validate_bevel_policy(policy: &BevelPolicy, report: &mut FamilyValidationReport) {
-    if !policy.width_ratio.is_finite() || policy.width_ratio < 0.0 {
-        push_issue(
-            report,
-            Some("bevel_policy.width_ratio"),
-            "invalid_bevel_width_ratio",
-            "Bevel width ratio must be finite and non-negative.",
-        );
-    }
+    validate_length_value(
+        report,
+        Some("bevel_policy.width"),
+        &policy.width,
+        "invalid_bevel_width",
+    );
     if policy.segments == 0 {
         push_issue(
             report,
@@ -1076,8 +1404,8 @@ fn validate_bevel_policy(policy: &BevelPolicy, report: &mut FamilyValidationRepo
     }
     validate_fraction(
         report,
-        Some("bevel_policy.profile"),
-        policy.profile,
+        Some("bevel_policy.profile.normalized"),
+        policy.profile.normalized,
         "invalid_bevel_profile",
     );
 }
@@ -1173,6 +1501,12 @@ fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport)
             &prototype.style_tags,
             "invalid_part_prototype_style_tag",
         );
+        validate_unique_strings(
+            report,
+            &format!("part_prototypes.{index}.style_tags"),
+            &prototype.style_tags,
+            "duplicate_part_prototype_style_tag",
+        );
     }
 }
 
@@ -1181,7 +1515,18 @@ fn validate_operation_tags(
     prototype_index: usize,
     operations: &[AllowedOperationKind],
 ) {
+    let mut seen = BTreeSet::new();
     for (index, operation) in operations.iter().enumerate() {
+        if !seen.insert(operation) {
+            push_issue(
+                report,
+                Some(format!(
+                    "part_prototypes.{prototype_index}.operation_tags.{index}"
+                )),
+                "duplicate_part_prototype_operation_tag",
+                "Part prototype operation tags must be unique.",
+            );
+        }
         if let AllowedOperationKind::Custom(key) = operation {
             validate_identifier(
                 report,
@@ -1238,12 +1583,23 @@ fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) 
             &module.target_roles,
             "invalid_detail_target_role",
         );
-        if module.minimum_feature_size == 0 {
+        validate_unique_strings(
+            report,
+            &format!("detail_modules.{index}.target_roles"),
+            &module.target_roles,
+            "duplicate_detail_target_role",
+        );
+        validate_readability_threshold(
+            report,
+            Some(format!("detail_modules.{index}.minimum_readability")),
+            &module.minimum_readability,
+        );
+        if module.minimum_readability.pixels == 0 {
             push_issue(
                 report,
-                Some(format!("detail_modules.{index}.minimum_feature_size")),
-                "invalid_detail_minimum_feature_size",
-                "Detail modules must declare a positive minimum feature size.",
+                Some(format!("detail_modules.{index}.minimum_readability.pixels")),
+                "invalid_detail_minimum_readability",
+                "Detail modules must declare a positive readability threshold.",
             );
         }
         validate_identifier_list(
@@ -1251,6 +1607,12 @@ fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) 
             &format!("detail_modules.{index}.tags"),
             &module.tags,
             "invalid_detail_tag",
+        );
+        validate_unique_strings(
+            report,
+            &format!("detail_modules.{index}.tags"),
+            &module.tags,
+            "duplicate_detail_tag",
         );
     }
 }
@@ -1262,14 +1624,12 @@ fn validate_repetition_policy(policy: &RepetitionPolicy, report: &mut FamilyVali
         policy.density,
         "invalid_repetition_density",
     );
-    if !policy.preferred_spacing.is_finite() || policy.preferred_spacing <= 0.0 {
-        push_issue(
-            report,
-            Some("repetition.preferred_spacing"),
-            "invalid_repetition_spacing",
-            "Preferred repetition spacing must be finite and greater than zero.",
-        );
-    }
+    validate_length_value(
+        report,
+        Some("repetition.preferred_spacing"),
+        &policy.preferred_spacing,
+        "invalid_repetition_spacing",
+    );
     if policy.maximum_default_count == 0 {
         push_issue(
             report,
@@ -1331,6 +1691,15 @@ fn validate_kit_role_references(
             &proportion.role,
             "unknown_style_proportion_role",
         );
+        for (axis, value) in proportion.preferred_scale.iter().enumerate() {
+            validate_length_value_role_reference(
+                report,
+                role_ids,
+                format!("style_kit.proportions.{index}.preferred_scale.{axis}"),
+                value,
+                "unknown_style_relative_length_role",
+            );
+        }
     }
     for (index, prototype) in kit.part_prototypes.iter().enumerate() {
         validate_role_reference(
@@ -1352,6 +1721,20 @@ fn validate_kit_role_references(
             );
         }
     }
+    validate_length_value_role_reference(
+        report,
+        role_ids,
+        "style_kit.bevel_policy.width",
+        &kit.bevel_policy.width,
+        "unknown_style_relative_length_role",
+    );
+    validate_length_value_role_reference(
+        report,
+        role_ids,
+        "style_kit.repetition.preferred_spacing",
+        &kit.repetition.preferred_spacing,
+        "unknown_style_relative_length_role",
+    );
 }
 
 fn validate_kit_operation_compatibility(
@@ -1374,6 +1757,126 @@ fn validate_kit_operation_compatibility(
             }
         }
     }
+}
+
+fn validate_style_required_role_providers(
+    family: &AssetFamilySchema,
+    kit: &StyleKit,
+    report: &mut FamilyValidationReport,
+) {
+    let style_roles = kit
+        .part_prototypes
+        .iter()
+        .map(|prototype| prototype.role.as_str())
+        .collect::<BTreeSet<_>>();
+    for (index, role) in family.part_roles.iter().enumerate() {
+        if role.required
+            && role.provision == RoleProvision::StyleRequired
+            && !style_roles.contains(role.id.as_str())
+        {
+            push_issue(
+                report,
+                Some(format!("family.part_roles.{index}.provision")),
+                "missing_style_required_role_provider",
+                "Required style-provided roles need at least one style-kit prototype.",
+            );
+        }
+    }
+}
+
+fn validate_length_value_role_reference(
+    report: &mut FamilyValidationReport,
+    role_ids: &BTreeSet<&str>,
+    subject: impl Into<String>,
+    value: &LengthValue,
+    code: &'static str,
+) {
+    if let LengthValue::RelativeToRole { role, .. } = value {
+        validate_role_reference(report, role_ids, subject, role, code);
+    }
+}
+
+fn validate_length_unit_role_reference(
+    report: &mut FamilyValidationReport,
+    role_ids: &BTreeSet<&str>,
+    subject: impl Into<String>,
+    unit: &LengthUnit,
+    code: &'static str,
+) {
+    if let LengthUnit::RelativeToRole { role } = unit {
+        validate_role_reference(report, role_ids, subject, role, code);
+    }
+}
+
+fn validate_length_unit(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    unit: &LengthUnit,
+) {
+    if let LengthUnit::RelativeToRole { role } = unit {
+        validate_identifier(report, subject, role, "invalid_relative_length_unit_role");
+    }
+}
+
+fn validate_angle_unit(
+    _report: &mut FamilyValidationReport,
+    _subject: Option<impl Into<String>>,
+    _unit: AngleUnit,
+) {
+}
+
+fn validate_length_value(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &LengthValue,
+    code: &'static str,
+) {
+    let subject = subject.map(Into::into);
+    match value {
+        LengthValue::Meters(value) | LengthValue::FamilyUnits(value) => {
+            if !value.is_finite() || *value <= 0.0 {
+                push_issue(
+                    report,
+                    subject.clone(),
+                    code,
+                    "Length values must be finite and greater than zero.",
+                );
+            }
+        }
+        LengthValue::RelativeToRole { role, ratio } => {
+            if !ratio.is_finite() || *ratio <= 0.0 {
+                push_issue(
+                    report,
+                    subject.clone(),
+                    code,
+                    "Relative length ratios must be finite and greater than zero.",
+                );
+            }
+            validate_identifier(report, subject, role, "invalid_relative_length_role");
+        }
+    }
+}
+
+fn validate_readability_threshold(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    threshold: &ReadabilityThreshold,
+) {
+    let subject = subject.map(Into::into);
+    if threshold.pixels == 0 {
+        push_issue(
+            report,
+            subject.clone(),
+            "invalid_readability_threshold_pixels",
+            "Readability thresholds must be greater than zero pixels.",
+        );
+    }
+    validate_identifier(
+        report,
+        subject,
+        &threshold.camera_profile,
+        "invalid_readability_camera_profile",
+    );
 }
 
 fn validate_parameter_range(
@@ -1467,20 +1970,51 @@ fn validate_identifier(
     value: &str,
     code: &'static str,
 ) {
-    if value.trim() != value || value.is_empty() || !value.chars().all(is_identifier_char) {
+    if !stable_identifier_is_valid(value) {
         push_issue(
             report,
             subject,
             code,
-            "Stable identifiers must use lowercase ASCII letters, digits, `_`, `-`, `.`, or `:` without surrounding whitespace.",
+            "Stable identifiers must start with a lowercase ASCII letter, end with an alphanumeric character, and use non-repeated lowercase ASCII letters, digits, `_`, `-`, `.`, or `:` separators.",
         );
     }
+}
+
+fn stable_identifier_is_valid(value: &str) -> bool {
+    if value.trim() != value || value.is_empty() || value == "." || value == ".." {
+        return false;
+    }
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let mut previous_was_separator = false;
+    let mut last = first;
+    for character in std::iter::once(first).chain(chars) {
+        if !is_identifier_char(character) {
+            return false;
+        }
+        let is_separator = is_identifier_separator(character);
+        if is_separator && previous_was_separator {
+            return false;
+        }
+        previous_was_separator = is_separator;
+        last = character;
+    }
+    last.is_ascii_lowercase() || last.is_ascii_digit()
 }
 
 fn is_identifier_char(character: char) -> bool {
     character.is_ascii_lowercase()
         || character.is_ascii_digit()
         || matches!(character, '_' | '-' | '.' | ':')
+}
+
+fn is_identifier_separator(character: char) -> bool {
+    matches!(character, '_' | '-' | '.' | ':')
 }
 
 fn validate_fraction(
