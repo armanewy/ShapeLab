@@ -7,6 +7,9 @@ use std::fmt::Write;
 
 pub mod validation;
 
+/// Package version for the asset compiler.
+pub const SHAPE_COMPILE_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetRecipe, BoundaryLoopDependencyMode, BoundaryLoopId, ModelingOperationSpec, OperationId,

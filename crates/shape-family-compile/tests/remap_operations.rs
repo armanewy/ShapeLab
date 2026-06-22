@@ -84,7 +84,7 @@ fn allocation_is_deterministic_and_avoids_populated_target_collisions() {
         first.remap.boundary_loops[&RECESSED_ENTRY_LOOP],
         BoundaryLoopId(3)
     );
-    assert_eq!(first.remap.sockets[&SOURCE_SOCKET], SocketId(2));
+    assert_eq!(first.remap.sockets[&SOURCE_SOCKET], SocketId(8));
     assert_eq!(first.allocated.operations.len(), source_operations().len());
     assert_eq!(first.allocated.regions.len(), 9);
     assert_eq!(first.allocated.boundary_loops.len(), 8);
@@ -103,6 +103,7 @@ fn allocation_is_deterministic_and_avoids_populated_target_collisions() {
             .iter()
             .all(|boundary_loop| boundary_loop.0 > 2)
     );
+    assert!(first.allocated.sockets.iter().all(|socket| socket.0 > 7));
 }
 
 #[test]

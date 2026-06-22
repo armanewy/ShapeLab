@@ -31,6 +31,14 @@ fingerprint_scope!(
     "Fingerprint for values that can affect generated geometry."
 );
 fingerprint_scope!(
+    ConformanceContractFingerprint,
+    "Fingerprint for rules that validate, reject, or grade generated assets."
+);
+fingerprint_scope!(
+    BuildFingerprint,
+    "Fingerprint for geometry inputs, conformance contracts, and compiler versions."
+);
+fingerprint_scope!(
     RecipeFingerprint,
     "Fingerprint for an AssetRecipe snapshot."
 );

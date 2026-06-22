@@ -10,7 +10,7 @@ use shape_asset::{
 
 use crate::{FragmentSurfaceTarget, RecipeFragment, RecipeFragmentExports};
 
-use super::{AllocatedSemanticIds, FragmentRemap, FragmentRemapError};
+use super::{AllocatedSemanticIds, FragmentRemap, FragmentRemapError, generated_socket_ids};
 
 /// Remapped fragment assembly content inserted into a target recipe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +96,7 @@ fn prepare_fragment_assembly_remap(
     for definition in target.definitions.values() {
         used_regions.extend(definition.regions.keys().copied());
         used_sockets.extend(definition.sockets.keys().copied());
+        used_sockets.extend(generated_socket_ids(&definition.geometry.source));
         for operation in &definition.geometry.operations {
             used_operations.insert(operation.operation_id());
             used_regions.extend(operation.generated_region_ids());
@@ -106,6 +107,9 @@ fn prepare_fragment_assembly_remap(
     used_regions.extend(region_ids.iter().copied());
     used_boundary_loops.extend(boundary_loop_ids.iter().copied());
     used_sockets.extend(socket_ids.iter().copied());
+    for definition in fragment.recipe.definitions.values() {
+        used_sockets.extend(generated_socket_ids(&definition.geometry.source));
+    }
 
     for definition_id in fragment.recipe.definitions.keys() {
         let new_id = allocate_unused_id(

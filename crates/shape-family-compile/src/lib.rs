@@ -14,21 +14,28 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetId, AssetRecipe, AssetValidationReport, AttachmentMode, ParameterDescriptor,
-    PartDefinitionId, PartInstanceId, RegionId, SocketId, validate_asset_recipe,
+    ASSET_RECIPE_SCHEMA_VERSION, AssetConstraint, AssetId, AssetRecipe, AssetRelationshipPolicy,
+    AssetValidationReport, AttachmentMode, AttachmentSpec, Frame3, GeometryRecipe,
+    ParameterDescriptor, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, RegionId,
+    SHAPE_ASSET_CRATE_VERSION, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
+    validate_asset_recipe,
 };
-use shape_compile::{AssetArtifact, CompileError, CompileValidationReport, compile_asset};
+use shape_compile::{
+    AssetArtifact, CompileError, CompileValidationReport, SHAPE_COMPILE_CRATE_VERSION,
+    compile_asset,
+};
 use shape_family::{
-    AssetFamilySchema, FamilyDefaultValue, FamilyParameterKind, FamilyValidationIssue,
-    FamilyValidationReport, ParameterExecutionPolicy, ParameterRange, PartRole, RoleMultiplicity,
-    RoleProvision, StyleKit, validate_family_style_compatibility,
-    validate_family_style_completeness,
+    ASSET_FAMILY_SCHEMA_VERSION, AssetFamilySchema, FamilyDefaultValue, FamilyParameterKind,
+    FamilyValidationIssue, FamilyValidationReport, ParameterExecutionPolicy, ParameterRange,
+    PartRole, RoleMultiplicity, RoleProvision, STYLE_KIT_SCHEMA_VERSION, StyleKit,
+    validate_family_style_compatibility, validate_family_style_completeness,
 };
 use thiserror::Error;
 
 use crate::identity::{
-    ArtifactFingerprint, FingerprintError, FoundryIntentFingerprint, GeometryInputFingerprint,
-    RecipeFingerprint, fingerprint_serializable,
+    ArtifactFingerprint, BuildFingerprint, ConformanceContractFingerprint, FingerprintError,
+    FoundryIntentFingerprint, GeometryInputFingerprint, RecipeFingerprint,
+    fingerprint_serializable,
 };
 
 /// Current schema version for executable family implementations.
@@ -330,6 +337,10 @@ pub struct FamilyInstantiationReport {
     pub foundry_intent_fingerprint: String,
     /// Fingerprint for values consumed by executable geometry generation.
     pub geometry_input_fingerprint: String,
+    /// Fingerprint for conformance rules that validate or reject the generated asset.
+    pub conformance_contract_fingerprint: String,
+    /// Fingerprint for geometry input, conformance contract, and compiler versions.
+    pub build_fingerprint: String,
     /// Fingerprint for the instantiated asset recipe.
     pub recipe_fingerprint: String,
     /// Fingerprint for the compiled artifact contract.
@@ -553,6 +564,8 @@ pub fn instantiate_family(
         instantiation_fingerprint: fingerprints.geometry_input.0.to_hex(),
         foundry_intent_fingerprint: fingerprints.foundry_intent.0.to_hex(),
         geometry_input_fingerprint: fingerprints.geometry_input.0.to_hex(),
+        conformance_contract_fingerprint: fingerprints.conformance_contract.0.to_hex(),
+        build_fingerprint: fingerprints.build.0.to_hex(),
         recipe_fingerprint: recipe_fingerprint.0.to_hex(),
         artifact_fingerprint: artifact_fingerprint.0.to_hex(),
         compiled_part_count: artifact.statistics.part_count,
@@ -622,6 +635,8 @@ fn family_value_from_default(default_value: &FamilyDefaultValue) -> FamilyValue 
 struct InstantiationFingerprints {
     foundry_intent: FoundryIntentFingerprint,
     geometry_input: GeometryInputFingerprint,
+    conformance_contract: ConformanceContractFingerprint,
+    build: BuildFingerprint,
 }
 
 #[derive(Serialize)]
@@ -637,27 +652,79 @@ struct FoundryIntentFingerprintPayload<'a> {
 
 #[derive(Serialize)]
 struct GeometryInputFingerprintPayload<'a> {
+    base_recipe: serde_json::Value,
+    required_parameter_bindings: Vec<GeometryParameterBindingFingerprint<'a>>,
+    attachment_bindings: &'a [FragmentAttachmentBinding],
+    selected_providers: Vec<SelectedProviderGeometryFingerprint>,
+    executable_parameters: BTreeMap<String, FamilyValue>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum GeometryParameterBindingFingerprint<'a> {
+    Scalar {
+        slot: &'a str,
+        role: &'a str,
+        local_path: &'a str,
+        transform: ScalarTransform,
+    },
+    TogglePartPresence {
+        slot: &'a str,
+        role: &'a str,
+    },
+    ChoiceToPrototype {
+        slot: &'a str,
+        role: &'a str,
+        selected_choice: &'a str,
+        selected_fragment: &'a str,
+    },
+}
+
+#[derive(Serialize)]
+struct ConformanceContractFingerprintPayload<'a> {
     family_id: &'a str,
     family_schema_version: u32,
     style_kit_id: &'a str,
     style_kit_schema_version: u32,
     family_part_roles: serde_json::Value,
     family_attachment_rules: serde_json::Value,
+    family_allowed_operations: serde_json::Value,
+    family_parameter_slots: serde_json::Value,
     family_constraints: serde_json::Value,
-    required_parameter_slots: serde_json::Value,
+    family_variant_rules: serde_json::Value,
+    family_export_requirements: serde_json::Value,
+    family_compatible_style_kits: serde_json::Value,
+    style_compatible_families: serde_json::Value,
     style_family_facet: serde_json::Value,
     style_bevel_policy: &'a shape_family::BevelPolicy,
     style_profile_language: &'a shape_family::ProfileLanguage,
     style_repetition: &'a shape_family::RepetitionPolicy,
     style_symmetry: &'a shape_family::SymmetryPolicy,
     style_exaggeration: &'a shape_family::ExaggerationPolicy,
-    base_recipe: serde_json::Value,
-    required_parameter_bindings: Vec<&'a ParameterBinding>,
-    family_default_role_providers: &'a BTreeMap<String, String>,
-    style_default_role_providers: &'a BTreeMap<String, String>,
-    selected_providers: Vec<SelectedProviderFingerprint<'a>>,
-    executable_parameters: BTreeMap<String, FamilyValue>,
-    seed: u64,
+    base_recipe: RecipeConformanceFingerprint,
+    selected_providers: Vec<SelectedProviderConformanceFingerprint>,
+}
+
+#[derive(Serialize)]
+struct BuildFingerprintPayload<'a> {
+    geometry_input: GeometryInputFingerprint,
+    conformance_contract: ConformanceContractFingerprint,
+    compiler_versions: CompilerVersions<'a>,
+}
+
+#[derive(Serialize)]
+struct CompilerVersions<'a> {
+    asset_recipe_schema: u32,
+    shape_asset_crate: &'a str,
+    shape_compile_crate: &'a str,
+    shape_family_compile_crate: &'a str,
+    shape_modeling_crate: &'a str,
+    shape_poly_crate: &'a str,
+    asset_family_schema: u32,
+    style_kit_schema: u32,
+    family_implementation_schema: u32,
+    style_implementation_schema: u32,
+    recipe_fragment_schema: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -666,6 +733,104 @@ struct SelectedProviderFingerprint<'a> {
     fragment: &'a str,
     source: &'static str,
     fragment_contract: Option<&'a RecipeFragment>,
+}
+
+#[derive(Clone, Serialize)]
+struct SelectedProviderGeometryFingerprint {
+    role: String,
+    fragment_contract: Option<GeometryRecipeFragment>,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryRecipeFragment {
+    exports: GeometryRecipeFragmentExports,
+    recipe: GeometryAssetRecipeFingerprint,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryRecipeFragmentExports {
+    role_occurrence_roots: Vec<PartInstanceId>,
+    internal_roots: Vec<PartInstanceId>,
+    socket_ports: Vec<GeometryFragmentSocketPort>,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryFragmentSocketPort {
+    id: String,
+    local_occurrence_root: PartInstanceId,
+    local_socket: SocketId,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryAssetRecipeFingerprint {
+    definitions: Vec<GeometryPartDefinitionFingerprint>,
+    instances: Vec<GeometryPartInstanceFingerprint>,
+    root_instances: Vec<PartInstanceId>,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryPartDefinitionFingerprint {
+    id: PartDefinitionId,
+    geometry: GeometryRecipe,
+    regions: Vec<GeometryRegionFingerprint>,
+    sockets: Vec<GeometrySocketFingerprint>,
+    local_pivot: Frame3,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryRegionFingerprint {
+    id: RegionId,
+    role: SurfaceRole,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometrySocketFingerprint {
+    id: SocketId,
+    local_frame: Frame3,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryPartInstanceFingerprint {
+    id: PartInstanceId,
+    definition: PartDefinitionId,
+    parent: Option<PartInstanceId>,
+    local_transform: Transform3,
+    attachment: Option<GeometryAttachmentFingerprint>,
+    enabled: bool,
+    generated_by: Option<shape_asset::OperationId>,
+}
+
+#[derive(Clone, Serialize)]
+struct GeometryAttachmentFingerprint {
+    parent_instance: PartInstanceId,
+    parent_socket: SocketId,
+    child_socket: SocketId,
+    local_offset: Transform3,
+    mode: AttachmentMode,
+}
+
+#[derive(Clone, Default)]
+struct GeometryExportUse {
+    include_roots: bool,
+    socket_ports: BTreeSet<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct SelectedProviderConformanceFingerprint {
+    role: String,
+    fragment_contract: Option<RecipeFragmentConformanceFingerprint>,
+}
+
+#[derive(Clone, Serialize)]
+struct RecipeFragmentConformanceFingerprint {
+    exports: RecipeFragmentExports,
+    recipe: RecipeConformanceFingerprint,
+}
+
+#[derive(Clone, Serialize)]
+struct RecipeConformanceFingerprint {
+    constraints: Vec<AssetConstraint>,
+    relationships: Vec<AssetRelationshipPolicy>,
 }
 
 fn derive_instantiation_fingerprints(
@@ -696,46 +861,24 @@ fn derive_instantiation_fingerprints(
         .map_err(fingerprint_error)?,
     );
 
-    let required_parameter_slots = family
-        .parameter_slots
-        .iter()
-        .filter(|slot| slot.execution_policy == ParameterExecutionPolicy::RequiredBinding)
-        .collect::<Vec<_>>();
     let required_parameter_bindings =
-        executable_parameter_bindings(family, &family_impl.parameter_bindings);
+        executable_parameter_bindings(family, &family_impl.parameter_bindings, request)?;
     let executable_parameters = executable_parameter_values(family, request);
-    let style_family_facet = style_kit.family_facets.get(&family.id);
+    let export_use_by_role = geometry_export_use_by_role(family_impl);
     let geometry_payload = GeometryInputFingerprintPayload {
-        family_id: &family.id,
-        family_schema_version: family.schema_version,
-        style_kit_id: &style_kit.id,
-        style_kit_schema_version: style_kit.schema_version,
-        family_part_roles: fingerprint_value("family.part_roles", &family.part_roles)?,
-        family_attachment_rules: fingerprint_value(
-            "family.attachment_rules",
-            &family.attachment_rules,
-        )?,
-        family_constraints: fingerprint_value("family.constraints", &family.constraints)?,
-        required_parameter_slots: fingerprint_value(
-            "family.required_parameter_slots",
-            &required_parameter_slots,
-        )?,
-        style_family_facet: fingerprint_value("style.family_facet", &style_family_facet)?,
-        style_bevel_policy: &style_kit.bevel_policy,
-        style_profile_language: &style_kit.profile_language,
-        style_repetition: &style_kit.repetition,
-        style_symmetry: &style_kit.symmetry,
-        style_exaggeration: &style_kit.exaggeration,
         base_recipe: fingerprint_value(
             "family_implementation.base_recipe.geometry_inputs",
             &geometry_base_recipe(&family_impl.base_recipe),
         )?,
         required_parameter_bindings,
-        family_default_role_providers: &family_impl.default_role_providers,
-        style_default_role_providers: &style_impl.default_role_providers,
-        selected_providers: selected_provider_payload,
+        attachment_bindings: &family_impl.attachment_bindings,
+        selected_providers: selected_provider_geometry_fingerprints(
+            family_impl,
+            style_impl,
+            selected_providers,
+            &export_use_by_role,
+        ),
         executable_parameters,
-        seed: request.seed,
     };
     let geometry_input = GeometryInputFingerprint(
         fingerprint_serializable(
@@ -745,17 +888,149 @@ fn derive_instantiation_fingerprints(
         )
         .map_err(fingerprint_error)?,
     );
+    let style_family_facet = style_kit.family_facets.get(&family.id);
+    let conformance_payload = ConformanceContractFingerprintPayload {
+        family_id: &family.id,
+        family_schema_version: family.schema_version,
+        style_kit_id: &style_kit.id,
+        style_kit_schema_version: style_kit.schema_version,
+        family_part_roles: fingerprint_value("family.part_roles", &family.part_roles)?,
+        family_attachment_rules: fingerprint_value(
+            "family.attachment_rules",
+            &family.attachment_rules,
+        )?,
+        family_allowed_operations: fingerprint_value(
+            "family.allowed_operations",
+            &family.allowed_operations,
+        )?,
+        family_parameter_slots: fingerprint_value(
+            "family.parameter_slots",
+            &family.parameter_slots,
+        )?,
+        family_constraints: fingerprint_value("family.constraints", &family.constraints)?,
+        family_variant_rules: fingerprint_value("family.variant_rules", &family.variant_rules)?,
+        family_export_requirements: fingerprint_value(
+            "family.export_requirements",
+            &family.export_requirements,
+        )?,
+        family_compatible_style_kits: fingerprint_value(
+            "family.compatible_style_kits",
+            &family.compatible_style_kits,
+        )?,
+        style_compatible_families: fingerprint_value(
+            "style.compatible_families",
+            &style_kit.compatible_families,
+        )?,
+        style_family_facet: fingerprint_value("style.family_facet", &style_family_facet)?,
+        style_bevel_policy: &style_kit.bevel_policy,
+        style_profile_language: &style_kit.profile_language,
+        style_repetition: &style_kit.repetition,
+        style_symmetry: &style_kit.symmetry,
+        style_exaggeration: &style_kit.exaggeration,
+        base_recipe: recipe_conformance(&family_impl.base_recipe),
+        selected_providers: selected_provider_conformance_fingerprints(
+            family_impl,
+            style_impl,
+            selected_providers,
+        ),
+    };
+    let conformance_contract = ConformanceContractFingerprint(
+        fingerprint_serializable(
+            "shape-lab.conformance-contract.v1",
+            "conformance_contract",
+            &conformance_payload,
+        )
+        .map_err(fingerprint_error)?,
+    );
+    let build_payload = BuildFingerprintPayload {
+        geometry_input,
+        conformance_contract,
+        compiler_versions: CompilerVersions {
+            asset_recipe_schema: ASSET_RECIPE_SCHEMA_VERSION,
+            shape_asset_crate: SHAPE_ASSET_CRATE_VERSION,
+            shape_compile_crate: SHAPE_COMPILE_CRATE_VERSION,
+            shape_family_compile_crate: env!("CARGO_PKG_VERSION"),
+            shape_modeling_crate: shape_modeling::SHAPE_MODELING_CRATE_VERSION,
+            shape_poly_crate: shape_poly::SHAPE_POLY_CRATE_VERSION,
+            asset_family_schema: ASSET_FAMILY_SCHEMA_VERSION,
+            style_kit_schema: STYLE_KIT_SCHEMA_VERSION,
+            family_implementation_schema: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
+            style_implementation_schema: STYLE_IMPLEMENTATION_SCHEMA_VERSION,
+            recipe_fragment_schema: RECIPE_FRAGMENT_SCHEMA_VERSION,
+        },
+    };
+    let build = BuildFingerprint(
+        fingerprint_serializable("shape-lab.build.v1", "build", &build_payload)
+            .map_err(fingerprint_error)?,
+    );
     Ok(InstantiationFingerprints {
         foundry_intent,
         geometry_input,
+        conformance_contract,
+        build,
     })
 }
 
-fn geometry_base_recipe(base_recipe: &AssetRecipe) -> AssetRecipe {
-    let mut recipe = base_recipe.clone();
-    recipe.id = AssetId(0);
-    recipe.title.clear();
-    recipe
+fn geometry_base_recipe(base_recipe: &AssetRecipe) -> GeometryAssetRecipeFingerprint {
+    GeometryAssetRecipeFingerprint {
+        definitions: base_recipe
+            .definitions
+            .values()
+            .map(geometry_part_definition)
+            .collect(),
+        instances: base_recipe
+            .instances
+            .values()
+            .map(geometry_part_instance)
+            .collect(),
+        root_instances: base_recipe.root_instances.clone(),
+    }
+}
+
+fn geometry_part_definition(definition: &PartDefinition) -> GeometryPartDefinitionFingerprint {
+    GeometryPartDefinitionFingerprint {
+        id: definition.id,
+        geometry: definition.geometry.clone(),
+        regions: definition.regions.values().map(geometry_region).collect(),
+        sockets: definition.sockets.values().map(geometry_socket).collect(),
+        local_pivot: definition.local_pivot.clone(),
+    }
+}
+
+fn geometry_region(region: &SurfaceRegionSpec) -> GeometryRegionFingerprint {
+    GeometryRegionFingerprint {
+        id: region.id,
+        role: region.role.clone(),
+    }
+}
+
+fn geometry_socket(socket: &SocketSpec) -> GeometrySocketFingerprint {
+    GeometrySocketFingerprint {
+        id: socket.id,
+        local_frame: socket.local_frame.clone(),
+    }
+}
+
+fn geometry_part_instance(instance: &PartInstance) -> GeometryPartInstanceFingerprint {
+    GeometryPartInstanceFingerprint {
+        id: instance.id,
+        definition: instance.definition,
+        parent: instance.parent,
+        local_transform: instance.local_transform.clone(),
+        attachment: instance.attachment.as_ref().map(geometry_attachment),
+        enabled: instance.enabled,
+        generated_by: instance.generated_by,
+    }
+}
+
+fn geometry_attachment(attachment: &AttachmentSpec) -> GeometryAttachmentFingerprint {
+    GeometryAttachmentFingerprint {
+        parent_instance: attachment.parent_instance,
+        parent_socket: attachment.parent_socket,
+        child_socket: attachment.child_socket,
+        local_offset: attachment.local_offset.clone(),
+        mode: attachment.mode,
+    }
 }
 
 fn selected_provider_fingerprints<'a>(
@@ -777,20 +1052,174 @@ fn selected_provider_fingerprints<'a>(
         .collect()
 }
 
+fn selected_provider_geometry_fingerprints(
+    family_impl: &FamilyImplementation,
+    style_impl: &StyleImplementation,
+    selected_providers: &BTreeMap<String, ProviderSelection>,
+    export_use_by_role: &BTreeMap<String, GeometryExportUse>,
+) -> Vec<SelectedProviderGeometryFingerprint> {
+    selected_providers
+        .iter()
+        .map(|(role, selection)| SelectedProviderGeometryFingerprint {
+            role: role.clone(),
+            fragment_contract: find_selected_fragment_for_hash(family_impl, style_impl, selection)
+                .map(|fragment| {
+                    geometry_recipe_fragment(
+                        fragment,
+                        export_use_by_role.get(role).cloned().unwrap_or_default(),
+                    )
+                }),
+        })
+        .collect()
+}
+
+fn selected_provider_conformance_fingerprints(
+    family_impl: &FamilyImplementation,
+    style_impl: &StyleImplementation,
+    selected_providers: &BTreeMap<String, ProviderSelection>,
+) -> Vec<SelectedProviderConformanceFingerprint> {
+    selected_providers
+        .iter()
+        .map(|(role, selection)| SelectedProviderConformanceFingerprint {
+            role: role.clone(),
+            fragment_contract: find_selected_fragment_for_hash(family_impl, style_impl, selection)
+                .map(recipe_fragment_conformance),
+        })
+        .collect()
+}
+
+fn geometry_recipe_fragment(
+    fragment: &RecipeFragment,
+    export_use: GeometryExportUse,
+) -> GeometryRecipeFragment {
+    GeometryRecipeFragment {
+        exports: geometry_fragment_exports(&fragment.exports, &export_use),
+        recipe: geometry_base_recipe(&fragment.recipe),
+    }
+}
+
+fn geometry_fragment_exports(
+    exports: &RecipeFragmentExports,
+    export_use: &GeometryExportUse,
+) -> GeometryRecipeFragmentExports {
+    GeometryRecipeFragmentExports {
+        role_occurrence_roots: if export_use.include_roots {
+            exports.role_occurrence_roots.clone()
+        } else {
+            Vec::new()
+        },
+        internal_roots: if export_use.include_roots {
+            exports.internal_roots.clone()
+        } else {
+            Vec::new()
+        },
+        socket_ports: exports
+            .socket_ports
+            .iter()
+            .filter(|port| export_use.socket_ports.contains(&port.id))
+            .map(|port| GeometryFragmentSocketPort {
+                id: port.id.clone(),
+                local_occurrence_root: port.local_occurrence_root,
+                local_socket: port.local_socket,
+            })
+            .collect(),
+    }
+}
+
+fn geometry_export_use_by_role(
+    family_impl: &FamilyImplementation,
+) -> BTreeMap<String, GeometryExportUse> {
+    let mut by_role = BTreeMap::<String, GeometryExportUse>::new();
+    for binding in &family_impl.parameter_bindings {
+        if let ParameterBinding::TogglePartPresence { role, .. } = binding {
+            by_role.entry(role.clone()).or_default().include_roots = true;
+        }
+    }
+    for binding in &family_impl.attachment_bindings {
+        let parent = by_role.entry(binding.parent_role.clone()).or_default();
+        parent.include_roots = true;
+        parent.socket_ports.insert(binding.parent_port.clone());
+        let child = by_role.entry(binding.child_role.clone()).or_default();
+        child.include_roots = true;
+        child.socket_ports.insert(binding.child_port.clone());
+    }
+    by_role
+}
+
+fn recipe_fragment_conformance(fragment: &RecipeFragment) -> RecipeFragmentConformanceFingerprint {
+    RecipeFragmentConformanceFingerprint {
+        exports: fragment.exports.clone(),
+        recipe: recipe_conformance(&fragment.recipe),
+    }
+}
+
+fn recipe_conformance(recipe: &AssetRecipe) -> RecipeConformanceFingerprint {
+    RecipeConformanceFingerprint {
+        constraints: recipe.constraints.clone(),
+        relationships: recipe.relationships.clone(),
+    }
+}
+
 fn executable_parameter_bindings<'a>(
     family: &'a AssetFamilySchema,
     bindings: &'a [ParameterBinding],
-) -> Vec<&'a ParameterBinding> {
+    request: &'a FamilyInstantiationRequest,
+) -> Result<Vec<GeometryParameterBindingFingerprint<'a>>, FamilyCompileError> {
     let executable_slots = family
         .parameter_slots
         .iter()
         .filter(|slot| slot.execution_policy == ParameterExecutionPolicy::RequiredBinding)
         .map(|slot| slot.id.as_str())
         .collect::<BTreeSet<_>>();
-    bindings
-        .iter()
-        .filter(|binding| executable_slots.contains(binding.slot()))
-        .collect()
+    let mut executable_bindings = Vec::new();
+    for binding in bindings {
+        if !executable_slots.contains(binding.slot()) {
+            continue;
+        }
+        match binding {
+            ParameterBinding::Scalar {
+                slot,
+                role,
+                local_path,
+                transform,
+            } => executable_bindings.push(GeometryParameterBindingFingerprint::Scalar {
+                slot,
+                role,
+                local_path,
+                transform: *transform,
+            }),
+            ParameterBinding::TogglePartPresence { slot, role } => {
+                executable_bindings
+                    .push(GeometryParameterBindingFingerprint::TogglePartPresence { slot, role });
+            }
+            ParameterBinding::ChoiceToPrototype {
+                slot,
+                role,
+                choices,
+            } => {
+                let Some(value) = request.parameters.get(slot) else {
+                    continue;
+                };
+                let FamilyValue::Choice(choice) = value else {
+                    return Err(FamilyCompileError::IncompatibleParameterValue {
+                        slot: slot.clone(),
+                    });
+                };
+                let Some(selected_fragment) = choices.get(choice) else {
+                    return Err(FamilyCompileError::IncompatibleParameterValue {
+                        slot: slot.clone(),
+                    });
+                };
+                executable_bindings.push(GeometryParameterBindingFingerprint::ChoiceToPrototype {
+                    slot,
+                    role,
+                    selected_choice: choice,
+                    selected_fragment,
+                });
+            }
+        }
+    }
+    Ok(executable_bindings)
 }
 
 fn executable_parameter_values(

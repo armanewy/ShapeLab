@@ -3788,6 +3788,8 @@ dependencies = [
  "shape-caesar-assets",
  "shape-compile",
  "shape-family",
+ "shape-modeling",
+ "shape-poly",
  "thiserror 2.0.18",
 ]
 

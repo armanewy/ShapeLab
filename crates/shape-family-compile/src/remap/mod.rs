@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    BoundaryLoopId, OperationId, ParameterId, PartDefinitionId, PartInstanceId, RegionId, SocketId,
+    BoundaryLoopId, GeometrySource, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
+    RegionId, SocketId,
 };
 use thiserror::Error;
 
@@ -117,4 +118,19 @@ pub enum FragmentRemapError {
         /// Reason.
         reason: String,
     },
+}
+
+pub(crate) fn generated_socket_ids(source: &GeometrySource) -> Vec<SocketId> {
+    match source {
+        GeometrySource::RoundedBox { .. } => (1..=6).map(SocketId).collect(),
+        GeometrySource::Cylinder { .. } | GeometrySource::Frustum { .. } => {
+            (1..=3).map(SocketId).collect()
+        }
+        GeometrySource::Plate { .. }
+        | GeometrySource::Sweep { .. }
+        | GeometrySource::Lathe { .. } => (1..=2).map(SocketId).collect(),
+        GeometrySource::LiteralMesh { .. } | GeometrySource::ReservedBooleanResult { .. } => {
+            Vec::new()
+        }
+    }
 }

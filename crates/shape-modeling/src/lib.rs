@@ -22,6 +22,9 @@ pub mod bevel;
 /// Semantic constructive detail features.
 pub mod features;
 
+/// Package version for deterministic modeling generators.
+pub const SHAPE_MODELING_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Deterministic explicit-topology generators.
 pub mod generators {
     /// Basic built-in generator families.

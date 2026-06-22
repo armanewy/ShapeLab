@@ -6,7 +6,7 @@ use shape_asset::AssetRecipe;
 
 use crate::RecipeFragment;
 
-use super::{AllocatedSemanticIds, FragmentRemap};
+use super::{AllocatedSemanticIds, FragmentRemap, generated_socket_ids};
 
 /// Prepared typed ID remap with its allocation audit data.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -39,6 +39,7 @@ pub fn prepare_fragment_id_remap(
     for definition in target.definitions.values() {
         used_regions.extend(definition.regions.keys().copied());
         used_sockets.extend(definition.sockets.keys().copied());
+        used_sockets.extend(generated_socket_ids(&definition.geometry.source));
         for operation in &definition.geometry.operations {
             used_operations.insert(operation.operation_id());
             used_regions.extend(operation.generated_region_ids());
@@ -48,6 +49,7 @@ pub fn prepare_fragment_id_remap(
     for definition in fragment.recipe.definitions.values() {
         used_regions.extend(definition.regions.keys().copied());
         used_sockets.extend(definition.sockets.keys().copied());
+        used_sockets.extend(generated_socket_ids(&definition.geometry.source));
         for operation in &definition.geometry.operations {
             used_operations.insert(operation.operation_id());
             used_regions.extend(operation.generated_region_ids());

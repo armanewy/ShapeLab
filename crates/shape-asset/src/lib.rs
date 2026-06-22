@@ -24,6 +24,8 @@ pub use parameters::*;
 
 /// Current schema version for asset recipes.
 pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 7;
+/// Package version for asset-recipe contracts.
+pub const SHAPE_ASSET_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
 const BOUNDARY_BEVEL_PROFILE_MAX: f32 = 8.0;
 const CUT_SCALAR_SAFETY_MARGIN: f32 = 0.001;

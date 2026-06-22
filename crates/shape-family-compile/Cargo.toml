@@ -13,6 +13,8 @@ serde_json.workspace = true
 shape-asset.workspace = true
 shape-compile.workspace = true
 shape-family.workspace = true
+shape-modeling.workspace = true
+shape-poly.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

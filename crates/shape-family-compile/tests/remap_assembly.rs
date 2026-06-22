@@ -551,14 +551,14 @@ fn stale_target_counters_do_not_overwrite_existing_or_source_ids() {
     assert!(remapped.remap.operations.values().all(|id| id.0 > 1));
     assert!(remapped.remap.regions.values().all(|id| id.0 > 6));
     assert!(remapped.remap.boundary_loops.values().all(|id| id.0 > 2));
-    assert!(remapped.remap.sockets.values().all(|id| id.0 > 2));
+    assert!(remapped.remap.sockets.values().all(|id| id.0 > 6));
     assert!(target.next_ids.part_definition > 4);
     assert!(target.next_ids.part_instance > 4);
     assert!(target.next_ids.parameter > 4);
     assert!(target.next_ids.operation > 2);
     assert!(target.next_ids.region > 10);
     assert!(target.next_ids.boundary_loop > 4);
-    assert!(target.next_ids.socket > 4);
+    assert!(target.next_ids.socket > 8);
 }
 
 #[test]

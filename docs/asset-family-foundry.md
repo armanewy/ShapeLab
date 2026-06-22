@@ -93,7 +93,9 @@ Cross-fragment port bindings use explicit `parent_role`/`parent_port` and `child
 
 Family parameter slots declare a `ParameterExecutionPolicy`. `RequiredBinding` is the default and requires at least one executable binding in the implementation. `AdvisoryOnly` and `RuntimeOnly` slots can be accepted as semantic intent, but executable geometry bindings may not consume them. The compiler rejects unbound required slots, non-executable parameter bindings, conflicting provider-selection bindings, conflicting presence bindings, and non-finite or degenerate scalar transforms.
 
-Instantiated recipes derive `AssetId` from a canonical, domain-separated BLAKE3 geometry-input fingerprint. The report also exposes foundry-intent, recipe, and artifact fingerprints. Geometry identity excludes advisory/runtime-only parameter values; foundry intent includes them. The ID is not the seed and does not rely on schema-version bumps to detect content changes.
+Instantiated recipes derive `AssetId` from a canonical, domain-separated BLAKE3 geometry-input fingerprint. The report also exposes foundry-intent, conformance-contract, build, recipe, and artifact fingerprints. Geometry identity is limited to executable recipe inputs such as selected fragments, executable parameter values and bindings, base recipe geometry inputs, active export selectors, and cross-fragment attachment bindings. Foundry intent preserves advisory/runtime values and request seed; conformance/build identity preserves validation contracts, recipe-level constraints and relationships, export contracts, and selected-fragment export tags. The ID is not the seed and does not rely on schema-version bumps to detect content changes.
+
+Typed fragment remap reports intentionally retain source IDs as map keys for auditability. The no-source-ID invariant applies to the instantiated recipe, compiled artifact, exported provenance, parameter application targets, and other generated outputs, not to the audit map that explains how source IDs were rewritten.
 
 The first binding language is intentionally small:
 

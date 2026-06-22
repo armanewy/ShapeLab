@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AttachmentMode, BoundaryLoopId, Frame3, GeometryRecipe, GeometrySource,
-    OperationId, ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId,
-    RegionId, SocketId, SocketSpec, Transform3, definition_scalar_path, get_scalar,
-    validate_asset_recipe,
+    AssetConstraint, AssetId, AssetPartSelector, AssetRecipe, AssetRelationshipPolicy,
+    AttachmentMode, BoundaryLoopId, Frame3, GeometryRecipe, GeometrySource, OperationId,
+    ParameterDescriptor, ParameterId, ParameterRangeOverride, PartDefinition, PartDefinitionId,
+    PartInstance, PartInstanceId, RegionId, RelationshipPairing, SocketId, SocketSpec, Transform3,
+    definition_scalar_path, get_scalar, validate_asset_recipe,
 };
 use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
-use shape_compile::export::write_grouped_obj_export;
+use shape_compile::{compile_asset, export::write_grouped_obj_export};
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, ExaggerationPolicy, ExportRequirement, FamilyDefaultValue,
@@ -17,6 +18,7 @@ use shape_family::{
     RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
     VariantMode, VariantRule,
 };
+use shape_family_compile::remap::FragmentRemap;
 use shape_family_compile::{
     FAMILY_IMPLEMENTATION_SCHEMA_VERSION, FamilyCompileError, FamilyImplementation,
     FamilyInstantiationRequest, FamilyValue, FragmentAttachmentBinding, FragmentAttachmentPairing,
@@ -25,6 +27,7 @@ use shape_family_compile::{
     STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform, StyleImplementation, instantiate_family,
     scalar_parameter,
 };
+use shape_poly::{EdgeMetadata, FaceMetadata, PolygonMesh, TriangulatedPolygonMesh};
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
 const LOCAL_INSTANCE: PartInstanceId = PartInstanceId(91);
@@ -298,13 +301,109 @@ fn ids_are_deterministically_remapped_and_instantiation_repeats_identically() {
 }
 
 #[test]
+fn source_map_insertion_order_does_not_change_output() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let canonical_style = scifi_industrial_style_implementation();
+    let mut reversed_style = StyleImplementation {
+        schema_version: canonical_style.schema_version,
+        style_kit_id: canonical_style.style_kit_id.clone(),
+        family_id: canonical_style.family_id.clone(),
+        default_role_providers: BTreeMap::new(),
+        prototypes: BTreeMap::new(),
+        detail_modules: BTreeMap::new(),
+    };
+    for (role, provider) in canonical_style.default_role_providers.iter().rev() {
+        reversed_style
+            .default_role_providers
+            .insert(role.clone(), provider.clone());
+    }
+    for (prototype, fragment) in canonical_style.prototypes.iter().rev() {
+        reversed_style
+            .prototypes
+            .insert(prototype.clone(), fragment.clone());
+    }
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let canonical = instantiate_family(&family, &kit, &implementation, &canonical_style, &request)
+        .expect("canonical order should instantiate");
+    let reversed = instantiate_family(&family, &kit, &implementation, &reversed_style, &request)
+        .expect("reversed insertion order should instantiate");
+
+    assert_eq!(
+        serde_json::to_string(&canonical.recipe).expect("canonical recipe json"),
+        serde_json::to_string(&reversed.recipe).expect("reversed recipe json")
+    );
+    assert_eq!(
+        canonical.report.source_recipe_hash,
+        reversed.report.source_recipe_hash
+    );
+    assert_eq!(
+        canonical.report.geometry_input_fingerprint,
+        reversed.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        canonical.report.conformance_contract_fingerprint,
+        reversed.report.conformance_contract_fingerprint
+    );
+    assert_eq!(
+        canonical.report.build_fingerprint,
+        reversed.report.build_fingerprint
+    );
+    assert_eq!(
+        canonical.report.artifact_fingerprint,
+        reversed.report.artifact_fingerprint
+    );
+}
+
+#[test]
 fn fragment_remap_reports_are_complete_unique_and_fresh() {
+    let mut style = scifi_industrial_style_implementation();
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .recipe
+        .next_ids
+        .socket = 43;
+    style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .recipe
+        .definitions
+        .get_mut(&LOCAL_DEFINITION)
+        .expect("body definition")
+        .sockets
+        .insert(
+            SocketId(42),
+            SocketSpec {
+                id: SocketId(42),
+                name: "Angled diagnostic socket".to_owned(),
+                local_frame: Frame3 {
+                    origin: [0.25, 0.1, -0.2],
+                    x_axis: [0.0, 1.0, 0.0],
+                    y_axis: [-1.0, 0.0, 0.0],
+                    z_axis: [0.0, 0.0, 1.0],
+                },
+                role: "diagnostic".to_owned(),
+                tags: BTreeSet::from(["diagnostic".to_owned()]),
+            },
+        );
     let output = instantiate_family(
         &crate_family(),
         &scifi_industrial_style_kit(),
         &crate_implementation(),
-        &scifi_industrial_style_implementation(),
-        &request("crate", "sci_fi_industrial", []),
+        &style,
+        &request(
+            "crate",
+            "sci_fi_industrial",
+            [
+                ("body_width", FamilyValue::Scalar(1.0)),
+                ("bolt_segments", FamilyValue::Integer(16)),
+            ],
+        ),
     )
     .expect("crate instantiates");
 
@@ -348,6 +447,8 @@ fn fragment_remap_reports_are_complete_unique_and_fresh() {
     }
     assert!(!output.recipe.definitions.contains_key(&LOCAL_DEFINITION));
     assert!(!output.recipe.instances.contains_key(&LOCAL_INSTANCE));
+    assert_no_source_semantic_ids_survive(&output);
+    assert_selected_fragments_compile_equivalent(&crate_implementation(), &style, &output);
 }
 
 #[test]
@@ -848,10 +949,29 @@ fn fragment_attachment_bindings_attach_child_occurrences_to_parent_ports() {
         .expect("attached child instance");
     assert_eq!(child.parent, Some(attachment.parent_instance));
     assert!(child.attachment.is_some());
+
+    let unbound = instantiate_family(
+        &bridge_family(&["roman_timber_engineering"]),
+        &roman_timber_engineering_style_kit(),
+        &bridge_implementation(),
+        &style,
+        &request("bridge", "roman_timber_engineering", []),
+    )
+    .expect("unbound bridge should instantiate");
+
+    assert_ne!(unbound.recipe.id, output.recipe.id);
+    assert_ne!(
+        unbound.report.geometry_input_fingerprint,
+        output.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        unbound.report.build_fingerprint,
+        output.report.build_fingerprint
+    );
 }
 
 #[test]
-fn asset_id_is_hash_derived_from_seed_and_semantic_parameters() {
+fn asset_id_is_hash_derived_from_geometry_inputs_not_seed() {
     let family = crate_family();
     let kit = scifi_industrial_style_kit();
     let implementation = crate_implementation();
@@ -874,14 +994,79 @@ fn asset_id_is_hash_derived_from_seed_and_semantic_parameters() {
 
     assert_ne!(zero.recipe.id, AssetId(0));
     assert_ne!(zero.recipe.id, AssetId(1));
-    assert_ne!(zero.recipe.id, one.recipe.id);
+    assert_eq!(zero.recipe.id, one.recipe.id);
     assert_ne!(zero.recipe.id, wider.recipe.id);
     assert_eq!(zero.report.instantiation_fingerprint.len(), 64);
     assert_eq!(zero.report.geometry_input_fingerprint.len(), 64);
     assert_eq!(zero.report.foundry_intent_fingerprint.len(), 64);
+    assert_eq!(zero.report.conformance_contract_fingerprint.len(), 64);
+    assert_eq!(zero.report.build_fingerprint.len(), 64);
     assert_eq!(
         zero.report.instantiation_fingerprint,
         zero.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        zero.report.geometry_input_fingerprint,
+        one.report.geometry_input_fingerprint
+    );
+    assert_eq!(zero.report.build_fingerprint, one.report.build_fingerprint);
+    assert_ne!(
+        zero.report.foundry_intent_fingerprint,
+        one.report.foundry_intent_fingerprint
+    );
+    assert_eq!(
+        zero.report.conformance_contract_fingerprint,
+        one.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        zero.report.geometry_input_fingerprint,
+        wider.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        zero.report.conformance_contract_fingerprint,
+        wider.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        zero.report.build_fingerprint,
+        wider.report.build_fingerprint
+    );
+}
+
+#[test]
+fn validation_constraints_do_not_change_geometry_identity() {
+    let family = crate_family();
+    let mut constrained = family.clone();
+    constrained.constraints.push(GeometricConstraint {
+        id: "body-clearance-contract".to_owned(),
+        roles: vec!["body".to_owned()],
+        kind: ConstraintKind::Clearance,
+    });
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let style = scifi_industrial_style_implementation();
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&constrained, &kit, &implementation, &style, &request)
+        .expect("constraint change should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
     );
 }
 
@@ -913,6 +1098,194 @@ fn export_requirements_do_not_change_geometry_identity() {
         baseline.report.foundry_intent_fingerprint,
         changed.report.foundry_intent_fingerprint
     );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+}
+
+#[test]
+fn advisory_style_policy_does_not_change_geometry_identity() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let mut changed_kit = kit.clone();
+    changed_kit.bevel_policy.segments += 1;
+    let implementation = crate_implementation();
+    let style = scifi_industrial_style_implementation();
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &changed_kit, &implementation, &style, &request)
+        .expect("style policy changed should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+}
+
+#[test]
+fn required_slot_metadata_does_not_change_geometry_identity() {
+    let family = crate_family();
+    let mut metadata_changed = family.clone();
+    let body_width = metadata_changed
+        .parameter_slots
+        .iter_mut()
+        .find(|slot| slot.id == "body_width")
+        .expect("body width slot");
+    body_width.label = "Body Width Display Copy".to_owned();
+    body_width.range = Some(ParameterRange {
+        minimum: 0.6,
+        maximum: 2.4,
+        step: 0.1,
+    });
+    body_width.topology_changing = true;
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let style = scifi_industrial_style_implementation();
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&metadata_changed, &kit, &implementation, &style, &request)
+        .expect("metadata-changed family should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+}
+
+#[test]
+fn unselected_optional_provider_changes_do_not_change_geometry_identity() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let mut style = scifi_industrial_style_implementation();
+    let GeometrySource::RoundedBox { half_extents, .. } = &mut style
+        .prototypes
+        .get_mut("side_handle")
+        .expect("side handle prototype")
+        .recipe
+        .definitions
+        .get_mut(&LOCAL_DEFINITION)
+        .expect("side handle definition")
+        .geometry
+        .source
+    else {
+        panic!("expected side handle rounded box");
+    };
+    *half_extents = [0.3, 0.08, 0.3];
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(
+        &family,
+        &kit,
+        &implementation,
+        &scifi_industrial_style_implementation(),
+        &request,
+    )
+    .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("unselected provider change should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_eq!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+}
+
+#[test]
+fn unselected_choice_mapping_does_not_change_geometry_identity() {
+    let family = bridge_family(&["industrial_steel"]);
+    let kit = industrial_bridge_style_kit();
+    let implementation = industrial_bridge_implementation();
+    let mut changed_implementation = implementation.clone();
+    let ParameterBinding::ChoiceToPrototype { choices, .. } = changed_implementation
+        .parameter_bindings
+        .iter_mut()
+        .find(|binding| matches!(binding, ParameterBinding::ChoiceToPrototype { .. }))
+        .expect("support shape choice binding")
+    else {
+        panic!("expected choice binding");
+    };
+    choices.insert("round".to_owned(), "box_support".to_owned());
+    let style = industrial_bridge_style_implementation();
+    let request = request(
+        "bridge",
+        "industrial_steel",
+        [
+            ("span_length", FamilyValue::Scalar(3.0)),
+            ("support_shape", FamilyValue::Choice("box".to_owned())),
+        ],
+    );
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &kit, &changed_implementation, &style, &request)
+        .expect("changed unselected mapping should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_eq!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
 }
 
 #[test]
@@ -923,6 +1296,13 @@ fn base_recipe_placeholder_id_and_title_do_not_change_geometry_identity() {
     let mut placeholder_changed = implementation.clone();
     placeholder_changed.base_recipe.id = AssetId(999);
     placeholder_changed.base_recipe.title = "Different placeholder".to_owned();
+    placeholder_changed
+        .base_recipe
+        .constraints
+        .push(AssetConstraint::Custom {
+            code: "editor-only-contract".to_owned(),
+            message: "Authoring note that should not affect geometry identity.".to_owned(),
+        });
     let style = scifi_industrial_style_implementation();
     let request = request("crate", "sci_fi_industrial", []);
 
@@ -935,6 +1315,142 @@ fn base_recipe_placeholder_id_and_title_do_not_change_geometry_identity() {
     assert_eq!(
         baseline.report.geometry_input_fingerprint,
         changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+}
+
+#[test]
+fn selected_fragment_unused_export_metadata_does_not_change_geometry_identity() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let mut baseline_style = scifi_industrial_style_implementation();
+    add_socket_port(
+        baseline_style
+            .prototypes
+            .get_mut("armored_body")
+            .expect("body fragment"),
+        "diagnostic_mount",
+        "diagnostic",
+        "mount",
+    );
+    let mut changed_style = baseline_style.clone();
+    let body = changed_style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment");
+    body.exports.socket_ports[0].id = "diagnostic_mount_alias".to_owned();
+    body.exports.socket_ports[0]
+        .compatibility_tags
+        .push("alternate-mount".to_owned());
+    let request = request("crate", "sci_fi_industrial", []);
+
+    let baseline = instantiate_family(&family, &kit, &implementation, &baseline_style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &kit, &implementation, &changed_style, &request)
+        .expect("export tag changed selected fragment should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_ne!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_ne!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
+    assert_ne!(
+        baseline.report.foundry_intent_fingerprint,
+        changed.report.foundry_intent_fingerprint
+    );
+}
+
+#[test]
+fn selected_fragment_authoring_metadata_does_not_change_geometry_identity() {
+    let family = crate_family();
+    let kit = scifi_industrial_style_kit();
+    let implementation = crate_implementation();
+    let baseline_style = scifi_industrial_style_implementation();
+    let mut metadata_changed = baseline_style.clone();
+    let body = metadata_changed
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment");
+    let definition = body
+        .recipe
+        .definitions
+        .get_mut(&LOCAL_DEFINITION)
+        .expect("body definition");
+    definition.name = "Armored Body Display Name".to_owned();
+    definition.tags.insert("editor-tag".to_owned());
+    body.recipe
+        .instances
+        .get_mut(&LOCAL_INSTANCE)
+        .expect("body instance")
+        .tags
+        .insert("editor-instance-tag".to_owned());
+    body.recipe.parameters.insert(
+        ParameterId(7),
+        ParameterDescriptor {
+            id: ParameterId(7),
+            path: definition_scalar_path(LOCAL_DEFINITION, "geometry.rounded_box.radius"),
+            label: "Editor Radius".to_owned(),
+            group: "Editor".to_owned(),
+            minimum: 0.0,
+            maximum: 1.0,
+            step: 0.01,
+            mutation_sigma: 0.05,
+            topology_changing: false,
+            beginner_description: "Editor-facing hint.".to_owned(),
+        },
+    );
+    body.recipe.locks.insert(ParameterId(7));
+    body.recipe.instance_locks.insert(LOCAL_INSTANCE);
+    body.recipe.topology_locks.insert(LOCAL_DEFINITION);
+    body.recipe.variation.parameter_range_overrides.insert(
+        ParameterId(7),
+        ParameterRangeOverride {
+            minimum: 0.02,
+            maximum: 0.12,
+            step: Some(0.01),
+            mutation_sigma: Some(0.02),
+        },
+    );
+    body.recipe.next_ids.parameter = 8;
+
+    let request = request("crate", "sci_fi_industrial", []);
+    let baseline = instantiate_family(&family, &kit, &implementation, &baseline_style, &request)
+        .expect("baseline should instantiate");
+    let changed = instantiate_family(&family, &kit, &implementation, &metadata_changed, &request)
+        .expect("metadata-changed selected fragment should instantiate");
+
+    assert_eq!(baseline.recipe.id, changed.recipe.id);
+    assert_eq!(
+        baseline.report.geometry_input_fingerprint,
+        changed.report.geometry_input_fingerprint
+    );
+    assert_eq!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_eq!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
     );
     assert_ne!(
         baseline.report.foundry_intent_fingerprint,
@@ -1574,6 +2090,14 @@ fn advisory_and_runtime_values_do_not_change_geometry_identity() {
         baseline.report.foundry_intent_fingerprint,
         changed.report.foundry_intent_fingerprint
     );
+    assert_eq!(
+        baseline.report.conformance_contract_fingerprint,
+        changed.report.conformance_contract_fingerprint
+    );
+    assert_eq!(
+        baseline.report.build_fingerprint,
+        changed.report.build_fingerprint
+    );
 }
 
 #[test]
@@ -1869,6 +2393,661 @@ fn assert_concrete_exportable(output: &shape_family_compile::FamilyInstantiation
         .expect("instantiated asset should export");
     assert!(export.report.object_count > 0);
     assert!(export.report.face_count > 0);
+}
+
+fn assert_selected_fragments_compile_equivalent(
+    family_impl: &FamilyImplementation,
+    style: &StyleImplementation,
+    output: &shape_family_compile::FamilyInstantiation,
+) {
+    for report in &output.report.fragment_remaps {
+        let fragment = style
+            .prototypes
+            .get(&report.fragment_id)
+            .or_else(|| family_impl.fragments.get(&report.fragment_id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "remap report references unknown fragment {}",
+                    report.fragment_id
+                )
+            });
+        let source_ids = SourceSemanticIds::from_remap(&report.remap);
+        let source_artifact = compile_asset(&fragment.recipe).expect("source fragment compiles");
+        assert!(source_artifact.validation_report.is_valid());
+        let expected_target_instances = source_artifact
+            .compiled_parts
+            .iter()
+            .map(|source_part| report.remap.instances[&source_part.instance_id])
+            .collect::<BTreeSet<_>>();
+        let actual_target_parts = output
+            .artifact
+            .compiled_parts
+            .iter()
+            .filter(|part| expected_target_instances.contains(&part.instance_id))
+            .count();
+        assert_eq!(actual_target_parts, source_artifact.compiled_parts.len());
+        for source_part in &source_artifact.compiled_parts {
+            let target_instance = report.remap.instances[&source_part.instance_id];
+            let target_part = output
+                .artifact
+                .compiled_parts
+                .iter()
+                .find(|part| part.instance_id == target_instance)
+                .expect("remapped compiled part exists");
+            assert_eq!(
+                target_part.definition_id,
+                report.remap.definitions[&source_part.definition_id]
+            );
+            assert_eq!(
+                target_part.prototype_instance_id,
+                source_part
+                    .prototype_instance_id
+                    .map(|id| remap_instance_id(id, &report.remap, &source_ids))
+            );
+            assert_eq!(
+                target_part.generated_by,
+                source_part.generated_by.map(|id| remap_operation_id(
+                    id,
+                    &report.remap,
+                    &source_ids
+                ))
+            );
+            assert_eq!(
+                target_part.source_recipe_instance,
+                source_part.source_recipe_instance
+            );
+            assert_eq!(
+                remap_polygon_mesh(source_part.local_mesh.clone(), &report.remap, &source_ids),
+                target_part.local_mesh
+            );
+            assert_eq!(
+                remap_polygon_mesh(source_part.world_mesh.clone(), &report.remap, &source_ids),
+                target_part.world_mesh
+            );
+            assert_eq!(
+                remap_triangulated_mesh(
+                    source_part.triangulated_world.clone(),
+                    &report.remap,
+                    &source_ids,
+                ),
+                target_part.triangulated_world
+            );
+            assert_eq!(
+                remap_socket_map(
+                    source_part.sockets_world.clone(),
+                    &report.remap,
+                    &source_ids
+                ),
+                target_part.sockets_world
+            );
+        }
+        assert_fragment_sockets_remap_equivalently(fragment, &output.recipe, &report.remap);
+    }
+}
+
+#[derive(Default)]
+struct SourceSemanticIds {
+    definitions: BTreeSet<PartDefinitionId>,
+    instances: BTreeSet<PartInstanceId>,
+    parameters: BTreeSet<ParameterId>,
+    operations: BTreeSet<OperationId>,
+    regions: BTreeSet<RegionId>,
+    boundary_loops: BTreeSet<BoundaryLoopId>,
+    sockets: BTreeSet<SocketId>,
+}
+
+impl SourceSemanticIds {
+    fn from_output(output: &shape_family_compile::FamilyInstantiation) -> Self {
+        let mut ids = Self::default();
+        for report in &output.report.fragment_remaps {
+            ids.extend_remap(&report.remap);
+        }
+        ids
+    }
+
+    fn from_remap(remap: &FragmentRemap) -> Self {
+        let mut ids = Self::default();
+        ids.extend_remap(remap);
+        ids
+    }
+
+    fn extend_remap(&mut self, remap: &FragmentRemap) {
+        self.definitions.extend(remap.definitions.keys().copied());
+        self.instances.extend(remap.instances.keys().copied());
+        self.parameters.extend(remap.parameters.keys().copied());
+        self.operations.extend(remap.operations.keys().copied());
+        self.regions.extend(remap.regions.keys().copied());
+        self.boundary_loops
+            .extend(remap.boundary_loops.keys().copied());
+        self.sockets.extend(remap.sockets.keys().copied());
+    }
+}
+
+fn assert_no_source_semantic_ids_survive(output: &shape_family_compile::FamilyInstantiation) {
+    let source_ids = SourceSemanticIds::from_output(output);
+
+    for definition in output.recipe.definitions.values() {
+        assert!(!source_ids.definitions.contains(&definition.id));
+        for region in definition.regions.values() {
+            assert!(!source_ids.regions.contains(&region.id));
+        }
+        for socket in definition.sockets.values() {
+            assert!(!source_ids.sockets.contains(&socket.id));
+        }
+        for operation in &definition.geometry.operations {
+            assert!(!source_ids.operations.contains(&operation.operation_id()));
+            for region in operation.generated_region_ids() {
+                assert!(!source_ids.regions.contains(&region));
+            }
+            for boundary_loop in operation.all_declared_boundary_loop_outputs() {
+                assert!(!source_ids.boundary_loops.contains(&boundary_loop));
+            }
+        }
+    }
+    for root in &output.recipe.root_instances {
+        assert!(!source_ids.instances.contains(root));
+    }
+    for instance in output.recipe.instances.values() {
+        assert!(!source_ids.instances.contains(&instance.id));
+        assert!(!source_ids.definitions.contains(&instance.definition));
+        assert!(
+            !instance
+                .parent
+                .is_some_and(|id| source_ids.instances.contains(&id))
+        );
+        assert!(
+            !instance
+                .generated_by
+                .is_some_and(|id| source_ids.operations.contains(&id))
+        );
+        if let Some(attachment) = &instance.attachment {
+            assert!(!source_ids.instances.contains(&attachment.parent_instance));
+            assert!(!source_ids.sockets.contains(&attachment.parent_socket));
+            assert!(!source_ids.sockets.contains(&attachment.child_socket));
+        }
+    }
+    for parameter in output.recipe.parameters.values() {
+        assert!(!source_ids.parameters.contains(&parameter.id));
+        assert_scalar_path_contains_no_source_ids(&parameter.path, &source_ids);
+    }
+    for parameter in &output.recipe.locks {
+        assert!(!source_ids.parameters.contains(parameter));
+    }
+    for instance in &output.recipe.instance_locks {
+        assert!(!source_ids.instances.contains(instance));
+    }
+    for instance in &output.recipe.subtree_locks {
+        assert!(!source_ids.instances.contains(instance));
+    }
+    for definition in &output.recipe.topology_locks {
+        assert!(!source_ids.definitions.contains(definition));
+    }
+    for constraint in &output.recipe.constraints {
+        assert_constraint_contains_no_source_ids(constraint, &source_ids);
+    }
+    for relationship in &output.recipe.relationships {
+        assert_relationship_contains_no_source_ids(relationship, &source_ids);
+    }
+    assert_variation_contains_no_source_ids(&output.recipe, &source_ids);
+    for application in &output.report.parameter_applications {
+        assert_scalar_path_contains_no_source_ids(&application.target, &source_ids);
+    }
+    for part in &output.artifact.compiled_parts {
+        assert!(!source_ids.definitions.contains(&part.definition_id));
+        assert!(!source_ids.instances.contains(&part.instance_id));
+        assert!(
+            !part
+                .prototype_instance_id
+                .is_some_and(|id| source_ids.instances.contains(&id))
+        );
+        assert!(
+            !part
+                .generated_by
+                .is_some_and(|id| source_ids.operations.contains(&id))
+        );
+        assert_mesh_contains_no_source_ids(&part.local_mesh, &source_ids);
+        assert_mesh_contains_no_source_ids(&part.world_mesh, &source_ids);
+        assert_triangulated_mesh_contains_no_source_ids(&part.triangulated_world, &source_ids);
+        for socket in part.sockets_world.values() {
+            assert!(!source_ids.sockets.contains(&socket.id));
+        }
+    }
+    assert_mesh_contains_no_source_ids(&output.artifact.combined_polygon, &source_ids);
+    assert_triangulated_mesh_contains_no_source_ids(&output.artifact.combined_preview, &source_ids);
+    assert_provenance_contains_no_source_ids(&output.artifact.provenance_report, &source_ids);
+}
+
+fn assert_mesh_contains_no_source_ids(mesh: &PolygonMesh, source_ids: &SourceSemanticIds) {
+    for metadata in &mesh.face_metadata {
+        assert!(
+            !metadata
+                .part_definition
+                .is_some_and(|id| source_ids.definitions.contains(&id))
+        );
+        assert!(
+            !metadata
+                .part_instance
+                .is_some_and(|id| source_ids.instances.contains(&id))
+        );
+        assert!(
+            !metadata
+                .region
+                .is_some_and(|id| source_ids.regions.contains(&id))
+        );
+        assert!(
+            !metadata
+                .operation
+                .is_some_and(|id| source_ids.operations.contains(&id))
+        );
+    }
+    for metadata in mesh.edge_metadata.values() {
+        assert!(
+            !metadata
+                .operation
+                .is_some_and(|id| source_ids.operations.contains(&id))
+        );
+        assert!(
+            !metadata
+                .boundary_loop
+                .is_some_and(|id| source_ids.boundary_loops.contains(&id))
+        );
+        if let Some((first, second)) = metadata.region_transition {
+            assert!(!source_ids.regions.contains(&first));
+            assert!(!source_ids.regions.contains(&second));
+        }
+    }
+}
+
+fn assert_triangulated_mesh_contains_no_source_ids(
+    mesh: &TriangulatedPolygonMesh,
+    source_ids: &SourceSemanticIds,
+) {
+    for region in &mesh.triangle_to_region {
+        assert!(!region.is_some_and(|id| source_ids.regions.contains(&id)));
+    }
+    for part in &mesh.triangle_to_part {
+        assert!(!part.is_some_and(|id| source_ids.instances.contains(&id)));
+    }
+    for operation in &mesh.triangle_to_operation {
+        assert!(!operation.is_some_and(|id| source_ids.operations.contains(&id)));
+    }
+}
+
+fn assert_constraint_contains_no_source_ids(
+    constraint: &AssetConstraint,
+    source_ids: &SourceSemanticIds,
+) {
+    match constraint {
+        AssetConstraint::RequireInstance { instance } => {
+            assert!(!source_ids.instances.contains(instance));
+        }
+        AssetConstraint::MutuallyExclusiveTags { .. } | AssetConstraint::Custom { .. } => {}
+    }
+}
+
+fn assert_relationship_contains_no_source_ids(
+    relationship: &AssetRelationshipPolicy,
+    source_ids: &SourceSemanticIds,
+) {
+    match relationship {
+        AssetRelationshipPolicy::MayOverlap {
+            first,
+            second,
+            pairing,
+            ..
+        }
+        | AssetRelationshipPolicy::MustNotIntersect {
+            first,
+            second,
+            pairing,
+        }
+        | AssetRelationshipPolicy::MustTouch {
+            first,
+            second,
+            pairing,
+            ..
+        }
+        | AssetRelationshipPolicy::MinimumClearance {
+            first,
+            second,
+            pairing,
+            ..
+        } => {
+            assert_selector_contains_no_source_ids(first, source_ids);
+            assert_selector_contains_no_source_ids(second, source_ids);
+            assert_pairing_contains_no_source_ids(pairing, source_ids);
+        }
+        AssetRelationshipPolicy::MustContain {
+            container,
+            contained,
+            pairing,
+        } => {
+            assert_selector_contains_no_source_ids(container, source_ids);
+            assert_selector_contains_no_source_ids(contained, source_ids);
+            assert_pairing_contains_no_source_ids(pairing, source_ids);
+        }
+        AssetRelationshipPolicy::SocketAttached {
+            parent,
+            child,
+            pairing,
+            parent_socket,
+            child_socket,
+            ..
+        } => {
+            assert_selector_contains_no_source_ids(parent, source_ids);
+            assert_selector_contains_no_source_ids(child, source_ids);
+            assert_pairing_contains_no_source_ids(pairing, source_ids);
+            assert!(!source_ids.sockets.contains(parent_socket));
+            assert!(!source_ids.sockets.contains(child_socket));
+        }
+    }
+}
+
+fn assert_selector_contains_no_source_ids(
+    selector: &AssetPartSelector,
+    source_ids: &SourceSemanticIds,
+) {
+    match selector {
+        AssetPartSelector::SpecificInstance { instance }
+        | AssetPartSelector::PrototypeAndGeneratedOccurrences {
+            prototype: instance,
+        } => assert!(!source_ids.instances.contains(instance)),
+        AssetPartSelector::GeneratedByOperation { operation } => {
+            assert!(!source_ids.operations.contains(operation));
+        }
+        AssetPartSelector::PartTag { .. } | AssetPartSelector::DefinitionRole { .. } => {}
+    }
+}
+
+fn assert_pairing_contains_no_source_ids(
+    pairing: &RelationshipPairing,
+    source_ids: &SourceSemanticIds,
+) {
+    if let RelationshipPairing::Explicit(pairs) = pairing {
+        for (first, second) in pairs {
+            assert!(!source_ids.instances.contains(first));
+            assert!(!source_ids.instances.contains(second));
+        }
+    }
+}
+
+fn assert_variation_contains_no_source_ids(recipe: &AssetRecipe, source_ids: &SourceSemanticIds) {
+    for instance in &recipe.variation.optional_instances {
+        assert!(!source_ids.instances.contains(instance));
+    }
+    for hint in recipe.variation.replacement_groups.values() {
+        for definition in &hint.definitions {
+            assert!(!source_ids.definitions.contains(definition));
+        }
+    }
+    for operation in recipe.variation.count_ranges.keys() {
+        assert!(!source_ids.operations.contains(operation));
+    }
+    for parameter in recipe.variation.parameter_range_overrides.keys() {
+        assert!(!source_ids.parameters.contains(parameter));
+    }
+    for group in recipe.variation.semantic_cut_groups.values() {
+        assert!(!source_ids.definitions.contains(&group.definition));
+        for operation in &group.operations {
+            assert!(!source_ids.operations.contains(operation));
+        }
+    }
+}
+
+fn assert_provenance_contains_no_source_ids(
+    report: &shape_compile::ProvenanceReport,
+    source_ids: &SourceSemanticIds,
+) {
+    for definition in &report.definition_generation_order {
+        assert!(!source_ids.definitions.contains(definition));
+    }
+    for instance in &report.instance_order {
+        assert!(!source_ids.instances.contains(instance));
+    }
+    for mapping in &report.part_region_operation_mappings {
+        assert!(
+            !mapping
+                .part_definition
+                .is_some_and(|id| source_ids.definitions.contains(&id))
+        );
+        assert!(
+            !mapping
+                .part_instance
+                .is_some_and(|id| source_ids.instances.contains(&id))
+        );
+        assert!(
+            !mapping
+                .region
+                .is_some_and(|id| source_ids.regions.contains(&id))
+        );
+        assert!(
+            !mapping
+                .operation
+                .is_some_and(|id| source_ids.operations.contains(&id))
+        );
+    }
+    for instance in report.topology_signatures.keys() {
+        assert!(!source_ids.instances.contains(instance));
+    }
+}
+
+fn assert_scalar_path_contains_no_source_ids(path: &str, source_ids: &SourceSemanticIds) {
+    let parts = path.split('.').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["definition", definition, "geometry", ..] => {
+            if let Ok(definition) = definition.parse::<u64>() {
+                assert!(
+                    !source_ids
+                        .definitions
+                        .contains(&PartDefinitionId(definition))
+                );
+            }
+        }
+        ["definition", definition, "operation", operation, ..] => {
+            if let Ok(definition) = definition.parse::<u64>() {
+                assert!(
+                    !source_ids
+                        .definitions
+                        .contains(&PartDefinitionId(definition))
+                );
+            }
+            if let Ok(operation) = operation.parse::<u64>() {
+                assert!(!source_ids.operations.contains(&OperationId(operation)));
+            }
+        }
+        ["instance", instance, ..] => {
+            if let Ok(instance) = instance.parse::<u64>() {
+                assert!(!source_ids.instances.contains(&PartInstanceId(instance)));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_fragment_sockets_remap_equivalently(
+    fragment: &RecipeFragment,
+    recipe: &AssetRecipe,
+    remap: &FragmentRemap,
+) {
+    for (source_definition_id, source_definition) in &fragment.recipe.definitions {
+        let target_definition_id = remap.definitions[source_definition_id];
+        let target_definition = recipe
+            .definitions
+            .get(&target_definition_id)
+            .expect("remapped definition exists");
+        for (source_socket_id, source_socket) in &source_definition.sockets {
+            let target_socket_id = remap.sockets[source_socket_id];
+            let target_socket = target_definition
+                .sockets
+                .get(&target_socket_id)
+                .expect("remapped socket exists");
+            assert_eq!(target_socket.id, target_socket_id);
+            assert_eq!(target_socket.name, source_socket.name);
+            assert_eq!(target_socket.local_frame, source_socket.local_frame);
+            assert_eq!(target_socket.role, source_socket.role);
+            assert_eq!(target_socket.tags, source_socket.tags);
+        }
+    }
+}
+
+fn remap_polygon_mesh(
+    mut mesh: PolygonMesh,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> PolygonMesh {
+    for metadata in &mut mesh.face_metadata {
+        remap_face_metadata(metadata, remap, source_ids);
+    }
+    for metadata in mesh.edge_metadata.values_mut() {
+        remap_edge_metadata(metadata, remap, source_ids);
+    }
+    mesh
+}
+
+fn remap_face_metadata(
+    metadata: &mut FaceMetadata,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) {
+    metadata.part_definition = metadata
+        .part_definition
+        .map(|id| remap_definition_id(id, remap, source_ids));
+    metadata.part_instance = metadata
+        .part_instance
+        .map(|id| remap_instance_id(id, remap, source_ids));
+    metadata.region = metadata
+        .region
+        .map(|id| remap_region_id(id, remap, source_ids));
+    metadata.operation = metadata
+        .operation
+        .map(|id| remap_operation_id(id, remap, source_ids));
+}
+
+fn remap_edge_metadata(
+    metadata: &mut EdgeMetadata,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) {
+    metadata.operation = metadata
+        .operation
+        .map(|id| remap_operation_id(id, remap, source_ids));
+    metadata.region_transition = metadata.region_transition.map(|(first, second)| {
+        (
+            remap_region_id(first, remap, source_ids),
+            remap_region_id(second, remap, source_ids),
+        )
+    });
+    metadata.boundary_loop = metadata
+        .boundary_loop
+        .map(|id| remap_boundary_loop_id(id, remap, source_ids));
+}
+
+fn remap_triangulated_mesh(
+    mut mesh: TriangulatedPolygonMesh,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> TriangulatedPolygonMesh {
+    for region in &mut mesh.triangle_to_region {
+        *region = region.map(|id| remap_region_id(id, remap, source_ids));
+    }
+    for part in &mut mesh.triangle_to_part {
+        *part = part.map(|id| remap_instance_id(id, remap, source_ids));
+    }
+    for operation in &mut mesh.triangle_to_operation {
+        *operation = operation.map(|id| remap_operation_id(id, remap, source_ids));
+    }
+    mesh
+}
+
+fn remap_socket_map(
+    sockets: BTreeMap<SocketId, SocketSpec>,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> BTreeMap<SocketId, SocketSpec> {
+    sockets
+        .into_iter()
+        .map(|(id, mut socket)| {
+            let remapped_id = remap_socket_id(id, remap, source_ids);
+            socket.id = remap_socket_id(socket.id, remap, source_ids);
+            (remapped_id, socket)
+        })
+        .collect()
+}
+
+fn remap_definition_id(
+    id: PartDefinitionId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> PartDefinitionId {
+    remap_if_source_owned(
+        "part definition",
+        id,
+        &source_ids.definitions,
+        &remap.definitions,
+    )
+}
+
+fn remap_instance_id(
+    id: PartInstanceId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> PartInstanceId {
+    remap_if_source_owned("part instance", id, &source_ids.instances, &remap.instances)
+}
+
+fn remap_operation_id(
+    id: OperationId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> OperationId {
+    remap_if_source_owned("operation", id, &source_ids.operations, &remap.operations)
+}
+
+fn remap_region_id(
+    id: RegionId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> RegionId {
+    remap_if_source_owned("region", id, &source_ids.regions, &remap.regions)
+}
+
+fn remap_boundary_loop_id(
+    id: BoundaryLoopId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> BoundaryLoopId {
+    remap_if_source_owned(
+        "boundary loop",
+        id,
+        &source_ids.boundary_loops,
+        &remap.boundary_loops,
+    )
+}
+
+fn remap_socket_id(
+    id: SocketId,
+    remap: &FragmentRemap,
+    source_ids: &SourceSemanticIds,
+) -> SocketId {
+    remap_if_source_owned("socket", id, &source_ids.sockets, &remap.sockets)
+}
+
+fn remap_if_source_owned<T>(
+    kind: &str,
+    id: T,
+    source_ids: &BTreeSet<T>,
+    remap: &BTreeMap<T, T>,
+) -> T
+where
+    T: Copy + Ord + std::fmt::Debug,
+{
+    if source_ids.contains(&id) {
+        *remap
+            .get(&id)
+            .unwrap_or_else(|| panic!("missing {kind} remap for source-owned ID {id:?}"))
+    } else {
+        id
+    }
 }
 
 fn bridge_family(style_kits: &[&str]) -> AssetFamilySchema {

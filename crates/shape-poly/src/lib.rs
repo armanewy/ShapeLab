@@ -23,6 +23,9 @@ const MIN_NORMAL_LENGTH: f32 = 1.0e-6;
 const MIN_AREA_LENGTH: f32 = 1.0e-7;
 const GEOMETRY_EPSILON: f32 = 1.0e-6;
 
+/// Package version for polygon topology contracts.
+pub const SHAPE_POLY_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Deterministic identifier for generated polygon elements.
 #[derive(
     Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
