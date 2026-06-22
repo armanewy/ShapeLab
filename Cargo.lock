@@ -3677,6 +3677,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "shape-caesar-assets"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "shape-asset",
+ "shape-compile",
+ "shape-gamekit",
+]
+
+[[package]]
 name = "shape-cli"
 version = "0.1.0"
 dependencies = [
@@ -3746,6 +3756,15 @@ dependencies = [
  "rayon",
  "shape-core",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-gamekit"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shape-asset",
 ]
 
 [[package]]

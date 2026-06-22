@@ -20,6 +20,38 @@ use shape_search::asset::AssetCandidateEditKind;
 use super::jobs::AssetJobSlot;
 use super::state::{AssetAppIssue, AssetCandidateSlot};
 
+macro_rules! cut_control {
+    (
+        $recipe:expr,
+        $definition:expr,
+        $operation:expr,
+        $field:expr,
+        $label:expr,
+        $value:expr,
+        $minimum:expr,
+        $maximum:expr,
+        $step:expr,
+        $topology_changing:expr $(,)?
+    ) => {
+        build_cut_control(
+            $recipe,
+            $definition,
+            $operation,
+            CutControlText {
+                field: $field,
+                label: $label,
+            },
+            $value,
+            CutControlDisplayRange {
+                minimum: $minimum,
+                maximum: $maximum,
+                step: $step,
+            },
+            $topology_changing,
+        )
+    };
+}
+
 /// Build the complete UI DTO consumed by asset panels.
 pub(crate) fn build_asset_ui_state(state: &AssetAppState, wireframe: bool) -> AssetUiState {
     let mut ui_state = AssetUiState::empty(state.recipe.title.clone());
@@ -145,7 +177,7 @@ fn cut_operation_for_spec(
             (
                 AssetCutOperationKind::RecessedPanel,
                 vec![
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -157,7 +189,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -169,7 +201,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -181,7 +213,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -193,7 +225,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -205,7 +237,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -217,7 +249,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -229,7 +261,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -277,7 +309,7 @@ fn cut_operation_for_spec(
             (
                 AssetCutOperationKind::RectangularOpening,
                 vec![
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -289,7 +321,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -301,7 +333,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -313,7 +345,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -325,7 +357,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -337,7 +369,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -349,7 +381,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -396,7 +428,7 @@ fn cut_operation_for_spec(
             (
                 AssetCutOperationKind::CircularOpening,
                 vec![
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -408,7 +440,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -420,7 +452,7 @@ fn cut_operation_for_spec(
                         0.01,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -432,7 +464,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -444,7 +476,7 @@ fn cut_operation_for_spec(
                         0.005,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         operation_id,
@@ -594,7 +626,7 @@ fn edge_treatments_for_cut(
                 target_loop: *target_loop,
                 label: format!("{}: Rounded", loop_control.label),
                 controls: vec![
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         *operation,
@@ -606,7 +638,7 @@ fn edge_treatments_for_cut(
                         0.001,
                         false,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         *operation,
@@ -626,7 +658,7 @@ fn edge_treatments_for_cut(
                         1.0,
                         true,
                     ),
-                    cut_control(
+                    cut_control!(
                         recipe,
                         definition,
                         *operation,
@@ -878,28 +910,41 @@ fn ordered_range(minimum: f32, maximum: f32, current: f32) -> (f32, f32) {
     }
 }
 
-fn cut_control(
-    recipe: &AssetRecipe,
-    definition: PartDefinitionId,
-    operation: OperationId,
-    field: &str,
-    label: &str,
-    value: f32,
+#[derive(Debug, Copy, Clone)]
+struct CutControlText<'a> {
+    field: &'a str,
+    label: &'a str,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CutControlDisplayRange {
     minimum: f32,
     maximum: f32,
     step: f32,
+}
+
+fn build_cut_control(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    text: CutControlText<'_>,
+    value: f32,
+    display_range: CutControlDisplayRange,
     topology_changing: bool,
 ) -> AssetCutControl {
-    let (minimum, maximum) = feasible_operation_scalar_range(recipe, definition, operation, field)
-        .map(|range| intersect_display_range(minimum, maximum, range, value))
-        .unwrap_or((minimum, maximum));
+    let (minimum, maximum) =
+        feasible_operation_scalar_range(recipe, definition, operation, text.field)
+            .map(|range| {
+                intersect_display_range(display_range.minimum, display_range.maximum, range, value)
+            })
+            .unwrap_or((display_range.minimum, display_range.maximum));
     AssetCutControl {
-        field: field.to_owned(),
-        label: label.to_owned(),
+        field: text.field.to_owned(),
+        label: text.label.to_owned(),
         value,
         minimum,
         maximum,
-        step,
+        step: display_range.step,
         topology_changing,
     }
 }

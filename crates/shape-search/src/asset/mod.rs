@@ -435,36 +435,42 @@ fn collect_circular_cut_group_opportunities(
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "circular_through_cut.radius",
-        average(&radii),
-        positive_group_range(average(&radii), 0.015, 0.24, 0.005),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "circular_through_cut.radius",
+            current: average(&radii),
+            range: positive_group_range(average(&radii), 0.015, 0.24, 0.005),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "circular_through_cut.rim_width",
-        average(&rim_widths),
-        positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "circular_through_cut.rim_width",
+            current: average(&rim_widths),
+            range: positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "circular_through_cut.radial_segments",
-        average(&radial_segments),
-        ParameterRange {
-            minimum: 8.0,
-            maximum: 32.0,
-            step: 1.0,
-            mutation_sigma: 2.0,
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "circular_through_cut.radial_segments",
+            current: average(&radial_segments),
+            range: ParameterRange {
+                minimum: 8.0,
+                maximum: 32.0,
+                step: 1.0,
+                mutation_sigma: 2.0,
+            },
         },
     );
 }
@@ -500,42 +506,50 @@ fn collect_rectangular_cut_group_opportunities(
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "rectangular_through_cut.size.x",
-        average(&widths),
-        positive_group_range(average(&widths), 0.04, 0.72, 0.01),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "rectangular_through_cut.size.x",
+            current: average(&widths),
+            range: positive_group_range(average(&widths), 0.04, 0.72, 0.01),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "rectangular_through_cut.size.y",
-        average(&heights),
-        positive_group_range(average(&heights), 0.015, 0.24, 0.005),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "rectangular_through_cut.size.y",
+            current: average(&heights),
+            range: positive_group_range(average(&heights), 0.015, 0.24, 0.005),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "rectangular_through_cut.rim_width",
-        average(&rim_widths),
-        positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "rectangular_through_cut.rim_width",
+            current: average(&rim_widths),
+            range: positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "rectangular_through_cut.center.y",
-        average_axis(&centers, 1),
-        signed_group_range(average_axis(&centers, 1), 1.25, 0.02),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "rectangular_through_cut.center.y",
+            current: average_axis(&centers, 1),
+            range: signed_group_range(average_axis(&centers, 1), 1.25, 0.02),
+        },
     );
     if centers.len() >= 2 {
         let spacing = average_spacing(&centers, 0).abs();
@@ -575,66 +589,86 @@ fn collect_recessed_cut_group_opportunities(
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "recessed_panel_cut.size.x",
-        average(&widths),
-        positive_group_range(average(&widths), 0.04, 1.20, 0.02),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "recessed_panel_cut.size.x",
+            current: average(&widths),
+            range: positive_group_range(average(&widths), 0.04, 1.20, 0.02),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "recessed_panel_cut.size.y",
-        average(&heights),
-        positive_group_range(average(&heights), 0.04, 1.20, 0.02),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "recessed_panel_cut.size.y",
+            current: average(&heights),
+            range: positive_group_range(average(&heights), 0.04, 1.20, 0.02),
+        },
     );
     push_group_scalar(
         recipe,
         opportunities,
-        group_id,
-        definition,
-        &ids,
-        "recessed_panel_cut.depth",
-        average(&depths),
-        positive_group_range(average(&depths), 0.01, 0.30, 0.005),
+        GroupScalarCandidate {
+            group: group_id,
+            definition,
+            operations: &ids,
+            field: "recessed_panel_cut.depth",
+            current: average(&depths),
+            range: positive_group_range(average(&depths), 0.01, 0.30, 0.005),
+        },
     );
+}
+
+struct GroupScalarCandidate<'a> {
+    group: &'a str,
+    definition: PartDefinitionId,
+    operations: &'a [OperationId],
+    field: &'a str,
+    current: f32,
+    range: ParameterRange,
 }
 
 fn push_group_scalar(
     recipe: &AssetRecipe,
     opportunities: &mut Vec<EditOpportunity>,
-    group: &str,
-    definition: PartDefinitionId,
-    operations: &[OperationId],
-    field: &str,
-    current: f32,
-    range: ParameterRange,
+    candidate: GroupScalarCandidate<'_>,
 ) {
-    let range = operations.iter().fold(Some(range), |range, operation| {
-        let range = range?;
-        match feasible_operation_scalar_range(recipe, definition, *operation, field) {
-            Some(feasible) => intersect_parameter_range(range, feasible.minimum, feasible.maximum),
-            None => Some(range),
-        }
-    });
+    let range = candidate
+        .operations
+        .iter()
+        .try_fold(
+            candidate.range,
+            |range, operation| match feasible_operation_scalar_range(
+                recipe,
+                candidate.definition,
+                *operation,
+                candidate.field,
+            ) {
+                Some(feasible) => {
+                    intersect_parameter_range(range, feasible.minimum, feasible.maximum)
+                }
+                None => Some(range),
+            },
+        );
     let Some(range) = range else {
         return;
     };
-    if current.is_finite()
-        && current >= range.minimum
-        && current <= range.maximum
+    if candidate.current.is_finite()
+        && candidate.current >= range.minimum
+        && candidate.current <= range.maximum
         && range.minimum < range.maximum
     {
         opportunities.push(EditOpportunity::CutGroupScalar {
-            group: group.to_owned(),
-            definition,
-            operations: operations.to_vec(),
-            field: field.to_owned(),
-            current,
+            group: candidate.group.to_owned(),
+            definition: candidate.definition,
+            operations: candidate.operations.to_vec(),
+            field: candidate.field.to_owned(),
+            current: candidate.current,
             range,
         });
     }

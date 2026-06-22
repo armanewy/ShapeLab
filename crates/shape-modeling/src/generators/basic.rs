@@ -542,9 +542,11 @@ fn build_cut_rounded_box(
         &host,
         &cuts,
         &cuts,
-        0.0,
-        host.outward_normal,
-        ROUNDED_PRIMARY_REGION,
+        HostPatchSurface {
+            depth: 0.0,
+            desired_normal: host.outward_normal,
+            region: ROUNDED_PRIMARY_REGION,
+        },
         context,
     )?;
     if !through_cuts.is_empty() {
@@ -553,9 +555,11 @@ fn build_cut_rounded_box(
             &host,
             &through_cuts,
             &cuts,
-            host.thickness,
-            negate(host.outward_normal),
-            ROUNDED_PRIMARY_REGION,
+            HostPatchSurface {
+                depth: host.thickness,
+                desired_normal: negate(host.outward_normal),
+                region: ROUNDED_PRIMARY_REGION,
+            },
             context,
         )?;
     }
@@ -2555,14 +2559,19 @@ fn add_cut_features_for_face(
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+struct HostPatchSurface {
+    depth: f32,
+    desired_normal: [f32; 3],
+    region: RegionId,
+}
+
 fn add_cut_patch_for_host_face(
     builder: &mut MeshBuilder,
     host: &PlanarHostPatch,
     holes: &[PlateCutPlan],
     sample_cuts: &[PlateCutPlan],
-    depth: f32,
-    desired_normal: [f32; 3],
-    region: RegionId,
+    surface: HostPatchSurface,
     context: &GeneratorContext,
 ) -> Result<(), ModelingError> {
     let xs = plate_cut_axis_samples(host.half_u, sample_cuts, 0);
@@ -2583,12 +2592,12 @@ fn add_cut_patch_for_host_face(
                 continue;
             }
             let points = rect_points(cell.min_x, cell.max_x, cell.min_z, cell.max_z);
-            let vertices = builder.add_host_ring(host, depth, &points)?;
+            let vertices = builder.add_host_ring(host, surface.depth, &points)?;
             add_oriented_face(
                 builder,
                 vertices,
-                desired_normal,
-                rounded_box_metadata(context, region),
+                surface.desired_normal,
+                rounded_box_metadata(context, surface.region),
             );
         }
     }

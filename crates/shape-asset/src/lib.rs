@@ -1189,11 +1189,13 @@ pub fn feasible_operation_scalar_range(
             recessed_cut_scalar_range(
                 field,
                 host,
-                *center,
-                *size,
-                *depth,
-                *corner_radius,
-                *rim_width,
+                RecessedCutScalars {
+                    center: *center,
+                    size: *size,
+                    depth: *depth,
+                    corner_radius: *corner_radius,
+                    rim_width: *rim_width,
+                },
                 bevels,
             )
         }
@@ -1416,40 +1418,45 @@ impl CutLoopBevelWidths {
     }
 }
 
-fn recessed_cut_scalar_range(
-    field: &str,
-    host: Option<CutHostBounds>,
+#[derive(Debug, Copy, Clone)]
+struct RecessedCutScalars {
     center: [f32; 2],
     size: [f32; 2],
     depth: f32,
     corner_radius: f32,
     rim_width: f32,
+}
+
+fn recessed_cut_scalar_range(
+    field: &str,
+    host: Option<CutHostBounds>,
+    scalars: RecessedCutScalars,
     bevels: CutLoopBevelWidths,
 ) -> Option<OperationScalarRange> {
-    let ranges = rect_cut_ranges(host, center, size, rim_width);
+    let ranges = rect_cut_ranges(host, scalars.center, scalars.size, scalars.rim_width);
     match field {
         "recessed_panel_cut.center.x" => Some(ranges.center_x),
         "recessed_panel_cut.center.y" => Some(ranges.center_y),
         "recessed_panel_cut.size.x" => OperationScalarRange::new(
             rect_size_min(bevels.maximum()),
-            ranges.size_x_max.max(size[0].abs()),
+            ranges.size_x_max.max(scalars.size[0].abs()),
         ),
         "recessed_panel_cut.size.y" => OperationScalarRange::new(
             rect_size_min(bevels.maximum()),
-            ranges.size_y_max.max(size[1].abs()),
+            ranges.size_y_max.max(scalars.size[1].abs()),
         ),
         "recessed_panel_cut.depth" => OperationScalarRange::new(
             (bevels.combined() + CUT_SCALAR_SAFETY_MARGIN).max(0.005),
             host.map_or(f32::MAX, |host| host.thickness * 0.95)
-                .max(depth),
+                .max(scalars.depth),
         ),
         "recessed_panel_cut.rim_width" => OperationScalarRange::new(
             (bevels.maximum() + CUT_SCALAR_SAFETY_MARGIN).max(0.001),
-            ranges.rim_width_max.max(rim_width),
+            ranges.rim_width_max.max(scalars.rim_width),
         ),
         "recessed_panel_cut.corner_radius" => OperationScalarRange::new(
-            recessed_corner_radius_min(corner_radius, bevels.secondary),
-            (size[0].min(size[1]) * 0.5).max(corner_radius),
+            recessed_corner_radius_min(scalars.corner_radius, bevels.secondary),
+            (scalars.size[0].min(scalars.size[1]) * 0.5).max(scalars.corner_radius),
         ),
         "recessed_panel_cut.corner_segments" => OperationScalarRange::new(1.0, 128.0),
         _ => None,
