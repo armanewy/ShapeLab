@@ -14,11 +14,11 @@ Project Caesar's River Bend prototype has a concrete need for modular engineerin
 
 Shape Lab will use Project Caesar as its primary near-term internal customer. The first production target is a coherent, editable, validated River Bend asset pack that replaces graybox engineering modules and command pieces.
 
-This does not make Shape Lab's core Project Caesar-specific. Game-neutral runtime contracts live in `shape-gamekit`; Project Caesar authored content lives in `shape-caesar-assets`.
+This does not make Shape Lab's core Project Caesar-specific. Asset-family and style-kit contracts live in `shape-family`; game-neutral runtime contracts live in `shape-gamekit`; Project Caesar authored content lives in `shape-caesar-assets`.
 
 ## Consequences
 
 - Near-term modeling work is prioritized by real camera, runtime, export, and validation needs.
 - Gameplay balance remains in game code, not Shape Lab metadata.
-- Broad commercial asset packs are deferred until Project Caesar dogfooding proves the templates are useful.
+- Non-Caesar reference packs should be used as generality checks whenever new operators or family contracts are added.
 - GPU viewport work is deferred unless CPU interaction becomes a demonstrated blocker.

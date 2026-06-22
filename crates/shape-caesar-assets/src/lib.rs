@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod families;
+pub mod style_kits;
 
 use shape_asset::{
     AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, PartDefinition, PartDefinitionId,

@@ -9,6 +9,15 @@
 
 ## Ownership Boundary
 
+`shape-family` owns theme-neutral foundry contracts:
+
+- asset-family roles
+- attachment rules
+- parameter slots
+- variant rules
+- family/style compatibility
+- style-kit schema
+
 `shape-gamekit` owns runtime-neutral contracts:
 
 - logical footprints
@@ -24,6 +33,7 @@
 `shape-caesar-assets` owns Project Caesar authored content:
 
 - Roman and Gallic naming
+- Roman timber engineering style data
 - River Bend runtime keys
 - family-specific template recipes
 - Project Caesar dogfooding pack composition

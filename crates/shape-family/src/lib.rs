@@ -1,0 +1,1524 @@
+#![forbid(unsafe_code)]
+
+//! Theme-neutral asset-family and style-kit contracts.
+//!
+//! An asset family describes functional structure: roles, attachments,
+//! parameters, constraints, variant rules, and export needs. A style kit
+//! describes visual language that can be applied to compatible families.
+//! Runtime-specific placement metadata belongs in adapter crates such as
+//! `shape-gamekit`, not here.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+/// Current schema version for asset-family documents.
+pub const ASSET_FAMILY_SCHEMA_VERSION: u32 = 1;
+
+/// Current schema version for style-kit documents.
+pub const STYLE_KIT_SCHEMA_VERSION: u32 = 1;
+
+/// Theme-neutral functional grammar for one class of assets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssetFamilySchema {
+    /// Asset-family schema version.
+    pub schema_version: u32,
+    /// Stable family identifier, such as `bridge` or `crate`.
+    pub id: String,
+    /// Human-facing family name.
+    pub display_name: String,
+    /// Short description of the family contract.
+    pub summary: String,
+    /// Semantic roles that recipes in this family can contain.
+    pub part_roles: Vec<PartRole>,
+    /// Attachment rules between roles.
+    pub attachment_rules: Vec<AttachmentRule>,
+    /// Generic modeling operations this family may use.
+    pub allowed_operations: Vec<AllowedOperationKind>,
+    /// Parameter slots surfaced to novice workflows and search.
+    pub parameter_slots: Vec<FamilyParameterSlot>,
+    /// Geometric and semantic constraints.
+    pub constraints: Vec<GeometricConstraint>,
+    /// Variant-generation rules.
+    pub variant_rules: Vec<VariantRule>,
+    /// Optional export-profile requirements.
+    pub export_requirements: Vec<ExportRequirement>,
+    /// Style kits explicitly accepted by this family.
+    pub compatible_style_kits: Vec<String>,
+    /// Search and catalog tags.
+    pub tags: Vec<String>,
+}
+
+/// One semantic part role in a family.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartRole {
+    /// Stable role identifier.
+    pub id: String,
+    /// Human-facing role name.
+    pub display_name: String,
+    /// Whether at least one occurrence is required.
+    pub required: bool,
+    /// Occurrence cardinality.
+    pub multiplicity: RoleMultiplicity,
+    /// Functional tags, such as `support`, `panel`, or `handle`.
+    pub semantic_tags: Vec<String>,
+}
+
+/// Cardinality for a role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoleMultiplicity {
+    /// Exactly one occurrence.
+    Single,
+    /// Zero or one occurrence.
+    Optional,
+    /// Inclusive finite range.
+    Range {
+        /// Minimum occurrence count.
+        min: u32,
+        /// Maximum occurrence count.
+        max: u32,
+    },
+    /// Any number of occurrences.
+    Repeated,
+}
+
+/// Rule describing how roles can attach or depend on each other.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentRule {
+    /// Stable rule identifier.
+    pub id: String,
+    /// Source role.
+    pub from_role: String,
+    /// Destination role.
+    pub to_role: String,
+    /// Optional anchor role that mediates the relationship.
+    pub anchor_role: Option<String>,
+    /// Compatibility tags used by sockets, anchors, or adapters.
+    pub compatibility_tags: Vec<String>,
+    /// Whether the attachment is required for validity.
+    pub required: bool,
+}
+
+/// Theme-neutral modeling operation classes.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum AllowedOperationKind {
+    /// Primitive part generation.
+    Primitive,
+    /// Analytic cut, such as panel, rectangular opening, or circular through-cut.
+    Cut,
+    /// Boundary or edge bevel treatment.
+    Bevel,
+    /// Repeated occurrences.
+    Array,
+    /// Transform-only structural edits.
+    Transform,
+    /// Sweep or path extrusion.
+    Sweep,
+    /// Lathe or surface of revolution.
+    Lathe,
+    /// Reserved loft/profile transition.
+    LoftReserved,
+    /// Reserved constrained constructive operation.
+    BooleanReserved,
+    /// Pack-authored extension key.
+    Custom(String),
+}
+
+/// Search or inspector parameter slot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FamilyParameterSlot {
+    /// Stable parameter key.
+    pub id: String,
+    /// Human-facing label.
+    pub label: String,
+    /// Optional role targeted by this parameter.
+    pub target_role: Option<String>,
+    /// Semantic parameter kind.
+    pub kind: FamilyParameterKind,
+    /// Optional numeric range.
+    pub range: Option<ParameterRange>,
+    /// Whether edits to this slot can change topology.
+    pub topology_changing: bool,
+}
+
+/// Theme-neutral parameter kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FamilyParameterKind {
+    /// Length-like value.
+    Length,
+    /// Count-like value.
+    Count,
+    /// Unitless ratio.
+    Ratio,
+    /// Angle in radians unless the adapter says otherwise.
+    Angle,
+    /// Binary setting.
+    Toggle,
+    /// Closed set of symbolic choices.
+    Choice(Vec<String>),
+    /// Pack-authored parameter kind.
+    Custom(String),
+}
+
+/// Inclusive numeric range.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterRange {
+    /// Minimum accepted value.
+    pub minimum: f32,
+    /// Maximum accepted value.
+    pub maximum: f32,
+    /// Suggested edit step.
+    pub step: f32,
+}
+
+/// Generic geometry or semantic constraint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometricConstraint {
+    /// Stable constraint identifier.
+    pub id: String,
+    /// Role IDs governed by this constraint.
+    pub roles: Vec<String>,
+    /// Constraint class.
+    pub kind: ConstraintKind,
+}
+
+/// Theme-neutral constraint classes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConstraintKind {
+    /// Stay within authored bounds.
+    Bounds,
+    /// Maintain clearance.
+    Clearance,
+    /// Roles must connect.
+    MustConnect,
+    /// Role must provide physical support.
+    MustSupport,
+    /// Role becomes walkable only when a runtime profile asks for it.
+    WalkableIfRuntimeRequires,
+    /// Pack-authored constraint key.
+    Custom(String),
+}
+
+/// Variant-generation rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VariantRule {
+    /// Stable variant rule identifier.
+    pub id: String,
+    /// Human-facing label.
+    pub label: String,
+    /// Variant mode.
+    pub mode: VariantMode,
+    /// Roles this rule is allowed to edit.
+    pub editable_roles: Vec<String>,
+    /// Semantic tags that prevent edits when locked.
+    pub locked_by_tags: Vec<String>,
+}
+
+/// Variant rule class.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VariantMode {
+    /// Add, remove, or replace roles.
+    Structural,
+    /// Add or change small details.
+    Detail,
+    /// Change dimensions and proportions.
+    Proportion,
+    /// Change counts, spacing, or rhythm.
+    Repetition,
+    /// Pack-authored variant mode.
+    Custom(String),
+}
+
+/// Export requirement for a destination profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportRequirement {
+    /// Export profile key, such as `asset-pack` or `game-runtime`.
+    pub profile: String,
+    /// Runtime or packaging metadata expected by that profile.
+    pub required_metadata: Vec<RuntimeMetadataRequirement>,
+    /// Optional approximate triangle budget.
+    pub triangle_budget_hint: Option<u32>,
+}
+
+/// Runtime/export metadata categories. These remain optional at the family layer.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum RuntimeMetadataRequirement {
+    /// Authored pivot.
+    Pivot,
+    /// Snap or attachment anchors.
+    SnapAnchors,
+    /// Logical footprint.
+    Footprint,
+    /// Walkable surface declarations.
+    WalkableSurfaces,
+    /// Support surface declarations.
+    SupportSurfaces,
+    /// Collision proxy declarations.
+    CollisionProxies,
+    /// Construction phase declarations.
+    ConstructionPhases,
+    /// Level-of-detail contract.
+    Lod,
+    /// Preview renders or thumbnails.
+    Previews,
+    /// Pack-authored metadata key.
+    Custom(String),
+}
+
+/// Concrete visual language that can be applied to compatible families.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleKit {
+    /// Style-kit schema version.
+    pub schema_version: u32,
+    /// Stable kit identifier.
+    pub id: String,
+    /// Human-facing kit name.
+    pub display_name: String,
+    /// Family IDs this kit can style.
+    pub compatible_families: Vec<String>,
+    /// Per-role proportion guidance.
+    pub proportions: Vec<RoleProportion>,
+    /// Global bevel guidance.
+    pub bevel_policy: BevelPolicy,
+    /// Preferred profile and curve vocabulary.
+    pub profile_language: ProfileLanguage,
+    /// Concrete part prototypes exposed to compatible families.
+    pub part_prototypes: Vec<PartPrototype>,
+    /// Optional detail modules.
+    pub detail_modules: Vec<DetailModule>,
+    /// Repetition density and rhythm.
+    pub repetition: RepetitionPolicy,
+    /// Symmetry preferences.
+    pub symmetry: SymmetryPolicy,
+    /// Shape exaggeration preferences.
+    pub exaggeration: ExaggerationPolicy,
+    /// Search and catalog tags.
+    pub tags: Vec<String>,
+}
+
+/// Per-role proportion guidance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleProportion {
+    /// Target family role.
+    pub role: String,
+    /// Preferred width:depth:height scale.
+    pub preferred_scale: [f32; 3],
+    /// Optional taper from 0 to 1.
+    pub taper: f32,
+}
+
+/// Global bevel guidance for a style kit.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BevelPolicy {
+    /// Preferred bevel width as a fraction of local feature size.
+    pub width_ratio: f32,
+    /// Preferred bevel segment count.
+    pub segments: u32,
+    /// Profile shape from 0 to 1.
+    pub profile: f32,
+}
+
+/// Style-level profile vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileLanguage {
+    /// Preferred curve family, such as `straight`, `rounded`, or `faceted`.
+    pub curve_family: String,
+    /// Allowed profile keys.
+    pub allowed_profiles: Vec<String>,
+    /// Whether asymmetric profiles are acceptable.
+    pub allow_asymmetry: bool,
+}
+
+/// Concrete prototype for a semantic role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartPrototype {
+    /// Stable prototype identifier.
+    pub id: String,
+    /// Human-facing prototype name.
+    pub display_name: String,
+    /// Family role this prototype can satisfy.
+    pub role: String,
+    /// Generic operation vocabulary this prototype expects.
+    pub operation_tags: Vec<AllowedOperationKind>,
+    /// Style tags used by search.
+    pub style_tags: Vec<String>,
+}
+
+/// Concrete detail module for one or more roles.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetailModule {
+    /// Stable detail identifier.
+    pub id: String,
+    /// Human-facing detail name.
+    pub display_name: String,
+    /// Roles this detail can decorate.
+    pub target_roles: Vec<String>,
+    /// Minimum feature size where this detail remains readable.
+    pub minimum_feature_size: u32,
+    /// Detail tags used by search.
+    pub tags: Vec<String>,
+}
+
+/// Repetition policy for style modules.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepetitionPolicy {
+    /// Preferred density from 0 to 1.
+    pub density: f32,
+    /// Preferred spacing in local units.
+    pub preferred_spacing: f32,
+    /// Maximum repeated count the kit should propose by default.
+    pub maximum_default_count: u32,
+}
+
+/// Symmetry policy for a style kit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SymmetryPolicy {
+    /// Whether mirrored layouts are preferred.
+    pub prefer_mirrors: bool,
+    /// Allowed local mirror axes, such as `x`, `y`, or `z`.
+    pub allowed_axes: Vec<String>,
+}
+
+/// Shape exaggeration policy for a style kit.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExaggerationPolicy {
+    /// Silhouette exaggeration from 0 to 1.
+    pub silhouette: f32,
+    /// Detail exaggeration from 0 to 1.
+    pub detail: f32,
+}
+
+/// One validation issue from family or style-kit validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FamilyValidationIssue {
+    /// Optional stable subject path.
+    pub subject: Option<String>,
+    /// Stable issue code.
+    pub code: String,
+    /// Human-readable message.
+    pub message: String,
+}
+
+/// Validation report for family and style-kit contracts.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FamilyValidationReport {
+    /// Discovered issues.
+    pub issues: Vec<FamilyValidationIssue>,
+}
+
+impl FamilyValidationReport {
+    /// Return true when no issues were discovered.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.issues.is_empty()
+    }
+
+    fn extend_prefixed(&mut self, prefix: &str, nested: FamilyValidationReport) {
+        for issue in nested.issues {
+            self.issues.push(FamilyValidationIssue {
+                subject: issue
+                    .subject
+                    .map(|subject| format!("{prefix}.{subject}"))
+                    .or_else(|| Some(prefix.to_owned())),
+                code: issue.code,
+                message: issue.message,
+            });
+        }
+    }
+}
+
+/// Validate a theme-neutral asset-family schema.
+#[must_use]
+pub fn validate_asset_family_schema(family: &AssetFamilySchema) -> FamilyValidationReport {
+    let mut report = FamilyValidationReport::default();
+    if family.schema_version != ASSET_FAMILY_SCHEMA_VERSION {
+        push_issue(
+            &mut report,
+            Some("schema_version"),
+            "unsupported_asset_family_schema",
+            "Asset-family schema version is not supported.",
+        );
+    }
+    validate_non_empty(&mut report, Some("id"), &family.id, "empty_family_id");
+    validate_identifier(&mut report, Some("id"), &family.id, "invalid_family_id");
+    validate_non_empty(
+        &mut report,
+        Some("display_name"),
+        &family.display_name,
+        "empty_family_display_name",
+    );
+    validate_non_empty(
+        &mut report,
+        Some("summary"),
+        &family.summary,
+        "empty_family_summary",
+    );
+
+    let role_ids = validate_part_roles(family, &mut report);
+    validate_attachment_rules(family, &role_ids, &mut report);
+    validate_allowed_operations(family, &mut report);
+    validate_parameter_slots(family, &role_ids, &mut report);
+    validate_constraints(family, &role_ids, &mut report);
+    validate_variant_rules(family, &role_ids, &mut report);
+    validate_export_requirements(family, &mut report);
+    validate_unique_strings(
+        &mut report,
+        "compatible_style_kits",
+        &family.compatible_style_kits,
+        "duplicate_compatible_style_kit",
+    );
+    validate_identifier_list(
+        &mut report,
+        "compatible_style_kits",
+        &family.compatible_style_kits,
+        "invalid_compatible_style_kit",
+    );
+    validate_identifier_list(&mut report, "tags", &family.tags, "invalid_family_tag");
+    report
+}
+
+/// Validate a style-kit schema without assuming a specific family document.
+#[must_use]
+pub fn validate_style_kit(kit: &StyleKit) -> FamilyValidationReport {
+    let mut report = FamilyValidationReport::default();
+    if kit.schema_version != STYLE_KIT_SCHEMA_VERSION {
+        push_issue(
+            &mut report,
+            Some("schema_version"),
+            "unsupported_style_kit_schema",
+            "Style-kit schema version is not supported.",
+        );
+    }
+    validate_non_empty(&mut report, Some("id"), &kit.id, "empty_style_kit_id");
+    validate_identifier(&mut report, Some("id"), &kit.id, "invalid_style_kit_id");
+    validate_non_empty(
+        &mut report,
+        Some("display_name"),
+        &kit.display_name,
+        "empty_style_kit_display_name",
+    );
+    if kit.compatible_families.is_empty() {
+        push_issue(
+            &mut report,
+            Some("compatible_families"),
+            "missing_compatible_family",
+            "Style kit must declare at least one compatible family.",
+        );
+    }
+    validate_unique_strings(
+        &mut report,
+        "compatible_families",
+        &kit.compatible_families,
+        "duplicate_compatible_family",
+    );
+    validate_identifier_list(
+        &mut report,
+        "compatible_families",
+        &kit.compatible_families,
+        "invalid_compatible_family",
+    );
+    validate_role_proportions(kit, &mut report);
+    validate_bevel_policy(&kit.bevel_policy, &mut report);
+    validate_profile_language(&kit.profile_language, &mut report);
+    validate_part_prototypes(kit, &mut report);
+    validate_detail_modules(kit, &mut report);
+    validate_repetition_policy(&kit.repetition, &mut report);
+    validate_symmetry_policy(&kit.symmetry, &mut report);
+    validate_exaggeration_policy(&kit.exaggeration, &mut report);
+    validate_identifier_list(&mut report, "tags", &kit.tags, "invalid_style_kit_tag");
+    report
+}
+
+/// Validate that a style kit and asset family explicitly fit together.
+#[must_use]
+pub fn validate_family_style_compatibility(
+    family: &AssetFamilySchema,
+    kit: &StyleKit,
+) -> FamilyValidationReport {
+    let mut report = FamilyValidationReport::default();
+    report.extend_prefixed("family", validate_asset_family_schema(family));
+    report.extend_prefixed("style_kit", validate_style_kit(kit));
+
+    if !family.compatible_style_kits.iter().any(|id| id == &kit.id) {
+        push_issue(
+            &mut report,
+            Some("family.compatible_style_kits"),
+            "style_kit_not_accepted_by_family",
+            "Family must explicitly list the style kit as compatible.",
+        );
+    }
+    if !kit.compatible_families.iter().any(|id| id == &family.id) {
+        push_issue(
+            &mut report,
+            Some("style_kit.compatible_families"),
+            "family_not_accepted_by_style_kit",
+            "Style kit must explicitly list the family as compatible.",
+        );
+    }
+
+    let role_ids = family
+        .part_roles
+        .iter()
+        .map(|role| role.id.as_str())
+        .collect::<BTreeSet<_>>();
+    validate_kit_role_references(kit, &role_ids, &mut report);
+    validate_kit_operation_compatibility(family, kit, &mut report);
+    report
+}
+
+fn validate_part_roles<'family>(
+    family: &'family AssetFamilySchema,
+    report: &mut FamilyValidationReport,
+) -> BTreeSet<&'family str> {
+    let mut role_ids = BTreeSet::new();
+    if family.part_roles.is_empty() {
+        push_issue(
+            report,
+            Some("part_roles"),
+            "missing_part_role",
+            "Asset family must declare at least one part role.",
+        );
+    }
+    for (index, role) in family.part_roles.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("part_roles.{index}.id")),
+            &role.id,
+            "empty_part_role_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("part_roles.{index}.id")),
+            &role.id,
+            "invalid_part_role_id",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("part_roles.{index}.display_name")),
+            &role.display_name,
+            "empty_part_role_display_name",
+        );
+        if !role_ids.insert(role.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("part_roles.{index}.id")),
+                "duplicate_part_role_id",
+                "Part role IDs must be unique within one family.",
+            );
+        }
+        if let RoleMultiplicity::Range { min, max } = role.multiplicity
+            && min > max
+        {
+            push_issue(
+                report,
+                Some(format!("part_roles.{index}.multiplicity")),
+                "invalid_role_multiplicity_range",
+                "Role multiplicity minimum must not exceed maximum.",
+            );
+        }
+        validate_role_requiredness(report, index, role);
+        validate_identifier_list(
+            report,
+            &format!("part_roles.{index}.semantic_tags"),
+            &role.semantic_tags,
+            "invalid_part_role_tag",
+        );
+    }
+    role_ids
+}
+
+fn validate_role_requiredness(report: &mut FamilyValidationReport, index: usize, role: &PartRole) {
+    match (&role.multiplicity, role.required) {
+        (RoleMultiplicity::Optional, true) => push_issue(
+            report,
+            Some(format!("part_roles.{index}.required")),
+            "required_optional_role",
+            "Required roles cannot use Optional multiplicity.",
+        ),
+        (RoleMultiplicity::Range { min: 0, .. }, true) => push_issue(
+            report,
+            Some(format!("part_roles.{index}.required")),
+            "required_zero_minimum_role",
+            "Required ranged roles must have a minimum greater than zero.",
+        ),
+        (RoleMultiplicity::Single, false) => push_issue(
+            report,
+            Some(format!("part_roles.{index}.required")),
+            "optional_single_role",
+            "Non-required roles cannot use Single multiplicity.",
+        ),
+        (RoleMultiplicity::Range { min, .. }, false) if *min > 0 => push_issue(
+            report,
+            Some(format!("part_roles.{index}.required")),
+            "optional_positive_minimum_role",
+            "Non-required ranged roles must allow zero occurrences.",
+        ),
+        _ => {}
+    }
+}
+
+fn validate_attachment_rules(
+    family: &AssetFamilySchema,
+    role_ids: &BTreeSet<&str>,
+    report: &mut FamilyValidationReport,
+) {
+    let mut rule_ids = BTreeSet::new();
+    for (index, rule) in family.attachment_rules.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("attachment_rules.{index}.id")),
+            &rule.id,
+            "empty_attachment_rule_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("attachment_rules.{index}.id")),
+            &rule.id,
+            "invalid_attachment_rule_id",
+        );
+        if !rule_ids.insert(rule.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("attachment_rules.{index}.id")),
+                "duplicate_attachment_rule_id",
+                "Attachment rule IDs must be unique within one family.",
+            );
+        }
+        validate_role_reference(
+            report,
+            role_ids,
+            format!("attachment_rules.{index}.from_role"),
+            &rule.from_role,
+            "unknown_attachment_from_role",
+        );
+        validate_identifier(
+            report,
+            Some(format!("attachment_rules.{index}.from_role")),
+            &rule.from_role,
+            "invalid_attachment_from_role",
+        );
+        validate_role_reference(
+            report,
+            role_ids,
+            format!("attachment_rules.{index}.to_role"),
+            &rule.to_role,
+            "unknown_attachment_to_role",
+        );
+        validate_identifier(
+            report,
+            Some(format!("attachment_rules.{index}.to_role")),
+            &rule.to_role,
+            "invalid_attachment_to_role",
+        );
+        if let Some(anchor_role) = &rule.anchor_role {
+            validate_role_reference(
+                report,
+                role_ids,
+                format!("attachment_rules.{index}.anchor_role"),
+                anchor_role,
+                "unknown_attachment_anchor_role",
+            );
+            validate_identifier(
+                report,
+                Some(format!("attachment_rules.{index}.anchor_role")),
+                anchor_role,
+                "invalid_attachment_anchor_role",
+            );
+        }
+        if rule.required && rule.compatibility_tags.is_empty() {
+            push_issue(
+                report,
+                Some(format!("attachment_rules.{index}.compatibility_tags")),
+                "missing_required_attachment_tag",
+                "Required attachment rules must include at least one compatibility tag.",
+            );
+        }
+        validate_identifier_list(
+            report,
+            &format!("attachment_rules.{index}.compatibility_tags"),
+            &rule.compatibility_tags,
+            "invalid_attachment_compatibility_tag",
+        );
+    }
+}
+
+fn validate_allowed_operations(family: &AssetFamilySchema, report: &mut FamilyValidationReport) {
+    if family.allowed_operations.is_empty() {
+        push_issue(
+            report,
+            Some("allowed_operations"),
+            "missing_allowed_operation",
+            "Asset family must declare at least one allowed operation.",
+        );
+    }
+}
+
+fn validate_parameter_slots(
+    family: &AssetFamilySchema,
+    role_ids: &BTreeSet<&str>,
+    report: &mut FamilyValidationReport,
+) {
+    let mut ids = BTreeSet::new();
+    for (index, slot) in family.parameter_slots.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("parameter_slots.{index}.id")),
+            &slot.id,
+            "empty_parameter_slot_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("parameter_slots.{index}.id")),
+            &slot.id,
+            "invalid_parameter_slot_id",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("parameter_slots.{index}.label")),
+            &slot.label,
+            "empty_parameter_slot_label",
+        );
+        if !ids.insert(slot.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("parameter_slots.{index}.id")),
+                "duplicate_parameter_slot_id",
+                "Parameter slot IDs must be unique within one family.",
+            );
+        }
+        if let Some(role) = &slot.target_role {
+            validate_role_reference(
+                report,
+                role_ids,
+                format!("parameter_slots.{index}.target_role"),
+                role,
+                "unknown_parameter_target_role",
+            );
+            validate_identifier(
+                report,
+                Some(format!("parameter_slots.{index}.target_role")),
+                role,
+                "invalid_parameter_target_role",
+            );
+        }
+        if let Some(range) = slot.range {
+            validate_parameter_range(
+                report,
+                Some(format!("parameter_slots.{index}.range")),
+                range,
+            );
+        }
+        if let FamilyParameterKind::Choice(choices) = &slot.kind {
+            if choices.is_empty() {
+                push_issue(
+                    report,
+                    Some(format!("parameter_slots.{index}.kind")),
+                    "empty_parameter_choice_set",
+                    "Choice parameters must include at least one option.",
+                );
+            }
+            validate_unique_strings(
+                report,
+                &format!("parameter_slots.{index}.kind.choices"),
+                choices,
+                "duplicate_parameter_choice",
+            );
+            validate_identifier_list(
+                report,
+                &format!("parameter_slots.{index}.kind.choices"),
+                choices,
+                "invalid_parameter_choice",
+            );
+        }
+    }
+}
+
+fn validate_constraints(
+    family: &AssetFamilySchema,
+    role_ids: &BTreeSet<&str>,
+    report: &mut FamilyValidationReport,
+) {
+    let mut ids = BTreeSet::new();
+    for (index, constraint) in family.constraints.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("constraints.{index}.id")),
+            &constraint.id,
+            "empty_constraint_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("constraints.{index}.id")),
+            &constraint.id,
+            "invalid_constraint_id",
+        );
+        if !ids.insert(constraint.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("constraints.{index}.id")),
+                "duplicate_constraint_id",
+                "Constraint IDs must be unique within one family.",
+            );
+        }
+        if constraint.roles.is_empty() {
+            push_issue(
+                report,
+                Some(format!("constraints.{index}.roles")),
+                "missing_constraint_role",
+                "Constraints must reference at least one role.",
+            );
+        }
+        for role in &constraint.roles {
+            validate_role_reference(
+                report,
+                role_ids,
+                format!("constraints.{index}.roles"),
+                role,
+                "unknown_constraint_role",
+            );
+            validate_identifier(
+                report,
+                Some(format!("constraints.{index}.roles")),
+                role,
+                "invalid_constraint_role",
+            );
+        }
+    }
+}
+
+fn validate_variant_rules(
+    family: &AssetFamilySchema,
+    role_ids: &BTreeSet<&str>,
+    report: &mut FamilyValidationReport,
+) {
+    let mut ids = BTreeSet::new();
+    for (index, rule) in family.variant_rules.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("variant_rules.{index}.id")),
+            &rule.id,
+            "empty_variant_rule_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("variant_rules.{index}.id")),
+            &rule.id,
+            "invalid_variant_rule_id",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("variant_rules.{index}.label")),
+            &rule.label,
+            "empty_variant_rule_label",
+        );
+        if !ids.insert(rule.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("variant_rules.{index}.id")),
+                "duplicate_variant_rule_id",
+                "Variant rule IDs must be unique within one family.",
+            );
+        }
+        if rule.editable_roles.is_empty() {
+            push_issue(
+                report,
+                Some(format!("variant_rules.{index}.editable_roles")),
+                "missing_variant_editable_role",
+                "Variant rules must declare at least one editable role.",
+            );
+        }
+        for role in &rule.editable_roles {
+            validate_role_reference(
+                report,
+                role_ids,
+                format!("variant_rules.{index}.editable_roles"),
+                role,
+                "unknown_variant_editable_role",
+            );
+            validate_identifier(
+                report,
+                Some(format!("variant_rules.{index}.editable_roles")),
+                role,
+                "invalid_variant_editable_role",
+            );
+        }
+        validate_identifier_list(
+            report,
+            &format!("variant_rules.{index}.locked_by_tags"),
+            &rule.locked_by_tags,
+            "invalid_variant_lock_tag",
+        );
+    }
+}
+
+fn validate_export_requirements(family: &AssetFamilySchema, report: &mut FamilyValidationReport) {
+    let mut profiles = BTreeMap::<&str, usize>::new();
+    for (index, requirement) in family.export_requirements.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("export_requirements.{index}.profile")),
+            &requirement.profile,
+            "empty_export_profile",
+        );
+        validate_identifier(
+            report,
+            Some(format!("export_requirements.{index}.profile")),
+            &requirement.profile,
+            "invalid_export_profile",
+        );
+        if let Some(previous_index) = profiles.insert(requirement.profile.as_str(), index) {
+            push_issue(
+                report,
+                Some(format!("export_requirements.{index}.profile")),
+                "duplicate_export_profile",
+                format!("Export profile is already used at index {previous_index}."),
+            );
+        }
+        if requirement.required_metadata.is_empty() {
+            push_issue(
+                report,
+                Some(format!("export_requirements.{index}.required_metadata")),
+                "missing_export_metadata_requirement",
+                "Export requirement entries must request at least one metadata category.",
+            );
+        }
+        if matches!(requirement.triangle_budget_hint, Some(0)) {
+            push_issue(
+                report,
+                Some(format!("export_requirements.{index}.triangle_budget_hint")),
+                "invalid_triangle_budget_hint",
+                "Triangle budget hints must be greater than zero when present.",
+            );
+        }
+        validate_runtime_metadata_requirements(report, index, &requirement.required_metadata);
+    }
+}
+
+fn validate_runtime_metadata_requirements(
+    report: &mut FamilyValidationReport,
+    export_index: usize,
+    requirements: &[RuntimeMetadataRequirement],
+) {
+    for (index, requirement) in requirements.iter().enumerate() {
+        if let RuntimeMetadataRequirement::Custom(key) = requirement {
+            validate_identifier(
+                report,
+                Some(format!(
+                    "export_requirements.{export_index}.required_metadata.{index}"
+                )),
+                key,
+                "invalid_custom_runtime_metadata_requirement",
+            );
+        }
+    }
+}
+
+fn validate_role_proportions(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    let mut roles = BTreeSet::new();
+    for (index, proportion) in kit.proportions.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("proportions.{index}.role")),
+            &proportion.role,
+            "empty_proportion_role",
+        );
+        validate_identifier(
+            report,
+            Some(format!("proportions.{index}.role")),
+            &proportion.role,
+            "invalid_proportion_role",
+        );
+        if !roles.insert(proportion.role.as_str()) {
+            push_issue(
+                report,
+                Some(format!("proportions.{index}.role")),
+                "duplicate_role_proportion",
+                "A style kit can declare at most one proportion policy per role.",
+            );
+        }
+        if !proportion
+            .preferred_scale
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+        {
+            push_issue(
+                report,
+                Some(format!("proportions.{index}.preferred_scale")),
+                "invalid_role_preferred_scale",
+                "Preferred scale values must be finite and greater than zero.",
+            );
+        }
+        validate_fraction(
+            report,
+            Some(format!("proportions.{index}.taper")),
+            proportion.taper,
+            "invalid_role_taper",
+        );
+    }
+}
+
+fn validate_bevel_policy(policy: &BevelPolicy, report: &mut FamilyValidationReport) {
+    if !policy.width_ratio.is_finite() || policy.width_ratio < 0.0 {
+        push_issue(
+            report,
+            Some("bevel_policy.width_ratio"),
+            "invalid_bevel_width_ratio",
+            "Bevel width ratio must be finite and non-negative.",
+        );
+    }
+    if policy.segments == 0 {
+        push_issue(
+            report,
+            Some("bevel_policy.segments"),
+            "invalid_bevel_segments",
+            "Bevel policy must request at least one segment.",
+        );
+    }
+    validate_fraction(
+        report,
+        Some("bevel_policy.profile"),
+        policy.profile,
+        "invalid_bevel_profile",
+    );
+}
+
+fn validate_profile_language(language: &ProfileLanguage, report: &mut FamilyValidationReport) {
+    validate_non_empty(
+        report,
+        Some("profile_language.curve_family"),
+        &language.curve_family,
+        "empty_profile_curve_family",
+    );
+    validate_identifier(
+        report,
+        Some("profile_language.curve_family"),
+        &language.curve_family,
+        "invalid_profile_curve_family",
+    );
+    if language.allowed_profiles.is_empty() {
+        push_issue(
+            report,
+            Some("profile_language.allowed_profiles"),
+            "missing_allowed_profile",
+            "Style kit must include at least one allowed profile key.",
+        );
+    }
+    validate_unique_strings(
+        report,
+        "profile_language.allowed_profiles",
+        &language.allowed_profiles,
+        "duplicate_allowed_profile",
+    );
+    validate_identifier_list(
+        report,
+        "profile_language.allowed_profiles",
+        &language.allowed_profiles,
+        "invalid_allowed_profile",
+    );
+}
+
+fn validate_part_prototypes(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    let mut ids = BTreeSet::new();
+    for (index, prototype) in kit.part_prototypes.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("part_prototypes.{index}.id")),
+            &prototype.id,
+            "empty_part_prototype_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("part_prototypes.{index}.id")),
+            &prototype.id,
+            "invalid_part_prototype_id",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("part_prototypes.{index}.display_name")),
+            &prototype.display_name,
+            "empty_part_prototype_display_name",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("part_prototypes.{index}.role")),
+            &prototype.role,
+            "empty_part_prototype_role",
+        );
+        validate_identifier(
+            report,
+            Some(format!("part_prototypes.{index}.role")),
+            &prototype.role,
+            "invalid_part_prototype_role",
+        );
+        if !ids.insert(prototype.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("part_prototypes.{index}.id")),
+                "duplicate_part_prototype_id",
+                "Part prototype IDs must be unique within one style kit.",
+            );
+        }
+        if prototype.operation_tags.is_empty() {
+            push_issue(
+                report,
+                Some(format!("part_prototypes.{index}.operation_tags")),
+                "missing_part_prototype_operation_tag",
+                "Part prototypes must declare at least one expected operation class.",
+            );
+        }
+        validate_operation_tags(report, index, &prototype.operation_tags);
+        validate_identifier_list(
+            report,
+            &format!("part_prototypes.{index}.style_tags"),
+            &prototype.style_tags,
+            "invalid_part_prototype_style_tag",
+        );
+    }
+}
+
+fn validate_operation_tags(
+    report: &mut FamilyValidationReport,
+    prototype_index: usize,
+    operations: &[AllowedOperationKind],
+) {
+    for (index, operation) in operations.iter().enumerate() {
+        if let AllowedOperationKind::Custom(key) = operation {
+            validate_identifier(
+                report,
+                Some(format!(
+                    "part_prototypes.{prototype_index}.operation_tags.{index}"
+                )),
+                key,
+                "invalid_custom_operation_tag",
+            );
+        }
+    }
+}
+
+fn validate_detail_modules(kit: &StyleKit, report: &mut FamilyValidationReport) {
+    let mut ids = BTreeSet::new();
+    for (index, module) in kit.detail_modules.iter().enumerate() {
+        validate_non_empty(
+            report,
+            Some(format!("detail_modules.{index}.id")),
+            &module.id,
+            "empty_detail_module_id",
+        );
+        validate_identifier(
+            report,
+            Some(format!("detail_modules.{index}.id")),
+            &module.id,
+            "invalid_detail_module_id",
+        );
+        validate_non_empty(
+            report,
+            Some(format!("detail_modules.{index}.display_name")),
+            &module.display_name,
+            "empty_detail_module_display_name",
+        );
+        if !ids.insert(module.id.as_str()) {
+            push_issue(
+                report,
+                Some(format!("detail_modules.{index}.id")),
+                "duplicate_detail_module_id",
+                "Detail module IDs must be unique within one style kit.",
+            );
+        }
+        if module.target_roles.is_empty() {
+            push_issue(
+                report,
+                Some(format!("detail_modules.{index}.target_roles")),
+                "missing_detail_target_role",
+                "Detail modules must target at least one role.",
+            );
+        }
+        validate_identifier_list(
+            report,
+            &format!("detail_modules.{index}.target_roles"),
+            &module.target_roles,
+            "invalid_detail_target_role",
+        );
+        if module.minimum_feature_size == 0 {
+            push_issue(
+                report,
+                Some(format!("detail_modules.{index}.minimum_feature_size")),
+                "invalid_detail_minimum_feature_size",
+                "Detail modules must declare a positive minimum feature size.",
+            );
+        }
+        validate_identifier_list(
+            report,
+            &format!("detail_modules.{index}.tags"),
+            &module.tags,
+            "invalid_detail_tag",
+        );
+    }
+}
+
+fn validate_repetition_policy(policy: &RepetitionPolicy, report: &mut FamilyValidationReport) {
+    validate_fraction(
+        report,
+        Some("repetition.density"),
+        policy.density,
+        "invalid_repetition_density",
+    );
+    if !policy.preferred_spacing.is_finite() || policy.preferred_spacing <= 0.0 {
+        push_issue(
+            report,
+            Some("repetition.preferred_spacing"),
+            "invalid_repetition_spacing",
+            "Preferred repetition spacing must be finite and greater than zero.",
+        );
+    }
+    if policy.maximum_default_count == 0 {
+        push_issue(
+            report,
+            Some("repetition.maximum_default_count"),
+            "invalid_repetition_count",
+            "Maximum default repetition count must be greater than zero.",
+        );
+    }
+}
+
+fn validate_symmetry_policy(policy: &SymmetryPolicy, report: &mut FamilyValidationReport) {
+    if policy.prefer_mirrors && policy.allowed_axes.is_empty() {
+        push_issue(
+            report,
+            Some("symmetry.allowed_axes"),
+            "missing_symmetry_axis",
+            "Mirror-preferring style kits must declare at least one allowed axis.",
+        );
+    }
+    validate_unique_strings(
+        report,
+        "symmetry.allowed_axes",
+        &policy.allowed_axes,
+        "duplicate_symmetry_axis",
+    );
+    validate_identifier_list(
+        report,
+        "symmetry.allowed_axes",
+        &policy.allowed_axes,
+        "invalid_symmetry_axis",
+    );
+}
+
+fn validate_exaggeration_policy(policy: &ExaggerationPolicy, report: &mut FamilyValidationReport) {
+    validate_fraction(
+        report,
+        Some("exaggeration.silhouette"),
+        policy.silhouette,
+        "invalid_silhouette_exaggeration",
+    );
+    validate_fraction(
+        report,
+        Some("exaggeration.detail"),
+        policy.detail,
+        "invalid_detail_exaggeration",
+    );
+}
+
+fn validate_kit_role_references(
+    kit: &StyleKit,
+    role_ids: &BTreeSet<&str>,
+    report: &mut FamilyValidationReport,
+) {
+    for (index, proportion) in kit.proportions.iter().enumerate() {
+        validate_role_reference(
+            report,
+            role_ids,
+            format!("style_kit.proportions.{index}.role"),
+            &proportion.role,
+            "unknown_style_proportion_role",
+        );
+    }
+    for (index, prototype) in kit.part_prototypes.iter().enumerate() {
+        validate_role_reference(
+            report,
+            role_ids,
+            format!("style_kit.part_prototypes.{index}.role"),
+            &prototype.role,
+            "unknown_style_prototype_role",
+        );
+    }
+    for (index, module) in kit.detail_modules.iter().enumerate() {
+        for role in &module.target_roles {
+            validate_role_reference(
+                report,
+                role_ids,
+                format!("style_kit.detail_modules.{index}.target_roles"),
+                role,
+                "unknown_style_detail_role",
+            );
+        }
+    }
+}
+
+fn validate_kit_operation_compatibility(
+    family: &AssetFamilySchema,
+    kit: &StyleKit,
+    report: &mut FamilyValidationReport,
+) {
+    let allowed = family.allowed_operations.iter().collect::<BTreeSet<_>>();
+    for (prototype_index, prototype) in kit.part_prototypes.iter().enumerate() {
+        for (operation_index, operation) in prototype.operation_tags.iter().enumerate() {
+            if !allowed.contains(operation) {
+                push_issue(
+                    report,
+                    Some(format!(
+                        "style_kit.part_prototypes.{prototype_index}.operation_tags.{operation_index}"
+                    )),
+                    "style_prototype_operation_not_allowed",
+                    "Style-kit prototype requires an operation not allowed by the family.",
+                );
+            }
+        }
+    }
+}
+
+fn validate_parameter_range(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    range: ParameterRange,
+) {
+    if !range.minimum.is_finite() || !range.maximum.is_finite() || !range.step.is_finite() {
+        push_issue(
+            report,
+            subject,
+            "non_finite_parameter_range",
+            "Parameter ranges must contain only finite values.",
+        );
+    } else if range.minimum > range.maximum {
+        push_issue(
+            report,
+            subject,
+            "invalid_parameter_range",
+            "Parameter range minimum must not exceed maximum.",
+        );
+    } else if range.step <= 0.0 {
+        push_issue(
+            report,
+            subject,
+            "invalid_parameter_step",
+            "Parameter range step must be greater than zero.",
+        );
+    }
+}
+
+fn validate_role_reference(
+    report: &mut FamilyValidationReport,
+    role_ids: &BTreeSet<&str>,
+    subject: impl Into<String>,
+    role: &str,
+    code: &'static str,
+) {
+    if !role_ids.contains(role) {
+        push_issue(
+            report,
+            Some(subject),
+            code,
+            "Role reference is not declared.",
+        );
+    }
+}
+
+fn validate_unique_strings(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    values: &[String],
+    code: &'static str,
+) {
+    let mut seen = BTreeSet::new();
+    for (index, value) in values.iter().enumerate() {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            push_issue(
+                report,
+                Some(format!("{subject}.{index}")),
+                "empty_identifier",
+                "Identifier values cannot be empty.",
+            );
+        }
+        if !seen.insert(normalized) {
+            push_issue(
+                report,
+                Some(format!("{subject}.{index}")),
+                code,
+                "Identifier values must be unique.",
+            );
+        }
+    }
+}
+
+fn validate_identifier_list(
+    report: &mut FamilyValidationReport,
+    subject: &str,
+    values: &[String],
+    code: &'static str,
+) {
+    for (index, value) in values.iter().enumerate() {
+        validate_identifier(report, Some(format!("{subject}.{index}")), value, code);
+    }
+}
+
+fn validate_identifier(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &str,
+    code: &'static str,
+) {
+    if value.trim() != value || value.is_empty() || !value.chars().all(is_identifier_char) {
+        push_issue(
+            report,
+            subject,
+            code,
+            "Stable identifiers must use lowercase ASCII letters, digits, `_`, `-`, `.`, or `:` without surrounding whitespace.",
+        );
+    }
+}
+
+fn is_identifier_char(character: char) -> bool {
+    character.is_ascii_lowercase()
+        || character.is_ascii_digit()
+        || matches!(character, '_' | '-' | '.' | ':')
+}
+
+fn validate_fraction(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: f32,
+    code: &'static str,
+) {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        push_issue(
+            report,
+            subject,
+            code,
+            "Value must be a finite fraction from 0 to 1.",
+        );
+    }
+}
+
+fn validate_non_empty(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    value: &str,
+    code: &'static str,
+) {
+    if value.trim().is_empty() {
+        push_issue(report, subject, code, "Value cannot be empty.");
+    }
+}
+
+fn push_issue(
+    report: &mut FamilyValidationReport,
+    subject: Option<impl Into<String>>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) {
+    report.issues.push(FamilyValidationIssue {
+        subject: subject.map(Into::into),
+        code: code.into(),
+        message: message.into(),
+    });
+}

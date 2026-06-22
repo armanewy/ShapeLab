@@ -73,6 +73,18 @@ AssetRecipe
 
 That lane is additive to the implicit editor and same-topology decompiler. Its benchmark assets live in `crates/shape-modeling-assets`.
 
+The next product layer is the asset-family foundry:
+
+```text
+AssetFamilySchema
+  + StyleKit
+  + optional runtime/export profile
+  -> authored AssetRecipe variants
+  -> validation, preview, export, and adapter packaging
+```
+
+`shape-family` owns theme-neutral family and style-kit contracts. `shape-gamekit` owns runtime-neutral game metadata. `shape-caesar-assets` is the first content-pack customer, not a core engine dependency. See [`docs/asset-family-foundry.md`](docs/asset-family-foundry.md) and [`docs/adr/0011-asset-family-style-kit-layer.md`](docs/adr/0011-asset-family-style-kit-layer.md).
+
 ## CLI
 
 ```bash

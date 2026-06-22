@@ -3683,6 +3683,7 @@ dependencies = [
  "serde_json",
  "shape-asset",
  "shape-compile",
+ "shape-family",
  "shape-gamekit",
 ]
 
@@ -3745,6 +3746,14 @@ dependencies = [
  "shape-mesh",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-family"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

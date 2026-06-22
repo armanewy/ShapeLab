@@ -1,15 +1,17 @@
 # Project Caesar Asset Brief
 
-Shape Lab's near-term production customer is Project Caesar's River Bend prototype. The goal is not to broaden toward generic modeling in the abstract; it is to replace graybox operational engineering modules with editable, validated, deterministic Shape Lab assets.
+Shape Lab's near-term production customer is Project Caesar's River Bend prototype. The goal is to use Project Caesar as the first demanding asset-pack customer while keeping Shape Lab a general asset-family foundry.
 
 Project Caesar is a single-player operational engineering strategy game set during Caesar's campaigns in Gaul. The game uses formation-level command pieces, modular field engineering, continuous time with pause, a top-down or oblique 2.5D camera, and semantic runtime modules rather than unrestricted structure physics.
 
-Shape Lab should initially produce placed structures and command pieces. Terrain remains owned by the game: rivers, ridges, forests, and ground generation are outside this first asset pack.
+Shape Lab should initially produce placed structures and command pieces from generic family contracts and a Project Caesar style kit. Terrain remains owned by the game: rivers, ridges, forests, and ground generation are outside this first asset pack.
 
 ## First Proof
 
 ```text
 Project Caesar graybox module
+  -> generic asset family
+  -> Roman timber style kit
   -> Shape Lab semantic template
   -> Refine / Explore variants
   -> accepted construction recipe
@@ -40,4 +42,4 @@ Keep developing explicit topology, semantic parts, sockets and attachment frames
 
 Add game-module metadata, construction-phase metadata, game-scale readability tests, walkable/support surfaces, simple collision proxies, batch pack export, Godot adapter, and local dogfooding metrics.
 
-Defer deeper deformation decompilation, arbitrary mesh reconstruction, universal booleans, materials, UVs, rigging, animation, generic commercial template libraries, marketplace packaging, and GPU viewport work unless CPU interaction becomes a real blocker.
+Defer deeper deformation decompilation, arbitrary mesh reconstruction, universal booleans, materials, UVs, rigging, animation, marketplace packaging, and GPU viewport work unless CPU interaction becomes a real blocker. Do not defer generic family and style-kit contracts; they are the boundary that keeps Project Caesar content out of the core engine.
