@@ -67,7 +67,7 @@ Production geometry stays on explicit polygon generators. No SDF production geom
 - Candidate generation is deterministic, lock-aware, semantic, and score-selected from mesh-derived visual descriptors, but the metrics remain heuristics rather than visual taste or artistic quality.
 - Authored relationship policies travel with recipes and can target concrete instances, generated operation occurrences, prototype occurrence families, part tags, and definition role tags. Future Boolean boundary-loop relationships still need richer selectors.
 - The viewport overlay exposes selected-part context, validation, and wireframe hinting; direct viewport part picking is not in this MVP.
-- Current explicit generators avoid generic booleans. The crate now uses constrained semantic plate cuts for recessed panels and through-cut vents; broader arbitrary mesh booleans remain future work.
+- Current explicit generators avoid generic booleans. The crate now uses constrained semantic Plate and RoundedBox cuts for recessed panels, through-cut vents, mounting holes, and targeted boundary bevels; broader arbitrary mesh booleans remain future work.
 
 ## Verification
 

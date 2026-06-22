@@ -218,6 +218,19 @@ pub fn generate_rounded_box(
         face_subdivisions: 1,
         face_mask: FaceMask::all(),
     };
+    let cut_operations = cut_operations(definition);
+    let boundary_loop_bevels = boundary_loop_bevel_operations(definition)?;
+    if !cut_operations.is_empty() {
+        return build_cut_rounded_box(&params, &cut_operations, &boundary_loop_bevels, context);
+    }
+    if let Some(bevel) = boundary_loop_bevels.first() {
+        return Err(ModelingError::UnsupportedOperation {
+            operation: bevel.operation,
+            reason:
+                "BevelBoundaryLoop requires a supported cut operation in the same RoundedBox definition"
+                    .to_owned(),
+        });
+    }
     build_rounded_box(&params, context)
 }
 
@@ -405,6 +418,335 @@ pub fn build_rounded_box(
         format!(
             "rounded_box:h={:.6},{:.6},{:.6}:r={:.6}:bs={}:fs={}:mask={:?}",
             half[0], half[1], half[2], radius, bevel_segments, face_subdivisions, params.face_mask
+        ),
+    ))
+}
+
+fn build_cut_rounded_box(
+    params: &RoundedBoxParams,
+    operations: &[&ModelingOperationSpec],
+    bevels: &[BoundaryLoopBevelPlan],
+    context: &GeneratorContext,
+) -> Result<GeneratedPart, ModelingError> {
+    let half = positive_triplet(params.half_extents, "rounded_box.half_extents")?;
+    let requested_radius = finite_non_negative(params.bevel_radius, "rounded_box.bevel_radius")?;
+    let radius = requested_radius.min(half[0].min(half[1]).min(half[2]));
+    let bevel_segments = if radius > EPSILON {
+        params.bevel_segments.max(1)
+    } else {
+        0
+    };
+    let face_subdivisions = params.face_subdivisions.max(1);
+    let inner = [
+        (half[0] - radius).max(0.0),
+        (half[1] - radius).max(0.0),
+        (half[2] - radius).max(0.0),
+    ];
+
+    let first_operation = operations.first().ok_or_else(|| {
+        ModelingError::InvalidInput(
+            "rounded-box cut generation requires at least one cut".to_owned(),
+        )
+    })?;
+    let face = operation_face(first_operation)?;
+    let host = PlanarHostPatch::rounded_box(face, half, radius)?;
+    let mut cuts = operations
+        .iter()
+        .map(|operation| {
+            if operation_face(operation)? != face {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: operation.operation_id(),
+                    reason: "rounded-box cut composition currently supports one selected face per definition"
+                        .to_owned(),
+                });
+            }
+            let cut = PlateCutPlan::from_operation(operation, host.half_u, host.half_v, host.thickness)?;
+            if cut.target_region != ROUNDED_PRIMARY_REGION || cut.outer_region != ROUNDED_PRIMARY_REGION {
+                return Err(ModelingError::InvalidInput(
+                    "rounded-box cuts must target the primary flat face region".to_owned(),
+                ));
+            }
+            Ok(cut)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    apply_boundary_loop_bevels(&mut cuts, bevels, host.thickness)?;
+    validate_cut_frame_clearance(&cuts)?;
+
+    let mut axis_samples = [
+        axis_samples(half[0], inner[0], radius, bevel_segments, face_subdivisions),
+        axis_samples(half[1], inner[1], radius, bevel_segments, face_subdivisions),
+        axis_samples(half[2], inner[2], radius, bevel_segments, face_subdivisions),
+    ];
+    for cut in &cuts {
+        axis_samples[host.u_axis_index].push(cut.frame.min_x);
+        axis_samples[host.u_axis_index].push(cut.frame.max_x);
+        axis_samples[host.v_axis_index].push(cut.frame.min_z);
+        axis_samples[host.v_axis_index].push(cut.frame.max_z);
+    }
+    for samples in &mut axis_samples {
+        *samples = dedup_sorted_f32(std::mem::take(samples));
+    }
+
+    let entry_side = face_side_for_cut(face);
+    let opposite_side = entry_side.opposite();
+    let through_cuts = cuts
+        .iter()
+        .filter(|cut| matches!(cut.kind, PlateCutKind::Through))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut builder = MeshBuilder::new();
+    for side in FaceSide::ALL {
+        if !params.face_mask.includes(side) {
+            continue;
+        }
+        let [u_axis, v_axis] = side.tangent_axes();
+        let u_samples = &axis_samples[u_axis];
+        let v_samples = &axis_samples[v_axis];
+        for u in 0..u_samples.len() - 1 {
+            for v in 0..v_samples.len() - 1 {
+                let region = rounded_box_region(
+                    [u_axis, v_axis],
+                    [
+                        (u_samples[u] + u_samples[u + 1]) * 0.5,
+                        (v_samples[v] + v_samples[v + 1]) * 0.5,
+                    ],
+                    inner,
+                    radius,
+                );
+                if region == ROUNDED_PRIMARY_REGION
+                    && (side == entry_side || (side == opposite_side && !through_cuts.is_empty()))
+                {
+                    continue;
+                }
+                let corners = [
+                    rounded_box_position(side, u_samples[u], v_samples[v], half, inner, radius),
+                    rounded_box_position(side, u_samples[u + 1], v_samples[v], half, inner, radius),
+                    rounded_box_position(
+                        side,
+                        u_samples[u + 1],
+                        v_samples[v + 1],
+                        half,
+                        inner,
+                        radius,
+                    ),
+                    rounded_box_position(side, u_samples[u], v_samples[v + 1], half, inner, radius),
+                ];
+                let vertices = builder.add_vertices(&corners)?;
+                builder.add_face(vertices, rounded_box_metadata(context, region));
+            }
+        }
+    }
+
+    add_cut_patch_for_host_face(
+        &mut builder,
+        &host,
+        &cuts,
+        &cuts,
+        0.0,
+        host.outward_normal,
+        ROUNDED_PRIMARY_REGION,
+        context,
+    )?;
+    if !through_cuts.is_empty() {
+        add_cut_patch_for_host_face(
+            &mut builder,
+            &host,
+            &through_cuts,
+            &cuts,
+            host.thickness,
+            negate(host.outward_normal),
+            ROUNDED_PRIMARY_REGION,
+            context,
+        )?;
+    }
+
+    let mut boundary_marks = Vec::new();
+    let mut entry_wall_rings: BTreeMap<OperationId, Vec<u32>> = BTreeMap::new();
+    let mut secondary_wall_rings: BTreeMap<OperationId, Vec<u32>> = BTreeMap::new();
+    let xs = plate_cut_axis_samples(host.half_u, &cuts, 0);
+    let zs = plate_cut_axis_samples(host.half_v, &cuts, 1);
+    for cut in &cuts {
+        let (entry_surface_ring, entry_wall_ring) = add_cut_features_for_host_face(
+            &mut builder,
+            cut,
+            &host,
+            0.0,
+            host.outward_normal,
+            &xs,
+            &zs,
+            ROUNDED_PRIMARY_REGION,
+            context,
+            cut.entry_bevel.as_ref(),
+        )?;
+        push_cut_or_bevel_boundary_marks(
+            &mut boundary_marks,
+            entry_surface_ring,
+            entry_wall_ring.clone(),
+            cut.operation,
+            cut.entry_loop,
+            cut.edge_treatment,
+            cut.entry_bevel.as_ref(),
+        );
+        entry_wall_rings.insert(cut.operation, entry_wall_ring);
+        if matches!(cut.kind, PlateCutKind::Through) {
+            let (secondary_surface_ring, secondary_wall_ring) = add_cut_features_for_host_face(
+                &mut builder,
+                cut,
+                &host,
+                host.thickness,
+                negate(host.outward_normal),
+                &xs,
+                &zs,
+                ROUNDED_PRIMARY_REGION,
+                context,
+                cut.secondary_bevel.as_ref(),
+            )?;
+            push_cut_or_bevel_boundary_marks(
+                &mut boundary_marks,
+                secondary_surface_ring,
+                secondary_wall_ring.clone(),
+                cut.operation,
+                cut.secondary_loop,
+                cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
+            );
+            secondary_wall_rings.insert(cut.operation, secondary_wall_ring);
+        }
+        if let PlateCutKind::Recessed {
+            depth,
+            floor_region,
+        } = cut.kind
+        {
+            let outside_inner = entry_wall_rings
+                .get(&cut.operation)
+                .cloned()
+                .expect("entry wall ring should be generated before recessed wall");
+            let floor_surface_points = cut
+                .secondary_bevel
+                .as_ref()
+                .map(|bevel| cut.offset_inner_points(-bevel.width))
+                .transpose()?
+                .unwrap_or_else(|| cut.inner_points.clone());
+            let (wall_bottom_ring, floor_inner) = if let Some(bevel) = &cut.secondary_bevel {
+                add_boundary_loop_bevel_band_on_host(
+                    &mut builder,
+                    &host,
+                    depth - bevel.width,
+                    &cut.inner_points,
+                    depth,
+                    &floor_surface_points,
+                    host.outward_normal,
+                    context,
+                    bevel,
+                )?
+            } else {
+                let ring = builder.add_host_ring(&host, depth, &cut.inner_points)?;
+                (ring.clone(), ring)
+            };
+            add_cut_wall_band_on_host(
+                &mut builder,
+                &outside_inner,
+                &wall_bottom_ring,
+                &cut.inner_points,
+                cut.center,
+                &host,
+                context,
+                cut.operation,
+                cut.wall_region,
+            );
+            add_cap_oriented(
+                &mut builder,
+                floor_inner.clone(),
+                host.outward_normal,
+                cut_metadata(
+                    context,
+                    floor_region,
+                    SurfaceRole::Interior,
+                    cut.operation,
+                    None,
+                ),
+            );
+            push_cut_or_bevel_boundary_marks(
+                &mut boundary_marks,
+                wall_bottom_ring,
+                floor_inner,
+                cut.operation,
+                cut.secondary_loop,
+                cut.edge_treatment,
+                cut.secondary_bevel.as_ref(),
+            );
+        }
+    }
+    for cut in cuts
+        .iter()
+        .filter(|cut| matches!(cut.kind, PlateCutKind::Through))
+    {
+        let outside_inner = entry_wall_rings
+            .get(&cut.operation)
+            .expect("entry wall ring should be generated before through wall");
+        let opposite_inner = secondary_wall_rings
+            .get(&cut.operation)
+            .expect("secondary wall ring should be generated before through wall");
+        add_cut_wall_band_on_host(
+            &mut builder,
+            outside_inner,
+            opposite_inner,
+            &cut.inner_points,
+            cut.center,
+            &host,
+            context,
+            cut.operation,
+            cut.wall_region,
+        );
+    }
+
+    let mut mesh = builder.finish()?;
+    for mark in boundary_marks {
+        mark_boundary_loop(
+            &mut mesh,
+            &mark.ring,
+            mark.operation,
+            mark.boundary_loop,
+            mark.treatment,
+        );
+    }
+    let mut regions = rounded_box_regions();
+    for cut in &cuts {
+        insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
+        insert_cut_region(
+            &mut regions,
+            cut.wall_region,
+            "cut_wall",
+            SurfaceRole::CutWall,
+        );
+        if let PlateCutKind::Recessed { floor_region, .. } = cut.kind {
+            insert_cut_region(
+                &mut regions,
+                floor_region,
+                "recess_floor",
+                SurfaceRole::Interior,
+            );
+        }
+        insert_boundary_bevel_region(&mut regions, cut.entry_bevel.as_ref());
+        insert_boundary_bevel_region(&mut regions, cut.secondary_bevel.as_ref());
+    }
+
+    Ok(part(
+        mesh,
+        regions,
+        rounded_box_sockets(half),
+        format!(
+            "rounded_box_cut:h={:.6},{:.6},{:.6}:r={:.6}:bs={}:face={:?}:cuts={}",
+            half[0],
+            half[1],
+            half[2],
+            radius,
+            bevel_segments,
+            face,
+            cuts.iter()
+                .map(|cut| cut.operation.0.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         ),
     ))
 }
@@ -1564,6 +1906,74 @@ struct BoundaryLoopMark {
     treatment: CutEdgeTreatment,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct PlanarHostPatch {
+    origin: [f32; 3],
+    u_axis: [f32; 3],
+    v_axis: [f32; 3],
+    outward_normal: [f32; 3],
+    u_axis_index: usize,
+    v_axis_index: usize,
+    half_u: f32,
+    half_v: f32,
+    thickness: f32,
+}
+
+impl PlanarHostPatch {
+    fn rounded_box(
+        face: PlanarCutFace,
+        half: [f32; 3],
+        radius: f32,
+    ) -> Result<Self, ModelingError> {
+        let (fixed_axis, sign, u_axis_index, v_axis_index) = match face {
+            PlanarCutFace::PositiveX => (0, 1.0, 2, 1),
+            PlanarCutFace::NegativeX => (0, -1.0, 2, 1),
+            PlanarCutFace::PositiveY => (1, 1.0, 0, 2),
+            PlanarCutFace::NegativeY => (1, -1.0, 0, 2),
+            PlanarCutFace::PositiveZ => (2, 1.0, 0, 1),
+            PlanarCutFace::NegativeZ => (2, -1.0, 0, 1),
+        };
+        let half_u = (half[u_axis_index] - radius).max(0.0);
+        let half_v = (half[v_axis_index] - radius).max(0.0);
+        if half_u <= EPSILON || half_v <= EPSILON {
+            return Err(ModelingError::UnsupportedOperation {
+                operation: OperationId(0),
+                reason: "rounded-box cuts require a non-zero flat primary face patch".to_owned(),
+            });
+        }
+        let mut origin = [0.0; 3];
+        origin[fixed_axis] = sign * half[fixed_axis];
+        let mut u_axis = [0.0; 3];
+        u_axis[u_axis_index] = 1.0;
+        let mut v_axis = [0.0; 3];
+        v_axis[v_axis_index] = 1.0;
+        let mut outward_normal = [0.0; 3];
+        outward_normal[fixed_axis] = sign;
+        Ok(Self {
+            origin,
+            u_axis,
+            v_axis,
+            outward_normal,
+            u_axis_index,
+            v_axis_index,
+            half_u,
+            half_v,
+            thickness: half[fixed_axis] * 2.0,
+        })
+    }
+
+    fn position(self, depth: f32, point: [f32; 2]) -> [f32; 3] {
+        [
+            self.origin[0] + self.u_axis[0] * point[0] + self.v_axis[0] * point[1]
+                - self.outward_normal[0] * depth,
+            self.origin[1] + self.u_axis[1] * point[0] + self.v_axis[1] * point[1]
+                - self.outward_normal[1] * depth,
+            self.origin[2] + self.u_axis[2] * point[0] + self.v_axis[2] * point[1]
+                - self.outward_normal[2] * depth,
+        ]
+    }
+}
+
 #[derive(Debug, Clone)]
 struct BoundaryLoopBevelPlan {
     operation: OperationId,
@@ -1840,7 +2250,7 @@ fn apply_boundary_loop_bevels(
             return Err(ModelingError::UnsupportedOperation {
                 operation: bevel.operation,
                 reason: format!(
-                    "BevelBoundaryLoop target {} is not a supported Plate cut loop",
+                    "BevelBoundaryLoop target {} is not a supported cut loop",
                     bevel.target_loop.0
                 ),
             });
@@ -1972,14 +2382,20 @@ fn rects_touch_or_overlap(left: Rect2, right: Rect2) -> bool {
 }
 
 fn frame_projection_splits(frame: Rect2, other: Rect2) -> bool {
-    value_inside_open_interval(other.min_x, frame.min_x, frame.max_x)
-        || value_inside_open_interval(other.max_x, frame.min_x, frame.max_x)
-        || value_inside_open_interval(other.min_z, frame.min_z, frame.max_z)
-        || value_inside_open_interval(other.max_z, frame.min_z, frame.max_z)
+    (ranges_overlap_open(frame.min_z, frame.max_z, other.min_z, other.max_z)
+        && (value_inside_open_interval(other.min_x, frame.min_x, frame.max_x)
+            || value_inside_open_interval(other.max_x, frame.min_x, frame.max_x)))
+        || (ranges_overlap_open(frame.min_x, frame.max_x, other.min_x, other.max_x)
+            && (value_inside_open_interval(other.min_z, frame.min_z, frame.max_z)
+                || value_inside_open_interval(other.max_z, frame.min_z, frame.max_z)))
 }
 
 fn value_inside_open_interval(value: f32, min: f32, max: f32) -> bool {
     value > min + EPSILON && value < max - EPSILON
+}
+
+fn ranges_overlap_open(first_min: f32, first_max: f32, second_min: f32, second_max: f32) -> bool {
+    first_min < second_max - EPSILON && second_min < first_max - EPSILON
 }
 
 fn plate_cut_axis_samples(half_extent: f32, cuts: &[PlateCutPlan], axis: usize) -> Vec<f32> {
@@ -2136,6 +2552,262 @@ fn add_cut_features_for_face(
         )
     } else {
         Ok((surface_ring.clone(), surface_ring))
+    }
+}
+
+fn add_cut_patch_for_host_face(
+    builder: &mut MeshBuilder,
+    host: &PlanarHostPatch,
+    holes: &[PlateCutPlan],
+    sample_cuts: &[PlateCutPlan],
+    depth: f32,
+    desired_normal: [f32; 3],
+    region: RegionId,
+    context: &GeneratorContext,
+) -> Result<(), ModelingError> {
+    let xs = plate_cut_axis_samples(host.half_u, sample_cuts, 0);
+    let zs = plate_cut_axis_samples(host.half_v, sample_cuts, 1);
+    for x_index in 0..xs.len().saturating_sub(1) {
+        for z_index in 0..zs.len().saturating_sub(1) {
+            let cell = Rect2 {
+                min_x: xs[x_index],
+                max_x: xs[x_index + 1],
+                min_z: zs[z_index],
+                max_z: zs[z_index + 1],
+            };
+            let center = [
+                (cell.min_x + cell.max_x) * 0.5,
+                (cell.min_z + cell.max_z) * 0.5,
+            ];
+            if holes.iter().any(|cut| point_inside_rect(center, cut.frame)) {
+                continue;
+            }
+            let points = rect_points(cell.min_x, cell.max_x, cell.min_z, cell.max_z);
+            let vertices = builder.add_host_ring(host, depth, &points)?;
+            add_oriented_face(
+                builder,
+                vertices,
+                desired_normal,
+                rounded_box_metadata(context, region),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_cut_features_for_host_face(
+    builder: &mut MeshBuilder,
+    cut: &PlateCutPlan,
+    host: &PlanarHostPatch,
+    depth: f32,
+    desired_normal: [f32; 3],
+    xs: &[f32],
+    zs: &[f32],
+    host_region: RegionId,
+    context: &GeneratorContext,
+    bevel: Option<&BoundaryLoopBevelPlan>,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
+    let window_points = frame_boundary_points(cut.frame, xs, zs);
+    let window_ring = builder.add_host_ring(host, depth, &window_points)?;
+    let surface_points = bevel
+        .map(|bevel| cut.offset_inner_points(bevel.width))
+        .transpose()?
+        .unwrap_or_else(|| cut.inner_points.clone());
+    let surface_ring = builder.add_host_ring(host, depth, &surface_points)?;
+
+    if !cut.has_host_surface_band {
+        add_frame_boundary_to_ring_cap(
+            builder,
+            &window_ring,
+            &window_points,
+            &surface_ring,
+            &surface_points,
+            cut.frame,
+            desired_normal,
+            context,
+            cut.operation,
+            cut.rim_region,
+            SurfaceRole::Rim,
+        )?;
+        return if let Some(bevel) = bevel {
+            add_boundary_loop_bevel_band_from_outer_on_host(
+                builder,
+                host,
+                surface_ring,
+                depth,
+                &surface_points,
+                depth + dot(desired_normal, host.outward_normal) * bevel.width,
+                &cut.inner_points,
+                desired_normal,
+                context,
+                bevel,
+            )
+        } else {
+            Ok((surface_ring.clone(), surface_ring))
+        };
+    }
+
+    let rim_ring = builder.add_host_ring(host, depth, &cut.rim_points)?;
+    add_frame_boundary_to_ring_cap(
+        builder,
+        &window_ring,
+        &window_points,
+        &rim_ring,
+        &cut.rim_points,
+        cut.frame,
+        desired_normal,
+        context,
+        cut.operation,
+        host_region,
+        SurfaceRole::PrimarySurface,
+    )?;
+    add_matched_ring_band(
+        builder,
+        &rim_ring,
+        &surface_ring,
+        &cut.rim_points,
+        &surface_points,
+        desired_normal,
+        context,
+        cut.operation,
+        cut.rim_region,
+        SurfaceRole::Rim,
+    );
+    if let Some(bevel) = bevel {
+        add_boundary_loop_bevel_band_from_outer_on_host(
+            builder,
+            host,
+            surface_ring,
+            depth,
+            &surface_points,
+            depth + dot(desired_normal, host.outward_normal) * bevel.width,
+            &cut.inner_points,
+            desired_normal,
+            context,
+            bevel,
+        )
+    } else {
+        Ok((surface_ring.clone(), surface_ring))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_boundary_loop_bevel_band_on_host(
+    builder: &mut MeshBuilder,
+    host: &PlanarHostPatch,
+    outer_depth: f32,
+    outer_points: &[[f32; 2]],
+    inner_depth: f32,
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    bevel: &BoundaryLoopBevelPlan,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
+    if outer_points.len() != inner_points.len() {
+        return Err(ModelingError::InvalidInput(
+            "boundary-loop bevel replacement loops must have matching topology".to_owned(),
+        ));
+    }
+    let outer_ring = builder.add_host_ring(host, outer_depth, outer_points)?;
+    add_boundary_loop_bevel_band_from_outer_on_host(
+        builder,
+        host,
+        outer_ring,
+        outer_depth,
+        outer_points,
+        inner_depth,
+        inner_points,
+        desired_normal,
+        context,
+        bevel,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_boundary_loop_bevel_band_from_outer_on_host(
+    builder: &mut MeshBuilder,
+    host: &PlanarHostPatch,
+    outer_ring: Vec<u32>,
+    outer_depth: f32,
+    outer_points: &[[f32; 2]],
+    inner_depth: f32,
+    inner_points: &[[f32; 2]],
+    desired_normal: [f32; 3],
+    context: &GeneratorContext,
+    bevel: &BoundaryLoopBevelPlan,
+) -> Result<(Vec<u32>, Vec<u32>), ModelingError> {
+    if outer_points.len() != inner_points.len() {
+        return Err(ModelingError::InvalidInput(
+            "boundary-loop bevel replacement loops must have matching topology".to_owned(),
+        ));
+    }
+    let mut previous_points = outer_points.to_vec();
+    let mut previous_ring = outer_ring.clone();
+    for step in 1..=bevel.segments {
+        let t = step as f32 / bevel.segments as f32;
+        let (radial_t, depth_t) = boundary_bevel_curve_t(t, bevel.profile);
+        let current_points = lerp_loop_points(outer_points, inner_points, radial_t);
+        let current_depth = lerp(outer_depth, inner_depth, depth_t);
+        let current_ring = builder.add_host_ring(host, current_depth, &current_points)?;
+        add_boundary_bevel_ring_band(
+            builder,
+            &previous_ring,
+            &current_ring,
+            &previous_points,
+            &current_points,
+            desired_normal,
+            context,
+            bevel.operation,
+            bevel.bevel_region,
+            SurfaceRole::BevelBand,
+        );
+        previous_points = current_points;
+        previous_ring = current_ring;
+    }
+    Ok((outer_ring, previous_ring))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_cut_wall_band_on_host(
+    builder: &mut MeshBuilder,
+    front_ring: &[u32],
+    back_ring: &[u32],
+    points: &[[f32; 2]],
+    center: [f32; 2],
+    host: &PlanarHostPatch,
+    context: &GeneratorContext,
+    operation: OperationId,
+    region: RegionId,
+) {
+    for index in 0..front_ring.len() {
+        let next = (index + 1) % front_ring.len();
+        let midpoint = [
+            (points[index][0] + points[next][0]) * 0.5,
+            (points[index][1] + points[next][1]) * 0.5,
+        ];
+        let desired = normalize_or(
+            [
+                host.u_axis[0] * (center[0] - midpoint[0])
+                    + host.v_axis[0] * (center[1] - midpoint[1]),
+                host.u_axis[1] * (center[0] - midpoint[0])
+                    + host.v_axis[1] * (center[1] - midpoint[1]),
+                host.u_axis[2] * (center[0] - midpoint[0])
+                    + host.v_axis[2] * (center[1] - midpoint[1]),
+            ],
+            host.u_axis,
+        );
+        add_oriented_face(
+            builder,
+            vec![
+                front_ring[index],
+                front_ring[next],
+                back_ring[next],
+                back_ring[index],
+            ],
+            desired,
+            cut_metadata(context, region, SurfaceRole::CutWall, operation, None),
+        );
     }
 }
 
@@ -2473,6 +3145,28 @@ fn plate_cut_face_regions(
             operation,
             reason: "plate semantic cuts currently target only local +/-Y planar faces".to_owned(),
         }),
+    }
+}
+
+fn operation_face(operation: &ModelingOperationSpec) -> Result<PlanarCutFace, ModelingError> {
+    match operation {
+        ModelingOperationSpec::RecessedPanelCut { face, .. }
+        | ModelingOperationSpec::RectangularThroughCut { face, .. }
+        | ModelingOperationSpec::CircularThroughCut { face, .. } => Ok(*face),
+        _ => Err(ModelingError::InvalidInput(
+            "expected semantic cut operation".to_owned(),
+        )),
+    }
+}
+
+fn face_side_for_cut(face: PlanarCutFace) -> FaceSide {
+    match face {
+        PlanarCutFace::PositiveX => FaceSide::PositiveX,
+        PlanarCutFace::NegativeX => FaceSide::NegativeX,
+        PlanarCutFace::PositiveY => FaceSide::PositiveY,
+        PlanarCutFace::NegativeY => FaceSide::NegativeY,
+        PlanarCutFace::PositiveZ => FaceSide::PositiveZ,
+        PlanarCutFace::NegativeZ => FaceSide::NegativeZ,
     }
 }
 
@@ -3207,7 +3901,7 @@ enum RingVertices {
     Circle(Vec<u32>),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FaceSide {
     PositiveX,
     NegativeX,
@@ -3253,6 +3947,18 @@ impl FaceSide {
             Self::NegativeY => [0, 2],
             Self::PositiveZ => [0, 1],
             Self::NegativeZ => [1, 0],
+        }
+    }
+
+    #[must_use]
+    fn opposite(self) -> Self {
+        match self {
+            Self::PositiveX => Self::NegativeX,
+            Self::NegativeX => Self::PositiveX,
+            Self::PositiveY => Self::NegativeY,
+            Self::NegativeY => Self::PositiveY,
+            Self::PositiveZ => Self::NegativeZ,
+            Self::NegativeZ => Self::PositiveZ,
         }
     }
 }
@@ -3335,6 +4041,18 @@ impl MeshBuilder {
         points
             .iter()
             .map(|point| self.add_vertex([point[0], y, point[1]]))
+            .collect()
+    }
+
+    fn add_host_ring(
+        &mut self,
+        host: &PlanarHostPatch,
+        depth: f32,
+        points: &[[f32; 2]],
+    ) -> Result<Vec<u32>, ModelingError> {
+        points
+            .iter()
+            .map(|point| self.add_vertex(host.position(depth, *point)))
             .collect()
     }
 
@@ -3898,6 +4616,10 @@ fn quantize(value: f32) -> i64 {
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn negate(value: [f32; 3]) -> [f32; 3] {
+    [-value[0], -value[1], -value[2]]
 }
 
 fn lerp(start: f32, end: f32, t: f32) -> f32 {

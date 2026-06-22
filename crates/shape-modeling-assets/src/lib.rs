@@ -98,10 +98,146 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
                     width: 0.08,
                     height: 0.045,
                 },
+                ModelingOperationSpec::RecessedPanelCut {
+                    operation: OperationId(15),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [0.0, 0.0],
+                    size: [2.38, 0.48],
+                    depth: 0.045,
+                    corner_radius: 0.075,
+                    rim_width: 0.0768,
+                    corner_segments: 4,
+                    entry_loop: BoundaryLoopId(30),
+                    floor_loop: BoundaryLoopId(31),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(60),
+                    wall_region: RegionId(61),
+                    floor_region: RegionId(62),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(18),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [-0.62, 0.62],
+                    size: [0.34, 0.05],
+                    corner_radius: 0.0,
+                    rim_width: 0.035,
+                    corner_segments: 1,
+                    entry_loop: BoundaryLoopId(36),
+                    exit_loop: BoundaryLoopId(37),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(65),
+                    wall_region: RegionId(66),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(19),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [0.0, 0.62],
+                    size: [0.34, 0.05],
+                    corner_radius: 0.0,
+                    rim_width: 0.035,
+                    corner_segments: 1,
+                    entry_loop: BoundaryLoopId(38),
+                    exit_loop: BoundaryLoopId(39),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(67),
+                    wall_region: RegionId(68),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+                ModelingOperationSpec::RectangularThroughCut {
+                    operation: OperationId(20),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [0.62, 0.62],
+                    size: [0.34, 0.05],
+                    corner_radius: 0.0,
+                    rim_width: 0.035,
+                    corner_segments: 1,
+                    entry_loop: BoundaryLoopId(40),
+                    exit_loop: BoundaryLoopId(41),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(69),
+                    wall_region: RegionId(70),
+                    edge_treatment: CutEdgeTreatment::Hard,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(21),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [-0.52, -0.62],
+                    radius: 0.065,
+                    radial_segments: 12,
+                    rim_width: 0.035,
+                    entry_loop: BoundaryLoopId(42),
+                    exit_loop: BoundaryLoopId(43),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(71),
+                    wall_region: RegionId(72),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
+                ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(22),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [0.52, -0.62],
+                    radius: 0.065,
+                    radial_segments: 12,
+                    rim_width: 0.035,
+                    entry_loop: BoundaryLoopId(44),
+                    exit_loop: BoundaryLoopId(45),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(73),
+                    wall_region: RegionId(74),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                },
                 ModelingOperationSpec::SetBevelProfile {
                     operation: OperationId(1),
                     radius: 0.14,
                     segments: 3,
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(16),
+                    target_loop: BoundaryLoopId(30),
+                    width: 0.022,
+                    segments: 2,
+                    profile: 1.15,
+                    bevel_region: RegionId(63),
+                    outer_replacement_loop: BoundaryLoopId(32),
+                    inner_replacement_loop: BoundaryLoopId(33),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(17),
+                    target_loop: BoundaryLoopId(31),
+                    width: 0.018,
+                    segments: 2,
+                    profile: 1.1,
+                    bevel_region: RegionId(64),
+                    outer_replacement_loop: BoundaryLoopId(34),
+                    inner_replacement_loop: BoundaryLoopId(35),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(23),
+                    target_loop: BoundaryLoopId(42),
+                    width: 0.018,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(75),
+                    outer_replacement_loop: BoundaryLoopId(46),
+                    inner_replacement_loop: BoundaryLoopId(47),
+                },
+                ModelingOperationSpec::BevelBoundaryLoop {
+                    operation: OperationId(24),
+                    target_loop: BoundaryLoopId(44),
+                    width: 0.018,
+                    segments: 2,
+                    profile: 1.0,
+                    bevel_region: RegionId(76),
+                    outer_replacement_loop: BoundaryLoopId(48),
+                    inner_replacement_loop: BoundaryLoopId(49),
                 },
             ],
             rounded_box_regions(),
@@ -479,12 +615,12 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
         ParameterId(7),
         parameter(
             7,
-            "Panel thickness",
+            "Panel edge rounding",
             "Detail Density",
-            "definition.3.geometry.plate.thickness",
-            0.06,
-            0.16,
-            0.01,
+            "definition.1.operation.16.bevel_boundary_loop.width",
+            0.012,
+            0.036,
+            0.002,
         ),
     );
     recipe.parameters.insert(
@@ -529,7 +665,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             11,
             "Panel recess width",
             "Panel Cuts",
-            "definition.3.operation.13.recessed_panel_cut.size.x",
+            "definition.1.operation.15.recessed_panel_cut.size.x",
             1.85,
             2.85,
             0.05,
@@ -541,7 +677,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             12,
             "Panel recess height",
             "Panel Cuts",
-            "definition.3.operation.13.recessed_panel_cut.size.y",
+            "definition.1.operation.15.recessed_panel_cut.size.y",
             0.34,
             0.64,
             0.03,
@@ -553,7 +689,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             13,
             "Panel recess depth",
             "Panel Cuts",
-            "definition.3.operation.13.recessed_panel_cut.depth",
+            "definition.1.operation.15.recessed_panel_cut.depth",
             0.025,
             0.075,
             0.005,
@@ -565,7 +701,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             14,
             "Panel corner radius",
             "Panel Cuts",
-            "definition.3.operation.13.recessed_panel_cut.corner_radius",
+            "definition.1.operation.15.recessed_panel_cut.corner_radius",
             0.04,
             0.14,
             0.01,
@@ -577,7 +713,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             15,
             "Vent opening width",
             "Vent Cuts",
-            "definition.7.operation.14.rectangular_through_cut.size.x",
+            "definition.1.operation.18.rectangular_through_cut.size.x",
             0.26,
             0.62,
             0.03,
@@ -589,10 +725,10 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             16,
             "Vent opening height",
             "Vent Cuts",
-            "definition.7.operation.14.rectangular_through_cut.size.y",
-            0.022,
-            0.045,
-            0.003,
+            "definition.1.operation.18.rectangular_through_cut.size.y",
+            0.035,
+            0.085,
+            0.005,
         ),
     );
     recipe.parameters.insert(
@@ -601,7 +737,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             17,
             "Panel rim width",
             "Panel Cuts",
-            "definition.3.operation.13.recessed_panel_cut.rim_width",
+            "definition.1.operation.15.recessed_panel_cut.rim_width",
             0.045,
             0.12,
             0.005,
@@ -613,7 +749,7 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             18,
             "Panel corner segments",
             "Detail Density",
-            "definition.3.operation.13.recessed_panel_cut.corner_segments",
+            "definition.1.operation.15.recessed_panel_cut.corner_segments",
             1.0,
             6.0,
             1.0,
@@ -625,10 +761,10 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             19,
             "Vent rim width",
             "Vent Cuts",
-            "definition.7.operation.14.rectangular_through_cut.rim_width",
+            "definition.1.operation.18.rectangular_through_cut.rim_width",
+            0.018,
+            0.060,
             0.003,
-            0.012,
-            0.001,
         ),
     );
     recipe.parameters.insert(
@@ -637,14 +773,88 @@ pub fn industrial_crate_recipe() -> AssetRecipe {
             20,
             "Vent corner segments",
             "Detail Density",
-            "definition.7.operation.14.rectangular_through_cut.corner_segments",
+            "definition.1.operation.18.rectangular_through_cut.corner_segments",
             1.0,
             6.0,
             1.0,
         ),
     );
+    recipe.parameters.insert(
+        ParameterId(21),
+        parameter(
+            21,
+            "Left mounting hole radius",
+            "Panel Cuts",
+            "definition.1.operation.21.circular_through_cut.radius",
+            0.045,
+            0.11,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(22),
+        parameter(
+            22,
+            "Left hole edge rounding",
+            "Detail Density",
+            "definition.1.operation.23.bevel_boundary_loop.width",
+            0.010,
+            0.028,
+            0.002,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(23),
+        parameter(
+            23,
+            "Right mounting hole radius",
+            "Panel Cuts",
+            "definition.1.operation.22.circular_through_cut.radius",
+            0.045,
+            0.11,
+            0.005,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(24),
+        parameter(
+            24,
+            "Right hole edge rounding",
+            "Detail Density",
+            "definition.1.operation.24.bevel_boundary_loop.width",
+            0.010,
+            0.028,
+            0.002,
+        ),
+    );
+    recipe.variation.semantic_cut_groups.insert(
+        "body_vents".to_owned(),
+        SemanticCutGroupHint {
+            label: "Body vent slots".to_owned(),
+            definition: PartDefinitionId(1),
+            operations: vec![OperationId(18), OperationId(19), OperationId(20)],
+            role: CutGroupRole::Vents,
+            count_range: Some(CountRangeHint {
+                minimum: 1,
+                maximum: 6,
+            }),
+        },
+    );
+    recipe.variation.semantic_cut_groups.insert(
+        "body_mount_holes".to_owned(),
+        SemanticCutGroupHint {
+            label: "Body mounting holes".to_owned(),
+            definition: PartDefinitionId(1),
+            operations: vec![OperationId(21), OperationId(22)],
+            role: CutGroupRole::MountHoles,
+            count_range: Some(CountRangeHint {
+                minimum: 2,
+                maximum: 6,
+            }),
+        },
+    );
     recipe.root_instances.push(PartInstanceId(1));
-    finish_ids(&mut recipe, 9, 18, 15, 3);
+    finish_ids(&mut recipe, 9, 18, 25, 3);
     recipe
 }
 
@@ -1974,6 +2184,8 @@ fn regular_profile(radius: f32, segments: u32) -> Vec<[f32; 2]> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use shape_asset::validate_asset_recipe;
     use shape_compile::compile_asset;
 
@@ -1992,6 +2204,45 @@ mod tests {
             assert!(artifact.validation_report.is_valid(), "{}", asset.slug());
             assert!(!artifact.statistics.used_sdf_or_remeshing);
         }
+    }
+
+    #[test]
+    fn industrial_crate_body_cut_mesh_is_closed() {
+        let recipe = industrial_crate_recipe();
+        let artifact = compile_asset(&recipe).expect("industrial crate should compile");
+        let body = artifact
+            .compiled_parts
+            .iter()
+            .find(|part| part.instance_id == PartInstanceId(1))
+            .expect("crate body should compile");
+        let mut edge_faces = BTreeMap::<(u32, u32), usize>::new();
+        for face in &body.local_mesh.faces {
+            for index in 0..face.vertices.len() {
+                let a = face.vertices[index];
+                let b = face.vertices[(index + 1) % face.vertices.len()];
+                let key = if a <= b { (a, b) } else { (b, a) };
+                *edge_faces.entry(key).or_default() += 1;
+            }
+        }
+        let bad_edges = edge_faces
+            .iter()
+            .filter(|(_, faces)| **faces != 2)
+            .take(8)
+            .map(|((a, b), faces)| {
+                format!(
+                    "{}.{} {:?}->{:?} faces={}",
+                    a,
+                    b,
+                    body.local_mesh.positions[*a as usize],
+                    body.local_mesh.positions[*b as usize],
+                    faces
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            edge_faces.values().all(|faces| *faces == 2),
+            "crate body should be closed; bad edges: {bad_edges:?}"
+        );
     }
 
     #[test]

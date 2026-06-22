@@ -250,12 +250,15 @@ fn ensure_context_matches(
 fn ensure_operations_supported(definition: &PartDefinition) -> Result<(), ModelingError> {
     for operation in &definition.geometry.operations {
         if operation_is_semantic_cut(operation)
-            && !matches!(&definition.geometry.source, GeometrySource::Plate { .. })
+            && !matches!(
+                &definition.geometry.source,
+                GeometrySource::Plate { .. } | GeometrySource::RoundedBox { .. }
+            )
         {
             return Err(ModelingError::UnsupportedOperation {
                 operation: operation.operation_id(),
                 reason:
-                    "semantic cut operations currently compile only against Plate geometry sources"
+                    "semantic cut operations currently compile only against Plate or RoundedBox geometry sources"
                         .to_owned(),
             });
         }
@@ -384,9 +387,10 @@ mod tests {
 
     #[test]
     fn semantic_cuts_are_rejected_on_unsupported_hosts() {
-        let mut definition = definition(GeometrySource::RoundedBox {
-            half_extents: [1.0, 1.0, 1.0],
-            radius: 0.1,
+        let mut definition = definition(GeometrySource::Cylinder {
+            radius: 0.5,
+            height: 1.0,
+            radial_segments: 16,
         });
         definition
             .geometry

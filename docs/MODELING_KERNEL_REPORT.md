@@ -6,7 +6,7 @@ Wave 4 integrates the explicit polygon modeling lane for the two benchmark asset
 
 ## Benchmarks
 
-`industrial-crate` now contains a rounded primary body, semantic recessed panels, corner reinforcement trim, mirrored swept handles, linear fastener arrays, feet, skid rails, and a top ventilation group with rectangular through-cuts. The compiled asset validates with complete face provenance and semantic region coverage, no SDF/remeshing, and no accidental intersections.
+`industrial-crate` now contains a rounded primary body with body-level semantic recessed panel, ventilation-slot, mounting-hole, and targeted boundary-bevel operations, plus corner reinforcement trim, mirrored swept handles, linear fastener arrays, feet, skid rails, and an optional top ventilation group. The compiled asset validates with complete face provenance and semantic region coverage, closed generated parts, no SDF/remeshing, and no accidental intersections.
 
 `explicit-desk-lamp` now contains a lathed weighted base, swept angled stem, explicit pivot joints, collar trim, support bracket, lathed shade, rim trim, sockets, and an optional switch detail group. Intentional socket/collar/trim contact is declared in validation metadata so accidental intersection metrics remain zero.
 

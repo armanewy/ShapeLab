@@ -20,8 +20,9 @@ Implemented parts and features:
 - semantic recessed front and back panels
 - swept side handle with mirrored generated counterpart
 - repeated cylinder bolt rows on front and back panels
-- top ventilation slat array with rectangular through-cuts
-- constrained semantic plate cuts, but no generic mesh booleans
+- body-level recessed panel, ventilation slots, mounting holes, and targeted boundary bevels on the rounded crate body
+- optional top ventilation slat array with rectangular through-cuts
+- constrained semantic Plate and RoundedBox cuts, but no generic mesh booleans
 - no SDF or remeshing path
 
 Current `model-demo` output:

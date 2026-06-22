@@ -8,6 +8,7 @@ use shape_asset::{
 use shape_modeling::generators::basic::{
     CapMode, CylinderParams, FaceMask, FrustumParams, PlateParams, RoundedBoxParams,
     build_cylinder, build_frustum, build_plate, build_rounded_box, generate_plate,
+    generate_rounded_box,
 };
 use shape_modeling::{GeneratedPart, GeneratorContext, ModelingError};
 use shape_poly::{
@@ -1211,6 +1212,186 @@ fn negative_face_multi_cut_uses_front_region_for_opposite_support() {
     );
 }
 
+#[test]
+fn rounded_box_recessed_panel_cut_is_closed_and_preserves_unaffected_rounding() {
+    let operation = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(120),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.86, 0.28],
+        depth: 0.08,
+        corner_radius: 0.05,
+        rim_width: 0.06,
+        corner_segments: 3,
+        entry_loop: BoundaryLoopId(120),
+        floor_loop: BoundaryLoopId(121),
+        outer_region: RegionId(1),
+        rim_region: RegionId(220),
+        wall_region: RegionId(221),
+        floor_region: RegionId(222),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+
+    let part = generate_cut_rounded_box_with_operations(vec![operation], [1.2, 0.7, 0.55], 0.16)
+        .expect("rounded-box recessed cut should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_faces_use_regions(
+        &part,
+        &[
+            RegionId(1),
+            RegionId(2),
+            RegionId(3),
+            RegionId(220),
+            RegionId(221),
+            RegionId(222),
+        ],
+    );
+    assert_region_faces_have_no_operation(&part, RegionId(2));
+    assert_region_faces_have_no_operation(&part, RegionId(3));
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(120), OperationId(120), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(121), OperationId(120), true);
+    assert_face_operation_present(&part.mesh, OperationId(120));
+}
+
+#[test]
+fn rounded_box_through_cuts_work_on_all_primary_faces() {
+    for (index, face) in [
+        PlanarCutFace::PositiveX,
+        PlanarCutFace::NegativeX,
+        PlanarCutFace::PositiveY,
+        PlanarCutFace::NegativeY,
+        PlanarCutFace::PositiveZ,
+        PlanarCutFace::NegativeZ,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let operation = OperationId(130 + index as u64);
+        let entry_loop = BoundaryLoopId(130 + index as u64 * 2);
+        let exit_loop = BoundaryLoopId(131 + index as u64 * 2);
+        let cut = ModelingOperationSpec::CircularThroughCut {
+            operation,
+            region: RegionId(1),
+            face,
+            center: [0.0, 0.0],
+            radius: 0.12,
+            radial_segments: 12,
+            rim_width: 0.045,
+            entry_loop,
+            exit_loop,
+            outer_region: RegionId(1),
+            rim_region: RegionId(230 + index as u64 * 2),
+            wall_region: RegionId(231 + index as u64 * 2),
+            edge_treatment: CutEdgeTreatment::BevelEligible,
+        };
+
+        let part = generate_cut_rounded_box_with_operations(vec![cut], [1.2, 0.8, 0.65], 0.14)
+            .unwrap_or_else(|error| panic!("{face:?} should generate: {error:?}"));
+
+        assert_closed_mesh(&part.mesh);
+        assert_common_mesh_quality(&part.mesh);
+        assert_boundary_loop(&part.mesh, entry_loop, operation, true);
+        assert_boundary_loop(&part.mesh, exit_loop, operation, true);
+        assert_face_operation_present(&part.mesh, operation);
+        assert_region_faces_have_no_operation(&part, RegionId(2));
+        assert_region_faces_have_no_operation(&part, RegionId(3));
+    }
+}
+
+#[test]
+fn rounded_box_multi_cut_face_supports_beveled_holes_and_hard_vents() {
+    let hole = ModelingOperationSpec::CircularThroughCut {
+        operation: OperationId(150),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveZ,
+        center: [-0.30, 0.0],
+        radius: 0.09,
+        radial_segments: 12,
+        rim_width: 0.055,
+        entry_loop: BoundaryLoopId(150),
+        exit_loop: BoundaryLoopId(151),
+        outer_region: RegionId(1),
+        rim_region: RegionId(250),
+        wall_region: RegionId(251),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let vent = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(151),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveZ,
+        center: [0.32, 0.32],
+        size: [0.28, 0.06],
+        corner_radius: 0.0,
+        rim_width: 0.04,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(152),
+        exit_loop: BoundaryLoopId(153),
+        outer_region: RegionId(1),
+        rim_region: RegionId(252),
+        wall_region: RegionId(253),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(160),
+        target_loop: BoundaryLoopId(150),
+        width: 0.02,
+        segments: 2,
+        profile: 1.4,
+        bevel_region: RegionId(260),
+        outer_replacement_loop: BoundaryLoopId(260),
+        inner_replacement_loop: BoundaryLoopId(261),
+    };
+
+    let part =
+        generate_cut_rounded_box_with_operations(vec![hole, vent, bevel], [1.2, 0.85, 0.70], 0.14)
+            .expect("rounded-box multi-cut face should generate");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_role(&part, RegionId(260), SurfaceRole::BevelBand);
+    assert_no_boundary_loop(&part.mesh, BoundaryLoopId(150));
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(151), OperationId(150), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(152), OperationId(151), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(153), OperationId(151), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(260), OperationId(160), false);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(261), OperationId(160), false);
+    assert_face_operation_present(&part.mesh, OperationId(150));
+    assert_face_operation_present(&part.mesh, OperationId(151));
+    assert_face_operation_present(&part.mesh, OperationId(160));
+}
+
+#[test]
+fn rounded_box_cut_rejects_host_bevel_overlap() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(170),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [1.55, 0.62],
+        corner_radius: 0.0,
+        rim_width: 0.05,
+        corner_segments: 1,
+        entry_loop: BoundaryLoopId(170),
+        exit_loop: BoundaryLoopId(171),
+        outer_region: RegionId(1),
+        rim_region: RegionId(270),
+        wall_region: RegionId(271),
+        edge_treatment: CutEdgeTreatment::Hard,
+    };
+
+    let error = generate_cut_rounded_box_with_operations(vec![cut], [1.0, 0.75, 0.50], 0.20)
+        .expect_err("cut should reject when the rim enters rounded host bevel bands");
+    assert!(
+        format!("{error:?}").contains("host boundary")
+            || format!("{error:?}").contains("plate face")
+            || format!("{error:?}").contains("host bevel"),
+        "unexpected error: {error:?}"
+    );
+}
+
 fn context() -> GeneratorContext {
     GeneratorContext::new(PartDefinitionId(7), PartInstanceId(11), 100, 0)
 }
@@ -1250,6 +1431,32 @@ fn generate_cut_plate_with_operations(
     };
     let mut context = context();
     generate_plate(&definition, &mut context)
+}
+
+fn generate_cut_rounded_box_with_operations(
+    operations: Vec<ModelingOperationSpec>,
+    half_extents: [f32; 3],
+    radius: f32,
+) -> Result<GeneratedPart, shape_modeling::ModelingError> {
+    let definition = PartDefinition {
+        id: PartDefinitionId(7),
+        name: "cut rounded box".to_owned(),
+        tags: BTreeSet::new(),
+        geometry: GeometryRecipe {
+            source: GeometrySource::RoundedBox {
+                half_extents,
+                radius,
+            },
+            operations,
+        },
+        regions: BTreeMap::new(),
+        sockets: BTreeMap::new(),
+        local_pivot: Frame3::default(),
+        variant_group: None,
+        production_hints: None,
+    };
+    let mut context = context();
+    generate_rounded_box(&definition, &mut context)
 }
 
 fn assert_closed_mesh(mesh: &PolygonMesh) {
@@ -1633,7 +1840,15 @@ fn assert_no_duplicate_positions(mesh: &PolygonMesh) {
 fn assert_no_degenerate_faces(mesh: &PolygonMesh) {
     for face in &mesh.faces {
         let area = polygon_area(mesh, &face.vertices);
-        assert!(area > EPSILON, "degenerate face {:?}", face.id);
+        assert!(
+            area > EPSILON,
+            "degenerate face {:?}: {:?}",
+            face.id,
+            face.vertices
+                .iter()
+                .map(|vertex| mesh.positions[*vertex as usize])
+                .collect::<Vec<_>>()
+        );
     }
 }
 

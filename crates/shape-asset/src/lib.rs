@@ -3443,6 +3443,7 @@ fn validate_definitions(recipe: &AssetRecipe, report: &mut AssetValidationReport
         }
         validate_geometry_source(*id, &definition.geometry.source, report);
         validate_operations(definition, report);
+        validate_semantic_cut_host_constraints(definition, report);
         let mut boundary_loop_state = BoundaryLoopValidationState::new(&mut seen_boundary_loop_ids);
         for operation in &definition.geometry.operations {
             let operation_id = operation.operation_id();
@@ -4714,6 +4715,51 @@ fn cut_group_role_accepts_operation(
             matches!(operation, ModelingOperationSpec::RecessedPanelCut { .. })
         }
         CutGroupRole::Custom(_) => true,
+    }
+}
+
+fn validate_semantic_cut_host_constraints(
+    definition: &PartDefinition,
+    report: &mut AssetValidationReport,
+) {
+    let mut rounded_box_cut_faces = BTreeSet::new();
+    for operation in &definition.geometry.operations {
+        let Some(face) = operation_cut_face(operation) else {
+            continue;
+        };
+        let operation_id = operation.operation_id();
+        match &definition.geometry.source {
+            GeometrySource::Plate { .. } => {
+                if !matches!(face, PlanarCutFace::PositiveY | PlanarCutFace::NegativeY) {
+                    push_issue(
+                        report,
+                        operation_subject(definition.id, operation_id, "cut.face"),
+                        "unsupported_plate_cut_face",
+                        "Plate semantic cuts currently target only local +/-Y planar faces.",
+                    );
+                }
+            }
+            GeometrySource::RoundedBox { .. } => {
+                rounded_box_cut_faces.insert(face);
+            }
+            _ => {
+                push_issue(
+                    report,
+                    operation_subject(definition.id, operation_id, "cut.host"),
+                    "unsupported_semantic_cut_host",
+                    "Semantic cuts currently target only Plate or RoundedBox geometry sources.",
+                );
+            }
+        }
+    }
+
+    if rounded_box_cut_faces.len() > 1 {
+        push_issue(
+            report,
+            definition_subject(definition.id, "rounded_box.semantic_cuts"),
+            "unsupported_rounded_box_cut_face_set",
+            "RoundedBox semantic cuts currently support one selected primary face per definition.",
+        );
     }
 }
 
@@ -8223,6 +8269,114 @@ mod tests {
 
         assert!(
             issue_codes(&report).contains("invalid_operation_phase_order"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_unsupported_semantic_cut_hosts() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.geometry.source = GeometrySource::Cylinder {
+            radius: 0.5,
+            height: 1.0,
+            radial_segments: 16,
+        };
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition.geometry.operations = vec![ModelingOperationSpec::CircularThroughCut {
+            operation: OperationId(2),
+            region: RegionId(1),
+            face: PlanarCutFace::PositiveY,
+            center: [0.0, 0.0],
+            radius: 0.08,
+            radial_segments: 12,
+            rim_width: 0.03,
+            entry_loop: BoundaryLoopId(1),
+            exit_loop: BoundaryLoopId(2),
+            outer_region: RegionId(1),
+            rim_region: RegionId(2),
+            wall_region: RegionId(3),
+            edge_treatment: CutEdgeTreatment::Hard,
+        }];
+        recipe.next_ids.operation = 3;
+        recipe.next_ids.region = 4;
+        recipe.next_ids.boundary_loop = 3;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(
+            issue_codes(&report).contains("unsupported_semantic_cut_host"),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_multi_face_rounded_box_cut_sets() {
+        let mut recipe = test_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("definition should exist");
+        definition.regions.insert(
+            RegionId(1),
+            SurfaceRegionSpec {
+                id: RegionId(1),
+                name: "front".to_owned(),
+                role: SurfaceRole::PrimarySurface,
+                tags: BTreeSet::new(),
+            },
+        );
+        definition.geometry.operations = vec![
+            ModelingOperationSpec::CircularThroughCut {
+                operation: OperationId(2),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveY,
+                center: [0.0, 0.0],
+                radius: 0.08,
+                radial_segments: 12,
+                rim_width: 0.03,
+                entry_loop: BoundaryLoopId(1),
+                exit_loop: BoundaryLoopId(2),
+                outer_region: RegionId(1),
+                rim_region: RegionId(2),
+                wall_region: RegionId(3),
+                edge_treatment: CutEdgeTreatment::Hard,
+            },
+            ModelingOperationSpec::CircularThroughCut {
+                operation: OperationId(3),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveZ,
+                center: [0.0, 0.0],
+                radius: 0.08,
+                radial_segments: 12,
+                rim_width: 0.03,
+                entry_loop: BoundaryLoopId(3),
+                exit_loop: BoundaryLoopId(4),
+                outer_region: RegionId(1),
+                rim_region: RegionId(4),
+                wall_region: RegionId(5),
+                edge_treatment: CutEdgeTreatment::Hard,
+            },
+        ];
+        recipe.next_ids.operation = 4;
+        recipe.next_ids.region = 6;
+        recipe.next_ids.boundary_loop = 5;
+
+        let report = validate_asset_recipe(&recipe);
+
+        assert!(
+            issue_codes(&report).contains("unsupported_rounded_box_cut_face_set"),
             "{report:?}"
         );
     }

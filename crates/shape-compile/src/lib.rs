@@ -422,7 +422,11 @@ pub fn build_construction_timeline_report(
         )
     });
     let bevel_operations = operation_ids_matching(recipe, |operation| {
-        matches!(operation, ModelingOperationSpec::SetBevelProfile { .. })
+        matches!(
+            operation,
+            ModelingOperationSpec::SetBevelProfile { .. }
+                | ModelingOperationSpec::BevelBoundaryLoop { .. }
+        )
     });
 
     ConstructionTimelineReport {
@@ -1585,6 +1589,71 @@ mod tests {
         recipe
     }
 
+    fn rounded_box_cut_recipe() -> AssetRecipe {
+        let definition = PartDefinition {
+            id: PartDefinitionId(1),
+            name: "Cut Rounded Box".to_owned(),
+            tags: BTreeSet::new(),
+            geometry: GeometryRecipe {
+                source: GeometrySource::RoundedBox {
+                    half_extents: [1.2, 0.8, 0.65],
+                    radius: 0.14,
+                },
+                operations: vec![ModelingOperationSpec::CircularThroughCut {
+                    operation: OperationId(40),
+                    region: RegionId(1),
+                    face: PlanarCutFace::PositiveZ,
+                    center: [0.0, 0.0],
+                    radius: 0.12,
+                    radial_segments: 12,
+                    rim_width: 0.055,
+                    entry_loop: BoundaryLoopId(40),
+                    exit_loop: BoundaryLoopId(41),
+                    outer_region: RegionId(1),
+                    rim_region: RegionId(42),
+                    wall_region: RegionId(43),
+                    edge_treatment: CutEdgeTreatment::BevelEligible,
+                }],
+            },
+            regions: [(
+                RegionId(1),
+                SurfaceRegionSpec {
+                    id: RegionId(1),
+                    name: "primary".to_owned(),
+                    role: SurfaceRole::PrimarySurface,
+                    tags: BTreeSet::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            sockets: BTreeMap::new(),
+            local_pivot: Frame3::default(),
+            variant_group: None,
+            production_hints: None,
+        };
+        let instance = PartInstance {
+            id: PartInstanceId(1),
+            definition: PartDefinitionId(1),
+            name: "Cut Rounded Box".to_owned(),
+            parent: None,
+            local_transform: Transform3::default(),
+            attachment: None,
+            enabled: true,
+            tags: BTreeSet::new(),
+            generated_by: None,
+        };
+        let mut recipe = AssetRecipe::new(AssetId(3), "Rounded Cut");
+        recipe.definitions.insert(definition.id, definition);
+        recipe.instances.insert(instance.id, instance);
+        recipe.root_instances.push(PartInstanceId(1));
+        recipe.next_ids.part_definition = 2;
+        recipe.next_ids.part_instance = 2;
+        recipe.next_ids.operation = 41;
+        recipe.next_ids.region = 44;
+        recipe.next_ids.boundary_loop = 42;
+        recipe
+    }
+
     fn cut_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
         [
             (RegionId(1), "front", SurfaceRole::PrimarySurface),
@@ -1915,6 +1984,44 @@ mod tests {
     }
 
     #[test]
+    fn construction_timeline_classifies_boundary_loop_bevels_as_edge_treatment() {
+        let mut recipe = cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(31),
+                target_loop: BoundaryLoopId(7),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(23),
+                outer_replacement_loop: BoundaryLoopId(9),
+                inner_replacement_loop: BoundaryLoopId(10),
+            });
+        recipe.next_ids.operation = 32;
+        recipe.next_ids.region = 24;
+        recipe.next_ids.boundary_loop = 11;
+        let artifact = compile_asset(&recipe).expect("beveled cut should compile");
+
+        let timeline = build_construction_timeline_report(&recipe, &artifact);
+        let edge_treatment = timeline
+            .stages
+            .iter()
+            .find(|stage| stage.key == "edge_treatment")
+            .expect("edge treatment stage should exist");
+
+        assert!(
+            edge_treatment.operations.contains(&OperationId(31)),
+            "{edge_treatment:?}"
+        );
+    }
+
+    #[test]
     fn recessed_boundary_loop_bevels_reject_overlapping_depth_budget() {
         let mut recipe = cut_recipe();
         let definition = recipe
@@ -2082,6 +2189,45 @@ mod tests {
         assert_compiled_boundary_loop(part, BoundaryLoopId(12), OperationId(32));
         assert_compiled_boundary_loop(part, BoundaryLoopId(13), OperationId(33));
         assert_compiled_boundary_loop(part, BoundaryLoopId(14), OperationId(33));
+    }
+
+    #[test]
+    fn rounded_box_cut_boundary_bevel_replacements_compile_as_live_loops() {
+        let mut recipe = rounded_box_cut_recipe();
+        recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("rounded cut definition should exist")
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(41),
+                target_loop: BoundaryLoopId(40),
+                width: 0.025,
+                segments: 2,
+                profile: 1.25,
+                bevel_region: RegionId(44),
+                outer_replacement_loop: BoundaryLoopId(42),
+                inner_replacement_loop: BoundaryLoopId(43),
+            });
+        recipe.next_ids.operation = 42;
+        recipe.next_ids.region = 45;
+        recipe.next_ids.boundary_loop = 44;
+
+        let artifact = compile_asset(&recipe).expect("beveled rounded-box cut should compile");
+        assert!(
+            artifact.validation_report.is_valid(),
+            "rounded-box cut compile validation should be clean: {:?}",
+            artifact.validation_report.issues
+        );
+        let part = artifact
+            .compiled_parts
+            .first()
+            .expect("rounded-box artifact should contain one part");
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(40));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(41), OperationId(40));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(42), OperationId(41));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(43), OperationId(41));
     }
 
     #[test]
