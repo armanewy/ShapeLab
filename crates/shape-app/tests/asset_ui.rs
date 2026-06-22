@@ -10,11 +10,12 @@ use std::collections::BTreeSet;
 use asset::panels::{candidate_gallery, history, inspector, part_tree};
 use asset::viewport as asset_viewport;
 use asset::{
-    AssetAppCommand, AssetCandidate, AssetCandidateEdit, AssetCandidateId, AssetCutControl,
-    AssetCutOperation, AssetCutOperationKind, AssetEdgeTreatment, AssetHistoryRevision, AssetJobId,
-    AssetJobProgress, AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart,
-    AssetRevisionId, AssetUiJobKind, AssetUiState, AssetValidationState, BoundaryLoopId,
-    GeneratedPartKind, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
+    AssetAppCommand, AssetAvailableEdgeTreatment, AssetCandidate, AssetCandidateEdit,
+    AssetCandidateId, AssetCutControl, AssetCutOperation, AssetCutOperationKind,
+    AssetEdgeTreatment, AssetHistoryRevision, AssetJobId, AssetJobProgress, AssetLockTarget,
+    AssetParameter, AssetParameterGroup, AssetPart, AssetRevisionId, AssetUiJobKind, AssetUiState,
+    AssetValidationState, BoundaryLoopId, GeneratedPartKind, OperationId, ParameterId,
+    PartDefinitionId, PartInstanceId,
 };
 use shape_render::OrbitCamera;
 use viewport::ViewportAction;
@@ -278,6 +279,7 @@ fn cut_operation_helpers_emit_descriptor_free_commands() {
     let operation = cut_operation();
     let control = operation.controls[0].clone();
     let treatment = operation.edge_treatments[0].clone();
+    let available_treatment = operation.available_edge_treatments[0].clone();
     let treatment_control = treatment.controls[0].clone();
 
     assert_eq!(
@@ -354,6 +356,21 @@ fn cut_operation_helpers_emit_descriptor_free_commands() {
     );
     assert_eq!(
         inspector::edge_treatment_remove_command(&treatment, true),
+        None
+    );
+    assert_eq!(
+        inspector::edge_treatment_add_command(&available_treatment, false),
+        Some(AssetAppCommand::AddBoundaryLoopBevel {
+            definition: available_treatment.definition,
+            source_operation: available_treatment.source_operation,
+            target_loop: available_treatment.target_loop,
+            width: available_treatment.width,
+            segments: available_treatment.segments,
+            profile: available_treatment.profile,
+        })
+    );
+    assert_eq!(
+        inspector::edge_treatment_add_command(&available_treatment, true),
         None
     );
 }
@@ -485,6 +502,16 @@ fn cut_operation() -> AssetCutOperation {
                 step: 0.001,
                 topology_changing: false,
             }],
+        }],
+        available_edge_treatments: vec![AssetAvailableEdgeTreatment {
+            definition: PartDefinitionId(2),
+            part: PartInstanceId(2),
+            source_operation: OperationId(42),
+            target_loop: BoundaryLoopId(10),
+            label: "Exit edge: Hard".to_owned(),
+            width: 0.015,
+            segments: 2,
+            profile: 1.0,
         }],
         selected: true,
     }

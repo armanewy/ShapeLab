@@ -9,7 +9,7 @@ use shape_modeling::generators::basic::{
     CapMode, CylinderParams, FaceMask, FrustumParams, PlateParams, RoundedBoxParams,
     build_cylinder, build_frustum, build_plate, build_rounded_box, generate_plate,
 };
-use shape_modeling::{GeneratedPart, GeneratorContext};
+use shape_modeling::{GeneratedPart, GeneratorContext, ModelingError};
 use shape_poly::{
     BoundaryRole, EdgeClassification, EdgeKey, PolygonMesh, build_adjacency, compute_face_normals,
     compute_split_vertex_normals, triangulate_polygon_mesh, validate_polygon_mesh,
@@ -508,6 +508,153 @@ fn plate_boundary_loop_bevel_profile_curves_geometry_and_smooths_band() {
 }
 
 #[test]
+fn plate_boundary_loop_bevel_profile_affects_two_segment_midpoint() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let shallow = generate_cut_plate_with_operations(
+        vec![
+            cut.clone(),
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(40),
+                target_loop: BoundaryLoopId(9),
+                width: 0.035,
+                segments: 2,
+                profile: 0.5,
+                bevel_region: RegionId(27),
+                outer_replacement_loop: BoundaryLoopId(30),
+                inner_replacement_loop: BoundaryLoopId(31),
+            },
+        ],
+        [3.0, 2.0],
+        0.30,
+    )
+    .expect("shallow two-segment bevel should generate");
+    let rounded = generate_cut_plate_with_operations(
+        vec![
+            cut,
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(40),
+                target_loop: BoundaryLoopId(9),
+                width: 0.035,
+                segments: 2,
+                profile: 2.0,
+                bevel_region: RegionId(27),
+                outer_replacement_loop: BoundaryLoopId(30),
+                inner_replacement_loop: BoundaryLoopId(31),
+            },
+        ],
+        [3.0, 2.0],
+        0.30,
+    )
+    .expect("rounded two-segment bevel should generate");
+
+    assert_ne!(
+        operation_y_samples(&shallow.mesh, OperationId(40)),
+        operation_y_samples(&rounded.mesh, OperationId(40)),
+        "profile should move the intermediate depth sample even with two bevel segments"
+    );
+}
+
+#[test]
+fn plate_boundary_loop_bevel_profile_one_remains_linear() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let part = generate_cut_plate_with_operations(
+        vec![
+            cut,
+            ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(40),
+                target_loop: BoundaryLoopId(9),
+                width: 0.035,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(27),
+                outer_replacement_loop: BoundaryLoopId(30),
+                inner_replacement_loop: BoundaryLoopId(31),
+            },
+        ],
+        [3.0, 2.0],
+        0.30,
+    )
+    .expect("linear two-segment bevel should generate");
+
+    let samples = operation_y_samples(&part.mesh, OperationId(40));
+    assert!(
+        samples.contains(&quantize(0.1325)),
+        "profile 1.0 should keep the midpoint depth linear; samples were {samples:?}"
+    );
+}
+
+#[test]
+fn rounded_rect_boundary_loop_bevel_uses_uniform_offset_extents() {
+    let center = [0.08, -0.05];
+    let size = [1.60, 0.40];
+    let bevel_width = 0.07;
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center,
+        size,
+        corner_radius: 0.08,
+        rim_width: 0.10,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(40),
+        target_loop: BoundaryLoopId(9),
+        width: bevel_width,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(27),
+        outer_replacement_loop: BoundaryLoopId(30),
+        inner_replacement_loop: BoundaryLoopId(31),
+    };
+    let part = generate_cut_plate_with_operations(vec![cut, bevel], [3.0, 2.0], 0.30)
+        .expect("beveled rounded-rect cut should generate");
+
+    let (min_x, max_x, min_z, max_z) = boundary_loop_xz_bounds(&part.mesh, BoundaryLoopId(30));
+    assert_close(min_x, center[0] - size[0] * 0.5 - bevel_width);
+    assert_close(max_x, center[0] + size[0] * 0.5 + bevel_width);
+    assert_close(min_z, center[1] - size[1] * 0.5 - bevel_width);
+    assert_close(max_z, center[1] + size[1] * 0.5 + bevel_width);
+}
+
+#[test]
 fn plate_boundary_loop_bevel_rejects_hard_only_loop() {
     let cut = ModelingOperationSpec::RectangularThroughCut {
         operation: OperationId(31),
@@ -537,6 +684,148 @@ fn plate_boundary_loop_bevel_rejects_hard_only_loop() {
     };
 
     assert!(generate_cut_plate_with_operations(vec![cut, bevel], [3.0, 2.0], 0.30).is_err());
+}
+
+#[test]
+fn recessed_boundary_loop_bevels_share_depth_budget() {
+    let cut = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        depth: 0.08,
+        corner_radius: 0.08,
+        rim_width: 0.0928,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        floor_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        floor_region: RegionId(25),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let entry_bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(40),
+        target_loop: BoundaryLoopId(9),
+        width: 0.06,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(27),
+        outer_replacement_loop: BoundaryLoopId(30),
+        inner_replacement_loop: BoundaryLoopId(31),
+    };
+    let floor_bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(41),
+        target_loop: BoundaryLoopId(10),
+        width: 0.06,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(28),
+        outer_replacement_loop: BoundaryLoopId(32),
+        inner_replacement_loop: BoundaryLoopId(33),
+    };
+
+    for (operations, rejected_operation) in [
+        (
+            vec![cut.clone(), entry_bevel.clone(), floor_bevel.clone()],
+            OperationId(41),
+        ),
+        (vec![cut.clone(), floor_bevel, entry_bevel], OperationId(40)),
+    ] {
+        let error = generate_cut_plate_with_operations(operations, [3.0, 2.0], 0.30)
+            .expect_err("opposing recessed bevels should reject when they consume full depth");
+        assert_unsupported_operation(&error, rejected_operation, "opposing recessed bevels");
+    }
+}
+
+#[test]
+fn through_cut_boundary_loop_bevels_share_depth_budget() {
+    let cut = ModelingOperationSpec::RectangularThroughCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.4, 1.0],
+        corner_radius: 0.08,
+        rim_width: 0.22,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        exit_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let entry_bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(40),
+        target_loop: BoundaryLoopId(9),
+        width: 0.18,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(27),
+        outer_replacement_loop: BoundaryLoopId(30),
+        inner_replacement_loop: BoundaryLoopId(31),
+    };
+    let exit_bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(41),
+        target_loop: BoundaryLoopId(10),
+        width: 0.18,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(28),
+        outer_replacement_loop: BoundaryLoopId(32),
+        inner_replacement_loop: BoundaryLoopId(33),
+    };
+
+    for (operations, rejected_operation) in [
+        (
+            vec![cut.clone(), entry_bevel.clone(), exit_bevel.clone()],
+            OperationId(41),
+        ),
+        (vec![cut.clone(), exit_bevel, entry_bevel], OperationId(40)),
+    ] {
+        let error = generate_cut_plate_with_operations(operations, [3.0, 2.0], 0.30)
+            .expect_err("opposing through-cut bevels should reject when they consume full depth");
+        assert_unsupported_operation(&error, rejected_operation, "opposing through-cut bevels");
+    }
+}
+
+#[test]
+fn recessed_floor_bevel_rejects_collapsed_rounded_corner_radius() {
+    let cut = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(31),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.08, -0.05],
+        size: [1.18, 0.58],
+        depth: 0.20,
+        corner_radius: 0.08,
+        rim_width: 0.10,
+        corner_segments: 4,
+        entry_loop: BoundaryLoopId(9),
+        floor_loop: BoundaryLoopId(10),
+        outer_region: RegionId(1),
+        rim_region: RegionId(23),
+        wall_region: RegionId(24),
+        floor_region: RegionId(25),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+    let floor_bevel = ModelingOperationSpec::BevelBoundaryLoop {
+        operation: OperationId(41),
+        target_loop: BoundaryLoopId(10),
+        width: 0.085,
+        segments: 2,
+        profile: 1.0,
+        bevel_region: RegionId(28),
+        outer_replacement_loop: BoundaryLoopId(32),
+        inner_replacement_loop: BoundaryLoopId(33),
+    };
+
+    let error = generate_cut_plate_with_operations(vec![cut, floor_bevel], [3.0, 2.0], 0.30)
+        .expect_err("floor bevel should reject before collapsing rounded corner radius");
+    assert_unsupported_operation(&error, OperationId(41), "target rounded corner radius");
 }
 
 #[test]
@@ -1180,6 +1469,42 @@ fn assert_boundary_loop(
     }));
 }
 
+fn boundary_loop_xz_bounds(
+    mesh: &PolygonMesh,
+    boundary_loop: BoundaryLoopId,
+) -> (f32, f32, f32, f32) {
+    let mut vertices = BTreeSet::new();
+    for (edge, metadata) in &mesh.edge_metadata {
+        if metadata.boundary_loop == Some(boundary_loop) {
+            vertices.insert(edge.a);
+            vertices.insert(edge.b);
+        }
+    }
+    assert!(
+        !vertices.is_empty(),
+        "boundary loop {boundary_loop:?} should have vertices"
+    );
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_z = f32::INFINITY;
+    let mut max_z = f32::NEG_INFINITY;
+    for vertex in vertices {
+        let position = mesh.positions[vertex as usize];
+        min_x = min_x.min(position[0]);
+        max_x = max_x.max(position[0]);
+        min_z = min_z.min(position[2]);
+        max_z = max_z.max(position[2]);
+    }
+    (min_x, max_x, min_z, max_z)
+}
+
+fn assert_close(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() <= EPSILON,
+        "expected {expected}, got {actual}"
+    );
+}
+
 fn assert_no_boundary_loop(mesh: &PolygonMesh, boundary_loop: BoundaryLoopId) {
     assert!(
         mesh.edge_metadata
@@ -1196,6 +1521,22 @@ fn assert_face_operation_present(mesh: &PolygonMesh, operation: OperationId) {
             .any(|metadata| metadata.operation == Some(operation)),
         "expected at least one face sourced by {operation:?}"
     );
+}
+
+fn assert_unsupported_operation(error: &ModelingError, operation: OperationId, reason: &str) {
+    match error {
+        ModelingError::UnsupportedOperation {
+            operation: actual,
+            reason: actual_reason,
+        } => {
+            assert_eq!(*actual, operation);
+            assert!(
+                actual_reason.contains(reason),
+                "expected reason containing {reason:?}, got {actual_reason:?}"
+            );
+        }
+        other => panic!("expected unsupported operation error, got {other:?}"),
+    }
 }
 
 fn operation_y_samples(mesh: &PolygonMesh, operation: OperationId) -> Vec<i64> {

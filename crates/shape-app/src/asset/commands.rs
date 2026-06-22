@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use shape_asset::{
-    AssetRecipe, OperationId, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
-    PartInstanceId, RevisionId, Transform3,
+    AssetRecipe, BoundaryLoopId, OperationId, ParameterId, PartDefinition, PartDefinitionId,
+    PartInstance, PartInstanceId, RevisionId, Transform3,
 };
 
 use crate::viewport::ViewportAction;
@@ -46,6 +46,14 @@ pub(crate) enum AssetAppCommand {
         operation: OperationId,
         field: String,
         value: f32,
+    },
+    AddBoundaryLoopBevel {
+        definition: PartDefinitionId,
+        source_operation: OperationId,
+        target_loop: BoundaryLoopId,
+        width: f32,
+        segments: u32,
+        profile: f32,
     },
     RemoveCutOperation {
         definition: PartDefinitionId,

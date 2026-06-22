@@ -1857,6 +1857,113 @@ mod tests {
     }
 
     #[test]
+    fn recessed_boundary_loop_bevel_replacements_compile_as_live_loops() {
+        let mut recipe = cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(31),
+                target_loop: BoundaryLoopId(7),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(23),
+                outer_replacement_loop: BoundaryLoopId(9),
+                inner_replacement_loop: BoundaryLoopId(10),
+            });
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(32),
+                target_loop: BoundaryLoopId(8),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(24),
+                outer_replacement_loop: BoundaryLoopId(11),
+                inner_replacement_loop: BoundaryLoopId(12),
+            });
+        recipe.next_ids.operation = 33;
+        recipe.next_ids.region = 25;
+        recipe.next_ids.boundary_loop = 13;
+
+        let artifact = compile_asset(&recipe).expect("beveled recessed cut should compile");
+        assert!(
+            artifact.validation_report.is_valid(),
+            "asset issues: {:?}; part issues: {:?}",
+            artifact.validation_report.issues,
+            artifact
+                .compiled_parts
+                .iter()
+                .map(|part| &part.validation_report.issues)
+                .collect::<Vec<_>>()
+        );
+        let part = &artifact.compiled_parts[0];
+
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(7));
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(8));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(9), OperationId(31));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(10), OperationId(31));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(11), OperationId(32));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(12), OperationId(32));
+    }
+
+    #[test]
+    fn recessed_boundary_loop_bevels_reject_overlapping_depth_budget() {
+        let mut recipe = cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(31),
+                target_loop: BoundaryLoopId(7),
+                width: 0.06,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(23),
+                outer_replacement_loop: BoundaryLoopId(9),
+                inner_replacement_loop: BoundaryLoopId(10),
+            });
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(32),
+                target_loop: BoundaryLoopId(8),
+                width: 0.06,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(24),
+                outer_replacement_loop: BoundaryLoopId(11),
+                inner_replacement_loop: BoundaryLoopId(12),
+            });
+        recipe.next_ids.operation = 33;
+        recipe.next_ids.region = 25;
+        recipe.next_ids.boundary_loop = 13;
+
+        let error = compile_asset(&recipe).expect_err("overlapping recessed bevels should reject");
+        match error {
+            CompileError::Assembly(AssemblyError::Modeling(error)) => {
+                assert!(
+                    format!("{error:?}").contains("opposing recessed bevels"),
+                    "unexpected modeling error: {error:?}"
+                );
+            }
+            other => panic!("expected modeling assembly error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn through_cut_entry_and_exit_loops_compile_as_closed_cycles() {
         let artifact = compile_asset(&through_cut_recipe()).expect("through cut should compile");
         assert!(artifact.validation_report.is_valid());
@@ -1912,6 +2019,69 @@ mod tests {
         assert_compiled_boundary_loop(part, BoundaryLoopId(10), OperationId(31));
         assert_compiled_boundary_loop(part, BoundaryLoopId(11), OperationId(32));
         assert_compiled_boundary_loop(part, BoundaryLoopId(12), OperationId(32));
+    }
+
+    #[test]
+    fn through_cut_dual_boundary_loop_bevels_compile_as_live_loops() {
+        let mut recipe = through_cut_recipe();
+        let definition = recipe
+            .definitions
+            .get_mut(&PartDefinitionId(1))
+            .expect("cut definition should exist");
+        if let ModelingOperationSpec::RectangularThroughCut { edge_treatment, .. } =
+            &mut definition.geometry.operations[0]
+        {
+            *edge_treatment = CutEdgeTreatment::BevelEligible;
+        }
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(32),
+                target_loop: BoundaryLoopId(9),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(25),
+                outer_replacement_loop: BoundaryLoopId(11),
+                inner_replacement_loop: BoundaryLoopId(12),
+            });
+        definition
+            .geometry
+            .operations
+            .push(ModelingOperationSpec::BevelBoundaryLoop {
+                operation: OperationId(33),
+                target_loop: BoundaryLoopId(10),
+                width: 0.025,
+                segments: 2,
+                profile: 1.0,
+                bevel_region: RegionId(26),
+                outer_replacement_loop: BoundaryLoopId(13),
+                inner_replacement_loop: BoundaryLoopId(14),
+            });
+        recipe.next_ids.operation = 34;
+        recipe.next_ids.region = 27;
+        recipe.next_ids.boundary_loop = 15;
+
+        let artifact = compile_asset(&recipe).expect("dual-beveled through cut should compile");
+        assert!(
+            artifact.validation_report.is_valid(),
+            "asset issues: {:?}; part issues: {:?}",
+            artifact.validation_report.issues,
+            artifact
+                .compiled_parts
+                .iter()
+                .map(|part| &part.validation_report.issues)
+                .collect::<Vec<_>>()
+        );
+        let part = &artifact.compiled_parts[0];
+
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(9));
+        assert_no_compiled_boundary_loop(part, BoundaryLoopId(10));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(11), OperationId(32));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(12), OperationId(32));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(13), OperationId(33));
+        assert_compiled_boundary_loop(part, BoundaryLoopId(14), OperationId(33));
     }
 
     #[test]

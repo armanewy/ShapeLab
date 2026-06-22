@@ -11,11 +11,11 @@ use std::path::PathBuf;
 
 use asset::{
     AssetAppCommand, AssetAppEffect, AssetAppState, AssetAppStateError, AssetGenerationMode,
-    AssetJobEvent, AssetJobKind, AssetJobRequest, AssetLockTarget, AssetTemplate, OperationId,
-    run_asset_job,
+    AssetJobEvent, AssetJobKind, AssetJobRequest, AssetLockTarget, AssetTemplate, BoundaryLoopId,
+    OperationId, run_asset_job,
 };
 use shape_asset::{
-    AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
+    AssetEdit, AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
     ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
     PartInstanceId, ReplacementGroupHint, Transform3, definition_scalar_path, get_scalar,
     instance_scalar_path,
@@ -681,7 +681,12 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
     );
     for treatment in &recess.edge_treatments {
         let width = edge_control(treatment, "bevel_boundary_loop.width");
-        assert_approx_eq(width.maximum, 0.063);
+        let expected_max = match treatment.label.as_str() {
+            "Entry edge: Rounded" => 0.061,
+            "Floor edge: Rounded" => 0.057,
+            label => panic!("unexpected recessed edge treatment {label}"),
+        };
+        assert_approx_eq(width.maximum, expected_max);
         assert_eq!(
             edge_control(treatment, "bevel_boundary_loop.segments").maximum,
             8.0
@@ -691,12 +696,23 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
             8.0
         );
     }
+    assert!(
+        recess.available_edge_treatments.is_empty(),
+        "fully rounded recessed panel should not show addable edge treatments"
+    );
 
     for operation in [2, 3, 4, 5] {
         let cut = cuts
             .get(&OperationId(operation))
             .expect("multi-cut panel should reflect mounting-hole cut");
         assert_eq!(edge_treatment_labels(cut), vec!["Entry edge: Rounded"]);
+        assert_eq!(
+            cut.available_edge_treatments
+                .iter()
+                .map(|treatment| treatment.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Exit edge: Hard"]
+        );
         let width = edge_control(&cut.edge_treatments[0], "bevel_boundary_loop.width");
         assert_approx_eq(width.maximum, 0.036);
     }
@@ -709,7 +725,283 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
             cut.edge_treatments.is_empty(),
             "hard-edged vent operation {operation} should not show rounded edge controls"
         );
+        assert!(
+            cut.available_edge_treatments.is_empty(),
+            "hard-edged vent operation {operation} should not show addable rounding"
+        );
     }
+}
+
+#[test]
+fn add_boundary_loop_bevel_command_inserts_explicit_edge_treatment() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    state.selected_part_instance = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+    state.selected_cut_operation = Some(OperationId(2));
+
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    let treatment = ui_state
+        .cut_operations
+        .iter()
+        .find(|cut| cut.operation == OperationId(2))
+        .and_then(|cut| cut.available_edge_treatments.first())
+        .cloned()
+        .expect("mounting hole exit edge should be addable");
+    let next_ids = state.recipe.next_ids.clone();
+
+    let effects = state
+        .handle_command(AssetAppCommand::AddBoundaryLoopBevel {
+            definition: treatment.definition,
+            source_operation: treatment.source_operation,
+            target_loop: treatment.target_loop,
+            width: treatment.width,
+            segments: treatment.segments,
+            profile: treatment.profile,
+        })
+        .expect("edge treatment should be inserted");
+
+    let inserted = state.recipe.definitions[&definition]
+        .geometry
+        .operations
+        .iter()
+        .find_map(|operation| {
+            let ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+                bevel_region,
+                outer_replacement_loop,
+                inner_replacement_loop,
+                ..
+            } = operation
+            else {
+                return None;
+            };
+            (*target_loop == treatment.target_loop).then_some((
+                *operation,
+                *width,
+                *segments,
+                *profile,
+                *bevel_region,
+                *outer_replacement_loop,
+                *inner_replacement_loop,
+            ))
+        })
+        .expect("new boundary-loop bevel should exist");
+
+    assert_eq!(inserted.0, OperationId(next_ids.operation));
+    assert_eq!(inserted.1, treatment.width);
+    assert_eq!(inserted.2, treatment.segments);
+    assert_eq!(inserted.3, treatment.profile);
+    assert_eq!(inserted.4, shape_asset::RegionId(next_ids.region));
+    assert_eq!(inserted.5, BoundaryLoopId(next_ids.boundary_loop));
+    assert_eq!(inserted.6, BoundaryLoopId(next_ids.boundary_loop + 1));
+    assert_eq!(state.recipe.next_ids.operation, next_ids.operation + 1);
+    assert_eq!(state.recipe.next_ids.region, next_ids.region + 1);
+    assert_eq!(
+        state.recipe.next_ids.boundary_loop,
+        next_ids.boundary_loop + 2
+    );
+    assert_eq!(state.selected_cut_operation, Some(OperationId(2)));
+    assert_eq!(
+        state.revision_history.revisions[&state.revision_history.current].label,
+        "Add edge treatment"
+    );
+    let revision = &state.revision_history.revisions[&state.revision_history.current];
+    let edit = revision
+        .edit
+        .as_ref()
+        .expect("edge treatment revision should preserve its edit program");
+    assert_eq!(edit.label, "Add edge treatment");
+    assert!(matches!(
+        edit.operations.as_slice(),
+        [AssetEdit::InsertModelingOperation {
+            definition: PartDefinitionId(1),
+            operation: ModelingOperationSpec::BevelBoundaryLoop {
+                operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+                bevel_region,
+                outer_replacement_loop,
+                inner_replacement_loop,
+            },
+            ..
+        }] if *operation == inserted.0
+            && *target_loop == treatment.target_loop
+            && *width == treatment.width
+            && *segments == treatment.segments
+            && *profile == treatment.profile
+            && *bevel_region == inserted.4
+            && *outer_replacement_loop == inserted.5
+            && *inner_replacement_loop == inserted.6
+    ));
+    let json = serde_json::to_string(&state.project_snapshot()).expect("snapshot serializes");
+    let loaded_project = serde_json::from_str(&json).expect("snapshot deserializes");
+    let mut loaded =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+            .expect("seed state");
+    loaded
+        .replace_loaded_project(loaded_project, PathBuf::from("panel.shapelab-asset.json"))
+        .expect("snapshot with replay edit should load");
+    assert!(
+        loaded.revision_history.revisions[&loaded.revision_history.current]
+            .edit
+            .is_some()
+    );
+    assert!(state.dirty);
+    assert!(matches!(
+        start_job(effects).kind,
+        AssetJobKind::CompileCurrentAsset
+    ));
+}
+
+#[test]
+fn add_boundary_loop_bevel_rejects_hard_only_cut_loop() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    let before = state.recipe.definitions[&definition]
+        .geometry
+        .operations
+        .len();
+
+    let result = state.handle_command(AssetAppCommand::AddBoundaryLoopBevel {
+        definition,
+        source_operation: OperationId(6),
+        target_loop: BoundaryLoopId(11),
+        width: 0.01,
+        segments: 2,
+        profile: 1.0,
+    });
+
+    assert!(matches!(
+        result,
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("eligible boundary loop")
+    ));
+    assert_eq!(
+        state.recipe.definitions[&definition]
+            .geometry
+            .operations
+            .len(),
+        before
+    );
+}
+
+#[test]
+fn recessed_edge_treatment_limits_treat_missing_sibling_as_zero() {
+    let mut entry_only =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+            .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    entry_only
+        .recipe
+        .definitions
+        .get_mut(&definition)
+        .unwrap()
+        .geometry
+        .operations
+        .retain(|operation| operation.operation_id() != OperationId(10));
+    entry_only.selected_part_instance = entry_only
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+
+    let ui_state = asset::view_model::build_asset_ui_state(&entry_only, false);
+    let recess = ui_state
+        .cut_operations
+        .iter()
+        .find(|cut| cut.operation == OperationId(1))
+        .expect("multi-cut panel should reflect recessed panel cut");
+    assert_eq!(edge_treatment_labels(recess), vec!["Entry edge: Rounded"]);
+    let width = edge_control(&recess.edge_treatments[0], "bevel_boundary_loop.width");
+    assert_approx_eq(width.maximum, 0.063);
+
+    let mut floor_only =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+            .expect("multi-cut panel template should load");
+    floor_only
+        .recipe
+        .definitions
+        .get_mut(&definition)
+        .unwrap()
+        .geometry
+        .operations
+        .retain(|operation| operation.operation_id() != OperationId(9));
+    floor_only.selected_part_instance = floor_only
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+
+    let ui_state = asset::view_model::build_asset_ui_state(&floor_only, false);
+    let recess = ui_state
+        .cut_operations
+        .iter()
+        .find(|cut| cut.operation == OperationId(1))
+        .expect("multi-cut panel should reflect recessed panel cut");
+    assert_eq!(edge_treatment_labels(recess), vec!["Floor edge: Rounded"]);
+    let width = edge_control(&recess.edge_treatments[0], "bevel_boundary_loop.width");
+    assert_approx_eq(width.maximum, 0.063);
+}
+
+#[test]
+fn recessed_edge_treatment_limit_preserves_over_budget_current_width() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    state.selected_part_instance = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+    for operation in &mut state
+        .recipe
+        .definitions
+        .get_mut(&definition)
+        .unwrap()
+        .geometry
+        .operations
+    {
+        if let ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(9),
+            width,
+            ..
+        } = operation
+        {
+            *width = 0.070;
+        }
+    }
+
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    let recess = ui_state
+        .cut_operations
+        .iter()
+        .find(|cut| cut.operation == OperationId(1))
+        .expect("multi-cut panel should reflect recessed panel cut");
+    let treatment = recess
+        .edge_treatments
+        .iter()
+        .find(|treatment| treatment.label == "Entry edge: Rounded")
+        .expect("entry treatment should be reflected");
+    let width = edge_control(treatment, "bevel_boundary_loop.width");
+
+    assert_approx_eq(width.value, 0.070);
+    assert_approx_eq(width.maximum, 0.070);
 }
 
 #[test]

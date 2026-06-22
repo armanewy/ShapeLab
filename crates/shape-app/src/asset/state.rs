@@ -9,9 +9,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationIssue, ModelingOperationSpec,
-    OperationId, OperationRemovalPolicy, ParameterId, PartDefinitionId, PartInstance,
-    PartInstanceId, RevisionId, apply_edit_program_with_report, validate_asset_recipe,
+    AssetEdit, AssetEditProgram, AssetRecipe, AssetValidationIssue, BoundaryLoopId,
+    ModelingOperationSpec, OperationId, OperationPhase, OperationRemovalPolicy, ParameterId,
+    PartDefinitionId, PartInstance, PartInstanceId, RevisionId, allocate_boundary_loop_id,
+    allocate_operation_id, allocate_region_id, apply_edit_program_with_report,
+    validate_asset_recipe,
 };
 use shape_compile::export::recipe_hash;
 use shape_compile::validation::{ValidationIssue, validate_model, validation_config_from_recipe};
@@ -122,6 +124,8 @@ pub(crate) struct AssetRevision {
     pub id: RevisionId,
     pub parent: Option<RevisionId>,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<AssetEditProgram>,
     pub recipe: AssetRecipe,
 }
 
@@ -153,6 +157,7 @@ impl AssetRevisionHistory {
                 id: current,
                 parent: None,
                 label: "Initial asset".to_owned(),
+                edit: None,
                 recipe,
             },
         );
@@ -163,7 +168,12 @@ impl AssetRevisionHistory {
         }
     }
 
-    fn push_child(&mut self, label: impl Into<String>, recipe: AssetRecipe) -> RevisionId {
+    fn push_child(
+        &mut self,
+        label: impl Into<String>,
+        recipe: AssetRecipe,
+        edit: Option<AssetEditProgram>,
+    ) -> RevisionId {
         let id = RevisionId(self.next_revision);
         self.next_revision = self.next_revision.saturating_add(1);
         self.revisions.insert(
@@ -172,6 +182,7 @@ impl AssetRevisionHistory {
                 id,
                 parent: Some(self.current),
                 label: label.into(),
+                edit,
                 recipe,
             },
         );
@@ -291,6 +302,21 @@ impl AssetAppState {
                 field,
                 value,
             } => self.set_cut_operation_scalar(definition, operation, field, value),
+            AssetAppCommand::AddBoundaryLoopBevel {
+                definition,
+                source_operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+            } => self.add_boundary_loop_bevel(
+                definition,
+                source_operation,
+                target_loop,
+                width,
+                segments,
+                profile,
+            ),
             AssetAppCommand::RemoveCutOperation {
                 definition,
                 operation,
@@ -641,6 +667,60 @@ impl AssetAppState {
         )
     }
 
+    fn add_boundary_loop_bevel(
+        &mut self,
+        definition: PartDefinitionId,
+        source_operation: OperationId,
+        target_loop: BoundaryLoopId,
+        width: f32,
+        segments: u32,
+        profile: f32,
+    ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
+        if !width.is_finite() || !profile.is_finite() {
+            return Err(AssetAppStateError::NonFiniteOperationScalar(
+                source_operation,
+            ));
+        }
+        if !source_cut_exposes_bevelable_loop(
+            &self.recipe,
+            definition,
+            source_operation,
+            target_loop,
+        ) {
+            return Err(AssetAppStateError::EditRejected(format!(
+                "operation {:?} does not expose eligible boundary loop {:?}",
+                source_operation, target_loop
+            )));
+        }
+
+        let mut allocated = self.recipe.clone();
+        let operation = allocate_operation_id(&mut allocated);
+        let bevel_region = allocate_region_id(&mut allocated);
+        let outer_replacement_loop = allocate_boundary_loop_id(&mut allocated);
+        let inner_replacement_loop = allocate_boundary_loop_id(&mut allocated);
+        let bevel = ModelingOperationSpec::BevelBoundaryLoop {
+            operation,
+            target_loop,
+            width,
+            segments,
+            profile,
+            bevel_region,
+            outer_replacement_loop,
+            inner_replacement_loop,
+        };
+        let index = boundary_treatment_insert_index(&self.recipe, definition)?;
+        self.selected_cut_operation = Some(source_operation);
+        self.apply_edit(
+            "Add edge treatment",
+            vec![AssetEdit::InsertModelingOperation {
+                definition,
+                index,
+                operation: bevel,
+            }],
+            true,
+        )
+    }
+
     fn set_lock(
         &mut self,
         target: AssetLockTarget,
@@ -666,10 +746,10 @@ impl AssetAppState {
             "Add optional part",
             vec![AssetEdit::AddInstance { instance }],
         )?;
-        let mut recipe = outcome;
+        let (mut recipe, _program) = outcome;
         recipe.variation.optional_instances.insert(instance_id);
         ensure_valid_recipe(&recipe)?;
-        self.commit_recipe("Add optional part", recipe, true)?;
+        self.commit_recipe("Add optional part", recipe, true, None)?;
         self.selected_part_instance = Some(instance_id);
         self.schedule_compile_current()
     }
@@ -687,7 +767,12 @@ impl AssetAppState {
         let promoted_artifact = candidate.artifact.clone().filter(|artifact| {
             recipe_hash(&candidate.recipe).ok() == Some(artifact.source_recipe_hash)
         });
-        self.commit_recipe("Accept candidate", candidate.recipe, true)?;
+        self.commit_recipe(
+            "Accept candidate",
+            candidate.recipe,
+            true,
+            Some(candidate.program),
+        )?;
         if let Some(artifact) = promoted_artifact {
             self.current_timeline =
                 Some(build_construction_timeline_report(&self.recipe, &artifact));
@@ -818,8 +903,8 @@ impl AssetAppState {
         operations: Vec<AssetEdit>,
         dirty: bool,
     ) -> Result<Vec<AssetAppEffect>, AssetAppStateError> {
-        let recipe = self.edited_recipe(label, operations)?;
-        self.commit_recipe(label, recipe, dirty)?;
+        let (recipe, program) = self.edited_recipe(label, operations)?;
+        self.commit_recipe(label, recipe, dirty, Some(program))?;
         self.schedule_compile_current()
     }
 
@@ -827,14 +912,14 @@ impl AssetAppState {
         &self,
         label: &'static str,
         operations: Vec<AssetEdit>,
-    ) -> Result<AssetRecipe, AssetAppStateError> {
+    ) -> Result<(AssetRecipe, AssetEditProgram), AssetAppStateError> {
         let program = AssetEditProgram {
             label: label.to_owned(),
             seed: self.revision_history.current.0,
             operations,
         };
         apply_edit_program_with_report(&self.recipe, &program)
-            .map(|outcome| outcome.recipe)
+            .map(|outcome| (outcome.recipe, program))
             .map_err(|rejection| {
                 let message = rejection
                     .report
@@ -851,9 +936,12 @@ impl AssetAppState {
         label: impl Into<String>,
         recipe: AssetRecipe,
         dirty: bool,
+        edit: Option<AssetEditProgram>,
     ) -> Result<RevisionId, AssetAppStateError> {
         ensure_valid_recipe(&recipe)?;
-        let revision = self.revision_history.push_child(label, recipe.clone());
+        let revision = self
+            .revision_history
+            .push_child(label, recipe.clone(), edit);
         self.recipe = recipe;
         self.dirty = dirty;
         self.refresh_after_recipe_replacement();
@@ -1302,6 +1390,64 @@ fn operation_is_cut_in_definition(
         })
 }
 
+fn source_cut_exposes_bevelable_loop(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    target_loop: BoundaryLoopId,
+) -> bool {
+    recipe
+        .definitions
+        .get(&definition)
+        .and_then(|definition| {
+            definition.geometry.operations.iter().find(|candidate| {
+                candidate.operation_id() == operation && operation_is_cut(candidate)
+            })
+        })
+        .is_some_and(|operation| match operation {
+            ModelingOperationSpec::RecessedPanelCut {
+                edge_treatment,
+                entry_loop,
+                floor_loop,
+                ..
+            } => {
+                matches!(edge_treatment, shape_asset::CutEdgeTreatment::BevelEligible)
+                    && [*entry_loop, *floor_loop].contains(&target_loop)
+            }
+            ModelingOperationSpec::RectangularThroughCut {
+                edge_treatment,
+                entry_loop,
+                exit_loop,
+                ..
+            }
+            | ModelingOperationSpec::CircularThroughCut {
+                edge_treatment,
+                entry_loop,
+                exit_loop,
+                ..
+            } => {
+                matches!(edge_treatment, shape_asset::CutEdgeTreatment::BevelEligible)
+                    && [*entry_loop, *exit_loop].contains(&target_loop)
+            }
+            _ => false,
+        })
+}
+
+fn boundary_treatment_insert_index(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+) -> Result<usize, AssetAppStateError> {
+    let definition = recipe.definitions.get(&definition).ok_or_else(|| {
+        AssetAppStateError::EditRejected(format!("unknown definition {definition:?}"))
+    })?;
+    Ok(definition
+        .geometry
+        .operations
+        .iter()
+        .position(|operation| operation.phase() > OperationPhase::BoundaryTreatment)
+        .unwrap_or(definition.geometry.operations.len()))
+}
+
 #[derive(Debug, Copy, Clone)]
 enum OperationEdit {
     Set,
@@ -1408,6 +1554,34 @@ fn ensure_valid_project_snapshot(project: &AssetModelingProject) -> Result<(), A
                     id, parent
                 )));
             }
+            if let Some(edit) = &revision.edit {
+                let parent_recipe = &project.revision_history.revisions[&parent].recipe;
+                let replayed = apply_edit_program_with_report(parent_recipe, edit)
+                    .map_err(|rejection| {
+                        AssetAppStateError::InvalidProject(format!(
+                            "revision {:?} edit program does not replay: {}",
+                            id,
+                            rejection
+                                .report
+                                .entries
+                                .last()
+                                .map(|entry| entry.message.as_str())
+                                .unwrap_or("edit rejected")
+                        ))
+                    })?
+                    .recipe;
+                if replayed != revision.recipe {
+                    return Err(AssetAppStateError::InvalidProject(format!(
+                        "revision {:?} edit program does not reproduce its recipe",
+                        id
+                    )));
+                }
+            }
+        } else if revision.edit.is_some() {
+            return Err(AssetAppStateError::InvalidProject(format!(
+                "root revision {:?} must not store an edit program",
+                id
+            )));
         }
         ensure_valid_recipe(&revision.recipe)?;
     }

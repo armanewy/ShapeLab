@@ -3,16 +3,16 @@
 use std::collections::BTreeMap;
 
 use shape_asset::{
-    AssetRecipe, GeometrySource, ModelingOperationSpec, ParameterDescriptor, enumerate_parameters,
-    get_scalar,
+    AssetRecipe, CutEdgeTreatment, GeometrySource, ModelingOperationSpec, ParameterDescriptor,
+    enumerate_parameters, get_scalar,
 };
 
 use crate::asset::{
-    AssetAppState, AssetCandidate, AssetCandidateEdit, AssetCutControl, AssetCutOperation,
-    AssetCutOperationKind, AssetEdgeTreatment, AssetHistoryRevision, AssetJobProgress,
-    AssetParameter, AssetParameterGroup, AssetPart, AssetUiJobKind, AssetUiState,
-    AssetValidationMessage, AssetValidationState, BoundaryLoopId, GeneratedPartKind, OperationId,
-    ParameterId, PartDefinitionId, PartInstanceId,
+    AssetAppState, AssetAvailableEdgeTreatment, AssetCandidate, AssetCandidateEdit,
+    AssetCutControl, AssetCutOperation, AssetCutOperationKind, AssetEdgeTreatment,
+    AssetHistoryRevision, AssetJobProgress, AssetParameter, AssetParameterGroup, AssetPart,
+    AssetUiJobKind, AssetUiState, AssetValidationMessage, AssetValidationState, BoundaryLoopId,
+    GeneratedPartKind, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
 };
 use shape_search::asset::AssetCandidateEditKind;
 
@@ -135,10 +135,12 @@ fn cut_operation_for_spec(
             corner_segments,
             entry_loop,
             floor_loop,
+            edge_treatment,
             ..
         } => {
             let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
             let bevel_limit = rect_loop_bevel_limit(*size, *rim_width, *depth);
+            let can_add_treatment = matches!(edge_treatment, CutEdgeTreatment::BevelEligible);
             (
                 AssetCutOperationKind::RecessedPanel,
                 vec![
@@ -224,8 +226,12 @@ fn cut_operation_for_spec(
                     ),
                 ],
                 vec![
-                    (*entry_loop, "Entry edge", bevel_limit),
-                    (*floor_loop, "Floor edge", bevel_limit),
+                    EdgeLoopControl::new(*entry_loop, "Entry edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_paired_depth(*depth),
+                    EdgeLoopControl::new(*floor_loop, "Floor edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_paired_depth(*depth),
                 ],
             )
         }
@@ -237,10 +243,12 @@ fn cut_operation_for_spec(
             corner_segments,
             entry_loop,
             exit_loop,
+            edge_treatment,
             ..
         } => {
             let ranges = rect_cut_ranges(host, *center, *size, *rim_width);
             let bevel_limit = rect_through_loop_bevel_limit(host, *size, *rim_width);
+            let can_add_treatment = matches!(edge_treatment, CutEdgeTreatment::BevelEligible);
             (
                 AssetCutOperationKind::RectangularOpening,
                 vec![
@@ -317,8 +325,12 @@ fn cut_operation_for_spec(
                     ),
                 ],
                 vec![
-                    (*entry_loop, "Entry edge", bevel_limit),
-                    (*exit_loop, "Exit edge", bevel_limit),
+                    EdgeLoopControl::new(*entry_loop, "Entry edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_optional_paired_depth(host.map(|host| host.thickness)),
+                    EdgeLoopControl::new(*exit_loop, "Exit edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_optional_paired_depth(host.map(|host| host.thickness)),
                 ],
             )
         }
@@ -329,10 +341,12 @@ fn cut_operation_for_spec(
             rim_width,
             entry_loop,
             exit_loop,
+            edge_treatment,
             ..
         } => {
             let ranges = circular_cut_ranges(host, *center, *radius, *rim_width);
             let bevel_limit = circular_through_loop_bevel_limit(host, *radius, *rim_width);
+            let can_add_treatment = matches!(edge_treatment, CutEdgeTreatment::BevelEligible);
             (
                 AssetCutOperationKind::CircularOpening,
                 vec![
@@ -391,8 +405,12 @@ fn cut_operation_for_spec(
                     ),
                 ],
                 vec![
-                    (*entry_loop, "Entry edge", bevel_limit),
-                    (*exit_loop, "Exit edge", bevel_limit),
+                    EdgeLoopControl::new(*entry_loop, "Entry edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_optional_paired_depth(host.map(|host| host.thickness)),
+                    EdgeLoopControl::new(*exit_loop, "Exit edge", bevel_limit)
+                        .with_can_add_treatment(can_add_treatment)
+                        .with_optional_paired_depth(host.map(|host| host.thickness)),
                 ],
             )
         }
@@ -406,6 +424,13 @@ fn cut_operation_for_spec(
         &loop_controls,
         topology_locked,
     );
+    let available_edge_treatments = available_edge_treatments_for_cut(
+        definition,
+        part,
+        operation_id,
+        operations,
+        &loop_controls,
+    );
 
     Some(AssetCutOperation {
         definition,
@@ -415,19 +440,61 @@ fn cut_operation_for_spec(
         kind,
         controls,
         edge_treatments,
+        available_edge_treatments,
         selected: selected_operation == Some(operation_id),
     })
 }
 
 const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
 const BOUNDARY_BEVEL_PROFILE_MAX: f32 = 8.0;
+const BEVEL_CONTROL_SAFETY_MARGIN: f32 = 0.001;
+const DEFAULT_BOUNDARY_BEVEL_SEGMENTS: u32 = 2;
+const DEFAULT_BOUNDARY_BEVEL_PROFILE: f32 = 1.0;
+
+#[derive(Debug, Copy, Clone)]
+struct EdgeLoopControl {
+    loop_id: BoundaryLoopId,
+    label: &'static str,
+    width_limit: f32,
+    paired_depth: Option<f32>,
+    can_add_treatment: bool,
+}
+
+impl EdgeLoopControl {
+    fn new(loop_id: BoundaryLoopId, label: &'static str, width_limit: f32) -> Self {
+        Self {
+            loop_id,
+            label,
+            width_limit,
+            paired_depth: None,
+            can_add_treatment: true,
+        }
+    }
+
+    fn with_can_add_treatment(mut self, can_add_treatment: bool) -> Self {
+        self.can_add_treatment = can_add_treatment;
+        self
+    }
+
+    fn with_paired_depth(mut self, depth: f32) -> Self {
+        self.paired_depth = Some(depth.abs());
+        self
+    }
+
+    fn with_optional_paired_depth(self, depth: Option<f32>) -> Self {
+        match depth {
+            Some(depth) => self.with_paired_depth(depth),
+            None => self,
+        }
+    }
+}
 
 fn edge_treatments_for_cut(
     definition: PartDefinitionId,
     part: PartInstanceId,
     source_operation: OperationId,
     operations: &[ModelingOperationSpec],
-    loop_controls: &[(BoundaryLoopId, &'static str, f32)],
+    loop_controls: &[EdgeLoopControl],
     topology_locked: bool,
 ) -> Vec<AssetEdgeTreatment> {
     operations
@@ -444,23 +511,29 @@ fn edge_treatments_for_cut(
             else {
                 return None;
             };
-            let (_, label, width_limit) = loop_controls
+            let loop_control = loop_controls
                 .iter()
-                .find(|(loop_id, _, _)| loop_id == target_loop)?;
+                .find(|control| control.loop_id == *target_loop)?;
+            let width_limit = sibling_aware_bevel_width_limit(
+                loop_control,
+                *target_loop,
+                loop_controls,
+                operations,
+            );
             Some(AssetEdgeTreatment {
                 definition,
                 part,
                 source_operation,
                 operation: *operation,
                 target_loop: *target_loop,
-                label: format!("{label}: Rounded"),
+                label: format!("{}: Rounded", loop_control.label),
                 controls: vec![
                     cut_control(
                         "bevel_boundary_loop.width",
                         "Width",
                         *width,
                         0.001,
-                        bevel_width_control_max(*width, *width_limit),
+                        bevel_width_control_max(*width, width_limit),
                         0.001,
                         false,
                     ),
@@ -496,8 +569,75 @@ fn edge_treatments_for_cut(
         .collect()
 }
 
+fn available_edge_treatments_for_cut(
+    definition: PartDefinitionId,
+    part: PartInstanceId,
+    source_operation: OperationId,
+    operations: &[ModelingOperationSpec],
+    loop_controls: &[EdgeLoopControl],
+) -> Vec<AssetAvailableEdgeTreatment> {
+    loop_controls
+        .iter()
+        .filter(|control| control.can_add_treatment)
+        .filter(|control| boundary_bevel_width_for_loop(operations, control.loop_id).is_none())
+        .map(|control| {
+            let width_limit = sibling_aware_bevel_width_limit(
+                control,
+                control.loop_id,
+                loop_controls,
+                operations,
+            );
+            AssetAvailableEdgeTreatment {
+                definition,
+                part,
+                source_operation,
+                target_loop: control.loop_id,
+                label: format!("{}: Hard", control.label),
+                width: default_boundary_bevel_width(width_limit),
+                segments: DEFAULT_BOUNDARY_BEVEL_SEGMENTS,
+                profile: DEFAULT_BOUNDARY_BEVEL_PROFILE,
+            }
+        })
+        .collect()
+}
+
+fn sibling_aware_bevel_width_limit(
+    loop_control: &EdgeLoopControl,
+    target_loop: BoundaryLoopId,
+    loop_controls: &[EdgeLoopControl],
+    operations: &[ModelingOperationSpec],
+) -> f32 {
+    let Some(depth) = loop_control.paired_depth else {
+        return loop_control.width_limit;
+    };
+    let sibling_width = loop_controls
+        .iter()
+        .filter(|candidate| candidate.loop_id != target_loop)
+        .filter_map(|candidate| boundary_bevel_width_for_loop(operations, candidate.loop_id))
+        .sum::<f32>();
+    loop_control
+        .width_limit
+        .min((depth - sibling_width - BEVEL_CONTROL_SAFETY_MARGIN).max(0.001))
+}
+
+fn boundary_bevel_width_for_loop(
+    operations: &[ModelingOperationSpec],
+    target: BoundaryLoopId,
+) -> Option<f32> {
+    operations.iter().find_map(|operation| match operation {
+        ModelingOperationSpec::BevelBoundaryLoop {
+            target_loop, width, ..
+        } if *target_loop == target => Some(*width),
+        _ => None,
+    })
+}
+
 fn bevel_width_control_max(current: f32, safe_limit: f32) -> f32 {
     safe_limit.max(current).max(0.001)
+}
+
+fn default_boundary_bevel_width(width_limit: f32) -> f32 {
+    (width_limit * 0.35).clamp(0.001, width_limit.max(0.001))
 }
 
 fn rect_loop_bevel_limit(size: [f32; 2], rim_width: f32, depth: f32) -> f32 {

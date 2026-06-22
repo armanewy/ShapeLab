@@ -5,9 +5,9 @@
 use egui::{RichText, Slider};
 
 use crate::asset::{
-    AssetAppCommand, AssetCutControl, AssetCutOperation, AssetEdgeTreatment, AssetLockTarget,
-    AssetParameter, AssetParameterGroup, AssetPart, AssetUiState, OperationId, ParameterId,
-    PartDefinitionId, PartInstanceId,
+    AssetAppCommand, AssetAvailableEdgeTreatment, AssetCutControl, AssetCutOperation,
+    AssetEdgeTreatment, AssetLockTarget, AssetParameter, AssetParameterGroup, AssetPart,
+    AssetUiState, OperationId, ParameterId, PartDefinitionId, PartInstanceId,
 };
 
 /// One reflected beginner parameter group.
@@ -153,6 +153,22 @@ pub(crate) fn edge_treatment_remove_command(
     (!locked).then_some(AssetAppCommand::RemoveCutOperation {
         definition: treatment.definition,
         operation: treatment.operation,
+    })
+}
+
+/// Emit an edge-treatment add command for an eligible untreated boundary loop.
+#[must_use]
+pub(crate) fn edge_treatment_add_command(
+    treatment: &AssetAvailableEdgeTreatment,
+    locked: bool,
+) -> Option<AssetAppCommand> {
+    (!locked).then_some(AssetAppCommand::AddBoundaryLoopBevel {
+        definition: treatment.definition,
+        source_operation: treatment.source_operation,
+        target_loop: treatment.target_loop,
+        width: treatment.width,
+        segments: treatment.segments,
+        profile: treatment.profile,
     })
 }
 
@@ -377,7 +393,7 @@ fn render_edge_treatments(
     operation: &AssetCutOperation,
 ) -> Vec<AssetAppCommand> {
     let mut commands = Vec::new();
-    if operation.edge_treatments.is_empty() {
+    if operation.edge_treatments.is_empty() && operation.available_edge_treatments.is_empty() {
         return commands;
     }
 
@@ -405,6 +421,22 @@ fn render_edge_treatments(
                     ui, state, treatment, control,
                 ));
             }
+        }
+        for treatment in &operation.available_edge_treatments {
+            ui.horizontal(|ui| {
+                ui.label(&treatment.label).on_hover_text(format!(
+                    "definition.{}.operation.{} can consume loop.{}",
+                    treatment.definition.0, treatment.source_operation.0, treatment.target_loop.0
+                ));
+                let topology_locked = state.topology_locks.contains(&treatment.definition);
+                if ui
+                    .add_enabled(!topology_locked, egui::Button::new("Add rounding"))
+                    .on_hover_text("Add a rounded edge treatment to this boundary loop.")
+                    .clicked()
+                {
+                    commands.extend(edge_treatment_add_command(treatment, topology_locked));
+                }
+            });
         }
     });
     commands

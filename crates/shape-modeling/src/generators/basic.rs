@@ -619,7 +619,8 @@ fn build_cut_plate(
             let entry_surface_points = cut
                 .entry_bevel
                 .as_ref()
-                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .map(|bevel| cut.offset_inner_points(bevel.width))
+                .transpose()?
                 .unwrap_or_else(|| cut.inner_points.clone());
             let (outside_inner, wall_top_ring) = if let Some(bevel) = &cut.entry_bevel {
                 add_boundary_loop_bevel_band(
@@ -639,7 +640,8 @@ fn build_cut_plate(
             let floor_surface_points = cut
                 .secondary_bevel
                 .as_ref()
-                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, -bevel.width))
+                .map(|bevel| cut.offset_inner_points(-bevel.width))
+                .transpose()?
                 .unwrap_or_else(|| cut.inner_points.clone());
             let (wall_bottom_ring, floor_inner) = if let Some(bevel) = &cut.secondary_bevel {
                 add_boundary_loop_bevel_band(
@@ -806,7 +808,8 @@ fn build_cut_plate(
             let entry_surface_points = cut
                 .entry_bevel
                 .as_ref()
-                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .map(|bevel| cut.offset_inner_points(bevel.width))
+                .transpose()?
                 .unwrap_or_else(|| cut.inner_points.clone());
             let (outside_inner, wall_front_ring) = if let Some(bevel) = &cut.entry_bevel {
                 add_boundary_loop_bevel_band(
@@ -826,7 +829,8 @@ fn build_cut_plate(
             let exit_surface_points = cut
                 .secondary_bevel
                 .as_ref()
-                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+                .map(|bevel| cut.offset_inner_points(bevel.width))
+                .transpose()?
                 .unwrap_or_else(|| cut.inner_points.clone());
             let (opposite_inner, wall_back_ring) = if let Some(bevel) = &cut.secondary_bevel {
                 add_boundary_loop_bevel_band(
@@ -1154,7 +1158,8 @@ fn build_multi_cut_plate(
             let floor_surface_points = cut
                 .secondary_bevel
                 .as_ref()
-                .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, -bevel.width))
+                .map(|bevel| cut.offset_inner_points(-bevel.width))
+                .transpose()?
                 .unwrap_or_else(|| cut.inner_points.clone());
             let (wall_bottom_ring, floor_inner) = if let Some(bevel) = &cut.secondary_bevel {
                 add_boundary_loop_bevel_band(
@@ -1522,6 +1527,7 @@ struct PlateCutPlan {
     operation: OperationId,
     face: PlanarCutFace,
     center: [f32; 2],
+    loop_shape: PlateCutLoopShape,
     inner_points: Vec<[f32; 2]>,
     rim_points: Vec<[f32; 2]>,
     frame_points: Vec<[f32; 2]>,
@@ -1538,6 +1544,17 @@ struct PlateCutPlan {
     edge_treatment: CutEdgeTreatment,
     entry_bevel: Option<BoundaryLoopBevelPlan>,
     secondary_bevel: Option<BoundaryLoopBevelPlan>,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum PlateCutLoopShape {
+    RoundedRect {
+        half_extents: [f32; 2],
+        corner_radius: f32,
+    },
+    Circle {
+        radius: f32,
+    },
 }
 
 struct BoundaryLoopMark {
@@ -1623,17 +1640,20 @@ impl PlateCutPlan {
                     ));
                 }
                 let rim_width = finite_positive(*rim_width, "recessed_panel_cut.rim_width")?;
+                let width = finite_positive(size[0], "cut.size.x")?;
+                let height = finite_positive(size[1], "cut.size.y")?;
+                let corner_radius = finite_non_negative(*corner_radius, "cut.corner_radius")?;
                 let corner_segments = (*corner_segments).max(1);
                 let inner_points = rounded_cut_points(
                     *center,
                     *size,
-                    *corner_radius,
+                    corner_radius,
                     corner_segments,
                     CutPointCount::RoundedRect,
                 )?;
                 let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
                 let frame_points =
-                    rounded_frame_points(*center, *size, *corner_radius, corner_segments, frame)?;
+                    rounded_frame_points(*center, *size, corner_radius, corner_segments, frame)?;
                 Ok(Self {
                     kind: PlateCutKind::Recessed {
                         depth,
@@ -1642,6 +1662,10 @@ impl PlateCutPlan {
                     operation: *operation,
                     face: *face,
                     center: *center,
+                    loop_shape: PlateCutLoopShape::RoundedRect {
+                        half_extents: [width * 0.5, height * 0.5],
+                        corner_radius,
+                    },
                     inner_points,
                     rim_points: frame_points.clone(),
                     frame_points,
@@ -1678,22 +1702,29 @@ impl PlateCutPlan {
                 ..
             } => {
                 let rim_width = finite_positive(*rim_width, "rectangular_through_cut.rim_width")?;
+                let width = finite_positive(size[0], "cut.size.x")?;
+                let height = finite_positive(size[1], "cut.size.y")?;
+                let corner_radius = finite_non_negative(*corner_radius, "cut.corner_radius")?;
                 let corner_segments = (*corner_segments).max(1);
                 let inner_points = rounded_cut_points(
                     *center,
                     *size,
-                    *corner_radius,
+                    corner_radius,
                     corner_segments,
                     CutPointCount::RoundedRect,
                 )?;
                 let frame = cut_frame_rect(*center, &inner_points, half_x, half_z, rim_width)?;
                 let frame_points =
-                    rounded_frame_points(*center, *size, *corner_radius, corner_segments, frame)?;
+                    rounded_frame_points(*center, *size, corner_radius, corner_segments, frame)?;
                 Ok(Self {
                     kind: PlateCutKind::Through,
                     operation: *operation,
                     face: *face,
                     center: *center,
+                    loop_shape: PlateCutLoopShape::RoundedRect {
+                        half_extents: [width * 0.5, height * 0.5],
+                        corner_radius,
+                    },
                     inner_points,
                     rim_points: frame_points.clone(),
                     frame_points,
@@ -1754,6 +1785,7 @@ impl PlateCutPlan {
                     operation: *operation,
                     face: *face,
                     center: *center,
+                    loop_shape: PlateCutLoopShape::Circle { radius },
                     inner_points,
                     rim_points,
                     frame_points,
@@ -1776,6 +1808,10 @@ impl PlateCutPlan {
                 "build_cut_plate received a non-cut operation".to_owned(),
             )),
         }
+    }
+
+    fn offset_inner_points(&self, offset: f32) -> Result<Vec<[f32; 2]>, ModelingError> {
+        offset_loop_points(self.loop_shape, self.center, self.corner_segments, offset)
     }
 }
 
@@ -1841,17 +1877,33 @@ fn validate_plate_loop_bevel(
     }
     match cut.kind {
         PlateCutKind::Recessed { depth, .. } => {
-            if entry_loop {
-                if bevel.width >= depth - EPSILON {
-                    return Err(ModelingError::UnsupportedOperation {
-                        operation: bevel.operation,
-                        reason: "entry bevel width must leave vertical cut wall height".to_owned(),
-                    });
-                }
-            } else if bevel.width >= depth - EPSILON {
+            if !entry_loop
+                && let PlateCutLoopShape::RoundedRect { corner_radius, .. } = cut.loop_shape
+                && corner_radius > EPSILON
+                && bevel.width >= corner_radius - EPSILON
+            {
                 return Err(ModelingError::UnsupportedOperation {
                     operation: bevel.operation,
-                    reason: "floor bevel width must be smaller than recess depth".to_owned(),
+                    reason: "floor boundary-loop bevel width must be smaller than the target rounded corner radius".to_owned(),
+                });
+            }
+            let entry_width = if entry_loop {
+                bevel.width
+            } else {
+                cut.entry_bevel.as_ref().map_or(0.0, |entry| entry.width)
+            };
+            let floor_width = if entry_loop {
+                cut.secondary_bevel
+                    .as_ref()
+                    .map_or(0.0, |floor| floor.width)
+            } else {
+                bevel.width
+            };
+            if entry_width + floor_width >= depth - EPSILON {
+                return Err(ModelingError::UnsupportedOperation {
+                    operation: bevel.operation,
+                    reason: "opposing recessed bevels must leave vertical cut wall height"
+                        .to_owned(),
                 });
             }
         }
@@ -2008,7 +2060,8 @@ fn add_cut_features_for_face(
     let window_points = frame_boundary_points(cut.frame, xs, zs);
     let window_ring = builder.add_plate_ring(y, &window_points)?;
     let surface_points = bevel
-        .map(|bevel| offset_loop_points(&cut.inner_points, cut.center, bevel.width))
+        .map(|bevel| cut.offset_inner_points(bevel.width))
+        .transpose()?
         .unwrap_or_else(|| cut.inner_points.clone());
     let surface_ring = builder.add_plate_ring(y, &surface_points)?;
 
@@ -2803,8 +2856,8 @@ fn add_boundary_loop_bevel_band_from_outer(
     let mut previous_points = outer_points.to_vec();
     let mut previous_ring = outer_ring.clone();
     for step in 1..=bevel.segments {
-        let radial_t = step as f32 / bevel.segments as f32;
-        let depth_t = boundary_bevel_depth_t(radial_t, bevel.profile);
+        let t = step as f32 / bevel.segments as f32;
+        let (radial_t, depth_t) = boundary_bevel_curve_t(t, bevel.profile);
         let current_points = lerp_loop_points(outer_points, inner_points, radial_t);
         let current_y = lerp(outer_y, inner_y, depth_t);
         let current_ring = builder.add_plate_ring(current_y, &current_points)?;
@@ -2837,19 +2890,18 @@ fn boundary_bevel_profile(profile: f32) -> Result<f32, ModelingError> {
     Ok(profile)
 }
 
-fn boundary_bevel_depth_t(radial_t: f32, profile: f32) -> f32 {
-    let t = radial_t.clamp(0.0, 1.0);
+fn boundary_bevel_curve_t(linear_t: f32, profile: f32) -> (f32, f32) {
+    let t = linear_t.clamp(0.0, 1.0);
     if t <= 0.0 || t >= 1.0 {
-        return t;
+        return (t, t);
     }
-    let forward = t.powf(profile);
-    let reverse = (1.0 - t).powf(profile);
-    let denominator = forward + reverse;
-    if denominator <= EPSILON || !denominator.is_finite() {
-        t
-    } else {
-        forward / denominator
+    let profile = profile.clamp(BOUNDARY_BEVEL_PROFILE_MIN, BOUNDARY_BEVEL_PROFILE_MAX);
+    if (profile - 1.0).abs() <= EPSILON {
+        return (t, t);
     }
+    let radial_t = t.powf(1.0 / profile);
+    let depth_t = t.powf(profile);
+    (radial_t.clamp(0.0, 1.0), depth_t.clamp(0.0, 1.0))
 }
 
 fn lerp_loop_points(from: &[[f32; 2]], to: &[[f32; 2]], t: f32) -> Vec<[f32; 2]> {
@@ -2859,27 +2911,56 @@ fn lerp_loop_points(from: &[[f32; 2]], to: &[[f32; 2]], t: f32) -> Vec<[f32; 2]>
         .collect()
 }
 
-fn offset_loop_points(points: &[[f32; 2]], center: [f32; 2], offset: f32) -> Vec<[f32; 2]> {
-    points
-        .iter()
-        .map(|point| {
-            let direction =
-                normalize_or_2d([point[0] - center[0], point[1] - center[1]], [1.0, 0.0]);
-            [
-                point[0] + direction[0] * offset,
-                point[1] + direction[1] * offset,
-            ]
-        })
-        .collect()
-}
-
-fn normalize_or_2d(value: [f32; 2], fallback: [f32; 2]) -> [f32; 2] {
-    let length = (value[0] * value[0] + value[1] * value[1]).sqrt();
-    if length <= EPSILON {
-        fallback
-    } else {
-        [value[0] / length, value[1] / length]
-    }
+fn offset_loop_points(
+    shape: PlateCutLoopShape,
+    center: [f32; 2],
+    segments: u32,
+    offset: f32,
+) -> Result<Vec<[f32; 2]>, ModelingError> {
+    let local = match shape {
+        PlateCutLoopShape::Circle { radius } => {
+            let radius = radius + offset;
+            if radius <= EPSILON {
+                return Err(ModelingError::InvalidInput(
+                    "boundary-loop bevel offset collapses circular cut radius".to_owned(),
+                ));
+            }
+            circle_points(radius, segments.max(6))
+        }
+        PlateCutLoopShape::RoundedRect {
+            half_extents,
+            corner_radius,
+        } => {
+            let half_x = half_extents[0] + offset;
+            let half_z = half_extents[1] + offset;
+            if half_x <= EPSILON || half_z <= EPSILON {
+                return Err(ModelingError::InvalidInput(
+                    "boundary-loop bevel offset collapses rectangular cut extents".to_owned(),
+                ));
+            }
+            let radius = if corner_radius <= EPSILON {
+                0.0
+            } else {
+                let radius = corner_radius + offset;
+                if radius <= EPSILON {
+                    return Err(ModelingError::InvalidInput(
+                        "boundary-loop bevel offset collapses rounded cut corner radius".to_owned(),
+                    ));
+                }
+                radius
+            };
+            if radius > half_x.min(half_z) + EPSILON {
+                return Err(ModelingError::InvalidInput(
+                    "boundary-loop bevel offset exceeds rounded cut half extents".to_owned(),
+                ));
+            }
+            rounded_rect_points(half_x, half_z, radius, segments.max(1))
+        }
+    };
+    Ok(local
+        .into_iter()
+        .map(|point| [point[0] + center[0], point[1] + center[1]])
+        .collect())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3513,6 +3594,16 @@ fn rounded_rect_points(
         }
     }
     points
+}
+
+fn circle_points(radius: f32, segments: u32) -> Vec<[f32; 2]> {
+    (0..segments)
+        .map(|index| {
+            let angle = 2.0 * PI * index as f32 / segments as f32;
+            let (sin, cos) = angle.sin_cos();
+            [radius * cos, radius * sin]
+        })
+        .collect()
 }
 
 fn clamp_frustum_bevels(

@@ -162,6 +162,7 @@ pub(crate) struct AssetCutOperation {
     pub kind: AssetCutOperationKind,
     pub controls: Vec<AssetCutControl>,
     pub edge_treatments: Vec<AssetEdgeTreatment>,
+    pub available_edge_treatments: Vec<AssetAvailableEdgeTreatment>,
     pub selected: bool,
 }
 
@@ -175,6 +176,19 @@ pub(crate) struct AssetEdgeTreatment {
     pub target_loop: BoundaryLoopId,
     pub label: String,
     pub controls: Vec<AssetCutControl>,
+}
+
+/// Reflected boundary loop that can receive a new edge treatment.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AssetAvailableEdgeTreatment {
+    pub definition: PartDefinitionId,
+    pub part: PartInstanceId,
+    pub source_operation: OperationId,
+    pub target_loop: BoundaryLoopId,
+    pub label: String,
+    pub width: f32,
+    pub segments: u32,
+    pub profile: f32,
 }
 
 /// Beginner-facing cut operation kind.
