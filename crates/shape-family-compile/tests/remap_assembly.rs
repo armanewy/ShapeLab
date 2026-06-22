@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AttachmentMode, AttachmentSpec, Frame3, GeometryRecipe, GeometrySource,
-    ModelingOperationSpec, OperationId, PartDefinition, PartDefinitionId, PartInstance,
-    PartInstanceId, RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
+    AssetId, AssetRecipe, AttachmentMode, AttachmentSpec, BoundaryLoopId, CutEdgeTreatment, Frame3,
+    GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterDescriptor,
+    ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace,
+    RegionId, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
     validate_asset_recipe,
 };
 use shape_family_compile::{
@@ -397,6 +398,7 @@ fn multiple_exported_socket_ports_remap_through_socket_map() {
 #[test]
 fn invalid_external_parent_reference_is_rejected() {
     let mut target = target_recipe();
+    let before = target.clone();
     let fragment = fragment(
         "external-parent",
         "bad",
@@ -428,7 +430,135 @@ fn invalid_external_parent_reference_is_rejected() {
             ..
         } if id_kind == "part_instance" && id == "999"
     ));
-    assert!(target.instances.is_empty());
+    assert_eq!(target, before);
+}
+
+#[test]
+fn stale_target_counters_do_not_overwrite_existing_or_source_ids() {
+    let mut target = AssetRecipe::new(AssetId(9000), "stale target");
+    target.definitions.insert(
+        PartDefinitionId(1),
+        definition(
+            PartDefinitionId(1),
+            "existing",
+            &[
+                RegionId(1),
+                RegionId(2),
+                RegionId(3),
+                RegionId(4),
+                RegionId(5),
+            ],
+            &[SocketId(1)],
+            vec![ModelingOperationSpec::RecessedPanelCut {
+                operation: OperationId(1),
+                region: RegionId(1),
+                face: PlanarCutFace::PositiveZ,
+                center: [0.0, 0.0],
+                size: [0.8, 0.6],
+                depth: 0.1,
+                corner_radius: 0.02,
+                rim_width: 0.05,
+                corner_segments: 1,
+                entry_loop: BoundaryLoopId(1),
+                floor_loop: BoundaryLoopId(2),
+                outer_region: RegionId(2),
+                rim_region: RegionId(3),
+                wall_region: RegionId(4),
+                floor_region: RegionId(5),
+                edge_treatment: CutEdgeTreatment::Hard,
+            }],
+        ),
+    );
+    target.instances.insert(
+        PartInstanceId(1),
+        instance(PartInstanceId(1), PartDefinitionId(1), None),
+    );
+    target
+        .parameters
+        .insert(ParameterId(1), parameter(ParameterId(1)));
+    target.root_instances.push(PartInstanceId(1));
+    target.next_ids.part_definition = 1;
+    target.next_ids.part_instance = 1;
+    target.next_ids.operation = 1;
+    target.next_ids.region = 1;
+    target.next_ids.boundary_loop = 1;
+    target.next_ids.socket = 1;
+    target.next_ids.parameter = 1;
+    let mut fragment = fragment(
+        "stale-counters",
+        "case",
+        recipe_with_parts(
+            vec![
+                definition(
+                    PartDefinitionId(1),
+                    "body",
+                    &[RegionId(1)],
+                    &[SocketId(1)],
+                    vec![ModelingOperationSpec::RecessedPanelCut {
+                        operation: OperationId(1),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [0.0, 0.0],
+                        size: [0.8, 0.6],
+                        depth: 0.1,
+                        corner_radius: 0.02,
+                        rim_width: 0.05,
+                        corner_segments: 1,
+                        entry_loop: BoundaryLoopId(1),
+                        floor_loop: BoundaryLoopId(2),
+                        outer_region: RegionId(3),
+                        rim_region: RegionId(4),
+                        wall_region: RegionId(5),
+                        floor_region: RegionId(6),
+                        edge_treatment: CutEdgeTreatment::Hard,
+                    }],
+                ),
+                definition(
+                    PartDefinitionId(2),
+                    "panel",
+                    &[RegionId(2)],
+                    &[SocketId(2)],
+                    vec![],
+                ),
+            ],
+            vec![
+                instance(PartInstanceId(1), PartDefinitionId(1), None),
+                instance(PartInstanceId(2), PartDefinitionId(2), None),
+            ],
+            vec![PartInstanceId(1), PartInstanceId(2)],
+        ),
+        RecipeFragmentExports {
+            role_occurrence_roots: vec![PartInstanceId(1), PartInstanceId(2)],
+            ..RecipeFragmentExports::default()
+        },
+    );
+    fragment
+        .recipe
+        .parameters
+        .insert(ParameterId(1), parameter(ParameterId(1)));
+    fragment
+        .recipe
+        .parameters
+        .insert(ParameterId(2), parameter(ParameterId(2)));
+
+    let remapped =
+        remap_fragment_assembly(&mut target, &fragment).expect("stale counters remap safely");
+
+    assert_eq!(target.definitions[&PartDefinitionId(1)].name, "existing");
+    assert!(remapped.remap.definitions.values().all(|id| id.0 > 2));
+    assert!(remapped.remap.instances.values().all(|id| id.0 > 2));
+    assert!(remapped.remap.parameters.values().all(|id| id.0 > 2));
+    assert!(remapped.remap.operations.values().all(|id| id.0 > 1));
+    assert!(remapped.remap.regions.values().all(|id| id.0 > 6));
+    assert!(remapped.remap.boundary_loops.values().all(|id| id.0 > 2));
+    assert!(remapped.remap.sockets.values().all(|id| id.0 > 2));
+    assert!(target.next_ids.part_definition > 4);
+    assert!(target.next_ids.part_instance > 4);
+    assert!(target.next_ids.parameter > 4);
+    assert!(target.next_ids.operation > 2);
+    assert!(target.next_ids.region > 10);
+    assert!(target.next_ids.boundary_loop > 4);
+    assert!(target.next_ids.socket > 4);
 }
 
 #[test]
@@ -623,6 +753,21 @@ fn instance(
         enabled: true,
         tags,
         generated_by: None,
+    }
+}
+
+fn parameter(id: ParameterId) -> ParameterDescriptor {
+    ParameterDescriptor {
+        id,
+        path: format!("parameter.{}", id.0),
+        label: format!("Parameter {}", id.0),
+        group: "Test".to_owned(),
+        minimum: 0.0,
+        maximum: 1.0,
+        step: 0.1,
+        mutation_sigma: 0.1,
+        topology_changing: false,
+        beginner_description: "Test parameter".to_owned(),
     }
 }
 

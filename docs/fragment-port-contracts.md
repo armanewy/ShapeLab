@@ -16,12 +16,12 @@ Port IDs and tags use stable lowercase identifiers. Socket ports must reference 
 `FamilyImplementation::attachment_bindings` connects selected fragments through exported ports. A binding names:
 
 - the family attachment rule
-- source role and source port
-- destination role and destination port
+- parent role and parent port
+- child role and child port
 - pairing policy
-- finite offset
+- finite rigid offset: translation plus canonical normalized quaternion
 - attachment mode
 
-Bindings are directional and must match the family attachment rule's source and destination roles. Future remap stages will resolve these bindings after provider selection through the `remap::ports` and `remap::relationships` boundaries.
+Bindings are directional. `AttachmentRule::from_role` is the child role and `AttachmentRule::to_role` is the parent role. The concrete `AssetRecipe` attachment is written onto the child occurrence and points at the parent occurrence/socket.
 
-Until those remap stages are executable, non-empty attachment bindings are rejected during implementation validation so authored attachments cannot be silently ignored.
+The current executable remapper supports explicit exported occurrence roots only. Generated array or mirror occurrence expansion is rejected until generated occurrences have an addressable port-expansion policy. `AllPairs` is valid only when each child receives one parent.

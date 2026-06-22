@@ -32,13 +32,26 @@ pub fn prepare_fragment_id_remap(
     let mut used_boundary_loops = BTreeSet::new();
     let mut used_sockets = BTreeSet::new();
 
+    used_definitions.extend(fragment.recipe.definitions.keys().copied());
+    used_instances.extend(fragment.recipe.instances.keys().copied());
+    used_parameters.extend(fragment.recipe.parameters.keys().copied());
+
     for definition in target.definitions.values() {
         used_regions.extend(definition.regions.keys().copied());
         used_sockets.extend(definition.sockets.keys().copied());
         for operation in &definition.geometry.operations {
             used_operations.insert(operation.operation_id());
             used_regions.extend(operation.generated_region_ids());
-            used_boundary_loops.extend(operation.boundary_loop_ids());
+            used_boundary_loops.extend(operation.all_declared_boundary_loop_outputs());
+        }
+    }
+    for definition in fragment.recipe.definitions.values() {
+        used_regions.extend(definition.regions.keys().copied());
+        used_sockets.extend(definition.sockets.keys().copied());
+        for operation in &definition.geometry.operations {
+            used_operations.insert(operation.operation_id());
+            used_regions.extend(operation.generated_region_ids());
+            used_boundary_loops.extend(operation.all_declared_boundary_loop_outputs());
         }
     }
 
@@ -141,7 +154,7 @@ fn allocate_mapped_id<T>(
     if map.contains_key(&source) {
         return;
     }
-    let new_id = allocate_unused_id(target, used, allocate);
+    let new_id = allocate_unused_id(target, used, source, allocate);
     map.insert(source, new_id);
     allocated.push(new_id);
 }
@@ -149,6 +162,7 @@ fn allocate_mapped_id<T>(
 fn allocate_unused_id<T>(
     target: &mut AssetRecipe,
     used: &mut BTreeSet<T>,
+    source: T,
     allocate: fn(&mut AssetRecipe) -> T,
 ) -> T
 where
@@ -156,7 +170,7 @@ where
 {
     loop {
         let new_id = allocate(target);
-        if used.insert(new_id) {
+        if new_id != source && used.insert(new_id) {
             return new_id;
         }
     }

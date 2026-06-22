@@ -81,13 +81,15 @@ That crate binds:
 - simple semantic parameter bindings
 - a concrete `FamilyInstantiationRequest`
 
-The compiler then validates the family/style pair, resolves required role providers, deterministically remaps fragment IDs into one `AssetRecipe`, applies semantic controls to concrete scalar paths or part presence, validates the recipe, compiles geometry, and returns an instantiation report. Omitted request parameters are filled from the family slot defaults before provider choice, presence toggles, and scalar bindings run.
+The compiler then validates the family/style pair, resolves required role providers, transactionally remaps fragment IDs into one `AssetRecipe`, applies cross-fragment port attachments, applies semantic controls to concrete scalar paths or part presence, validates the recipe, compiles geometry, and returns an instantiation report. Omitted request parameters are filled from the family slot defaults before provider choice, presence toggles, and scalar bindings run.
 
-Instantiation reports include typed fragment remap reports so audits can inspect the definition, instance, parameter, and region ID maps used during merge. Unsupported metadata in any executable fragment is rejected during implementation validation, whether or not that fragment is selected by the current request.
+Instantiation reports include typed fragment remap reports so audits can inspect the definition, instance, parameter, operation, region, boundary-loop, and socket ID maps used during merge. The report also lists concrete parent/child attachment applications generated from exported ports.
 
 Provider selection is explicit. A style-required role uses `StyleImplementation::default_role_providers` unless a choice binding selects a specific style prototype. A family-default role uses `FamilyImplementation::default_role_providers`. A family-or-style role prefers the style default and falls back to the family default. This avoids accidental selection changes when prototype IDs or `BTreeMap` ordering change.
 
 Recipe fragments declare `RecipeFragmentExports` containing `role_occurrence_roots`, `internal_roots`, `socket_ports`, and `surface_ports`. Cardinality checks and presence toggles operate on occurrence roots and their subtrees, so internal ribs, fasteners, helper geometry, or local construction pieces do not accidentally count as separate role occurrences. Exported occurrence roots must be pairwise disjoint, cannot be nested under one another, and cannot overlap internal roots. Cardinality checks use the effective enabled state through each occurrence root's ancestor chain.
+
+Cross-fragment port bindings use explicit `parent_role`/`parent_port` and `child_role`/`child_port` fields. The family attachment rule still uses child-to-parent `from_role`/`to_role` direction. Bindings use a scale-free rigid offset: finite translation and a canonical normalized quaternion.
 
 Family parameter slots declare a `ParameterExecutionPolicy`. `RequiredBinding` is the default and requires at least one executable binding in the implementation. `AdvisoryOnly` and `RuntimeOnly` slots can be accepted as semantic intent, but executable geometry bindings may not consume them. The compiler rejects unbound required slots, non-executable parameter bindings, conflicting provider-selection bindings, conflicting presence bindings, and non-finite or degenerate scalar transforms.
 

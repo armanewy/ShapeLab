@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use glam::{EulerRot, Quat};
+use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetRecipe, AttachmentMode, AttachmentSpec, PartInstanceId, SocketId, Transform3,
 };
@@ -9,7 +11,10 @@ use shape_family::{
     AssetFamilySchema, AttachmentRule, FamilyValidationIssue, FamilyValidationReport, PartRole,
 };
 
-use crate::{FamilyImplementation, FragmentAttachmentPairing, FragmentSocketPort, RecipeFragment};
+use crate::{
+    FamilyImplementation, FragmentAttachmentPairing, FragmentSocketPort, RecipeFragment,
+    RigidOffset,
+};
 
 use super::{FragmentRemap, FragmentRemapError};
 
@@ -25,37 +30,37 @@ pub struct SelectedFragmentPorts<'a> {
 }
 
 /// Deterministic report for generated cross-fragment attachments.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FragmentAttachmentBindingReport {
     /// Applied attachment bindings in deterministic order.
     pub attachments: Vec<FragmentAttachmentApplication>,
 }
 
 /// One generated concrete attachment.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FragmentAttachmentApplication {
     /// Index of the family implementation attachment binding that produced this row.
     pub binding_index: usize,
     /// Family attachment rule implemented by the binding.
     pub family_attachment_rule: String,
-    /// Source family role. This is the attached child side.
-    pub source_role: String,
-    /// Destination family role. This is the parent side.
-    pub destination_role: String,
-    /// Remapped child/source occurrence.
+    /// Parent family role.
+    pub parent_role: String,
+    /// Child family role.
+    pub child_role: String,
+    /// Remapped child occurrence.
     pub child_instance: PartInstanceId,
-    /// Remapped parent/destination occurrence.
+    /// Remapped parent occurrence.
     pub parent_instance: PartInstanceId,
-    /// Remapped child/source socket.
+    /// Remapped child socket.
     pub child_socket: SocketId,
-    /// Remapped parent/destination socket.
+    /// Remapped parent socket.
     pub parent_socket: SocketId,
 }
 
 /// Validate and apply family fragment attachment bindings to a remapped recipe.
 ///
-/// The binding direction is source role/port as the child side and destination
-/// role/port as the parent side, matching [`shape_asset::AttachmentSpec`].
+/// The binding direction is explicit: `parent_role`/`parent_port` receives the
+/// concrete child occurrence from `child_role`/`child_port`.
 pub fn apply_family_attachment_bindings(
     recipe: &mut AssetRecipe,
     family: &AssetFamilySchema,
@@ -132,13 +137,13 @@ struct ResolvedPort {
 struct PendingAttachment {
     binding_index: usize,
     family_attachment_rule: String,
-    source_role: String,
-    destination_role: String,
+    parent_role: String,
+    child_role: String,
     child_instance: PartInstanceId,
     parent_instance: PartInstanceId,
     child_socket: SocketId,
     parent_socket: SocketId,
-    offset: [f32; 3],
+    rigid_offset: RigidOffset,
     attachment_mode: AttachmentMode,
 }
 
@@ -146,13 +151,13 @@ impl PartialEq for PendingAttachment {
     fn eq(&self, other: &Self) -> bool {
         self.binding_index == other.binding_index
             && self.family_attachment_rule == other.family_attachment_rule
-            && self.source_role == other.source_role
-            && self.destination_role == other.destination_role
+            && self.parent_role == other.parent_role
+            && self.child_role == other.child_role
             && self.child_instance == other.child_instance
             && self.parent_instance == other.parent_instance
             && self.child_socket == other.child_socket
             && self.parent_socket == other.parent_socket
-            && self.offset == other.offset
+            && self.rigid_offset == other.rigid_offset
             && self.attachment_mode == other.attachment_mode
     }
 }
@@ -173,7 +178,7 @@ impl Ord for PendingAttachment {
             .then_with(|| self.parent_instance.cmp(&other.parent_instance))
             .then_with(|| self.child_socket.cmp(&other.child_socket))
             .then_with(|| self.parent_socket.cmp(&other.parent_socket))
-            .then_with(|| cmp_f32_array(self.offset, other.offset))
+            .then_with(|| cmp_rigid_offset(self.rigid_offset, other.rigid_offset))
             .then_with(|| self.attachment_mode.cmp(&other.attachment_mode))
     }
 }
@@ -183,8 +188,8 @@ impl From<PendingAttachment> for FragmentAttachmentApplication {
         Self {
             binding_index: value.binding_index,
             family_attachment_rule: value.family_attachment_rule,
-            source_role: value.source_role,
-            destination_role: value.destination_role,
+            parent_role: value.parent_role,
+            child_role: value.child_role,
             child_instance: value.child_instance,
             parent_instance: value.parent_instance,
             child_socket: value.child_socket,
@@ -217,24 +222,17 @@ fn resolve_family_attachment_bindings(
         let subject = format!("family_implementation.attachment_bindings.{index}");
         validate_identifier(
             report,
-            Some(format!("{subject}.source_port")),
-            &binding.source_port,
+            Some(format!("{subject}.parent_port")),
+            &binding.parent_port,
             "invalid_fragment_attachment_port",
         );
         validate_identifier(
             report,
-            Some(format!("{subject}.destination_port")),
-            &binding.destination_port,
+            Some(format!("{subject}.child_port")),
+            &binding.child_port,
             "invalid_fragment_attachment_port",
         );
-        if binding.offset.iter().any(|value| !value.is_finite()) {
-            push_issue(
-                report,
-                Some(format!("{subject}.offset")),
-                "non_finite_fragment_attachment_offset",
-                "Fragment attachment offsets must be finite.",
-            );
-        }
+        validate_rigid_offset(report, &subject, &binding.rigid_offset);
         if binding.attachment_mode != AttachmentMode::RigidSeparate {
             push_issue(
                 report,
@@ -244,61 +242,59 @@ fn resolve_family_attachment_bindings(
             );
         }
 
-        let source_role = validate_role(
+        let parent_role = validate_role(
             report,
             &roles,
             &subject,
-            "source_role",
-            &binding.source_role,
-            "unknown_fragment_attachment_source_role",
+            "parent_role",
+            &binding.parent_role,
+            "unknown_fragment_attachment_parent_role",
         );
-        let destination_role = validate_role(
+        let child_role = validate_role(
             report,
             &roles,
             &subject,
-            "destination_role",
-            &binding.destination_role,
-            "unknown_fragment_attachment_destination_role",
+            "child_role",
+            &binding.child_role,
+            "unknown_fragment_attachment_child_role",
         );
         let rule = validate_rule(report, &rules, &subject, binding);
-        if let (Some(rule), Some(source_role), Some(destination_role)) =
-            (rule, source_role, destination_role)
-        {
-            validate_rule_roles(report, &subject, rule, source_role, destination_role);
+        if let (Some(rule), Some(parent_role), Some(child_role)) = (rule, parent_role, child_role) {
+            validate_rule_roles(report, &subject, rule, parent_role, child_role);
         }
 
-        let source = resolve_selected_role(
+        let parent = resolve_selected_role(
             report,
             &selected,
             &subject,
-            "source_role",
-            &binding.source_role,
+            "parent_role",
+            &binding.parent_role,
         );
-        let destination = resolve_selected_role(
+        let child = resolve_selected_role(
             report,
             &selected,
             &subject,
-            "destination_role",
-            &binding.destination_role,
+            "child_role",
+            &binding.child_role,
         );
-        let (Some(source), Some(destination)) = (source, destination) else {
+        let (Some(parent), Some(child)) = (parent, child) else {
             continue;
         };
-        let source_port = resolve_socket_port(
+        let parent_port = resolve_socket_port(
             recipe,
-            source.selection,
-            &binding.source_port,
-            &format!("{subject}.source_port"),
+            parent.selection,
+            &binding.parent_port,
+            &format!("{subject}.parent_port"),
             report,
         );
-        let destination_port = resolve_socket_port(
+        let child_port = resolve_socket_port(
             recipe,
-            destination.selection,
-            &binding.destination_port,
-            &format!("{subject}.destination_port"),
+            child.selection,
+            &binding.child_port,
+            &format!("{subject}.child_port"),
             report,
         );
-        let (Some(source_port), Some(destination_port)) = (source_port, destination_port) else {
+        let (Some(parent_port), Some(child_port)) = (parent_port, child_port) else {
             continue;
         };
         if let Some(rule) = rule {
@@ -306,35 +302,31 @@ fn resolve_family_attachment_bindings(
                 report,
                 &subject,
                 rule,
-                &source_port.compatibility_tags,
-                &destination_port.compatibility_tags,
+                &parent_port.compatibility_tags,
+                &child_port.compatibility_tags,
             );
         }
         let pairs = pairing_pairs(
             recipe,
             index,
             &binding.pairing,
-            &source_port.occurrences,
-            &destination_port.occurrences,
+            &child_port.occurrences,
+            &parent_port.occurrences,
             &subject,
             report,
         );
-        pending.extend(
-            pairs
-                .into_iter()
-                .map(|(source, destination)| PendingAttachment {
-                    binding_index: index,
-                    family_attachment_rule: binding.family_attachment_rule.clone(),
-                    source_role: binding.source_role.clone(),
-                    destination_role: binding.destination_role.clone(),
-                    child_instance: source.instance,
-                    parent_instance: destination.instance,
-                    child_socket: source.socket,
-                    parent_socket: destination.socket,
-                    offset: binding.offset,
-                    attachment_mode: binding.attachment_mode,
-                }),
-        );
+        pending.extend(pairs.into_iter().map(|(child, parent)| PendingAttachment {
+            binding_index: index,
+            family_attachment_rule: binding.family_attachment_rule.clone(),
+            parent_role: binding.parent_role.clone(),
+            child_role: binding.child_role.clone(),
+            child_instance: child.instance,
+            parent_instance: parent.instance,
+            child_socket: child.socket,
+            parent_socket: parent.socket,
+            rigid_offset: binding.rigid_offset,
+            attachment_mode: binding.attachment_mode,
+        }));
     }
 
     pending
@@ -417,15 +409,15 @@ fn validate_rule_roles(
     report: &mut FamilyValidationReport,
     subject: &str,
     rule: &AttachmentRule,
-    source_role: &PartRole,
-    destination_role: &PartRole,
+    parent_role: &PartRole,
+    child_role: &PartRole,
 ) {
-    if rule.from_role != source_role.id || rule.to_role != destination_role.id {
+    if rule.from_role != child_role.id || rule.to_role != parent_role.id {
         push_issue(
             report,
             Some(format!("{subject}.family_attachment_rule")),
             "fragment_attachment_rule_role_mismatch",
-            "Fragment attachment binding roles must match the family attachment rule direction.",
+            "Fragment attachment binding child/parent roles must match the family attachment rule direction.",
         );
     }
 }
@@ -547,6 +539,15 @@ impl PortOccurrenceResolver<'_, '_> {
             );
             return None;
         };
+        if local_instance.generated_by.is_some() {
+            push_issue(
+                self.report,
+                Some(self.subject.to_owned()),
+                "unsupported_fragment_attachment_generated_occurrence",
+                "Fragment attachment ports support explicit role occurrence roots only; generated array or mirror occurrence expansion is not supported in this milestone.",
+            );
+            return None;
+        }
         let Some(local_definition) = self
             .selection
             .fragment
@@ -624,15 +625,15 @@ fn validate_compatibility(
     report: &mut FamilyValidationReport,
     subject: &str,
     rule: &AttachmentRule,
-    source_tags: &[String],
-    destination_tags: &[String],
+    child_tags: &[String],
+    parent_tags: &[String],
 ) {
     let compatible = if rule.compatibility_tags.is_empty() {
-        tags_overlap(source_tags, destination_tags)
+        tags_overlap(child_tags, parent_tags)
     } else {
         rule.compatibility_tags
             .iter()
-            .any(|tag| source_tags.contains(tag) && destination_tags.contains(tag))
+            .any(|tag| child_tags.contains(tag) && parent_tags.contains(tag))
     };
     if !compatible {
         push_issue(
@@ -652,77 +653,82 @@ fn pairing_pairs(
     recipe: &AssetRecipe,
     binding_index: usize,
     pairing: &FragmentAttachmentPairing,
-    source: &[PortOccurrence],
-    destination: &[PortOccurrence],
+    children: &[PortOccurrence],
+    parents: &[PortOccurrence],
     subject: &str,
     report: &mut FamilyValidationReport,
 ) -> Vec<(PortOccurrence, PortOccurrence)> {
     match pairing {
-        FragmentAttachmentPairing::AllPairs => all_pairs(source, destination, subject, report),
+        FragmentAttachmentPairing::AllPairs => all_pairs(children, parents, subject, report),
         FragmentAttachmentPairing::ByOccurrenceIndex => {
-            occurrence_index_pairs(source, destination, subject, report)
+            occurrence_index_pairs(children, parents, subject, report)
         }
         FragmentAttachmentPairing::NearestOneToOne => {
-            nearest_one_to_one_pairs(recipe, binding_index, source, destination, subject, report)
+            nearest_one_to_one_pairs(recipe, binding_index, children, parents, subject, report)
         }
         FragmentAttachmentPairing::ExplicitOrdinalPairs(pairs) => {
-            explicit_ordinal_pairs(source, destination, pairs, subject, report)
+            explicit_ordinal_pairs(children, parents, pairs, subject, report)
         }
     }
 }
 
 fn all_pairs(
-    source: &[PortOccurrence],
-    destination: &[PortOccurrence],
+    children: &[PortOccurrence],
+    parents: &[PortOccurrence],
     subject: &str,
     report: &mut FamilyValidationReport,
 ) -> Vec<(PortOccurrence, PortOccurrence)> {
-    if source.is_empty() || destination.is_empty() {
+    if children.is_empty() || parents.is_empty() {
         push_incomplete_pairing_issue(report, subject);
         return Vec::new();
     }
-    source
+    if parents.len() > 1 {
+        push_issue(
+            report,
+            Some(format!("{subject}.pairing")),
+            "fragment_attachment_all_pairs_multiple_parents",
+            "AllPairs is invalid for parent/child attachments when it would give one child occurrence multiple parents.",
+        );
+        return Vec::new();
+    }
+    children
         .iter()
-        .flat_map(|source| {
-            destination
-                .iter()
-                .map(move |destination| (*source, *destination))
-        })
+        .flat_map(|child| parents.iter().map(move |parent| (*child, *parent)))
         .collect()
 }
 
 fn occurrence_index_pairs(
-    source: &[PortOccurrence],
-    destination: &[PortOccurrence],
+    children: &[PortOccurrence],
+    parents: &[PortOccurrence],
     subject: &str,
     report: &mut FamilyValidationReport,
 ) -> Vec<(PortOccurrence, PortOccurrence)> {
-    if source.len() != destination.len() || source.is_empty() {
+    if children.len() != parents.len() || children.is_empty() {
         push_incomplete_pairing_issue(report, subject);
         return Vec::new();
     }
-    source
+    children
         .iter()
-        .zip(destination.iter())
-        .map(|(source, destination)| (*source, *destination))
+        .zip(parents.iter())
+        .map(|(child, parent)| (*child, *parent))
         .collect()
 }
 
 fn nearest_one_to_one_pairs(
     recipe: &AssetRecipe,
     binding_index: usize,
-    source: &[PortOccurrence],
-    destination: &[PortOccurrence],
+    children: &[PortOccurrence],
+    parents: &[PortOccurrence],
     subject: &str,
     report: &mut FamilyValidationReport,
 ) -> Vec<(PortOccurrence, PortOccurrence)> {
-    if source.len() != destination.len() || source.is_empty() {
+    if children.len() != parents.len() || children.is_empty() {
         push_incomplete_pairing_issue(report, subject);
         return Vec::new();
     }
     let mut candidates = Vec::new();
-    for source in source {
-        let Some(source_position) = instance_position(recipe, source.instance) else {
+    for child in children {
+        let Some(child_position) = instance_position(recipe, child.instance) else {
             push_issue(
                 report,
                 Some(format!("{subject}.pairing")),
@@ -731,8 +737,8 @@ fn nearest_one_to_one_pairs(
             );
             return Vec::new();
         };
-        for destination in destination {
-            let Some(destination_position) = instance_position(recipe, destination.instance) else {
+        for parent in parents {
+            let Some(parent_position) = instance_position(recipe, parent.instance) else {
                 push_issue(
                     report,
                     Some(format!("{subject}.pairing")),
@@ -742,25 +748,25 @@ fn nearest_one_to_one_pairs(
                 return Vec::new();
             };
             candidates.push(NearestCandidate {
-                distance_bits: distance_squared(source_position, destination_position).to_bits(),
+                distance_bits: distance_squared(child_position, parent_position).to_bits(),
                 binding_index,
-                source: *source,
-                destination: *destination,
+                child: *child,
+                parent: *parent,
             });
         }
     }
     candidates.sort();
-    let mut used_sources = BTreeSet::new();
-    let mut used_destinations = BTreeSet::new();
+    let mut used_children = BTreeSet::new();
+    let mut used_parents = BTreeSet::new();
     let mut pairs = Vec::new();
     for candidate in candidates {
-        if used_sources.insert(candidate.source.ordinal)
-            && used_destinations.insert(candidate.destination.ordinal)
+        if used_children.insert(candidate.child.ordinal)
+            && used_parents.insert(candidate.parent.ordinal)
         {
-            pairs.push((candidate.source, candidate.destination));
+            pairs.push((candidate.child, candidate.parent));
         }
     }
-    if pairs.len() != source.len() {
+    if pairs.len() != children.len() {
         push_incomplete_pairing_issue(report, subject);
         return Vec::new();
     }
@@ -772,8 +778,8 @@ fn nearest_one_to_one_pairs(
 struct NearestCandidate {
     distance_bits: u32,
     binding_index: usize,
-    source: PortOccurrence,
-    destination: PortOccurrence,
+    child: PortOccurrence,
+    parent: PortOccurrence,
 }
 
 impl PartialOrd for PortOccurrence {
@@ -793,41 +799,39 @@ impl Ord for PortOccurrence {
 }
 
 fn explicit_ordinal_pairs(
-    source: &[PortOccurrence],
-    destination: &[PortOccurrence],
+    children: &[PortOccurrence],
+    parents: &[PortOccurrence],
     pairs: &[(u32, u32)],
     subject: &str,
     report: &mut FamilyValidationReport,
 ) -> Vec<(PortOccurrence, PortOccurrence)> {
-    if source.is_empty() || destination.is_empty() {
+    if children.is_empty() || parents.is_empty() {
         push_incomplete_pairing_issue(report, subject);
         return Vec::new();
     }
     let mut result = Vec::new();
-    let mut covered_sources = BTreeSet::new();
-    let mut covered_destinations = BTreeSet::new();
-    for (source_ordinal, destination_ordinal) in pairs {
-        let Some(source) = source.get(*source_ordinal as usize).copied() else {
+    let mut covered_children = BTreeSet::new();
+    let mut covered_parents = BTreeSet::new();
+    for (child_ordinal, parent_ordinal) in pairs {
+        let Some(child) = children.get(*child_ordinal as usize).copied() else {
             push_issue(
                 report,
                 Some(format!("{subject}.pairing")),
                 "fragment_attachment_pairing_ordinal_out_of_range",
-                "Explicit attachment source ordinals must target exported role occurrences.",
+                "Explicit attachment child ordinals must target exported role occurrences.",
             );
             continue;
         };
-        let Some(destination) = destination.get(*destination_ordinal as usize).copied() else {
+        let Some(parent) = parents.get(*parent_ordinal as usize).copied() else {
             push_issue(
                 report,
                 Some(format!("{subject}.pairing")),
                 "fragment_attachment_pairing_ordinal_out_of_range",
-                "Explicit attachment destination ordinals must target exported role occurrences.",
+                "Explicit attachment parent ordinals must target exported role occurrences.",
             );
             continue;
         };
-        if !covered_sources.insert(source.ordinal)
-            || !covered_destinations.insert(destination.ordinal)
-        {
+        if !covered_children.insert(child.ordinal) || !covered_parents.insert(parent.ordinal) {
             push_issue(
                 report,
                 Some(format!("{subject}.pairing")),
@@ -835,9 +839,9 @@ fn explicit_ordinal_pairs(
                 "Explicit attachment ordinals must be one-to-one.",
             );
         }
-        result.push((source, destination));
+        result.push((child, parent));
     }
-    if covered_sources.len() != source.len() || covered_destinations.len() != destination.len() {
+    if covered_children.len() != children.len() || covered_parents.len() != parents.len() {
         push_incomplete_pairing_issue(report, subject);
     }
     result
@@ -848,7 +852,7 @@ fn push_incomplete_pairing_issue(report: &mut FamilyValidationReport, subject: &
         report,
         Some(format!("{subject}.pairing")),
         "incomplete_fragment_attachment_pairing",
-        "Attachment pairing must cover every source and destination occurrence.",
+        "Attachment pairing must cover every child and parent occurrence.",
     );
 }
 
@@ -953,7 +957,8 @@ fn attachment_spec(attachment: &PendingAttachment) -> AttachmentSpec {
         parent_socket: attachment.parent_socket,
         child_socket: attachment.child_socket,
         local_offset: Transform3 {
-            translation: attachment.offset,
+            translation: attachment.rigid_offset.translation,
+            rotation_degrees: quaternion_to_euler_degrees(attachment.rigid_offset.rotation),
             ..Transform3::default()
         },
         mode: attachment.attachment_mode,
@@ -986,11 +991,79 @@ fn distance_squared(left: [f32; 3], right: [f32; 3]) -> f32 {
     (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2)
 }
 
+fn cmp_rigid_offset(left: RigidOffset, right: RigidOffset) -> std::cmp::Ordering {
+    cmp_f32_array(left.translation, right.translation)
+        .then_with(|| cmp_f32_array4(left.rotation, right.rotation))
+}
+
 fn cmp_f32_array(left: [f32; 3], right: [f32; 3]) -> std::cmp::Ordering {
     left[0]
         .total_cmp(&right[0])
         .then_with(|| left[1].total_cmp(&right[1]))
         .then_with(|| left[2].total_cmp(&right[2]))
+}
+
+fn cmp_f32_array4(left: [f32; 4], right: [f32; 4]) -> std::cmp::Ordering {
+    left[0]
+        .total_cmp(&right[0])
+        .then_with(|| left[1].total_cmp(&right[1]))
+        .then_with(|| left[2].total_cmp(&right[2]))
+        .then_with(|| left[3].total_cmp(&right[3]))
+}
+
+fn validate_rigid_offset(report: &mut FamilyValidationReport, subject: &str, offset: &RigidOffset) {
+    if offset.translation.iter().any(|value| !value.is_finite()) {
+        push_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.translation")),
+            "non_finite_fragment_attachment_translation",
+            "Fragment attachment translations must be finite.",
+        );
+    }
+    if offset.rotation.iter().any(|value| !value.is_finite()) {
+        push_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_finite_fragment_attachment_rotation",
+            "Fragment attachment rotations must be finite.",
+        );
+        return;
+    }
+    let length_squared = offset
+        .rotation
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>();
+    if (length_squared - 1.0).abs() > 1.0e-4 {
+        push_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_unit_fragment_attachment_rotation",
+            "Fragment attachment rotations must be normalized quaternions.",
+        );
+    }
+    if !is_canonical_quaternion(offset.rotation) {
+        push_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_canonical_fragment_attachment_rotation",
+            "Fragment attachment rotations must use the canonical quaternion sign.",
+        );
+    }
+}
+
+fn is_canonical_quaternion(rotation: [f32; 4]) -> bool {
+    rotation[3] > 0.0
+        || (rotation[3] == 0.0
+            && (rotation[2] > 0.0
+                || (rotation[2] == 0.0
+                    && (rotation[1] > 0.0 || (rotation[1] == 0.0 && rotation[0] >= 0.0)))))
+}
+
+fn quaternion_to_euler_degrees(rotation: [f32; 4]) -> [f32; 3] {
+    let (x, y, z) =
+        Quat::from_xyzw(rotation[0], rotation[1], rotation[2], rotation[3]).to_euler(EulerRot::XYZ);
+    [x.to_degrees(), y.to_degrees(), z.to_degrees()]
 }
 
 fn validate_identifier(

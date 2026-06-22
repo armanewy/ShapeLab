@@ -29,16 +29,27 @@ pub fn remap_fragment_assembly(
     fragment: &RecipeFragment,
 ) -> Result<RemappedFragmentAssembly, FragmentRemapError> {
     validate_fragment_references(fragment)?;
-    let prepared = prepare_fragment_assembly_remap(target, fragment)?;
+    let mut working = target.clone();
+    let prepared = prepare_fragment_assembly_remap(&mut working, fragment)?;
 
     for (old_id, definition) in &fragment.recipe.definitions {
         let cloned = remap_definition(fragment, definition, old_id, &prepared.remap)?;
-        target.definitions.insert(cloned.id, cloned);
+        insert_target(
+            &fragment.id,
+            "part_definition",
+            cloned.id.0.to_string(),
+            working.definitions.insert(cloned.id, cloned),
+        )?;
     }
 
     for (old_id, instance) in &fragment.recipe.instances {
         let cloned = remap_instance(fragment, instance, old_id, &prepared.remap)?;
-        target.instances.insert(cloned.id, cloned);
+        insert_target(
+            &fragment.id,
+            "part_instance",
+            cloned.id.0.to_string(),
+            working.instances.insert(cloned.id, cloned),
+        )?;
     }
 
     let mut roots = remap_instance_list(
@@ -47,10 +58,11 @@ pub fn remap_fragment_assembly(
         &prepared.remap,
         "root instance",
     )?;
-    target.root_instances.append(&mut roots);
-    target.root_instances.sort_unstable();
+    working.root_instances.append(&mut roots);
+    working.root_instances.sort_unstable();
 
     let exports = remap_exports(fragment, &prepared.remap)?;
+    *target = working;
     Ok(RemappedFragmentAssembly {
         remap: prepared.remap,
         allocated: prepared.allocated,
@@ -65,9 +77,42 @@ fn prepare_fragment_assembly_remap(
     let mut remap = FragmentRemap::default();
     let mut allocated = AllocatedSemanticIds::default();
     let fragment_id = fragment.id.as_str();
+    let operation_ids = collect_operation_ids(fragment)?;
+    let region_ids = collect_region_ids(fragment)?;
+    let boundary_loop_ids = collect_boundary_loop_ids(fragment)?;
+    let socket_ids = collect_socket_ids(fragment)?;
+
+    let mut used_definitions = target.definitions.keys().copied().collect::<BTreeSet<_>>();
+    used_definitions.extend(fragment.recipe.definitions.keys().copied());
+    let mut used_instances = target.instances.keys().copied().collect::<BTreeSet<_>>();
+    used_instances.extend(fragment.recipe.instances.keys().copied());
+    let mut used_parameters = target.parameters.keys().copied().collect::<BTreeSet<_>>();
+    used_parameters.extend(fragment.recipe.parameters.keys().copied());
+    let mut used_operations = BTreeSet::new();
+    let mut used_regions = BTreeSet::new();
+    let mut used_boundary_loops = BTreeSet::new();
+    let mut used_sockets = BTreeSet::new();
+
+    for definition in target.definitions.values() {
+        used_regions.extend(definition.regions.keys().copied());
+        used_sockets.extend(definition.sockets.keys().copied());
+        for operation in &definition.geometry.operations {
+            used_operations.insert(operation.operation_id());
+            used_regions.extend(operation.generated_region_ids());
+            used_boundary_loops.extend(operation.all_declared_boundary_loop_outputs());
+        }
+    }
+    used_operations.extend(operation_ids.iter().copied());
+    used_regions.extend(region_ids.iter().copied());
+    used_boundary_loops.extend(boundary_loop_ids.iter().copied());
+    used_sockets.extend(socket_ids.iter().copied());
 
     for definition_id in fragment.recipe.definitions.keys() {
-        let new_id = target.allocate_part_definition_id();
+        let new_id = allocate_unused_id(
+            target,
+            &mut used_definitions,
+            AssetRecipe::allocate_part_definition_id,
+        );
         insert_unique(
             fragment_id,
             "part_definition",
@@ -78,7 +123,11 @@ fn prepare_fragment_assembly_remap(
         allocated.definitions.push(new_id);
     }
     for instance_id in fragment.recipe.instances.keys() {
-        let new_id = target.allocate_part_instance_id();
+        let new_id = allocate_unused_id(
+            target,
+            &mut used_instances,
+            AssetRecipe::allocate_part_instance_id,
+        );
         insert_unique(
             fragment_id,
             "part_instance",
@@ -88,8 +137,27 @@ fn prepare_fragment_assembly_remap(
         )?;
         allocated.instances.push(new_id);
     }
-    for operation_id in collect_operation_ids(fragment)? {
-        let new_id = target.allocate_operation_id();
+    for parameter_id in fragment.recipe.parameters.keys() {
+        let new_id = allocate_unused_id(
+            target,
+            &mut used_parameters,
+            AssetRecipe::allocate_parameter_id,
+        );
+        insert_unique(
+            fragment_id,
+            "parameter",
+            *parameter_id,
+            new_id,
+            &mut remap.parameters,
+        )?;
+        allocated.parameters.push(new_id);
+    }
+    for operation_id in operation_ids {
+        let new_id = allocate_unused_id(
+            target,
+            &mut used_operations,
+            AssetRecipe::allocate_operation_id,
+        );
         insert_unique(
             fragment_id,
             "operation",
@@ -99,13 +167,17 @@ fn prepare_fragment_assembly_remap(
         )?;
         allocated.operations.push(new_id);
     }
-    for region_id in collect_region_ids(fragment)? {
-        let new_id = target.allocate_region_id();
+    for region_id in region_ids {
+        let new_id = allocate_unused_id(target, &mut used_regions, AssetRecipe::allocate_region_id);
         insert_unique(fragment_id, "region", region_id, new_id, &mut remap.regions)?;
         allocated.regions.push(new_id);
     }
-    for boundary_loop_id in collect_boundary_loop_ids(fragment)? {
-        let new_id = target.allocate_boundary_loop_id();
+    for boundary_loop_id in boundary_loop_ids {
+        let new_id = allocate_unused_id(
+            target,
+            &mut used_boundary_loops,
+            AssetRecipe::allocate_boundary_loop_id,
+        );
         insert_unique(
             fragment_id,
             "boundary_loop",
@@ -115,8 +187,8 @@ fn prepare_fragment_assembly_remap(
         )?;
         allocated.boundary_loops.push(new_id);
     }
-    for socket_id in collect_socket_ids(fragment)? {
-        let new_id = target.allocate_socket_id();
+    for socket_id in socket_ids {
+        let new_id = allocate_unused_id(target, &mut used_sockets, AssetRecipe::allocate_socket_id);
         insert_unique(fragment_id, "socket", socket_id, new_id, &mut remap.sockets)?;
         allocated.sockets.push(new_id);
     }
@@ -180,7 +252,7 @@ fn collect_boundary_loop_ids(
     let mut seen = BTreeSet::new();
     for definition in fragment.recipe.definitions.values() {
         for operation in &definition.geometry.operations {
-            for boundary_loop_id in operation.boundary_loop_ids() {
+            for boundary_loop_id in operation.all_declared_boundary_loop_outputs() {
                 if !seen.insert(boundary_loop_id) {
                     return Err(duplicate(
                         &fragment.id,
@@ -943,6 +1015,34 @@ fn insert_unique<K: IdNumber + Ord + Copy>(
     Ok(())
 }
 
+fn insert_target<T>(
+    fragment: &str,
+    id_kind: &str,
+    id: String,
+    previous: Option<T>,
+) -> Result<(), FragmentRemapError> {
+    if previous.is_some() {
+        return Err(duplicate(fragment, id_kind, id));
+    }
+    Ok(())
+}
+
+fn allocate_unused_id<K>(
+    target: &mut AssetRecipe,
+    used: &mut BTreeSet<K>,
+    allocate: fn(&mut AssetRecipe) -> K,
+) -> K
+where
+    K: Copy + Ord,
+{
+    loop {
+        let candidate = allocate(target);
+        if used.insert(candidate) {
+            return candidate;
+        }
+    }
+}
+
 trait IdNumber {
     fn id_number(self) -> u64;
 }
@@ -954,6 +1054,12 @@ impl IdNumber for PartDefinitionId {
 }
 
 impl IdNumber for PartInstanceId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl IdNumber for shape_asset::ParameterId {
     fn id_number(self) -> u64 {
         self.0
     }

@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use glam::{EulerRot, Quat};
 use shape_asset::{
-    AssetId, AssetRecipe, AttachmentMode, Frame3, GeometryRecipe, GeometrySource, PartDefinition,
-    PartDefinitionId, PartInstance, PartInstanceId, SocketId, SocketSpec, Transform3,
-    validate_asset_recipe,
+    AssetId, AssetRecipe, AttachmentMode, Frame3, GeometryRecipe, GeometrySource, OperationId,
+    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, SocketId, SocketSpec,
+    Transform3, validate_asset_recipe,
 };
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
@@ -16,7 +17,7 @@ use shape_family_compile::remap::{
 use shape_family_compile::{
     FAMILY_IMPLEMENTATION_SCHEMA_VERSION, FamilyImplementation, FragmentAttachmentBinding,
     FragmentAttachmentPairing, FragmentSocketPort, RECIPE_FRAGMENT_SCHEMA_VERSION, RecipeFragment,
-    RecipeFragmentExports,
+    RecipeFragmentExports, RigidOffset,
 };
 
 #[test]
@@ -48,7 +49,9 @@ fn bridge_support_attachments() {
         "underside",
         FragmentAttachmentPairing::ByOccurrenceIndex,
     )]);
-    implementation.attachment_bindings[0].offset = [0.0, 0.25, 0.0];
+    implementation.attachment_bindings[0]
+        .rigid_offset
+        .translation = [0.0, 0.25, 0.0];
 
     let report = apply_family_attachment_bindings(
         &mut recipe,
@@ -74,6 +77,73 @@ fn bridge_support_attachments() {
     assert_eq!(attachment.local_offset.translation, [0.0, 0.25, 0.0]);
     assert_eq!(recipe.root_instances, vec![PartInstanceId(200)]);
     assert!(validate_asset_recipe(&recipe).is_valid());
+}
+
+#[test]
+fn rigid_offset_rotation_replays_with_transform3_xyz_semantics() {
+    let mut recipe = AssetRecipe::new(AssetId(1), "rotated");
+    let support = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("support_fragment", "support", "top", &["load_path"]).with_instances(
+            10,
+            100,
+            1000,
+            &[[0.0, 0.0, 0.0]],
+        ),
+    );
+    let span = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("span_fragment", "span", "underside", &["load_path"]).with_instances(
+            20,
+            200,
+            2000,
+            &[[0.0, 1.0, 0.0]],
+        ),
+    );
+    let mut implementation = implementation(vec![binding(
+        "support_span",
+        "support",
+        "top",
+        "span",
+        "underside",
+        FragmentAttachmentPairing::ByOccurrenceIndex,
+    )]);
+    let expected_rotation: [f32; 3] = [30.0, 20.0, 10.0];
+    let quaternion = Quat::from_euler(
+        EulerRot::XYZ,
+        expected_rotation[0].to_radians(),
+        expected_rotation[1].to_radians(),
+        expected_rotation[2].to_radians(),
+    );
+    implementation.attachment_bindings[0].rigid_offset.rotation =
+        [quaternion.x, quaternion.y, quaternion.z, quaternion.w];
+
+    apply_family_attachment_bindings(
+        &mut recipe,
+        &family(vec![rule(
+            "support_span",
+            "support",
+            "span",
+            &["load_path"],
+        )]),
+        &implementation,
+        &selected(&support, &span),
+    )
+    .expect("rotated rigid offset should bind");
+
+    let attachment = recipe.instances[&PartInstanceId(100)]
+        .attachment
+        .as_ref()
+        .expect("attachment");
+    let expected = Transform3 {
+        rotation_degrees: expected_rotation,
+        ..Transform3::default()
+    }
+    .matrix();
+    let actual = attachment.local_offset.matrix();
+    for (actual, expected) in actual.to_cols_array().iter().zip(expected.to_cols_array()) {
+        assert!((actual - expected).abs() < 1.0e-5);
+    }
 }
 
 #[test]
@@ -321,7 +391,7 @@ fn missing_port_is_rejected_without_mutating_recipe() {
         )]),
         &selected(&support, &span),
     )
-    .expect_err("missing source port should fail");
+    .expect_err("missing parent port should fail");
 
     assert!(issue_codes(&error).contains("unknown_fragment_attachment_port"));
     assert!(
@@ -464,7 +534,169 @@ fn duplicate_parent_attachment_is_rejected() {
     )
     .expect_err("one child cannot bind to two parents");
 
-    assert!(issue_codes(&error).contains("duplicate_fragment_parent_attachment"));
+    assert!(issue_codes(&error).contains("fragment_attachment_all_pairs_multiple_parents"));
+}
+
+#[test]
+fn generated_occurrence_attachment_ports_are_rejected() {
+    let mut recipe = AssetRecipe::new(AssetId(1), "generated occurrence");
+    let mut support = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("support_fragment", "support", "top", &["load_path"]).with_instances(
+            10,
+            100,
+            1000,
+            &[[0.0, 0.0, 0.0]],
+        ),
+    );
+    support
+        .fragment
+        .recipe
+        .instances
+        .get_mut(&PartInstanceId(1))
+        .expect("local occurrence")
+        .generated_by = Some(OperationId(7));
+    let span = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("span_fragment", "span", "underside", &["load_path"]).with_instances(
+            20,
+            200,
+            2000,
+            &[[0.0, 1.0, 0.0]],
+        ),
+    );
+
+    let error = apply_family_attachment_bindings(
+        &mut recipe,
+        &family(vec![rule(
+            "support_span",
+            "support",
+            "span",
+            &["load_path"],
+        )]),
+        &implementation(vec![binding(
+            "support_span",
+            "support",
+            "top",
+            "span",
+            "underside",
+            FragmentAttachmentPairing::ByOccurrenceIndex,
+        )]),
+        &selected(&support, &span),
+    )
+    .expect_err("generated occurrence ports are unsupported");
+
+    assert!(issue_codes(&error).contains("unsupported_fragment_attachment_generated_occurrence"));
+}
+
+#[test]
+fn generated_parent_occurrence_attachment_ports_are_rejected() {
+    let mut recipe = AssetRecipe::new(AssetId(1), "generated parent occurrence");
+    let support = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("support_fragment", "support", "top", &["load_path"]).with_instances(
+            10,
+            100,
+            1000,
+            &[[0.0, 0.0, 0.0]],
+        ),
+    );
+    let mut span = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("span_fragment", "span", "underside", &["load_path"]).with_instances(
+            20,
+            200,
+            2000,
+            &[[0.0, 1.0, 0.0]],
+        ),
+    );
+    span.fragment
+        .recipe
+        .instances
+        .get_mut(&PartInstanceId(1))
+        .expect("local occurrence")
+        .generated_by = Some(OperationId(7));
+
+    let error = apply_family_attachment_bindings(
+        &mut recipe,
+        &family(vec![rule(
+            "support_span",
+            "support",
+            "span",
+            &["load_path"],
+        )]),
+        &implementation(vec![binding(
+            "support_span",
+            "support",
+            "top",
+            "span",
+            "underside",
+            FragmentAttachmentPairing::ByOccurrenceIndex,
+        )]),
+        &selected(&support, &span),
+    )
+    .expect_err("generated parent occurrence ports are unsupported");
+
+    assert!(issue_codes(&error).contains("unsupported_fragment_attachment_generated_occurrence"));
+}
+
+#[test]
+fn invalid_rigid_offsets_are_rejected() {
+    let mut recipe = AssetRecipe::new(AssetId(1), "invalid rigid offset");
+    let support = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("support_fragment", "support", "top", &["load_path"]).with_instances(
+            10,
+            100,
+            1000,
+            &[[0.0, 0.0, 0.0]],
+        ),
+    );
+    let span = add_fragment(
+        &mut recipe,
+        FragmentSpec::new("span_fragment", "span", "underside", &["load_path"]).with_instances(
+            20,
+            200,
+            2000,
+            &[[0.0, 1.0, 0.0]],
+        ),
+    );
+    let mut implementation = implementation(vec![binding(
+        "support_span",
+        "support",
+        "top",
+        "span",
+        "underside",
+        FragmentAttachmentPairing::ByOccurrenceIndex,
+    )]);
+    implementation.attachment_bindings[0]
+        .rigid_offset
+        .translation = [0.0, f32::NAN, 0.0];
+    implementation.attachment_bindings[0].rigid_offset.rotation = [0.0, 0.0, 0.0, -2.0];
+
+    let error = apply_family_attachment_bindings(
+        &mut recipe,
+        &family(vec![rule(
+            "support_span",
+            "support",
+            "span",
+            &["load_path"],
+        )]),
+        &implementation,
+        &selected(&support, &span),
+    )
+    .expect_err("invalid rigid offset should fail validation");
+    let issue_codes = issue_codes(&error);
+
+    assert!(issue_codes.contains("non_finite_fragment_attachment_translation"));
+    assert!(issue_codes.contains("non_unit_fragment_attachment_rotation"));
+    assert!(issue_codes.contains("non_canonical_fragment_attachment_rotation"));
+    assert!(
+        recipe
+            .instances
+            .values()
+            .all(|instance| instance.attachment.is_none())
+    );
 }
 
 #[test]
@@ -837,20 +1069,20 @@ fn implementation(bindings: Vec<FragmentAttachmentBinding>) -> FamilyImplementat
 
 fn binding(
     family_attachment_rule: &str,
-    source_role: &str,
-    source_port: &str,
-    destination_role: &str,
-    destination_port: &str,
+    child_role: &str,
+    child_port: &str,
+    parent_role: &str,
+    parent_port: &str,
     pairing: FragmentAttachmentPairing,
 ) -> FragmentAttachmentBinding {
     FragmentAttachmentBinding {
         family_attachment_rule: family_attachment_rule.to_owned(),
-        source_role: source_role.to_owned(),
-        source_port: source_port.to_owned(),
-        destination_role: destination_role.to_owned(),
-        destination_port: destination_port.to_owned(),
+        parent_role: parent_role.to_owned(),
+        parent_port: parent_port.to_owned(),
+        child_role: child_role.to_owned(),
+        child_port: child_port.to_owned(),
         pairing,
-        offset: [0.0, 0.0, 0.0],
+        rigid_offset: RigidOffset::default(),
         attachment_mode: AttachmentMode::RigidSeparate,
     }
 }

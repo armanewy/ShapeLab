@@ -3781,6 +3781,7 @@ name = "shape-family-compile"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "glam",
  "serde",
  "serde_json",
  "shape-asset",

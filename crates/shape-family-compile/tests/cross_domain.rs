@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AttachmentMode, Frame3, GeometryRecipe, GeometrySource, OperationId,
-    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec,
-    Transform3, definition_scalar_path, get_scalar, validate_asset_recipe,
+    AssetId, AssetRecipe, AttachmentMode, BoundaryLoopId, Frame3, GeometryRecipe, GeometrySource,
+    OperationId, ParameterId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId,
+    RegionId, SocketId, SocketSpec, Transform3, definition_scalar_path, get_scalar,
+    validate_asset_recipe,
 };
 use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_compile::export::write_grouped_obj_export;
@@ -20,7 +21,7 @@ use shape_family_compile::{
     FAMILY_IMPLEMENTATION_SCHEMA_VERSION, FamilyCompileError, FamilyImplementation,
     FamilyInstantiationRequest, FamilyValue, FragmentAttachmentBinding, FragmentAttachmentPairing,
     FragmentSocketPort, FragmentSurfacePort, FragmentSurfaceTarget, ParameterBinding,
-    RECIPE_FRAGMENT_SCHEMA_VERSION, RecipeFragment, RecipeFragmentExports,
+    RECIPE_FRAGMENT_SCHEMA_VERSION, RecipeFragment, RecipeFragmentExports, RigidOffset,
     STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform, StyleImplementation, instantiate_family,
     scalar_parameter,
 };
@@ -294,6 +295,59 @@ fn ids_are_deterministically_remapped_and_instantiation_repeats_identically() {
             PartDefinitionId(3)
         ]
     );
+}
+
+#[test]
+fn fragment_remap_reports_are_complete_unique_and_fresh() {
+    let output = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &crate_implementation(),
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect("crate instantiates");
+
+    assert!(!output.report.fragment_remaps.is_empty());
+    for report in &output.report.fragment_remaps {
+        assert_numeric_remap(
+            &report.remap.definitions,
+            &report.allocated.definitions,
+            output.recipe.next_ids.part_definition,
+        );
+        assert_numeric_remap(
+            &report.remap.instances,
+            &report.allocated.instances,
+            output.recipe.next_ids.part_instance,
+        );
+        assert_numeric_remap(
+            &report.remap.parameters,
+            &report.allocated.parameters,
+            output.recipe.next_ids.parameter,
+        );
+        assert_numeric_remap(
+            &report.remap.operations,
+            &report.allocated.operations,
+            output.recipe.next_ids.operation,
+        );
+        assert_numeric_remap(
+            &report.remap.regions,
+            &report.allocated.regions,
+            output.recipe.next_ids.region,
+        );
+        assert_numeric_remap(
+            &report.remap.boundary_loops,
+            &report.allocated.boundary_loops,
+            output.recipe.next_ids.boundary_loop,
+        );
+        assert_numeric_remap(
+            &report.remap.sockets,
+            &report.allocated.sockets,
+            output.recipe.next_ids.socket,
+        );
+    }
+    assert!(!output.recipe.definitions.contains_key(&LOCAL_DEFINITION));
+    assert!(!output.recipe.instances.contains_key(&LOCAL_INSTANCE));
 }
 
 #[test]
@@ -577,7 +631,7 @@ fn removed_executable_binding_placeholders_are_rejected_by_strict_schemas() {
         .expect("family implementation object")
         .insert("role_bindings".to_owned(), serde_json::json!({}));
     serde_json::from_value::<FamilyImplementation>(family_impl_json)
-        .expect_err("family implementation v2 must reject removed role_bindings");
+        .expect_err("family implementation v3 must reject removed role_bindings");
 
     let mut fragment_json =
         serde_json::to_value(rounded_box_fragment("body", "body", [1.0, 0.5, 0.5], 0.05))
@@ -594,7 +648,7 @@ fn removed_executable_binding_placeholders_are_rejected_by_strict_schemas() {
 }
 
 #[test]
-fn unsupported_metadata_in_unselected_fragments_is_rejected_by_implementation_validation() {
+fn rich_metadata_in_unselected_fragments_does_not_block_selected_providers() {
     let mut style = industrial_bridge_style_implementation();
     style
         .prototypes
@@ -604,21 +658,16 @@ fn unsupported_metadata_in_unselected_fragments_is_rejected_by_implementation_va
         .instance_locks
         .insert(LOCAL_INSTANCE);
 
-    let error = instantiate_family(
+    let output = instantiate_family(
         &bridge_family(&["industrial_steel"]),
         &industrial_bridge_style_kit(),
         &industrial_bridge_implementation(),
         &style,
         &request("bridge", "industrial_steel", []),
     )
-    .expect_err(
-        "unsupported metadata on unselected fragment should fail implementation validation",
-    );
+    .expect("unselected rich metadata should not block selected providers");
 
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
-    };
-    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_metadata"));
+    assert!(output.recipe.instance_locks.is_empty());
 }
 
 #[test]
@@ -655,7 +704,7 @@ fn fragment_ports_validate_stable_ids_and_local_references() {
 }
 
 #[test]
-fn selected_fragment_socket_ports_are_rejected_until_socket_remap_is_executable() {
+fn selected_fragment_socket_ports_are_remapped_into_the_instantiated_recipe() {
     let mut style = scifi_industrial_style_implementation();
     let body = style
         .prototypes
@@ -682,23 +731,31 @@ fn selected_fragment_socket_ports_are_rejected_until_socket_remap_is_executable(
         local_socket: SocketId(7),
         compatibility_tags: vec!["mount".to_owned()],
     });
+    body.recipe.next_ids.socket = 8;
 
-    let error = instantiate_family(
+    let output = instantiate_family(
         &crate_family(),
         &scifi_industrial_style_kit(),
         &crate_implementation(),
         &style,
         &request("crate", "sci_fi_industrial", []),
     )
-    .expect_err("socket ports should fail until socket remap is executable");
+    .expect("socket ports should be remapped");
 
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
-    };
-    let codes = issue_codes(&report);
-    assert!(codes.contains(&"unsupported_fragment_socket_ports"));
-    assert!(codes.contains(&"unsupported_recipe_fragment_sockets"));
-    assert!(!codes.contains(&"unknown_fragment_socket_port_socket"));
+    assert!(
+        output
+            .recipe
+            .definitions
+            .values()
+            .any(|definition| !definition.sockets.is_empty())
+    );
+    assert!(
+        output
+            .report
+            .fragment_remaps
+            .iter()
+            .any(|report| !report.remap.sockets.is_empty())
+    );
 }
 
 #[test]
@@ -737,34 +794,60 @@ fn socket_and_surface_port_ids_share_one_fragment_namespace() {
 }
 
 #[test]
-fn fragment_attachment_bindings_are_rejected_until_port_remap_is_executable() {
+fn fragment_attachment_bindings_attach_child_occurrences_to_parent_ports() {
     let mut implementation = bridge_implementation();
     implementation
         .attachment_bindings
         .push(FragmentAttachmentBinding {
             family_attachment_rule: "support_span".to_owned(),
-            source_role: "support".to_owned(),
-            source_port: "support_socket".to_owned(),
-            destination_role: "span".to_owned(),
-            destination_port: "span_socket".to_owned(),
+            parent_role: "span".to_owned(),
+            parent_port: "span_socket".to_owned(),
+            child_role: "support".to_owned(),
+            child_port: "support_socket".to_owned(),
             pairing: FragmentAttachmentPairing::ByOccurrenceIndex,
-            offset: [0.0, 0.0, 0.0],
+            rigid_offset: RigidOffset::default(),
             attachment_mode: AttachmentMode::RigidSeparate,
         });
+    let mut style = roman_timber_style_implementation();
+    add_socket_port(
+        style
+            .prototypes
+            .get_mut("pointed_round_pile")
+            .expect("support fragment"),
+        "support_socket",
+        "support",
+        "load_path",
+    );
+    add_socket_port(
+        style
+            .prototypes
+            .get_mut("hewn_span_beam")
+            .expect("span fragment"),
+        "span_socket",
+        "span",
+        "load_path",
+    );
 
-    let error = instantiate_family(
+    let output = instantiate_family(
         &bridge_family(&["roman_timber_engineering"]),
         &roman_timber_engineering_style_kit(),
         &implementation,
-        &roman_timber_style_implementation(),
+        &style,
         &request("bridge", "roman_timber_engineering", []),
     )
-    .expect_err("attachment binding should fail until port remap is executable");
+    .expect("attachment binding should apply through remapped ports");
 
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
-    };
-    assert!(issue_codes(&report).contains(&"unsupported_fragment_attachment_binding"));
+    assert_eq!(output.report.fragment_attachment_applications.len(), 1);
+    let attachment = &output.report.fragment_attachment_applications[0];
+    assert_eq!(attachment.child_role, "support");
+    assert_eq!(attachment.parent_role, "span");
+    let child = output
+        .recipe
+        .instances
+        .get(&attachment.child_instance)
+        .expect("attached child instance");
+    assert_eq!(child.parent, Some(attachment.parent_instance));
+    assert!(child.attachment.is_some());
 }
 
 #[test]
@@ -1269,7 +1352,7 @@ fn internal_fragment_roots_cannot_overlap_exported_occurrences() {
 }
 
 #[test]
-fn selected_fragment_generated_provenance_is_rejected_until_remapped() {
+fn generated_provenance_must_reference_a_fragment_local_operation() {
     let mut style = scifi_industrial_style_implementation();
     style
         .prototypes
@@ -1288,12 +1371,60 @@ fn selected_fragment_generated_provenance_is_rejected_until_remapped() {
         &style,
         &request("crate", "sci_fi_industrial", []),
     )
-    .expect_err("generated provenance should remain unsupported until remapped");
+    .expect_err("generated provenance must target a local operation");
 
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
+    let FamilyCompileError::FragmentRemap(
+        shape_family_compile::remap::FragmentRemapError::ExternalReference { id_kind, id, .. },
+    ) = error
+    else {
+        panic!("expected typed external-reference remap failure");
     };
-    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_generated_provenance"));
+    assert_eq!(id_kind, "operation");
+    assert_eq!(id, "777");
+}
+
+#[test]
+fn failed_family_fragment_remap_does_not_mutate_base_recipe_or_counters() {
+    let implementation = crate_implementation();
+    let before_base = implementation.base_recipe.clone();
+    let mut invalid_style = scifi_industrial_style_implementation();
+    invalid_style
+        .prototypes
+        .get_mut("armored_body")
+        .expect("body fragment")
+        .recipe
+        .instances
+        .get_mut(&LOCAL_INSTANCE)
+        .expect("body root")
+        .generated_by = Some(OperationId(777));
+
+    instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &invalid_style,
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect_err("invalid remap should fail");
+
+    assert_eq!(implementation.base_recipe, before_base);
+
+    let valid = instantiate_family(
+        &crate_family(),
+        &scifi_industrial_style_kit(),
+        &implementation,
+        &scifi_industrial_style_implementation(),
+        &request("crate", "sci_fi_industrial", []),
+    )
+    .expect("valid remap should still allocate from original base counters");
+    assert_eq!(
+        valid.recipe.definitions.keys().copied().collect::<Vec<_>>(),
+        vec![
+            PartDefinitionId(1),
+            PartDefinitionId(2),
+            PartDefinitionId(3)
+        ]
+    );
 }
 
 #[test]
@@ -1694,7 +1825,7 @@ fn rogue_executable_style_prototypes_are_rejected() {
 }
 
 #[test]
-fn unsupported_fragment_metadata_is_rejected_instead_of_dropped() {
+fn selected_fragment_metadata_is_remapped_instead_of_dropped() {
     let mut style = scifi_industrial_style_implementation();
     style
         .prototypes
@@ -1704,7 +1835,7 @@ fn unsupported_fragment_metadata_is_rejected_instead_of_dropped() {
         .instance_locks
         .insert(LOCAL_INSTANCE);
 
-    let error = instantiate_family(
+    let output = instantiate_family(
         &crate_family(),
         &scifi_industrial_style_kit(),
         &crate_implementation(),
@@ -1715,12 +1846,17 @@ fn unsupported_fragment_metadata_is_rejected_instead_of_dropped() {
             [("body_width", FamilyValue::Scalar(1.2))],
         ),
     )
-    .expect_err("unsupported fragment metadata should fail");
+    .expect("selected fragment metadata should be remapped");
 
-    let FamilyCompileError::ImplementationValidationFailed(report) = error else {
-        panic!("expected implementation validation failure");
-    };
-    assert!(issue_codes(&report).contains(&"unsupported_recipe_fragment_metadata"));
+    let remapped_body = output
+        .report
+        .fragment_remaps
+        .iter()
+        .find(|report| report.fragment_id == "armored_body")
+        .and_then(|report| report.remap.instances.get(&LOCAL_INSTANCE).copied())
+        .expect("body root should be remapped");
+    assert!(output.recipe.instance_locks.contains(&remapped_body));
+    assert!(!output.recipe.instance_locks.contains(&LOCAL_INSTANCE));
 }
 
 fn assert_concrete_exportable(output: &shape_family_compile::FamilyInstantiation) {
@@ -2347,6 +2483,38 @@ fn cylinder_fragment(
     )
 }
 
+fn add_socket_port(
+    fragment: &mut RecipeFragment,
+    port_id: &str,
+    socket_role: &str,
+    compatibility_tag: &str,
+) {
+    fragment
+        .recipe
+        .definitions
+        .get_mut(&LOCAL_DEFINITION)
+        .expect("fragment definition")
+        .sockets
+        .insert(
+            SocketId(7),
+            SocketSpec {
+                id: SocketId(7),
+                name: port_id.to_owned(),
+                local_frame: Frame3::default(),
+                role: socket_role.to_owned(),
+                tags: BTreeSet::from([compatibility_tag.to_owned()]),
+            },
+        );
+    fragment.exports.socket_ports.push(FragmentSocketPort {
+        id: port_id.to_owned(),
+        local_occurrence_root: LOCAL_INSTANCE,
+        local_socket: SocketId(7),
+        compatibility_tags: vec![compatibility_tag.to_owned()],
+    });
+    fragment.recipe.next_ids.socket = 8;
+    assert!(validate_asset_recipe(&fragment.recipe).is_valid());
+}
+
 fn fragment(
     id: &str,
     role: &str,
@@ -2425,6 +2593,68 @@ fn issue_codes(report: &shape_family::FamilyValidationReport) -> Vec<&str> {
         .iter()
         .map(|issue| issue.code.as_str())
         .collect()
+}
+
+fn assert_numeric_remap<K>(map: &BTreeMap<K, K>, allocated: &[K], next_id: u64)
+where
+    K: Copy + Ord + std::fmt::Debug + TestIdNumber,
+{
+    assert_eq!(map.len(), allocated.len());
+    let targets = map.values().copied().collect::<BTreeSet<_>>();
+    let allocated = allocated.iter().copied().collect::<BTreeSet<_>>();
+    assert_eq!(targets, allocated);
+    let sources = map.keys().copied().collect::<BTreeSet<_>>();
+    for (source, target) in map {
+        assert_ne!(source.id_number(), target.id_number());
+        assert!(!sources.contains(target));
+        assert!(target.id_number() < next_id);
+    }
+}
+
+trait TestIdNumber {
+    fn id_number(self) -> u64;
+}
+
+impl TestIdNumber for PartDefinitionId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for PartInstanceId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for ParameterId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for OperationId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for RegionId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for BoundaryLoopId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
+}
+
+impl TestIdNumber for SocketId {
+    fn id_number(self) -> u64 {
+        self.0
+    }
 }
 
 fn request<'a>(

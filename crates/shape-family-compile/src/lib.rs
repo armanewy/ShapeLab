@@ -2,10 +2,10 @@
 
 //! Executable bindings from asset-family/style-kit contracts to concrete recipes.
 //!
-//! This crate deliberately keeps the first compiler small: recipe fragments are
-//! deterministic Shape Lab recipes, parameter bindings are simple scalar or
-//! presence/prototype choices, and unsupported fragment features are rejected
-//! instead of implicitly remapped.
+//! This crate keeps executable family binding deterministic: recipe fragments
+//! are Shape Lab recipes, semantic IDs are remapped through typed maps,
+//! parameter bindings are explicit scalar or presence/prototype choices, and
+//! unsupported binding features fail instead of being ignored.
 
 pub mod identity;
 pub mod remap;
@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetId, AssetRecipe, AssetValidationReport, AttachmentMode, ParameterDescriptor,
-    PartDefinitionId, PartInstanceId, RegionId, SocketId, SurfaceRegionSpec, validate_asset_recipe,
+    PartDefinitionId, PartInstanceId, RegionId, SocketId, validate_asset_recipe,
 };
 use shape_compile::{AssetArtifact, CompileError, CompileValidationReport, compile_asset};
 use shape_family::{
@@ -32,7 +32,7 @@ use crate::identity::{
 };
 
 /// Current schema version for executable family implementations.
-pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 2;
+pub const FAMILY_IMPLEMENTATION_SCHEMA_VERSION: u32 = 3;
 
 /// Current schema version for executable style implementations.
 pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 3;
@@ -156,33 +156,52 @@ pub enum FragmentSurfaceTarget {
 pub struct FragmentAttachmentBinding {
     /// Family attachment-rule ID this binding implements.
     pub family_attachment_rule: String,
-    /// Source family role.
-    pub source_role: String,
-    /// Source fragment port ID.
-    pub source_port: String,
-    /// Destination family role.
-    pub destination_role: String,
-    /// Destination fragment port ID.
-    pub destination_port: String,
+    /// Parent family role receiving the child occurrence.
+    pub parent_role: String,
+    /// Parent fragment socket port ID.
+    pub parent_port: String,
+    /// Child family role that receives the concrete attachment.
+    pub child_role: String,
+    /// Child fragment socket port ID.
+    pub child_port: String,
     /// Pairing policy for repeated occurrences.
     pub pairing: FragmentAttachmentPairing,
-    /// Finite offset applied after port alignment.
-    pub offset: [f32; 3],
+    /// Finite rigid offset applied after port alignment.
+    pub rigid_offset: RigidOffset,
     /// Attachment mode applied to generated instance attachments.
     pub attachment_mode: AttachmentMode,
+}
+
+/// Rigid socket-alignment offset. Scale is intentionally unsupported.
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RigidOffset {
+    /// Translation applied in the aligned socket frame.
+    pub translation: [f32; 3],
+    /// Canonical normalized quaternion `[x, y, z, w]`.
+    pub rotation: [f32; 4],
+}
+
+impl Default for RigidOffset {
+    fn default() -> Self {
+        Self {
+            translation: [0.0, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
 }
 
 /// Pairing policy for cross-fragment port bindings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum FragmentAttachmentPairing {
-    /// Every source occurrence pairs with every destination occurrence.
+    /// Every child occurrence pairs with every parent occurrence.
     AllPairs,
     /// Pair occurrences by deterministic ordinal.
     ByOccurrenceIndex,
-    /// Pair each source to the nearest available destination.
+    /// Pair each child to the nearest available parent.
     NearestOneToOne,
-    /// Explicit source/destination occurrence ordinals.
+    /// Explicit child/parent occurrence ordinals.
     ExplicitOrdinalPairs(Vec<(u32, u32)>),
 }
 
@@ -299,6 +318,8 @@ pub struct FamilyInstantiationReport {
     pub selected_providers: BTreeMap<String, String>,
     /// Applied parameter bindings.
     pub parameter_applications: Vec<ParameterApplication>,
+    /// Concrete cross-fragment attachments generated from exported ports.
+    pub fragment_attachment_applications: Vec<remap::ports::FragmentAttachmentApplication>,
     /// Typed fragment remaps used while merging providers.
     pub fragment_remaps: Vec<remap::FragmentRemapReport>,
     /// Stable source recipe hash from the compiled artifact.
@@ -387,7 +408,7 @@ pub enum FamilyCompileError {
         /// Parameter slot.
         slot: String,
     },
-    /// Fragment contains unsupported features for this first compiler slice.
+    /// Fragment contains unsupported binding features.
     #[error("unsupported recipe fragment `{fragment}`: {reason}")]
     UnsupportedFragment {
         /// Fragment ID.
@@ -395,6 +416,12 @@ pub enum FamilyCompileError {
         /// Reason.
         reason: String,
     },
+    /// Fragment remapping failed.
+    #[error(transparent)]
+    FragmentRemap(#[from] remap::FragmentRemapError),
+    /// Cross-fragment attachment binding failed.
+    #[error("fragment attachment binding validation failed")]
+    FragmentAttachmentBindingFailed(FamilyValidationReport),
     /// Fragment recipe is invalid before remapping.
     #[error("recipe fragment `{fragment}` failed validation")]
     FragmentValidationFailed {
@@ -481,6 +508,8 @@ pub fn instantiate_family(
         merge_fragment(&mut recipe, fragment, &mut merge_state)?;
     }
 
+    let attachment_report =
+        apply_fragment_attachment_bindings(&mut recipe, family, family_impl, &merge_state)?;
     let mut parameter_applications = Vec::new();
     apply_parameter_bindings(
         &mut recipe,
@@ -518,6 +547,7 @@ pub fn instantiate_family(
             .map(|(role, selection)| (role.clone(), selection.fragment.clone()))
             .collect(),
         parameter_applications,
+        fragment_attachment_applications: attachment_report.attachments,
         fragment_remaps: merge_state.remap_reports,
         source_recipe_hash: artifact.source_recipe_hash,
         instantiation_fingerprint: fingerprints.geometry_input.0.to_hex(),
@@ -1096,37 +1126,31 @@ fn validate_attachment_bindings(
         .collect::<BTreeMap<_, _>>();
     for (index, binding) in family_impl.attachment_bindings.iter().enumerate() {
         let subject = format!("family_implementation.attachment_bindings.{index}");
-        push_report_issue(
-            report,
-            Some(subject.clone()),
-            "unsupported_fragment_attachment_binding",
-            "Fragment attachment bindings are declared but not executable until port remapping is implemented.",
-        );
         validate_identifier_report(
             report,
-            Some(format!("{subject}.source_port")),
-            &binding.source_port,
+            Some(format!("{subject}.parent_port")),
+            &binding.parent_port,
             "invalid_fragment_attachment_port",
         );
         validate_identifier_report(
             report,
-            Some(format!("{subject}.destination_port")),
-            &binding.destination_port,
+            Some(format!("{subject}.child_port")),
+            &binding.child_port,
             "invalid_fragment_attachment_port",
         );
-        if !roles.contains_key(binding.source_role.as_str()) {
+        if !roles.contains_key(binding.parent_role.as_str()) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.source_role")),
-                "unknown_fragment_attachment_source_role",
+                Some(format!("{subject}.parent_role")),
+                "unknown_fragment_attachment_parent_role",
                 "Fragment attachment bindings must reference declared family roles.",
             );
         }
-        if !roles.contains_key(binding.destination_role.as_str()) {
+        if !roles.contains_key(binding.child_role.as_str()) {
             push_report_issue(
                 report,
-                Some(format!("{subject}.destination_role")),
-                "unknown_fragment_attachment_destination_role",
+                Some(format!("{subject}.child_role")),
+                "unknown_fragment_attachment_child_role",
                 "Fragment attachment bindings must reference declared family roles.",
             );
         }
@@ -1139,23 +1163,73 @@ fn validate_attachment_bindings(
             );
             continue;
         };
-        if rule.from_role != binding.source_role || rule.to_role != binding.destination_role {
+        if rule.from_role != binding.child_role || rule.to_role != binding.parent_role {
             push_report_issue(
                 report,
                 Some(format!("{subject}.family_attachment_rule")),
                 "fragment_attachment_rule_role_mismatch",
-                "Fragment attachment binding roles must match the family attachment rule direction.",
+                "Fragment attachment binding child/parent roles must match the family attachment rule direction.",
             );
         }
-        if binding.offset.iter().any(|value| !value.is_finite()) {
+        validate_rigid_offset(report, &subject, &binding.rigid_offset);
+        if binding.attachment_mode != AttachmentMode::RigidSeparate {
             push_report_issue(
                 report,
-                Some(format!("{subject}.offset")),
-                "non_finite_fragment_attachment_offset",
-                "Fragment attachment offsets must be finite.",
+                Some(format!("{subject}.attachment_mode")),
+                "unsupported_fragment_attachment_mode",
+                "Fragment attachment bindings currently support only RigidSeparate.",
             );
         }
     }
+}
+
+fn validate_rigid_offset(report: &mut FamilyValidationReport, subject: &str, offset: &RigidOffset) {
+    if offset.translation.iter().any(|value| !value.is_finite()) {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.translation")),
+            "non_finite_fragment_attachment_translation",
+            "Fragment attachment translations must be finite.",
+        );
+    }
+    if offset.rotation.iter().any(|value| !value.is_finite()) {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_finite_fragment_attachment_rotation",
+            "Fragment attachment rotations must be finite.",
+        );
+        return;
+    }
+    let length_squared = offset
+        .rotation
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>();
+    if (length_squared - 1.0).abs() > 1.0e-4 {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_unit_fragment_attachment_rotation",
+            "Fragment attachment rotations must be normalized quaternions.",
+        );
+    }
+    if !is_canonical_quaternion(offset.rotation) {
+        push_report_issue(
+            report,
+            Some(format!("{subject}.rigid_offset.rotation")),
+            "non_canonical_fragment_attachment_rotation",
+            "Fragment attachment rotations must use the canonical quaternion sign.",
+        );
+    }
+}
+
+fn is_canonical_quaternion(rotation: [f32; 4]) -> bool {
+    rotation[3] > 0.0
+        || (rotation[3] == 0.0
+            && (rotation[2] > 0.0
+                || (rotation[2] == 0.0
+                    && (rotation[1] > 0.0 || (rotation[1] == 0.0 && rotation[0] >= 0.0)))))
 }
 
 fn validate_recipe_fragment_exports(
@@ -1277,7 +1351,6 @@ fn validate_recipe_fragment_exports(
             );
         }
     }
-    validate_supported_fragment_contract(report, subject, fragment);
 }
 
 fn validate_fragment_socket_ports(
@@ -1438,77 +1511,6 @@ fn validate_fragment_port_id(
             Some(subject),
             duplicate_code,
             "Fragment port IDs must be unique within one port kind.",
-        );
-    }
-}
-
-fn validate_supported_fragment_contract(
-    report: &mut FamilyValidationReport,
-    subject: &str,
-    fragment: &RecipeFragment,
-) {
-    if !fragment.recipe.constraints.is_empty()
-        || !fragment.recipe.relationships.is_empty()
-        || !fragment.recipe.instance_locks.is_empty()
-        || !fragment.recipe.subtree_locks.is_empty()
-        || !fragment.recipe.topology_locks.is_empty()
-        || !fragment.recipe.variation.optional_instances.is_empty()
-        || !fragment.recipe.variation.replacement_groups.is_empty()
-        || !fragment.recipe.variation.count_ranges.is_empty()
-        || !fragment
-            .recipe
-            .variation
-            .parameter_range_overrides
-            .is_empty()
-        || !fragment.recipe.variation.semantic_cut_groups.is_empty()
-    {
-        push_report_issue(
-            report,
-            Some(format!("{subject}.recipe")),
-            "unsupported_recipe_fragment_metadata",
-            "Constraints, relationships, locks, and variation metadata are not remapped yet.",
-        );
-    }
-    for (definition_id, definition) in &fragment.recipe.definitions {
-        if !definition.geometry.operations.is_empty() {
-            push_report_issue(
-                report,
-                Some(format!("{subject}.recipe.definitions.{}", definition_id.0)),
-                "unsupported_recipe_fragment_modeling_operations",
-                "Modeling operations are not remapped yet.",
-            );
-        }
-        if !definition.sockets.is_empty() {
-            push_report_issue(
-                report,
-                Some(format!(
-                    "{subject}.recipe.definitions.{}.sockets",
-                    definition_id.0
-                )),
-                "unsupported_recipe_fragment_sockets",
-                "Fragment sockets are not remapped yet.",
-            );
-        }
-    }
-    if !fragment.exports.socket_ports.is_empty() {
-        push_report_issue(
-            report,
-            Some(format!("{subject}.exports.socket_ports")),
-            "unsupported_fragment_socket_ports",
-            "Socket port exports are declared but not executable until socket remapping is implemented.",
-        );
-    }
-    if fragment
-        .recipe
-        .instances
-        .values()
-        .any(|instance| instance.generated_by.is_some())
-    {
-        push_report_issue(
-            report,
-            Some(format!("{subject}.recipe.instances")),
-            "unsupported_recipe_fragment_generated_provenance",
-            "Generated-instance provenance is not remapped yet.",
         );
     }
 }
@@ -2260,7 +2262,14 @@ struct MergeState {
     scalar_paths: BTreeMap<(String, String), String>,
     role_occurrence_roots: BTreeMap<String, Vec<PartInstanceId>>,
     role_internal_instances: BTreeMap<String, Vec<PartInstanceId>>,
+    selected_fragments: Vec<SelectedFragmentRecord>,
     remap_reports: Vec<remap::FragmentRemapReport>,
+}
+
+struct SelectedFragmentRecord {
+    role: String,
+    fragment: RecipeFragment,
+    remap: remap::FragmentRemap,
 }
 
 fn merge_fragment(
@@ -2268,7 +2277,6 @@ fn merge_fragment(
     fragment: &RecipeFragment,
     state: &mut MergeState,
 ) -> Result<(), FamilyCompileError> {
-    validate_supported_fragment(fragment)?;
     let fragment_report = validate_asset_recipe(&fragment.recipe);
     if !fragment_report.is_valid() {
         return Err(FamilyCompileError::FragmentValidationFailed {
@@ -2277,66 +2285,52 @@ fn merge_fragment(
         });
     }
 
-    let prepared_remap = remap::ids::prepare_fragment_id_remap(target, fragment);
-    let fragment_remap = &prepared_remap.remap;
-
-    for (old_id, definition) in &fragment.recipe.definitions {
-        let mut cloned = definition.clone();
-        cloned.id = *fragment_remap
-            .definitions
-            .get(old_id)
-            .ok_or_else(|| unsupported_fragment(&fragment.id, "definition ID was not allocated"))?;
-        cloned.regions = remap_regions(&definition.regions, &fragment_remap.regions);
-        target.definitions.insert(cloned.id, cloned);
-    }
-
-    for (old_id, instance) in &fragment.recipe.instances {
-        let mut cloned = instance.clone();
-        cloned.id = *fragment_remap
-            .instances
-            .get(old_id)
-            .ok_or_else(|| unsupported_fragment(&fragment.id, "instance ID was not allocated"))?;
-        cloned.definition = *fragment_remap
-            .definitions
-            .get(&instance.definition)
-            .ok_or_else(|| {
-                unsupported_fragment(&fragment.id, "instance references an unmapped definition")
-            })?;
-        cloned.parent = instance
-            .parent
-            .map(|parent| {
-                fragment_remap
-                    .instances
-                    .get(&parent)
-                    .copied()
-                    .ok_or_else(|| {
-                        unsupported_fragment(&fragment.id, "instance references an unmapped parent")
-                    })
-            })
-            .transpose()?;
-        target.instances.insert(cloned.id, cloned.clone());
-    }
-    for root in &fragment.recipe.root_instances {
-        let Some(root) = fragment_remap.instances.get(root).copied() else {
-            return Err(unsupported_fragment(
-                &fragment.id,
-                "root instance was not remapped",
-            ));
-        };
-        target.root_instances.push(root);
-    }
-    let occurrence_roots = remap_fragment_instance_list(
-        fragment,
-        &fragment.exports.role_occurrence_roots,
-        &fragment_remap.instances,
-        "role occurrence root",
+    let mut working = target.clone();
+    let assembly = remap::assembly::remap_fragment_assembly(&mut working, fragment)?;
+    let fragment_remap = assembly.remap.clone();
+    let relationships = remap::relationships::remap_fragment_relationships(
+        &fragment.id,
+        &fragment.recipe,
+        &fragment_remap,
     )?;
-    let internal_instances = remap_fragment_instance_list(
-        fragment,
-        &fragment.exports.internal_roots,
-        &fragment_remap.instances,
-        "internal instance",
+    append_relationship_metadata(&mut working, &relationships);
+    let variation = remap::variation::remap_fragment_variation_metadata(
+        &fragment.id,
+        remap::variation::VariationMetadataSource {
+            parameters: &fragment.recipe.parameters,
+            parameter_locks: &fragment.recipe.locks,
+            instance_locks: &fragment.recipe.instance_locks,
+            subtree_locks: &fragment.recipe.subtree_locks,
+            topology_locks: &fragment.recipe.topology_locks,
+            variation: &fragment.recipe.variation,
+        },
+        &fragment_remap,
     )?;
+    append_variation_metadata(&mut working, &fragment.id, &variation)?;
+
+    let remapped_fragment = remapped_fragment_recipe(
+        fragment,
+        &working,
+        &fragment_remap,
+        &relationships,
+        &variation,
+    )?;
+    let remapped_fragment_report = validate_asset_recipe(&remapped_fragment);
+    if !remapped_fragment_report.is_valid() {
+        return Err(FamilyCompileError::FragmentValidationFailed {
+            fragment: fragment.id.clone(),
+            report: remapped_fragment_report,
+        });
+    }
+    let combined_report = validate_asset_recipe(&working);
+    if !combined_report.is_valid() {
+        return Err(FamilyCompileError::AssetValidationFailed(combined_report));
+    }
+
+    let occurrence_roots = assembly.exports.role_occurrence_roots.clone();
+    let internal_instances = assembly.exports.internal_roots.clone();
+    *target = working;
+
     state
         .role_occurrence_roots
         .entry(fragment.provided_role.clone())
@@ -2349,155 +2343,266 @@ fn merge_fragment(
         .extend(internal_instances);
 
     for (old_id, parameter) in &fragment.recipe.parameters {
-        let mut cloned = parameter.clone();
-        cloned.id = *fragment_remap
+        let new_parameter_id = fragment_remap
             .parameters
             .get(old_id)
-            .ok_or_else(|| unsupported_fragment(&fragment.id, "parameter ID was not allocated"))?;
-        cloned.path = remap_scalar_path(
-            &parameter.path,
-            &fragment_remap.definitions,
-            &fragment_remap.instances,
-        )?;
-        let new_parameter_id = cloned.id;
+            .copied()
+            .ok_or_else(|| remap::FragmentRemapError::MissingMapping {
+                fragment: fragment.id.clone(),
+                id_kind: "parameter".to_owned(),
+                id: old_id.0.to_string(),
+            })?;
+        let cloned = variation.parameters.get(&new_parameter_id).ok_or_else(|| {
+            remap::FragmentRemapError::MissingMapping {
+                fragment: fragment.id.clone(),
+                id_kind: "parameter descriptor".to_owned(),
+                id: new_parameter_id.0.to_string(),
+            }
+        })?;
         state.scalar_paths.insert(
             (fragment.provided_role.clone(), parameter.path.clone()),
             cloned.path.clone(),
         );
-        target.parameters.insert(new_parameter_id, cloned);
-        if fragment.recipe.locks.contains(old_id) {
-            target.locks.insert(new_parameter_id);
-        }
     }
+    state.selected_fragments.push(SelectedFragmentRecord {
+        role: fragment.provided_role.clone(),
+        fragment: fragment.clone(),
+        remap: fragment_remap.clone(),
+    });
     state.remap_reports.push(remap::FragmentRemapReport {
         fragment_id: fragment.id.clone(),
-        remap: prepared_remap.remap,
-        allocated: prepared_remap.allocated,
+        remap: assembly.remap,
+        allocated: assembly.allocated,
         warnings: Vec::new(),
     });
     Ok(())
 }
 
-fn remap_fragment_instance_list(
-    fragment: &RecipeFragment,
-    local_instances: &[PartInstanceId],
-    instance_map: &BTreeMap<PartInstanceId, PartInstanceId>,
-    label: &str,
-) -> Result<Vec<PartInstanceId>, FamilyCompileError> {
-    local_instances
-        .iter()
-        .map(|instance| {
-            instance_map.get(instance).copied().ok_or_else(|| {
-                unsupported_fragment(
-                    &fragment.id,
-                    &format!("{label} was not remapped from the fragment recipe"),
-                )
-            })
-        })
-        .collect()
+fn append_relationship_metadata(
+    recipe: &mut AssetRecipe,
+    relationships: &remap::relationships::RemappedFragmentRelationships,
+) {
+    recipe
+        .constraints
+        .extend(relationships.constraints.iter().cloned());
+    recipe
+        .relationships
+        .extend(relationships.relationships.iter().cloned());
+    recipe
+        .locks
+        .extend(relationships.parameter_locks.iter().copied());
+    recipe
+        .instance_locks
+        .extend(relationships.instance_locks.iter().copied());
+    recipe
+        .subtree_locks
+        .extend(relationships.subtree_locks.iter().copied());
+    recipe
+        .topology_locks
+        .extend(relationships.topology_locks.iter().copied());
 }
 
-fn validate_supported_fragment(fragment: &RecipeFragment) -> Result<(), FamilyCompileError> {
-    if !fragment.recipe.constraints.is_empty()
-        || !fragment.recipe.relationships.is_empty()
-        || !fragment.recipe.instance_locks.is_empty()
-        || !fragment.recipe.subtree_locks.is_empty()
-        || !fragment.recipe.topology_locks.is_empty()
-        || !fragment.recipe.variation.optional_instances.is_empty()
-        || !fragment.recipe.variation.replacement_groups.is_empty()
-        || !fragment.recipe.variation.count_ranges.is_empty()
-        || !fragment
-            .recipe
-            .variation
-            .parameter_range_overrides
-            .is_empty()
-        || !fragment.recipe.variation.semantic_cut_groups.is_empty()
-    {
-        return Err(unsupported_fragment(
-            &fragment.id,
-            "constraints, relationships, locks, and variation metadata are not remapped yet",
-        ));
+fn append_variation_metadata(
+    recipe: &mut AssetRecipe,
+    fragment: &str,
+    variation: &remap::variation::RemappedVariationMetadata,
+) -> Result<(), remap::FragmentRemapError> {
+    for (parameter, descriptor) in &variation.parameters {
+        insert_unique_remapped(
+            fragment,
+            &mut recipe.parameters,
+            *parameter,
+            descriptor.clone(),
+            "parameter",
+        )?;
     }
-    for definition in fragment.recipe.definitions.values() {
-        if !definition.geometry.operations.is_empty() || !definition.sockets.is_empty() {
-            return Err(unsupported_fragment(
-                &fragment.id,
-                "modeling operations and sockets are not remapped yet",
-            ));
-        }
+    recipe
+        .locks
+        .extend(variation.parameter_locks.iter().copied());
+    recipe
+        .instance_locks
+        .extend(variation.instance_locks.iter().copied());
+    recipe
+        .subtree_locks
+        .extend(variation.subtree_locks.iter().copied());
+    recipe
+        .topology_locks
+        .extend(variation.topology_locks.iter().copied());
+    recipe
+        .variation
+        .optional_instances
+        .extend(variation.variation.optional_instances.iter().copied());
+    for (group, hint) in &variation.variation.replacement_groups {
+        insert_unique_remapped(
+            fragment,
+            &mut recipe.variation.replacement_groups,
+            group.clone(),
+            hint.clone(),
+            "replacement group",
+        )?;
     }
-    if fragment
-        .recipe
-        .instances
-        .values()
-        .any(|instance| instance.generated_by.is_some())
-    {
-        return Err(unsupported_fragment(
-            &fragment.id,
-            "generated-instance provenance is not remapped yet",
-        ));
+    for (operation, range) in &variation.variation.count_ranges {
+        insert_unique_remapped(
+            fragment,
+            &mut recipe.variation.count_ranges,
+            *operation,
+            *range,
+            "count range",
+        )?;
+    }
+    for (parameter, range) in &variation.variation.parameter_range_overrides {
+        insert_unique_remapped(
+            fragment,
+            &mut recipe.variation.parameter_range_overrides,
+            *parameter,
+            *range,
+            "parameter range override",
+        )?;
+    }
+    for (group, hint) in &variation.variation.semantic_cut_groups {
+        insert_unique_remapped(
+            fragment,
+            &mut recipe.variation.semantic_cut_groups,
+            group.clone(),
+            hint.clone(),
+            "semantic cut group",
+        )?;
     }
     Ok(())
 }
 
-fn unsupported_fragment(fragment: &str, reason: &str) -> FamilyCompileError {
-    FamilyCompileError::UnsupportedFragment {
-        fragment: fragment.to_owned(),
-        reason: reason.to_owned(),
+fn insert_unique_remapped<K, V>(
+    fragment: &str,
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    value: V,
+    kind: &str,
+) -> Result<(), remap::FragmentRemapError>
+where
+    K: Ord + std::fmt::Debug,
+{
+    if map.insert(key, value).is_some() {
+        return Err(remap::FragmentRemapError::DuplicateMapping {
+            fragment: fragment.to_owned(),
+            id_kind: kind.to_owned(),
+            id: "target collision".to_owned(),
+        });
     }
+    Ok(())
 }
 
-fn remap_regions(
-    regions: &BTreeMap<RegionId, SurfaceRegionSpec>,
-    region_map: &BTreeMap<RegionId, RegionId>,
-) -> BTreeMap<RegionId, SurfaceRegionSpec> {
-    regions
+fn remapped_fragment_recipe(
+    fragment: &RecipeFragment,
+    combined: &AssetRecipe,
+    remap: &remap::FragmentRemap,
+    relationships: &remap::relationships::RemappedFragmentRelationships,
+    variation: &remap::variation::RemappedVariationMetadata,
+) -> Result<AssetRecipe, remap::FragmentRemapError> {
+    let mut recipe = AssetRecipe::new(fragment.recipe.id, fragment.recipe.title.clone());
+    recipe.schema_version = fragment.recipe.schema_version;
+    recipe.definitions = remap
+        .definitions
+        .values()
+        .map(|id| {
+            combined
+                .definitions
+                .get(id)
+                .cloned()
+                .map(|definition| (*id, definition))
+                .ok_or_else(|| remap::FragmentRemapError::MissingMapping {
+                    fragment: fragment.id.clone(),
+                    id_kind: "part_definition".to_owned(),
+                    id: id.0.to_string(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    recipe.instances = remap
+        .instances
+        .values()
+        .map(|id| {
+            combined
+                .instances
+                .get(id)
+                .cloned()
+                .map(|instance| (*id, instance))
+                .ok_or_else(|| remap::FragmentRemapError::MissingMapping {
+                    fragment: fragment.id.clone(),
+                    id_kind: "part_instance".to_owned(),
+                    id: id.0.to_string(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    recipe.root_instances = fragment
+        .recipe
+        .root_instances
         .iter()
-        .map(|(old_id, region)| {
-            let new_id = region_map[old_id];
-            let mut cloned = region.clone();
-            cloned.id = new_id;
-            (new_id, cloned)
+        .map(|root| {
+            remap.instances.get(root).copied().ok_or_else(|| {
+                remap::FragmentRemapError::MissingMapping {
+                    fragment: fragment.id.clone(),
+                    id_kind: "root_instance".to_owned(),
+                    id: root.0.to_string(),
+                }
+            })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    recipe.parameters = variation.parameters.clone();
+    recipe.locks = relationships
+        .parameter_locks
+        .union(&variation.parameter_locks)
+        .copied()
+        .collect();
+    recipe.instance_locks = relationships
+        .instance_locks
+        .union(&variation.instance_locks)
+        .copied()
+        .collect();
+    recipe.subtree_locks = relationships
+        .subtree_locks
+        .union(&variation.subtree_locks)
+        .copied()
+        .collect();
+    recipe.topology_locks = relationships
+        .topology_locks
+        .union(&variation.topology_locks)
+        .copied()
+        .collect();
+    recipe.constraints = relationships.constraints.clone();
+    recipe.relationships = relationships.relationships.clone();
+    recipe.variation = variation.variation.clone();
+    recipe.next_ids = combined.next_ids.clone();
+    Ok(recipe)
 }
 
-fn remap_scalar_path(
-    path: &str,
-    definition_map: &BTreeMap<PartDefinitionId, PartDefinitionId>,
-    instance_map: &BTreeMap<PartInstanceId, PartInstanceId>,
-) -> Result<String, FamilyCompileError> {
-    let parts = path.split('.').collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["definition", id, rest @ ..] => {
-            let old = PartDefinitionId(parse_id(path, id)?);
-            let Some(new) = definition_map.get(&old) else {
-                return Err(FamilyCompileError::UnsupportedScalarPath {
-                    path: path.to_owned(),
-                });
-            };
-            Ok(format!("definition.{}.{}", new.0, rest.join(".")))
-        }
-        ["instance", id, rest @ ..] => {
-            let old = PartInstanceId(parse_id(path, id)?);
-            let Some(new) = instance_map.get(&old) else {
-                return Err(FamilyCompileError::UnsupportedScalarPath {
-                    path: path.to_owned(),
-                });
-            };
-            Ok(format!("instance.{}.{}", new.0, rest.join(".")))
-        }
-        _ => Err(FamilyCompileError::UnsupportedScalarPath {
-            path: path.to_owned(),
-        }),
+fn apply_fragment_attachment_bindings(
+    recipe: &mut AssetRecipe,
+    family: &AssetFamilySchema,
+    family_impl: &FamilyImplementation,
+    state: &MergeState,
+) -> Result<remap::ports::FragmentAttachmentBindingReport, FamilyCompileError> {
+    let selected = state
+        .selected_fragments
+        .iter()
+        .map(|record| remap::ports::SelectedFragmentPorts {
+            role: record.role.as_str(),
+            fragment: &record.fragment,
+            remap: &record.remap,
+        })
+        .collect::<Vec<_>>();
+    let mut working = recipe.clone();
+    let report = remap::ports::apply_family_attachment_bindings(
+        &mut working,
+        family,
+        family_impl,
+        &selected,
+    )
+    .map_err(FamilyCompileError::FragmentAttachmentBindingFailed)?;
+    let validation = validate_asset_recipe(&working);
+    if !validation.is_valid() {
+        return Err(FamilyCompileError::AssetValidationFailed(validation));
     }
-}
-
-fn parse_id(path: &str, raw: &str) -> Result<u64, FamilyCompileError> {
-    raw.parse()
-        .map_err(|_| FamilyCompileError::UnsupportedScalarPath {
-            path: path.to_owned(),
-        })
+    *recipe = working;
+    Ok(report)
 }
 
 fn apply_parameter_bindings(
