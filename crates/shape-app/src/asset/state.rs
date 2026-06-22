@@ -13,7 +13,8 @@ use shape_asset::{
     ModelingOperationSpec, OperationId, OperationPhase, OperationRemovalPolicy, ParameterId,
     PartDefinitionId, PartInstance, PartInstanceId, RevisionId, allocate_boundary_loop_id,
     allocate_operation_id, allocate_region_id, apply_edit_program_with_report,
-    validate_asset_recipe,
+    feasible_boundary_loop_bevel_width_range, feasible_operation_scalar_range,
+    feasible_scalar_path_range, validate_asset_recipe,
 };
 use shape_compile::export::recipe_hash;
 use shape_compile::validation::{ValidationIssue, validate_model, validation_config_from_recipe};
@@ -38,7 +39,8 @@ const FIRST_REVISION_ID: u64 = 1;
 const FIRST_CHILD_REVISION_ID: u64 = 2;
 const DEFAULT_CANDIDATE_COUNT: usize = 6;
 const ASSET_APP_PROJECT_KIND: &str = "shape-lab.asset-modeling-lab";
-const ASSET_APP_PROJECT_SCHEMA_VERSION: u32 = 1;
+const ASSET_APP_PROJECT_SCHEMA_VERSION: u32 = 2;
+const ASSET_APP_MIN_PROJECT_SCHEMA_VERSION: u32 = 1;
 
 /// UI-facing validation issue independent of compile and recipe issue sources.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -615,6 +617,19 @@ impl AssetAppState {
         if self.recipe.locks.contains(&parameter) {
             return Err(AssetAppStateError::LockedParameter(parameter));
         }
+        let descriptor = self
+            .recipe
+            .parameters
+            .get(&parameter)
+            .ok_or(AssetAppStateError::UnknownParameter(parameter))?;
+        if let Some(range) = feasible_scalar_path_range(&self.recipe, &descriptor.path)
+            && !range.contains(value)
+        {
+            return Err(AssetAppStateError::EditRejected(format!(
+                "parameter {:?} value {value:.4} is outside feasible range {:.4}..{:.4}",
+                parameter, range.minimum, range.maximum
+            )));
+        }
         self.selected_parameter = Some(parameter);
         self.apply_edit(
             "Set parameter",
@@ -635,6 +650,27 @@ impl AssetAppState {
         }
         if operation_is_cut_in_definition(&self.recipe, definition, operation) {
             self.selected_cut_operation = Some(operation);
+        }
+        match feasible_operation_scalar_range(&self.recipe, definition, operation, &field) {
+            Some(range) if !range.contains(value) => {
+                return Err(AssetAppStateError::EditRejected(format!(
+                    "operation {:?} field '{}' value {value:.4} is outside feasible range {:.4}..{:.4}",
+                    operation, field, range.minimum, range.maximum
+                )));
+            }
+            None if operation_scalar_requires_feasible_range(
+                &self.recipe,
+                definition,
+                operation,
+                &field,
+            ) =>
+            {
+                return Err(AssetAppStateError::EditRejected(format!(
+                    "operation {:?} field '{}' has no feasible value range",
+                    operation, field
+                )));
+            }
+            _ => {}
         }
         let label = operation_edit_label(&self.recipe, definition, operation, OperationEdit::Set);
         self.apply_edit(
@@ -690,6 +726,19 @@ impl AssetAppState {
             return Err(AssetAppStateError::EditRejected(format!(
                 "operation {:?} does not expose eligible boundary loop {:?}",
                 source_operation, target_loop
+            )));
+        }
+        let range = feasible_boundary_loop_bevel_width_range(&self.recipe, definition, target_loop)
+            .ok_or_else(|| {
+                AssetAppStateError::EditRejected(format!(
+                    "boundary loop {:?} has no feasible bevel width",
+                    target_loop
+                ))
+            })?;
+        if !range.contains(width) {
+            return Err(AssetAppStateError::EditRejected(format!(
+                "boundary loop {:?} bevel width {width:.4} is outside feasible range {:.4}..{:.4}",
+                target_loop, range.minimum, range.maximum
             )));
         }
 
@@ -939,6 +988,26 @@ impl AssetAppState {
         edit: Option<AssetEditProgram>,
     ) -> Result<RevisionId, AssetAppStateError> {
         ensure_valid_recipe(&recipe)?;
+        if let Some(edit) = &edit {
+            let replayed = apply_edit_program_with_report(&self.recipe, edit)
+                .map_err(|rejection| {
+                    AssetAppStateError::EditRejected(format!(
+                        "revision edit program does not replay: {}",
+                        rejection
+                            .report
+                            .entries
+                            .last()
+                            .map(|entry| entry.message.as_str())
+                            .unwrap_or("edit rejected")
+                    ))
+                })?
+                .recipe;
+            if replayed != recipe {
+                return Err(AssetAppStateError::EditRejected(
+                    "revision edit program does not reproduce its recipe".to_owned(),
+                ));
+            }
+        }
         let revision = self
             .revision_history
             .push_child(label, recipe.clone(), edit);
@@ -1495,6 +1564,33 @@ fn operation_is_cut(operation: &ModelingOperationSpec) -> bool {
     )
 }
 
+fn operation_scalar_requires_feasible_range(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
+    field: &str,
+) -> bool {
+    recipe
+        .definitions
+        .get(&definition)
+        .and_then(|definition| {
+            definition
+                .geometry
+                .operations
+                .iter()
+                .find(|candidate| candidate.operation_id() == operation)
+        })
+        .is_some_and(|operation| {
+            matches!(
+                (operation, field),
+                (
+                    ModelingOperationSpec::BevelBoundaryLoop { .. },
+                    "bevel_boundary_loop.width"
+                )
+            )
+        })
+}
+
 fn ensure_valid_recipe(recipe: &AssetRecipe) -> Result<(), AssetAppStateError> {
     let issues = recipe_issues(recipe);
     if issues.is_empty() {
@@ -1511,7 +1607,9 @@ fn ensure_valid_project_snapshot(project: &AssetModelingProject) -> Result<(), A
             project.project_kind
         )));
     }
-    if project.schema_version != ASSET_APP_PROJECT_SCHEMA_VERSION {
+    if project.schema_version < ASSET_APP_MIN_PROJECT_SCHEMA_VERSION
+        || project.schema_version > ASSET_APP_PROJECT_SCHEMA_VERSION
+    {
         return Err(AssetAppStateError::InvalidProject(format!(
             "unsupported schema version {}",
             project.schema_version

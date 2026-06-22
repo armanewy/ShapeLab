@@ -693,6 +693,44 @@ fn beveled_cut_duplicate_search_is_deterministic() {
 }
 
 #[test]
+fn boundary_bevel_width_search_skips_infeasible_current_range() {
+    let mut recipe = beveled_cut_recipe();
+    for operation in &mut recipe
+        .definitions
+        .get_mut(&PartDefinitionId(7))
+        .expect("cut panel definition should exist")
+        .geometry
+        .operations
+    {
+        if let ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(6),
+            width,
+            ..
+        } = operation
+        {
+            *width = 0.030;
+        }
+    }
+
+    let output = generate_asset_candidates(&recipe, &request(43, AssetCandidateMode::Explore))
+        .expect("candidates should generate");
+
+    assert!(output.candidates.iter().all(|candidate| {
+        candidate.program.operations.iter().all(|edit| {
+            !matches!(
+                edit,
+                AssetEdit::SetOperationScalar {
+                    definition: PartDefinitionId(7),
+                    operation: OperationId(6),
+                    field,
+                    ..
+                } if field == "bevel_boundary_loop.width"
+            )
+        })
+    }));
+}
+
+#[test]
 fn explore_generates_semantic_cut_group_edits() {
     let recipe = grouped_cut_recipe();
     let output = generate_asset_candidates(

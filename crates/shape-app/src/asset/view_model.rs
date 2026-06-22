@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 
 use shape_asset::{
-    AssetRecipe, CutEdgeTreatment, GeometrySource, ModelingOperationSpec, ParameterDescriptor,
-    enumerate_parameters, get_scalar,
+    AssetRecipe, CutEdgeTreatment, GeometrySource, ModelingOperationSpec, OperationScalarRange,
+    ParameterDescriptor, enumerate_parameters, feasible_boundary_loop_bevel_width_range,
+    feasible_operation_scalar_range, feasible_scalar_path_range, get_scalar,
 };
 
 use crate::asset::{
@@ -145,6 +146,9 @@ fn cut_operation_for_spec(
                 AssetCutOperationKind::RecessedPanel,
                 vec![
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.center.x",
                         "Position X",
                         center[0],
@@ -154,6 +158,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.center.y",
                         "Position Y",
                         center[1],
@@ -163,6 +170,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.size.x",
                         "Width",
                         size[0],
@@ -172,6 +182,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.size.y",
                         "Height",
                         size[1],
@@ -181,6 +194,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.depth",
                         "Depth",
                         *depth,
@@ -190,6 +206,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.rim_width",
                         "Rim Width",
                         *rim_width,
@@ -199,6 +218,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.corner_radius",
                         "Corner Radius",
                         *corner_radius,
@@ -208,6 +230,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "recessed_panel_cut.corner_segments",
                         "Corner Resolution",
                         *corner_segments as f32,
@@ -253,6 +278,9 @@ fn cut_operation_for_spec(
                 AssetCutOperationKind::RectangularOpening,
                 vec![
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.center.x",
                         "Position X",
                         center[0],
@@ -262,6 +290,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.center.y",
                         "Position Y",
                         center[1],
@@ -271,6 +302,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.size.x",
                         "Width",
                         size[0],
@@ -280,6 +314,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.size.y",
                         "Height",
                         size[1],
@@ -289,6 +326,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.rim_width",
                         "Rim Width",
                         *rim_width,
@@ -298,6 +338,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.corner_radius",
                         "Corner Radius",
                         *corner_radius,
@@ -307,6 +350,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "rectangular_through_cut.corner_segments",
                         "Corner Resolution",
                         *corner_segments as f32,
@@ -351,6 +397,9 @@ fn cut_operation_for_spec(
                 AssetCutOperationKind::CircularOpening,
                 vec![
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "circular_through_cut.center.x",
                         "Position X",
                         center[0],
@@ -360,6 +409,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "circular_through_cut.center.y",
                         "Position Y",
                         center[1],
@@ -369,6 +421,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "circular_through_cut.radius",
                         "Radius",
                         *radius,
@@ -378,6 +433,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "circular_through_cut.rim_width",
                         "Rim Width",
                         *rim_width,
@@ -387,6 +445,9 @@ fn cut_operation_for_spec(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        operation_id,
                         "circular_through_cut.radial_segments",
                         "Roundness",
                         *radial_segments as f32,
@@ -417,6 +478,7 @@ fn cut_operation_for_spec(
         _ => return None,
     };
     let edge_treatments = edge_treatments_for_cut(
+        recipe,
         definition,
         part,
         operation_id,
@@ -425,6 +487,7 @@ fn cut_operation_for_spec(
         topology_locked,
     );
     let available_edge_treatments = available_edge_treatments_for_cut(
+        recipe,
         definition,
         part,
         operation_id,
@@ -490,6 +553,7 @@ impl EdgeLoopControl {
 }
 
 fn edge_treatments_for_cut(
+    recipe: &AssetRecipe,
     definition: PartDefinitionId,
     part: PartInstanceId,
     source_operation: OperationId,
@@ -515,6 +579,8 @@ fn edge_treatments_for_cut(
                 .iter()
                 .find(|control| control.loop_id == *target_loop)?;
             let width_limit = sibling_aware_bevel_width_limit(
+                recipe,
+                definition,
                 loop_control,
                 *target_loop,
                 loop_controls,
@@ -529,6 +595,9 @@ fn edge_treatments_for_cut(
                 label: format!("{}: Rounded", loop_control.label),
                 controls: vec![
                     cut_control(
+                        recipe,
+                        definition,
+                        *operation,
                         "bevel_boundary_loop.width",
                         "Width",
                         *width,
@@ -538,6 +607,9 @@ fn edge_treatments_for_cut(
                         false,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        *operation,
                         "bevel_boundary_loop.segments",
                         "Segments",
                         *segments as f32,
@@ -555,6 +627,9 @@ fn edge_treatments_for_cut(
                         true,
                     ),
                     cut_control(
+                        recipe,
+                        definition,
+                        *operation,
                         "bevel_boundary_loop.profile",
                         "Profile",
                         *profile,
@@ -570,6 +645,7 @@ fn edge_treatments_for_cut(
 }
 
 fn available_edge_treatments_for_cut(
+    recipe: &AssetRecipe,
     definition: PartDefinitionId,
     part: PartInstanceId,
     source_operation: OperationId,
@@ -580,14 +656,11 @@ fn available_edge_treatments_for_cut(
         .iter()
         .filter(|control| control.can_add_treatment)
         .filter(|control| boundary_bevel_width_for_loop(operations, control.loop_id).is_none())
-        .map(|control| {
-            let width_limit = sibling_aware_bevel_width_limit(
-                control,
-                control.loop_id,
-                loop_controls,
-                operations,
-            );
-            AssetAvailableEdgeTreatment {
+        .filter_map(|control| {
+            let width_limit =
+                feasible_boundary_loop_bevel_width_range(recipe, definition, control.loop_id)?
+                    .maximum;
+            Some(AssetAvailableEdgeTreatment {
                 definition,
                 part,
                 source_operation,
@@ -596,17 +669,22 @@ fn available_edge_treatments_for_cut(
                 width: default_boundary_bevel_width(width_limit),
                 segments: DEFAULT_BOUNDARY_BEVEL_SEGMENTS,
                 profile: DEFAULT_BOUNDARY_BEVEL_PROFILE,
-            }
+            })
         })
         .collect()
 }
 
 fn sibling_aware_bevel_width_limit(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
     loop_control: &EdgeLoopControl,
     target_loop: BoundaryLoopId,
     loop_controls: &[EdgeLoopControl],
     operations: &[ModelingOperationSpec],
 ) -> f32 {
+    if let Some(range) = feasible_boundary_loop_bevel_width_range(recipe, definition, target_loop) {
+        return range.maximum.max(0.001);
+    }
     let Some(depth) = loop_control.paired_depth else {
         return loop_control.width_limit;
     };
@@ -801,6 +879,9 @@ fn ordered_range(minimum: f32, maximum: f32, current: f32) -> (f32, f32) {
 }
 
 fn cut_control(
+    recipe: &AssetRecipe,
+    definition: PartDefinitionId,
+    operation: OperationId,
     field: &str,
     label: &str,
     value: f32,
@@ -809,6 +890,9 @@ fn cut_control(
     step: f32,
     topology_changing: bool,
 ) -> AssetCutControl {
+    let (minimum, maximum) = feasible_operation_scalar_range(recipe, definition, operation, field)
+        .map(|range| intersect_display_range(minimum, maximum, range, value))
+        .unwrap_or((minimum, maximum));
     AssetCutControl {
         field: field.to_owned(),
         label: label.to_owned(),
@@ -820,11 +904,35 @@ fn cut_control(
     }
 }
 
+fn include_current_value(range: OperationScalarRange, current: f32) -> (f32, f32) {
+    (
+        range.minimum.min(current).min(range.maximum),
+        range.maximum.max(current).max(range.minimum),
+    )
+}
+
+fn intersect_display_range(
+    fallback_minimum: f32,
+    fallback_maximum: f32,
+    feasible: OperationScalarRange,
+    current: f32,
+) -> (f32, f32) {
+    include_current_value(
+        OperationScalarRange {
+            minimum: fallback_minimum.max(feasible.minimum),
+            maximum: fallback_maximum.min(feasible.maximum),
+        },
+        current,
+    )
+}
+
 fn parameter_for_recipe(
     recipe: &AssetRecipe,
     parameter: ParameterDescriptor,
 ) -> Option<AssetParameter> {
     let value = get_scalar(recipe, &parameter.path).ok()?;
+    let range = feasible_scalar_path_range(recipe, &parameter.path)
+        .map(|range| include_current_value(range, value));
     let definition = definition_id_from_scalar_path(&parameter.path);
     let part = instance_id_from_scalar_path(&parameter.path).or_else(|| {
         definition.and_then(|definition| first_instance_of_definition(recipe, definition))
@@ -837,8 +945,12 @@ fn parameter_for_recipe(
         technical_name: parameter.path.clone(),
         group: parameter_group(&parameter),
         value,
-        minimum: parameter.minimum,
-        maximum: parameter.maximum,
+        minimum: range
+            .map(|range| range.0.max(parameter.minimum))
+            .unwrap_or(parameter.minimum),
+        maximum: range
+            .map(|range| range.1.min(parameter.maximum))
+            .unwrap_or(parameter.maximum),
         step: parameter.step,
         locked: recipe.locks.contains(&parameter.id),
         topology_changing: parameter.topology_changing,

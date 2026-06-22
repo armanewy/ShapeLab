@@ -9,16 +9,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
+use asset::jobs::AssetCandidate as JobAssetCandidate;
+use asset::state::AssetCandidateSlot;
 use asset::{
     AssetAppCommand, AssetAppEffect, AssetAppState, AssetAppStateError, AssetGenerationMode,
     AssetJobEvent, AssetJobKind, AssetJobRequest, AssetLockTarget, AssetTemplate, BoundaryLoopId,
     OperationId, run_asset_job,
 };
 use shape_asset::{
-    AssetEdit, AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
-    ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId, PartInstance,
-    PartInstanceId, ReplacementGroupHint, Transform3, definition_scalar_path, get_scalar,
-    instance_scalar_path,
+    AssetEdit, AssetEditProgram, AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource,
+    ModelingOperationSpec, ParameterDescriptor, ParameterId, PartDefinition, PartDefinitionId,
+    PartInstance, PartInstanceId, ReplacementGroupHint, Transform3, apply_edit_program,
+    definition_scalar_path, get_scalar, instance_scalar_path,
 };
 use shape_modeling_assets::BenchmarkAsset;
 use shape_render::{OrbitCamera, RenderSettings};
@@ -682,8 +684,7 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
     for treatment in &recess.edge_treatments {
         let width = edge_control(treatment, "bevel_boundary_loop.width");
         let expected_max = match treatment.label.as_str() {
-            "Entry edge: Rounded" => 0.061,
-            "Floor edge: Rounded" => 0.057,
+            "Entry edge: Rounded" | "Floor edge: Rounded" => 0.054,
             label => panic!("unexpected recessed edge treatment {label}"),
         };
         assert_approx_eq(width.maximum, expected_max);
@@ -714,7 +715,7 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
             vec!["Exit edge: Hard"]
         );
         let width = edge_control(&cut.edge_treatments[0], "bevel_boundary_loop.width");
-        assert_approx_eq(width.maximum, 0.036);
+        assert_approx_eq(width.maximum, 0.039);
     }
 
     for operation in [6, 7, 8] {
@@ -730,6 +731,119 @@ fn multi_cut_panel_edge_treatments_reflect_authored_cut_roles() {
             "hard-edged vent operation {operation} should not show addable rounding"
         );
     }
+}
+
+#[test]
+fn parent_cut_controls_respect_dependent_boundary_bevels() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    state.selected_part_instance = state
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.definition == definition)
+        .map(|instance| instance.id);
+
+    let ui_state = asset::view_model::build_asset_ui_state(&state, false);
+    let recess = ui_state
+        .cut_operations
+        .iter()
+        .find(|cut| cut.operation == OperationId(1))
+        .expect("multi-cut panel should reflect recessed panel cut");
+
+    assert_approx_eq(
+        cut_control(recess, "recessed_panel_cut.depth").minimum,
+        0.041,
+    );
+    assert_approx_eq(
+        cut_control(recess, "recessed_panel_cut.rim_width").minimum,
+        0.023,
+    );
+    assert_approx_eq(
+        cut_control(recess, "recessed_panel_cut.corner_radius").minimum,
+        0.019,
+    );
+    assert_approx_eq(
+        cut_control(recess, "recessed_panel_cut.size.x").minimum,
+        0.089,
+    );
+
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: OperationId(1),
+            field: "recessed_panel_cut.depth".to_owned(),
+            value: 0.030,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("outside feasible range")
+    ));
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition,
+            operation: OperationId(1),
+            field: "recessed_panel_cut.rim_width".to_owned(),
+            value: 0.020,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("outside feasible range")
+    ));
+}
+
+#[test]
+fn direct_cut_scalar_validation_preserves_generator_safety_margin() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::SetCutOperationScalar {
+            definition: PartDefinitionId(1),
+            operation: OperationId(2),
+            field: "circular_through_cut.radius".to_owned(),
+            value: 0.030,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("outside feasible range")
+    ));
+}
+
+#[test]
+fn add_boundary_loop_bevel_rejects_when_sibling_consumes_cut_depth() {
+    let mut state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
+        .expect("multi-cut panel template should load");
+    let definition = PartDefinitionId(1);
+    let operations = &mut state
+        .recipe
+        .definitions
+        .get_mut(&definition)
+        .unwrap()
+        .geometry
+        .operations;
+    operations.retain(|operation| operation.operation_id() != OperationId(10));
+    for operation in operations {
+        if let ModelingOperationSpec::BevelBoundaryLoop {
+            operation: OperationId(9),
+            width,
+            ..
+        } = operation
+        {
+            *width = 0.079;
+        }
+    }
+
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::AddBoundaryLoopBevel {
+            definition,
+            source_operation: OperationId(1),
+            target_loop: BoundaryLoopId(2),
+            width: 0.001,
+            segments: 2,
+            profile: 1.0,
+        }),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("no feasible bevel width")
+    ));
 }
 
 #[test]
@@ -927,7 +1041,7 @@ fn recessed_edge_treatment_limits_treat_missing_sibling_as_zero() {
         .expect("multi-cut panel should reflect recessed panel cut");
     assert_eq!(edge_treatment_labels(recess), vec!["Entry edge: Rounded"]);
     let width = edge_control(&recess.edge_treatments[0], "bevel_boundary_loop.width");
-    assert_approx_eq(width.maximum, 0.063);
+    assert_approx_eq(width.maximum, 0.054);
 
     let mut floor_only =
         AssetAppState::from_template(benchmark_template(BenchmarkAsset::MultiCutPanel))
@@ -955,7 +1069,7 @@ fn recessed_edge_treatment_limits_treat_missing_sibling_as_zero() {
         .expect("multi-cut panel should reflect recessed panel cut");
     assert_eq!(edge_treatment_labels(recess), vec!["Floor edge: Rounded"]);
     let width = edge_control(&recess.edge_treatments[0], "bevel_boundary_loop.width");
-    assert_approx_eq(width.maximum, 0.063);
+    assert_approx_eq(width.maximum, 0.054);
 }
 
 #[test]
@@ -1179,7 +1293,9 @@ fn project_snapshot_round_trip_preserves_branch_history() {
         .expect("second branch edit");
     let second_branch = state.revision_history.current;
 
-    let json = serde_json::to_string(&state.project_snapshot()).expect("snapshot serializes");
+    let snapshot = state.project_snapshot();
+    assert_eq!(snapshot.schema_version, 2);
+    let json = serde_json::to_string(&snapshot).expect("snapshot serializes");
     let project = serde_json::from_str(&json).expect("snapshot deserializes");
     let mut loaded =
         AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
@@ -1202,6 +1318,73 @@ fn project_snapshot_round_trip_preserves_branch_history() {
             .contains_key(&second_branch)
     );
     assert_eq!(loaded.revision_history.current, second_branch);
+}
+
+#[test]
+fn legacy_project_schema_one_loads_without_revision_edit_metadata() {
+    let state = AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
+        .expect("stool template should load");
+    let mut project = state.project_snapshot();
+    project.schema_version = 1;
+    let json = serde_json::to_string(&project).expect("legacy snapshot serializes");
+    let legacy_project = serde_json::from_str(&json).expect("legacy snapshot deserializes");
+    let mut loaded =
+        AssetAppState::from_template(benchmark_template(BenchmarkAsset::StylizedStool))
+            .expect("seed state");
+
+    loaded
+        .replace_loaded_project(legacy_project, PathBuf::from("legacy.shapelab-asset.json"))
+        .expect("schema 1 project should migrate at load boundary");
+
+    assert_eq!(loaded.revision_history.revisions.len(), 1);
+}
+
+#[test]
+fn accepting_candidate_verifies_replay_program_before_committing_history() {
+    let mut state = test_state();
+    let parent_revision = state.revision_history.current;
+    let good_program = AssetEditProgram {
+        label: "good".to_owned(),
+        seed: 1,
+        operations: vec![AssetEdit::SetScalar {
+            parameter: THICKNESS,
+            value: 0.30,
+        }],
+    };
+    let bad_program = AssetEditProgram {
+        label: "bad".to_owned(),
+        seed: 1,
+        operations: vec![AssetEdit::SetScalar {
+            parameter: THICKNESS,
+            value: 0.24,
+        }],
+    };
+    let candidate_recipe =
+        apply_edit_program(&state.recipe, &good_program).expect("fixture edit should apply");
+    state.candidate_slots = vec![AssetCandidateSlot {
+        slot: 0,
+        candidate: JobAssetCandidate {
+            id: asset::AssetCandidateId(1),
+            slot: 0,
+            label: "Mismatched direction".to_owned(),
+            program: bad_program,
+            recipe: candidate_recipe,
+            changed_parameters: BTreeSet::new(),
+            changes: Vec::new(),
+            quality_penalty: 0.0,
+            artifact: None,
+        },
+        preview: None,
+        preview_failure: None,
+    }];
+
+    assert!(matches!(
+        state.handle_command(AssetAppCommand::AcceptCandidate(asset::AssetCandidateId(1))),
+        Err(AssetAppStateError::EditRejected(message))
+            if message.contains("does not reproduce")
+    ));
+    assert_eq!(state.revision_history.current, parent_revision);
+    assert_eq!(state.revision_history.revisions.len(), 1);
 }
 
 #[test]
@@ -1346,6 +1529,13 @@ fn edge_control<'a>(
         .iter()
         .find(|control| control.field == field)
         .unwrap_or_else(|| panic!("missing edge treatment control {field}"))
+}
+
+fn cut_control<'a>(cut: &'a asset::AssetCutOperation, field: &str) -> &'a asset::AssetCutControl {
+    cut.controls
+        .iter()
+        .find(|control| control.field == field)
+        .unwrap_or_else(|| panic!("missing cut control {field}"))
 }
 
 fn assert_approx_eq(actual: f32, expected: f32) {

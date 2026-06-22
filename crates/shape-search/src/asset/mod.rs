@@ -11,8 +11,8 @@ use shape_asset::{
     BoundaryLoopId, CountRangeHint, CutGroupRole, DuplicateBoundaryBevelSpec, Frame3,
     GeneratorDimensionEdit, GeometrySource, ModelingOperationSpec, OperationId,
     ParameterDescriptor, PartDefinitionId, PartInstanceId, RegionId, Transform3,
-    apply_edit_program, definition_scalar_path, enumerate_parameters, get_scalar,
-    validate_asset_recipe,
+    apply_edit_program, definition_scalar_path, enumerate_parameters,
+    feasible_operation_scalar_range, feasible_scalar_path_range, get_scalar, validate_asset_recipe,
 };
 use thiserror::Error;
 
@@ -376,6 +376,7 @@ fn collect_cut_group_opportunities(
         match &group.role {
             CutGroupRole::MountHoles => {
                 collect_circular_cut_group_opportunities(
+                    recipe,
                     group_id,
                     group.definition,
                     &operations,
@@ -384,6 +385,7 @@ fn collect_cut_group_opportunities(
             }
             CutGroupRole::Vents => {
                 collect_rectangular_cut_group_opportunities(
+                    recipe,
                     group_id,
                     group.definition,
                     &operations,
@@ -392,6 +394,7 @@ fn collect_cut_group_opportunities(
             }
             CutGroupRole::Recesses => {
                 collect_recessed_cut_group_opportunities(
+                    recipe,
                     group_id,
                     group.definition,
                     &operations,
@@ -404,6 +407,7 @@ fn collect_cut_group_opportunities(
 }
 
 fn collect_circular_cut_group_opportunities(
+    recipe: &AssetRecipe,
     group_id: &str,
     definition: PartDefinitionId,
     operations: &[(OperationId, &ModelingOperationSpec)],
@@ -429,6 +433,7 @@ fn collect_circular_cut_group_opportunities(
         radial_segments.push(*segments as f32);
     }
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -438,6 +443,7 @@ fn collect_circular_cut_group_opportunities(
         positive_group_range(average(&radii), 0.015, 0.24, 0.005),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -447,6 +453,7 @@ fn collect_circular_cut_group_opportunities(
         positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -463,6 +470,7 @@ fn collect_circular_cut_group_opportunities(
 }
 
 fn collect_rectangular_cut_group_opportunities(
+    recipe: &AssetRecipe,
     group_id: &str,
     definition: PartDefinitionId,
     operations: &[(OperationId, &ModelingOperationSpec)],
@@ -490,6 +498,7 @@ fn collect_rectangular_cut_group_opportunities(
         rim_widths.push(*rim_width);
     }
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -499,6 +508,7 @@ fn collect_rectangular_cut_group_opportunities(
         positive_group_range(average(&widths), 0.04, 0.72, 0.01),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -508,6 +518,7 @@ fn collect_rectangular_cut_group_opportunities(
         positive_group_range(average(&heights), 0.015, 0.24, 0.005),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -517,6 +528,7 @@ fn collect_rectangular_cut_group_opportunities(
         positive_group_range(average(&rim_widths), 0.0, 0.16, 0.005),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -541,6 +553,7 @@ fn collect_rectangular_cut_group_opportunities(
 }
 
 fn collect_recessed_cut_group_opportunities(
+    recipe: &AssetRecipe,
     group_id: &str,
     definition: PartDefinitionId,
     operations: &[(OperationId, &ModelingOperationSpec)],
@@ -560,6 +573,7 @@ fn collect_recessed_cut_group_opportunities(
         depths.push(*depth);
     }
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -569,6 +583,7 @@ fn collect_recessed_cut_group_opportunities(
         positive_group_range(average(&widths), 0.04, 1.20, 0.02),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -578,6 +593,7 @@ fn collect_recessed_cut_group_opportunities(
         positive_group_range(average(&heights), 0.04, 1.20, 0.02),
     );
     push_group_scalar(
+        recipe,
         opportunities,
         group_id,
         definition,
@@ -589,6 +605,7 @@ fn collect_recessed_cut_group_opportunities(
 }
 
 fn push_group_scalar(
+    recipe: &AssetRecipe,
     opportunities: &mut Vec<EditOpportunity>,
     group: &str,
     definition: PartDefinitionId,
@@ -597,7 +614,21 @@ fn push_group_scalar(
     current: f32,
     range: ParameterRange,
 ) {
-    if current.is_finite() && range.minimum < range.maximum {
+    let range = operations.iter().fold(Some(range), |range, operation| {
+        let range = range?;
+        match feasible_operation_scalar_range(recipe, definition, *operation, field) {
+            Some(feasible) => intersect_parameter_range(range, feasible.minimum, feasible.maximum),
+            None => Some(range),
+        }
+    });
+    let Some(range) = range else {
+        return;
+    };
+    if current.is_finite()
+        && current >= range.minimum
+        && current <= range.maximum
+        && range.minimum < range.maximum
+    {
         opportunities.push(EditOpportunity::CutGroupScalar {
             group: group.to_owned(),
             definition,
@@ -1457,12 +1488,26 @@ impl EditOpportunity {
                 definition,
                 operation,
                 current,
-            } => Some(vec![AssetEdit::SetOperationScalar {
-                definition: *definition,
-                operation: *operation,
-                field: "bevel_boundary_loop.width".to_owned(),
-                value: mutate_non_negative(*current, mode, rng).max(0.001),
-            }]),
+            } => {
+                let feasible = feasible_operation_scalar_range(
+                    recipe,
+                    *definition,
+                    *operation,
+                    "bevel_boundary_loop.width",
+                )?;
+                let range = parameter_range_from_feasible(
+                    feasible.minimum,
+                    feasible.maximum,
+                    0.001,
+                    *current,
+                )?;
+                Some(vec![AssetEdit::SetOperationScalar {
+                    definition: *definition,
+                    operation: *operation,
+                    field: "bevel_boundary_loop.width".to_owned(),
+                    value: mutate_scalar(*current, range, mode, rng)?.max(0.001),
+                }])
+            }
             Self::SweepProfilePoint {
                 definition,
                 index,
@@ -1794,6 +1839,50 @@ struct ParameterRange {
     mutation_sigma: f32,
 }
 
+fn intersect_parameter_range(
+    range: ParameterRange,
+    minimum: f32,
+    maximum: f32,
+) -> Option<ParameterRange> {
+    let minimum = range.minimum.max(minimum);
+    let maximum = range.maximum.min(maximum);
+    if !(minimum.is_finite() && maximum.is_finite() && minimum < maximum) {
+        return None;
+    }
+    Some(ParameterRange {
+        minimum,
+        maximum,
+        step: range.step.max(f32::EPSILON),
+        mutation_sigma: range
+            .mutation_sigma
+            .min((maximum - minimum).abs().max(range.step))
+            .max(range.step),
+    })
+}
+
+fn parameter_range_from_feasible(
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+    current: f32,
+) -> Option<ParameterRange> {
+    if !(minimum.is_finite()
+        && maximum.is_finite()
+        && minimum < maximum
+        && current >= minimum
+        && current <= maximum)
+    {
+        return None;
+    }
+    let step = step.max(f32::EPSILON);
+    Some(ParameterRange {
+        minimum,
+        maximum,
+        step,
+        mutation_sigma: ((maximum - minimum) * 0.20).max(step),
+    })
+}
+
 #[derive(Debug, Clone)]
 enum DefinitionDimensionTarget {
     RoundedBoxHalfExtents {
@@ -2098,12 +2187,16 @@ fn effective_parameter_range(
         .variation
         .parameter_range_overrides
         .get(&parameter.id);
-    let minimum = override_range
+    let mut minimum = override_range
         .map(|range| range.minimum.max(parameter.minimum))
         .unwrap_or(parameter.minimum);
-    let maximum = override_range
+    let mut maximum = override_range
         .map(|range| range.maximum.min(parameter.maximum))
         .unwrap_or(parameter.maximum);
+    if let Some(feasible) = feasible_scalar_path_range(recipe, &parameter.path) {
+        minimum = minimum.max(feasible.minimum);
+        maximum = maximum.min(feasible.maximum);
+    }
     if !(minimum.is_finite() && maximum.is_finite() && minimum < maximum) {
         return None;
     }
