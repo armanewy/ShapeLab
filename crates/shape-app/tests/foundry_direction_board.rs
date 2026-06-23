@@ -244,6 +244,33 @@ fn invalid_candidate_validation_blocks_choose_but_keeps_reject_available() {
 }
 
 #[test]
+fn rejected_candidate_cannot_be_chosen_even_when_marked_selectable() {
+    let camera = OrbitCamera::default();
+    let parent = parent_card(camera.clone());
+    let mut candidate = candidate_card(
+        "rejected-selectable",
+        0,
+        FoundryCandidateMode::Explore,
+        &camera,
+    );
+    candidate.selectable = true;
+    candidate
+        .rejections
+        .insert(FoundryCandidateRejectionReason::DescriptorRejected, 1);
+
+    let board = direction_board_view(&parent, &[candidate], DirectionBoardState::default());
+    let card = board.candidate_slots[0]
+        .as_card()
+        .expect("rejected candidate is present");
+
+    assert_eq!(
+        card.validation_badge.state,
+        DirectionValidationState::Invalid
+    );
+    assert!(card.actions.choose.is_none());
+}
+
+#[test]
 fn ab_flip_comparison_swaps_sides_and_keeps_fixed_camera_whole_model_images() {
     let camera = OrbitCamera::default();
     let parent = parent_card(camera.clone());
@@ -285,6 +312,40 @@ fn ab_flip_comparison_swaps_sides_and_keeps_fixed_camera_whole_model_images() {
 }
 
 #[test]
+fn card_selected_fallback_drives_highlight_and_comparison() {
+    let camera = OrbitCamera::default();
+    let parent = parent_card(camera.clone());
+    let mut candidate = candidate_card(
+        "selected-fallback",
+        0,
+        FoundryCandidateMode::Structure,
+        &camera,
+    );
+    candidate.selected = true;
+
+    let board = direction_board_view(
+        &parent,
+        std::slice::from_ref(&candidate),
+        DirectionBoardState::default(),
+    );
+    let card = board.candidate_slots[0]
+        .as_card()
+        .expect("selected candidate is present");
+
+    assert!(card.selected);
+    assert!(card.highlighted);
+    assert_eq!(
+        board
+            .comparison
+            .as_ref()
+            .expect("selected fallback creates comparison")
+            .b
+            .card_id,
+        candidate.id
+    );
+}
+
+#[test]
 fn board_guard_truncates_to_six_candidates_and_emits_no_isolated_part_options() {
     let camera = OrbitCamera::default();
     let parent = parent_card(camera.clone());
@@ -312,6 +373,29 @@ fn board_guard_truncates_to_six_candidates_and_emits_no_isolated_part_options() 
             .all(|slot| matches!(slot, DirectionCardSlot::Filled(_)))
     );
     assert!(board.rows[1].cards.iter().all(|slot| !slot.is_empty()));
+}
+
+#[test]
+fn board_validation_requires_six_filled_candidate_images() {
+    let camera = OrbitCamera::default();
+    let parent = parent_card(camera.clone());
+
+    let empty_board = direction_board_view(&parent, &[], DirectionBoardState::default());
+    assert_eq!(empty_board.validation.filled_candidate_count, 0);
+    assert!(empty_board.validation.preview_images_present);
+    assert!(!empty_board.validation.is_valid());
+
+    let mut candidates = six_candidates(&camera);
+    candidates[3].rgba8.clear();
+    let missing_image_board =
+        direction_board_view(&parent, &candidates, DirectionBoardState::default());
+
+    assert_eq!(
+        missing_image_board.validation.filled_candidate_count,
+        VISIBLE_DIRECTION_CANDIDATE_CARDS
+    );
+    assert!(!missing_image_board.validation.preview_images_present);
+    assert!(!missing_image_board.validation.is_valid());
 }
 
 fn parent_card(camera: OrbitCamera) -> FoundryCandidateCard {

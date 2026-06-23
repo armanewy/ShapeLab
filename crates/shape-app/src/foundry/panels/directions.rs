@@ -44,6 +44,22 @@ pub(crate) struct DirectionBoardState {
     pub strategy_id: Option<String>,
 }
 
+impl DirectionBoardState {
+    fn with_normalized_selection(mut self, candidates: &[FoundryCandidateCard]) -> Self {
+        let explicit_selection_is_present = self
+            .selected_candidate
+            .as_ref()
+            .is_some_and(|selected| candidates.iter().any(|candidate| candidate.id == *selected));
+        if !explicit_selection_is_present {
+            self.selected_candidate = candidates
+                .iter()
+                .find(|candidate| candidate.selected)
+                .map(|candidate| candidate.id.clone());
+        }
+        self
+    }
+}
+
 /// Complete data-only direction board snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DirectionBoardView {
@@ -340,6 +356,8 @@ pub(crate) struct DirectionBoardValidation {
     pub candidate_slot_count: usize,
     /// Number of filled candidate slots.
     pub filled_candidate_count: usize,
+    /// Whether the parent and all filled candidate slots carry image pixels.
+    pub preview_images_present: bool,
     /// Number of input candidates beyond the six visible slots.
     pub overflow_candidate_count: usize,
     /// Whether all filled previews share the parent's fixed camera.
@@ -355,6 +373,8 @@ impl DirectionBoardValidation {
     #[must_use]
     pub(crate) fn is_valid(&self) -> bool {
         self.candidate_slot_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
+            && self.filled_candidate_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
+            && self.preview_images_present
             && self.fixed_camera
             && self.whole_model_only
             && self.no_isolated_part_option_cards
@@ -368,6 +388,7 @@ pub(crate) fn direction_board_view(
     candidates: &[FoundryCandidateCard],
     state: DirectionBoardState,
 ) -> DirectionBoardView {
+    let state = state.with_normalized_selection(candidates);
     let parent_view = direction_card_view(parent, DirectionCardKind::UnchangedParent, 0, &state);
     let candidate_slots = candidate_slots(candidates)
         .into_iter()
@@ -618,14 +639,16 @@ fn card_actions(card: &FoundryCandidateCard, kind: DirectionCardKind) -> Directi
             select: select_candidate_intent(Some(card.id.clone())),
             hover: hover_candidate_intent(Some(card.id.clone())),
             clear_hover: hover_candidate_intent(None),
-            choose: card
-                .selectable
-                .then(|| choose_direction_intent(card.id.clone())),
+            choose: candidate_can_be_chosen(card).then(|| choose_direction_intent(card.id.clone())),
             reject: Some(reject_direction_intent(card.id.clone())),
             choose_label: CHOOSE_THIS_DIRECTION_LABEL,
             reject_label: REJECT_DIRECTION_LABEL,
         },
     }
+}
+
+fn candidate_can_be_chosen(card: &FoundryCandidateCard) -> bool {
+    card.selectable && candidate_rejection_count(card) == 0
 }
 
 fn explanation_lines(card: &FoundryCandidateCard) -> Vec<String> {
@@ -676,7 +699,7 @@ fn validation_badge(
     card: &FoundryCandidateCard,
     kind: DirectionCardKind,
 ) -> DirectionValidationBadge {
-    let rejection_count = card.rejections.values().copied().sum();
+    let rejection_count = candidate_rejection_count(card);
     let detail = card
         .validation_detail
         .clone()
@@ -708,6 +731,10 @@ fn validation_badge(
         state,
         rejection_count,
     }
+}
+
+fn candidate_rejection_count(card: &FoundryCandidateCard) -> usize {
+    card.rejections.values().copied().sum()
 }
 
 fn rejection_detail(
@@ -760,12 +787,24 @@ fn board_validation(
     DirectionBoardValidation {
         candidate_slot_count: candidate_slots.len(),
         filled_candidate_count,
+        preview_images_present: board_preview_images_are_present(parent, candidate_slots),
         overflow_candidate_count: input_candidate_count
             .saturating_sub(VISIBLE_DIRECTION_CANDIDATE_CARDS),
         fixed_camera: board_uses_fixed_camera(parent, candidate_slots),
         whole_model_only: board_is_whole_model_only(parent, candidate_slots),
         no_isolated_part_option_cards: true,
     }
+}
+
+fn board_preview_images_are_present(
+    parent: &DirectionCardView,
+    candidate_slots: &[DirectionCardSlot],
+) -> bool {
+    parent.preview.has_image()
+        && candidate_slots
+            .iter()
+            .filter_map(DirectionCardSlot::as_card)
+            .all(|candidate| candidate.preview.has_image())
 }
 
 fn board_uses_fixed_camera(
