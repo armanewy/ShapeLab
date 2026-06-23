@@ -1,0 +1,83 @@
+# Product Positioning Boundary
+
+Shape Lab is a semantic asset foundry with strict reconstruction research
+lanes. It is not a general-purpose arbitrary mesh editor.
+
+## Product Promise
+
+Shape Lab helps users generate, customize, validate, branch, pack, and export
+coherent asset families from authored semantic controls.
+
+For imports, Shape Lab can recover exact semantics only when the input fits a
+known grammar and strict verification proves the recovered program. Otherwise,
+Shape Lab returns diagnostics and suggested next steps instead of claiming
+editability.
+
+## What To Emphasize
+
+- Visual Foundry is the primary novice-facing product surface.
+- The three current built-in profiles are Roman Timber Bridge, Sci-Fi
+  Industrial Crate, and Stylized Furniture Lamp.
+- Whole-model controls, locks, branches, packs, and export are the product
+  loop.
+- Strict semantic reconstruction is a truth engine for covered grammars.
+- External import analysis is useful when it explains why exact recovery is or
+  is not eligible.
+
+## What Not To Promise
+
+- Editing arbitrary imported meshes.
+- Proceduralizing any mesh.
+- Recovering semantics from noisy scans.
+- Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
+- UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
+- General character production, rigged characters, or garment simulation.
+
+## Approved Labels
+
+Use:
+
+- "Visual Foundry"
+- "Asset family"
+- "Whole-model controls"
+- "Exact semantic recovery"
+- "Known-base recovery"
+- "Analyze import"
+- "Diagnostic-only unsupported mesh"
+- "Strict verification"
+
+Use only after strict verification:
+
+- "Recover exact editable program"
+- "Exact editable recovery"
+- "Strict reconstruction success"
+
+Avoid:
+
+- "Edit any mesh"
+- "Automatic mesh-to-procedural compiler"
+- "Editable import" for partial or diagnostic outcomes
+- "Recovered" when the result is only ranked, suggested, or diagnosed
+
+## Demo Boundary
+
+Product demos should start with Visual Foundry and show the user producing an
+asset. Research demos may show inverse gates and diagnostics, but they must be
+introduced as strict-reconstruction or import-triage research.
+
+The strongest product proof remains:
+
+- Create a reinforced Roman bridge.
+- Create a compact vented sci-fi crate family.
+- Create a tall stylized lamp with a different shade.
+- Export a pack without using Advanced Recipe.
+
+## Decision Rule
+
+When a capability is ambiguous, choose the narrower claim:
+
+- If strict verification passed, call it exact recovery.
+- If ranking succeeded but proof did not, call it analysis or eligibility.
+- If the input is outside known grammars, call it diagnostic-only.
+- If the feature exists only in docs or planned backends, call it future work.
+
