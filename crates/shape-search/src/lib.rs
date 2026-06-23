@@ -3,6 +3,7 @@
 //! Deterministic candidate search.
 
 pub mod asset;
+pub mod foundry;
 
 use std::collections::{BTreeMap, BTreeSet};
 

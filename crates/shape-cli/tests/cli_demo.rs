@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use shape_decompiler::v3::bend::{BendParameters, evaluate_bend};
+use shape_foundry_catalog::{FoundryFixtureCatalog, headless_fixture_catalogs};
 
 #[test]
 fn demo_generates_headless_artifacts() {
@@ -223,6 +225,333 @@ fn inspect_and_compile_asset_use_canonical_model_package() {
         model_validation["metrics"]["accidental_intersection_count"],
         0
     );
+}
+
+#[test]
+fn foundry_build_generates_headless_outputs_for_fixtures() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    for fixture in headless_fixture_catalogs() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let catalog_dir = temp_dir.path().join("catalog");
+        let out_dir = temp_dir.path().join("build");
+        let document = write_foundry_fixture(&fixture, &catalog_dir);
+
+        let output = Command::new(exe)
+            .args(["foundry-build", "--catalog"])
+            .arg(&catalog_dir)
+            .args(["--document"])
+            .arg(&document)
+            .args(["--out-dir"])
+            .arg(&out_dir)
+            .output()
+            .unwrap_or_else(|error| panic!("run shape-cli foundry-build: {error}"));
+
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            fixture.slug,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for name in [
+            "foundry-document.json",
+            "catalog-lock.json",
+            "effective-request.json",
+            "family-conformance.json",
+            "recipe.json",
+            "build-stamp.json",
+            "local-overrides.json",
+            "local-override-divergence.json",
+            "control-divergence.json",
+            "provider-overrides.json",
+            "model-validation.json",
+            "package-verification.json",
+            "asset.obj",
+            "preview.png",
+            "model-package/asset-manifest.json",
+            "model-package/blender_reconstruct.py",
+        ] {
+            let path = out_dir.join(name);
+            assert!(path.exists(), "{} should write {name}", fixture.slug);
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "{} wrote empty {name}",
+                fixture.slug
+            );
+        }
+
+        let conformance: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out_dir.join("family-conformance.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !conformance["roles"].as_array().unwrap().is_empty(),
+            "{} should report role conformance",
+            fixture.slug
+        );
+        assert!(
+            conformance["issues"].as_array().unwrap().is_empty(),
+            "{} should pass required conformance",
+            fixture.slug
+        );
+        assert!(
+            conformance["exports"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["profile"] == "canonical-model-package"
+                    && row["status"] == "Passed"),
+            "{} should pass export conformance",
+            fixture.slug
+        );
+        let model_validation: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out_dir.join("model-validation.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            model_validation["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|issue| issue["severity"] != "Error"),
+            "{} should pass model validation",
+            fixture.slug
+        );
+        let verification: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out_dir.join("package-verification.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(verification["checksums_match"], true);
+        assert_eq!(verification["topology_matches_manifest"], true);
+    }
+}
+
+#[test]
+fn foundry_build_rejects_model_validation_errors() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let mut fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let base = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
+        .expect("base crate should compile");
+    let panel = base
+        .recipe
+        .instances
+        .values()
+        .find(|instance| {
+            base.recipe
+                .definitions
+                .get(&instance.definition)
+                .is_some_and(|definition| definition.tags.contains("panel"))
+        })
+        .expect("panel instance should survive remapping")
+        .id;
+    fixture
+        .document
+        .local_recipe_overrides
+        .push(shape_foundry::LocalRecipeOverride {
+            id: shape_foundry::LocalRecipeOverrideId("move-panel-inside-body".to_owned()),
+            base_geometry_fingerprint: base.base_geometry_fingerprint,
+            edit_program: shape_asset::AssetEditProgram {
+                label: "move panel inside body".to_owned(),
+                seed: 23,
+                operations: vec![shape_asset::AssetEdit::SetTransform {
+                    instance: panel,
+                    transform: shape_asset::Transform3 {
+                        translation: [0.0, 0.0, 0.55],
+                        ..shape_asset::Transform3::default()
+                    },
+                }],
+            },
+            touched_targets: vec![shape_foundry::TouchedSemanticTarget::PartInstance(panel)],
+            survival_policy: shape_foundry::OverrideSurvivalPolicy::Revalidate,
+        });
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let catalog_dir = temp_dir.path().join("catalog");
+    let out_dir = temp_dir.path().join("build");
+    let document = write_foundry_fixture(&fixture, &catalog_dir);
+
+    let output = Command::new(exe)
+        .args(["foundry-build", "--catalog"])
+        .arg(&catalog_dir)
+        .args(["--document"])
+        .arg(&document)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run shape-cli foundry-build");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("model validation failed"),
+        "model validation failure should be explicit, stderr was: {stderr}"
+    );
+    let model_validation: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("model-validation.json")).unwrap())
+            .unwrap();
+    assert!(
+        model_validation["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["severity"] == "Error"),
+        "model-validation.json should contain error severity diagnostics"
+    );
+}
+
+#[test]
+fn foundry_build_reports_local_override_divergence() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let mut fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let base = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
+        .expect("base crate should compile");
+    let parameter = base
+        .recipe
+        .parameters
+        .values()
+        .find(|parameter| parameter.path.contains("rounded_box.half_extents.x"))
+        .expect("body width parameter should survive remapping")
+        .id;
+    fixture
+        .document
+        .local_recipe_overrides
+        .push(shape_foundry::LocalRecipeOverride {
+            id: shape_foundry::LocalRecipeOverrideId("widen-body".to_owned()),
+            base_geometry_fingerprint: base.base_geometry_fingerprint,
+            edit_program: shape_asset::AssetEditProgram {
+                label: "widen body".to_owned(),
+                seed: 11,
+                operations: vec![shape_asset::AssetEdit::SetScalar {
+                    parameter,
+                    value: 1.45,
+                }],
+            },
+            touched_targets: vec![shape_foundry::TouchedSemanticTarget::Parameter(parameter)],
+            survival_policy: shape_foundry::OverrideSurvivalPolicy::Revalidate,
+        });
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let catalog_dir = temp_dir.path().join("catalog");
+    let out_dir = temp_dir.path().join("build");
+    let document = write_foundry_fixture(&fixture, &catalog_dir);
+
+    let output = Command::new(exe)
+        .args(["foundry-build", "--catalog"])
+        .arg(&catalog_dir)
+        .args(["--document"])
+        .arg(&document)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run shape-cli foundry-build");
+    assert!(
+        output.status.success(),
+        "foundry build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let control_divergence: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("control-divergence.json")).unwrap())
+            .unwrap();
+    assert_eq!(control_divergence["body_width"], "DivergedByOverride");
+    let override_divergence: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("local-override-divergence.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        override_divergence[0]["diverged_controls"][0]["control_id"],
+        "body_width"
+    );
+}
+
+#[test]
+fn foundry_build_replays_deterministically_and_reports_catalog_mismatch() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let catalog_dir = temp_dir.path().join("catalog");
+    let document = write_foundry_fixture(&fixture, &catalog_dir);
+    let first_out = temp_dir.path().join("first");
+    let second_out = temp_dir.path().join("second");
+
+    for out_dir in [&first_out, &second_out] {
+        let output = Command::new(exe)
+            .args(["foundry-build", "--catalog"])
+            .arg(&catalog_dir)
+            .args(["--document"])
+            .arg(&document)
+            .args(["--out-dir"])
+            .arg(out_dir)
+            .output()
+            .expect("run shape-cli foundry-build");
+        assert!(
+            output.status.success(),
+            "foundry build failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let first_files = relative_files(&first_out);
+    let second_files = relative_files(&second_out);
+    assert_eq!(first_files, second_files);
+    for name in first_files {
+        assert_eq!(
+            fs::read(first_out.join(&name)).unwrap(),
+            fs::read(second_out.join(&name)).unwrap(),
+            "{} should replay deterministically",
+            name.display()
+        );
+    }
+
+    let bad_family_path = catalog_dir.join(format!(
+        "{}.json",
+        fixture.document.family_content_ref.stable_id
+    ));
+    fs::write(&bad_family_path, "{}").expect("corrupt family catalog entry");
+    let mismatch = Command::new(exe)
+        .args(["foundry-build", "--catalog"])
+        .arg(&catalog_dir)
+        .args(["--document"])
+        .arg(&document)
+        .args(["--out-dir"])
+        .arg(temp_dir.path().join("mismatch"))
+        .output()
+        .expect("run shape-cli foundry-build with mismatch");
+    assert!(!mismatch.status.success());
+    let stderr = String::from_utf8_lossy(&mismatch.stderr);
+    assert!(
+        stderr.contains("FingerprintMismatch"),
+        "catalog mismatch should be explicit, stderr was: {stderr}"
+    );
+}
+
+fn write_foundry_fixture(fixture: &FoundryFixtureCatalog, catalog_dir: &Path) -> PathBuf {
+    fixture
+        .write_to_dir(catalog_dir)
+        .unwrap_or_else(|error| panic!("write foundry fixture {}: {error}", fixture.slug));
+    catalog_dir.join("foundry-document.json")
+}
+
+fn relative_files(root: &Path) -> Vec<PathBuf> {
+    fn visit(root: &Path, current: &Path, files: &mut Vec<PathBuf>) {
+        let mut entries = fs::read_dir(current)
+            .unwrap_or_else(|error| panic!("read {}: {error}", current.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.push(
+                    path.strip_prefix(root)
+                        .expect("relative path")
+                        .to_path_buf(),
+                );
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files
 }
 
 #[test]

@@ -9,6 +9,8 @@
 //! to reuse allocation-heavy buffers while keeping the default `render_mesh`
 //! convenience function.
 
+pub mod foundry;
+
 use glam::{Mat4, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use shape_core::Aabb;

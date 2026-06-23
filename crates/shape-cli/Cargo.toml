@@ -20,6 +20,7 @@ shape-core.workspace = true
 shape-compile.workspace = true
 shape-decompiler.workspace = true
 shape-field.workspace = true
+shape-foundry.workspace = true
 shape-mesh.workspace = true
 shape-modeling-assets.workspace = true
 shape-poly.workspace = true
@@ -29,4 +30,5 @@ shape-render.workspace = true
 shape-search.workspace = true
 
 [dev-dependencies]
+shape-foundry-catalog.workspace = true
 tempfile.workspace = true

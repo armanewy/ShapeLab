@@ -1,12 +1,16 @@
 //! Build stamp, compiled-output, and foundry document compilation contracts.
 #![allow(clippy::result_large_err)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use shape_asset::{AssetEditProgram, AssetRecipe, AssetValidationReport, validate_asset_recipe};
+use shape_asset::{
+    AssetEditProgram, AssetRecipe, AssetValidationReport, ParameterId, validate_asset_recipe,
+};
 use shape_compile::{AssetArtifact, CompileError, compile_asset};
-use shape_family::{AssetFamilySchema, FamilyRuleExecutionPolicy, RoleProvision};
+use shape_family::{
+    AssetFamilySchema, FamilyDefaultValue, FamilyRuleExecutionPolicy, RoleProvision,
+};
 use shape_family_compile::{
     FamilyCompileError, FamilyImplementation, FamilyInstantiationReport,
     FamilyInstantiationRequest, FamilyValue, SHAPE_FAMILY_COMPILE_CRATE_VERSION,
@@ -25,10 +29,11 @@ use shape_family_compile::{
 };
 
 use crate::{
-    ControlKind, ControlValue, DroppedLocalOverride, FoundryCatalogError, FoundryCatalogResolver,
-    FoundryConformanceSummary, FoundryResolvedCatalog, LocalRecipeOverride, LocalRecipeOverrideId,
-    OverrideSurvivalPolicy, ResponseCurve, SHAPE_FOUNDRY_CRATE_VERSION,
-    catalog::resolve_foundry_catalog, validate_foundry_document,
+    ControlDivergence, ControlKind, ControlValue, DroppedLocalOverride, FoundryCatalogError,
+    FoundryCatalogResolver, FoundryConformanceSummary, FoundryResolvedCatalog, LocalRecipeOverride,
+    LocalRecipeOverrideId, OverrideSurvivalPolicy, ResponseCurve, SHAPE_FOUNDRY_CRATE_VERSION,
+    TouchedSemanticTarget, catalog::resolve_foundry_catalog, control_divergence_state,
+    validate_foundry_document,
 };
 
 /// Deterministic build stamp emitted after foundry compilation.
@@ -102,6 +107,30 @@ pub struct LocalOverrideApplicationReport {
     pub current_base_geometry_fingerprint: GeometryInputFingerprint,
 }
 
+/// One control marked divergent by an applied local override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DivergedControlReport {
+    /// Control ID.
+    pub control_id: String,
+    /// Human-facing control label.
+    pub label: String,
+    /// Family slots linking the override target to this control.
+    pub slots: Vec<String>,
+}
+
+/// Deterministic report connecting local overrides back to customizer controls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalOverrideDivergenceReport {
+    /// Override ID.
+    pub id: LocalRecipeOverrideId,
+    /// Override application status.
+    pub status: LocalOverrideApplicationStatus,
+    /// Authored semantic targets touched by the override.
+    pub touched_targets: Vec<TouchedSemanticTarget>,
+    /// Controls whose generated semantic targets diverged.
+    pub diverged_controls: Vec<DivergedControlReport>,
+}
+
 /// Where a provider override was resolved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderOverrideSource {
@@ -153,6 +182,10 @@ pub struct FoundryCompilationOutput {
     pub provider_override_reports: Vec<ProviderOverrideApplicationReport>,
     /// Local override application reports.
     pub local_override_reports: Vec<LocalOverrideApplicationReport>,
+    /// Local override to visible-control divergence reports.
+    pub local_override_divergence_reports: Vec<LocalOverrideDivergenceReport>,
+    /// Current divergence state for every customizer control.
+    pub control_divergence: BTreeMap<String, ControlDivergence>,
     /// Local override rows explicitly dropped by policy.
     pub dropped_overrides: Vec<DroppedLocalOverride>,
 }
@@ -376,6 +409,14 @@ pub fn compile_foundry_document_with_options(
         family_compile_version: shape_family_compile_version(),
     };
     let conformance_summary = summarize_conformance(&final_conformance);
+    let (control_divergence, local_override_divergence_reports) =
+        compute_local_override_divergence_reports(
+            &catalog.customizer_profile,
+            document,
+            &base_instantiation.report,
+            &final_recipe,
+            &local_override_reports,
+        );
     let dropped_overrides = local_override_reports
         .iter()
         .filter(|report| report.status == LocalOverrideApplicationStatus::Dropped)
@@ -403,6 +444,8 @@ pub fn compile_foundry_document_with_options(
         recipe_snapshot,
         provider_override_reports,
         local_override_reports,
+        local_override_divergence_reports,
+        control_divergence,
         dropped_overrides,
     })
 }
@@ -472,15 +515,39 @@ fn evaluate_effective_family_request(
         }
     }
 
-    Ok((
-        FamilyInstantiationRequest {
-            family_id: catalog.family.id.clone(),
-            style_kit_id: catalog.style_kit.id.clone(),
-            parameters,
-            seed: document.seed,
-        },
-        provider_requests,
-    ))
+    let mut request = FamilyInstantiationRequest {
+        family_id: catalog.family.id.clone(),
+        style_kit_id: catalog.style_kit.id.clone(),
+        parameters,
+        seed: document.seed,
+    };
+    apply_family_parameter_defaults(&catalog.family, &mut request);
+
+    Ok((request, provider_requests))
+}
+
+fn apply_family_parameter_defaults(
+    family: &AssetFamilySchema,
+    request: &mut FamilyInstantiationRequest,
+) {
+    for slot in &family.parameter_slots {
+        if !request.parameters.contains_key(&slot.id)
+            && let Some(default_value) = &slot.default_value
+        {
+            request
+                .parameters
+                .insert(slot.id.clone(), family_value_from_default(default_value));
+        }
+    }
+}
+
+fn family_value_from_default(default_value: &FamilyDefaultValue) -> FamilyValue {
+    match default_value {
+        FamilyDefaultValue::Scalar(value) => FamilyValue::Scalar(*value),
+        FamilyDefaultValue::Integer(value) => FamilyValue::Integer(*value),
+        FamilyDefaultValue::Toggle(value) => FamilyValue::Toggle(*value),
+        FamilyDefaultValue::Choice(value) => FamilyValue::Choice(value.clone()),
+    }
 }
 
 fn push_provider_request(
@@ -770,6 +837,134 @@ fn apply_local_recipe_overrides(
         }
     }
     Ok(reports)
+}
+
+fn compute_local_override_divergence_reports(
+    profile: &crate::CustomizerProfile,
+    document: &crate::FoundryAssetDocument,
+    instantiation_report: &FamilyInstantiationReport,
+    recipe: &AssetRecipe,
+    application_reports: &[LocalOverrideApplicationReport],
+) -> (
+    BTreeMap<String, ControlDivergence>,
+    Vec<LocalOverrideDivergenceReport>,
+) {
+    let mut control_divergence = control_divergence_state(profile, document);
+    let controls_by_slot = controls_by_slot(profile);
+    let control_labels = profile
+        .controls
+        .iter()
+        .map(|control| (control.id.as_str(), control.label.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let slots_by_parameter = parameter_slots_by_id(instantiation_report, recipe);
+    let reports_by_id = application_reports
+        .iter()
+        .map(|report| (&report.id, report))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut reports = Vec::new();
+    for override_row in &document.local_recipe_overrides {
+        let Some(application_report) = reports_by_id.get(&override_row.id) else {
+            continue;
+        };
+        if application_report.status == LocalOverrideApplicationStatus::Dropped {
+            continue;
+        }
+
+        let mut slots = BTreeSet::new();
+        for target in &override_row.touched_targets {
+            match target {
+                TouchedSemanticTarget::FamilySlot(slot) => {
+                    slots.insert(slot.clone());
+                }
+                TouchedSemanticTarget::Parameter(parameter) => {
+                    if let Some(mapped_slots) = slots_by_parameter.get(parameter) {
+                        slots.extend(mapped_slots.iter().cloned());
+                    }
+                }
+                TouchedSemanticTarget::PartDefinition(_)
+                | TouchedSemanticTarget::PartInstance(_)
+                | TouchedSemanticTarget::Operation(_)
+                | TouchedSemanticTarget::Region(_)
+                | TouchedSemanticTarget::BoundaryLoop(_)
+                | TouchedSemanticTarget::Socket(_)
+                | TouchedSemanticTarget::Custom(_) => {}
+            }
+        }
+
+        let mut slots_by_control = BTreeMap::<String, BTreeSet<String>>::new();
+        for slot in slots {
+            if let Some(control_ids) = controls_by_slot.get(&slot) {
+                for control_id in control_ids {
+                    slots_by_control
+                        .entry(control_id.clone())
+                        .or_default()
+                        .insert(slot.clone());
+                    control_divergence
+                        .insert(control_id.clone(), ControlDivergence::DivergedByOverride);
+                }
+            }
+        }
+
+        reports.push(LocalOverrideDivergenceReport {
+            id: override_row.id.clone(),
+            status: application_report.status,
+            touched_targets: override_row.touched_targets.clone(),
+            diverged_controls: slots_by_control
+                .into_iter()
+                .map(|(control_id, slots)| DivergedControlReport {
+                    label: control_labels
+                        .get(control_id.as_str())
+                        .copied()
+                        .unwrap_or(control_id.as_str())
+                        .to_owned(),
+                    control_id,
+                    slots: slots.into_iter().collect(),
+                })
+                .collect(),
+        });
+    }
+
+    (control_divergence, reports)
+}
+
+fn controls_by_slot(profile: &crate::CustomizerProfile) -> BTreeMap<String, BTreeSet<String>> {
+    let mut controls_by_slot = BTreeMap::<String, BTreeSet<String>>::new();
+    for control in &profile.controls {
+        for binding in &control.bindings {
+            controls_by_slot
+                .entry(binding.slot.clone())
+                .or_default()
+                .insert(control.id.clone());
+        }
+    }
+    controls_by_slot
+}
+
+fn parameter_slots_by_id(
+    instantiation_report: &FamilyInstantiationReport,
+    recipe: &AssetRecipe,
+) -> BTreeMap<ParameterId, BTreeSet<String>> {
+    let mut parameters_by_path = BTreeMap::<&str, Vec<ParameterId>>::new();
+    for parameter in recipe.parameters.values() {
+        parameters_by_path
+            .entry(parameter.path.as_str())
+            .or_default()
+            .push(parameter.id);
+    }
+
+    let mut slots_by_parameter = BTreeMap::<ParameterId, BTreeSet<String>>::new();
+    for application in &instantiation_report.parameter_applications {
+        if let Some(parameter_ids) = parameters_by_path.get(application.target.as_str()) {
+            for parameter_id in parameter_ids {
+                slots_by_parameter
+                    .entry(*parameter_id)
+                    .or_default()
+                    .insert(application.slot.clone());
+            }
+        }
+    }
+    slots_by_parameter
 }
 
 fn apply_local_edit_program(

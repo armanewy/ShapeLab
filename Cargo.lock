@@ -3725,6 +3725,8 @@ dependencies = [
  "shape-core",
  "shape-decompiler",
  "shape-field",
+ "shape-foundry",
+ "shape-foundry-catalog",
  "shape-mesh",
  "shape-modeling-assets",
  "shape-poly",
@@ -3821,8 +3823,14 @@ name = "shape-foundry-catalog"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "shape-asset",
+ "shape-caesar-assets",
+ "shape-compile",
+ "shape-family",
  "shape-family-compile",
  "shape-foundry",
+ "tempfile",
 ]
 
 [[package]]

@@ -35,6 +35,10 @@ use shape_decompiler::{
     verify_decompile_package, write_decompile_package,
 };
 use shape_field::compile_document;
+use shape_foundry::{
+    CatalogContentRef, FoundryAssetDocument, FoundryCatalogError, FoundryCatalogResolver,
+    compile_foundry_document,
+};
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
@@ -91,6 +95,8 @@ enum Command {
     InspectAsset(InspectAssetArgs),
     /// Compile an explicit asset recipe or built-in benchmark slug.
     CompileAsset(CompileAssetArgs),
+    /// Build a foundry document through the conformance-checked headless compiler.
+    FoundryBuild(FoundryBuildArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -188,6 +194,19 @@ struct InspectAssetArgs {
 struct CompileAssetArgs {
     /// Built-in asset slug or recipe JSON path.
     recipe: String,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct FoundryBuildArgs {
+    /// Directory containing catalog JSON entries named `<stable-id>.json`.
+    #[arg(long)]
+    catalog: PathBuf,
+    /// Foundry document JSON file.
+    #[arg(long)]
+    document: PathBuf,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -331,6 +350,28 @@ struct PreviewArtifact {
     image: RenderedImage,
 }
 
+struct DirectoryFoundryCatalogResolver {
+    root: PathBuf,
+}
+
+impl FoundryCatalogResolver for DirectoryFoundryCatalogResolver {
+    fn resolve_catalog_content(
+        &self,
+        content_ref: &CatalogContentRef,
+    ) -> Result<String, FoundryCatalogError> {
+        let path = self.root.join(format!("{}.json", content_ref.stable_id));
+        if !path.exists() {
+            return Err(FoundryCatalogError::MissingContent {
+                content_ref: content_ref.clone(),
+            });
+        }
+        fs::read_to_string(&path).map_err(|error| FoundryCatalogError::InvalidJson {
+            subject: path.display().to_string(),
+            error: error.to_string(),
+        })
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
     match Cli::parse().command {
@@ -341,6 +382,7 @@ fn main() -> anyhow::Result<()> {
         Command::AssetVisualBenchmark(args) => run_asset_visual_benchmark(args),
         Command::InspectAsset(args) => run_inspect_asset(args),
         Command::CompileAsset(args) => run_compile_asset(args),
+        Command::FoundryBuild(args) => run_foundry_build(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -776,6 +818,108 @@ fn run_compile_asset(args: CompileAssetArgs) -> anyhow::Result<()> {
         package_verification.checksums_match,
         package_verification.topology_matches_manifest,
         package_verification.finite_numeric_payloads
+    );
+    Ok(())
+}
+
+fn run_foundry_build(args: FoundryBuildArgs) -> anyhow::Result<()> {
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    let document_json = fs::read_to_string(&args.document)
+        .with_context(|| format!("reading foundry document {}", args.document.display()))?;
+    let document: FoundryAssetDocument = serde_json::from_str(&document_json)
+        .with_context(|| format!("parsing foundry document {}", args.document.display()))?;
+    let resolver = DirectoryFoundryCatalogResolver { root: args.catalog };
+    let output = compile_foundry_document(&document, &resolver)
+        .map_err(|error| anyhow::anyhow!("foundry compilation failed: {error:#?}"))?;
+
+    if !output.artifact.validation_report.is_valid() {
+        bail!(
+            "compiled foundry artifact validation failed with {} issue(s)",
+            output.artifact.validation_report.issues.len()
+        );
+    }
+    let model_config = validation_config_from_recipe_with_limits(
+        &output.recipe,
+        &output.artifact,
+        ValidationLimits::default(),
+    );
+    let model_report = validate_model(&output.artifact, &model_config);
+
+    write_json(args.out_dir.join("foundry-document.json"), &output.document)?;
+    write_json(
+        args.out_dir.join("catalog-lock.json"),
+        &output.catalog.catalog_lock,
+    )?;
+    write_json(
+        args.out_dir.join("effective-request.json"),
+        &output.family_request,
+    )?;
+    write_json(
+        args.out_dir.join("family-conformance.json"),
+        &output.final_conformance,
+    )?;
+    write_json(
+        args.out_dir.join("conformance-summary.json"),
+        &output.conformance_summary,
+    )?;
+    write_json(args.out_dir.join("recipe.json"), &output.recipe)?;
+    write_json(args.out_dir.join("build-stamp.json"), &output.build_stamp)?;
+    write_json(
+        args.out_dir.join("local-overrides.json"),
+        &output.local_override_reports,
+    )?;
+    write_json(
+        args.out_dir.join("local-override-divergence.json"),
+        &output.local_override_divergence_reports,
+    )?;
+    write_json(
+        args.out_dir.join("control-divergence.json"),
+        &output.control_divergence,
+    )?;
+    write_json(
+        args.out_dir.join("provider-overrides.json"),
+        &output.provider_override_reports,
+    )?;
+    write_json(args.out_dir.join("model-validation.json"), &model_report)?;
+    if !model_report.is_valid() {
+        bail!(
+            "foundry model validation failed with {} issue(s)",
+            model_report.issues.len()
+        );
+    }
+
+    let package_dir = args.out_dir.join("model-package");
+    let package_paths = write_model_package(&output.recipe, &output.artifact, &package_dir)
+        .with_context(|| format!("writing model package {}", package_dir.display()))?;
+    let package_verification = verify_model_package(&package_dir)
+        .with_context(|| format!("verifying model package {}", package_dir.display()))?;
+    write_json(
+        args.out_dir.join("package-verification.json"),
+        &package_verification,
+    )?;
+
+    let grouped_obj = write_grouped_obj_export(&output.artifact, Some(&output.recipe))
+        .context("writing foundry grouped OBJ")?;
+    fs::write(args.out_dir.join("asset.obj"), grouped_obj.obj)
+        .with_context(|| format!("writing asset.obj to {}", args.out_dir.display()))?;
+    write_json(
+        args.out_dir.join("grouped-obj-report.json"),
+        &grouped_obj.report,
+    )?;
+
+    let preview = render_asset_artifact(&output.artifact, false)?;
+    save_png(&preview, args.out_dir.join("preview.png"))?;
+
+    println!("Built foundry document {}", output.document.document_id.0);
+    println!("  output: {}", args.out_dir.display());
+    println!("  package: {}", package_paths.directory.display());
+    println!("  manifest: {}", package_paths.manifest.display());
+    println!("  parts: {}", output.artifact.statistics.part_count);
+    println!("  triangles: {}", output.artifact.statistics.triangle_count);
+    println!(
+        "  conformance: {}",
+        validity_label(output.final_conformance.is_accepted())
     );
     Ok(())
 }
