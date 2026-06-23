@@ -537,6 +537,107 @@ fn foundry_build_replays_deterministically_and_reports_catalog_mismatch() {
     );
 }
 
+#[test]
+fn foundry_visual_benchmark_generates_usability_gate_artifacts() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("visual-benchmark");
+
+    let output = Command::new(exe)
+        .args([
+            "foundry-visual-benchmark",
+            "--profile",
+            "roman-bridge",
+            "--proposal-count",
+            "24",
+            "--skip-blender",
+            "--out-dir",
+        ])
+        .arg(&out_dir)
+        .output()
+        .expect("run shape-cli foundry-visual-benchmark");
+    assert!(
+        output.status.success(),
+        "foundry visual benchmark failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for name in [
+        "source-document.json",
+        "catalog-lock.json",
+        "customizer-profile.json",
+        "conformance.json",
+        "validation.json",
+        "metrics.json",
+        "parent/preview.png",
+        "parent/preview-wireframe.png",
+        "parent/blender-verification.json",
+        "refine/contact-sheet.png",
+        "refine/candidates.json",
+        "explore/contact-sheet.png",
+        "explore/candidates.json",
+        "silhouette/candidates.json",
+        "structure/candidates.json",
+        "detail/candidates.json",
+        "control-strips/summary.json",
+        "option-galleries/summary.json",
+        "coherent-pack/pack-document.json",
+        "coherent-pack/pack-report.json",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "benchmark should write {name}");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+
+    let metrics: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("metrics.json")).unwrap()).unwrap();
+    assert_eq!(metrics["profile"], "roman-bridge");
+    assert_eq!(metrics["advanced_recipe_required"], false);
+    assert_eq!(metrics["all_primary_controls_measurable"], true);
+    assert_eq!(metrics["invalid_state_became_current"], false);
+    assert_eq!(
+        metrics["provider_options_rendered"],
+        metrics["provider_options_total"]
+    );
+    assert_eq!(metrics["coherent_pack"]["member_count"], 3);
+
+    let modes = metrics["candidate_modes"].as_array().unwrap();
+    for mode in ["refine", "explore"] {
+        let summary = modes
+            .iter()
+            .find(|summary| summary["mode"] == mode)
+            .expect("candidate mode summary");
+        assert_eq!(
+            summary["returned_count"], 6,
+            "{mode} should return six candidates"
+        );
+    }
+    assert!(
+        metrics["primary_controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|control| control["control_kind"] == "continuous_axis")
+            .all(|control| control["sample_count"] == 5),
+        "continuous controls should render five samples"
+    );
+
+    let refine: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("refine/candidates.json")).unwrap())
+            .unwrap();
+    let candidates = refine["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 6);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| !candidate["explanations"].as_array().unwrap().is_empty()),
+        "every candidate should carry a structured explanation"
+    );
+}
+
 fn write_foundry_fixture(fixture: &FoundryFixtureCatalog, catalog_dir: &Path) -> PathBuf {
     fixture
         .write_to_dir(catalog_dir)

@@ -3724,6 +3724,7 @@ dependencies = [
  "shape-compile",
  "shape-core",
  "shape-decompiler",
+ "shape-family-compile",
  "shape-field",
  "shape-foundry",
  "shape-foundry-catalog",

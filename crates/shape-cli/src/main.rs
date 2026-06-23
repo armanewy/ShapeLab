@@ -58,6 +58,8 @@ use shape_search::asset::{
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
+mod foundry_visual_benchmark;
+
 const DEFAULT_PRESET: &str = "desk-lamp";
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_PROPOSAL_COUNT: usize = 64;
@@ -97,6 +99,8 @@ enum Command {
     CompileAsset(CompileAssetArgs),
     /// Build a foundry document through the conformance-checked headless compiler.
     FoundryBuild(FoundryBuildArgs),
+    /// Render the cross-domain headless visual Foundry benchmark.
+    FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -383,6 +387,9 @@ fn main() -> anyhow::Result<()> {
         Command::InspectAsset(args) => run_inspect_asset(args),
         Command::CompileAsset(args) => run_compile_asset(args),
         Command::FoundryBuild(args) => run_foundry_build(args),
+        Command::FoundryVisualBenchmark(args) => {
+            foundry_visual_benchmark::run_foundry_visual_benchmark(args)
+        }
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -2241,7 +2248,7 @@ fn build_preview(
     Ok(PreviewArtifact { mesh, image })
 }
 
-fn save_png(image: &RenderedImage, path: impl AsRef<Path>) -> anyhow::Result<()> {
+pub(crate) fn save_png(image: &RenderedImage, path: impl AsRef<Path>) -> anyhow::Result<()> {
     let path = path.as_ref();
     let buffer = RgbaImage::from_raw(image.width, image.height, image.rgba8.clone())
         .context("rendered image buffer length does not match dimensions")?;
@@ -2251,7 +2258,7 @@ fn save_png(image: &RenderedImage, path: impl AsRef<Path>) -> anyhow::Result<()>
     Ok(())
 }
 
-fn save_contact_sheet(
+pub(crate) fn save_contact_sheet(
     parent: &RenderedImage,
     candidates: &[&RenderedImage],
     path: impl AsRef<Path>,
@@ -2421,7 +2428,7 @@ fn mesh_summary(mesh: &TriangleMesh) -> MeshSummary {
     }
 }
 
-fn render_mesh_from_triangles(mesh: &TriangulatedPolygonMesh) -> TriangleMesh {
+pub(crate) fn render_mesh_from_triangles(mesh: &TriangulatedPolygonMesh) -> TriangleMesh {
     TriangleMesh {
         positions: mesh.mesh.positions.clone(),
         normals: mesh.mesh.normals.clone(),
@@ -2433,7 +2440,7 @@ fn render_mesh_from_triangles(mesh: &TriangulatedPolygonMesh) -> TriangleMesh {
     }
 }
 
-fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> anyhow::Result<()> {
+pub(crate) fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> anyhow::Result<()> {
     let path = path.as_ref();
     fs::write(path, serde_json::to_string_pretty(value)?)
         .with_context(|| format!("writing JSON to {}", path.display()))?;
