@@ -9,6 +9,7 @@
 pub mod analysis;
 pub mod deformation_recovery;
 pub mod hypotheses;
+pub mod recovery_gate;
 pub mod search;
 pub mod strict;
 
