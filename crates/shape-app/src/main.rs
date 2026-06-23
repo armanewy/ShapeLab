@@ -4,6 +4,7 @@ mod app;
 mod asset;
 mod commands;
 mod desktop;
+mod foundry;
 mod jobs;
 mod panels;
 mod state;

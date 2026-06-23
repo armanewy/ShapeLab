@@ -1,0 +1,140 @@
+//! UI-ready view-model contracts for the native Foundry surface.
+
+use std::collections::BTreeMap;
+
+use shape_foundry::{
+    ControlDivergence, ControlTopologyBehavior, ControlValue, FoundryCandidateId,
+    FoundryDocumentId, FoundryLock, FoundryPackDocument,
+};
+use shape_render::OrbitCamera;
+use shape_search::foundry::{
+    FoundryCandidateControlChange, FoundryCandidateMode, FoundryCandidateRejectionReason,
+};
+
+/// Whole-model candidate direction card.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FoundryCandidateCard {
+    /// Stable candidate ID.
+    pub id: FoundryCandidateId,
+    /// Candidate slot in the direction board.
+    pub slot: usize,
+    /// Search mode that produced this card.
+    pub mode: Option<FoundryCandidateMode>,
+    /// True for the unchanged parent card.
+    pub parent: bool,
+    /// Human-facing title.
+    pub title: String,
+    /// Human-facing subtitle.
+    pub subtitle: String,
+    /// Whole-model preview ID.
+    pub preview_id: Option<String>,
+    /// RGBA8 preview bytes.
+    pub rgba8: Vec<u8>,
+    /// Preview width.
+    pub width: u32,
+    /// Preview height.
+    pub height: u32,
+    /// Camera shared by cards in the same comparison.
+    pub camera: Option<OrbitCamera>,
+    /// Changed customizer controls.
+    pub changed_controls: Vec<String>,
+    /// Changed provider roles.
+    pub changed_roles: Vec<String>,
+    /// Structured candidate explanations from the generic candidate engine.
+    pub explanations: Vec<FoundryCandidateControlChange>,
+    /// Rejection reasons for invalid or unavailable cards.
+    pub rejections: BTreeMap<FoundryCandidateRejectionReason, usize>,
+    /// Validation label for badges.
+    pub validation_label: String,
+    /// Validation detail for tooltips.
+    pub validation_detail: Option<String>,
+    /// Whether this card can be accepted.
+    pub selectable: bool,
+    /// Whether this card is currently selected.
+    pub selected: bool,
+}
+
+/// One customizer control row/card.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FoundryControlView {
+    /// Stable control ID.
+    pub id: String,
+    /// Human-facing label.
+    pub label: String,
+    /// Optional section label.
+    pub section: Option<String>,
+    /// Human-facing control kind label.
+    pub kind: String,
+    /// Current control value.
+    pub value: Option<ControlValue>,
+    /// Authored default value, when available.
+    pub default_value: Option<ControlValue>,
+    /// Whether this is a primary novice-facing control.
+    pub primary: bool,
+    /// Whether this row is visible outside Advanced Recipe.
+    pub visible: bool,
+    /// Whether edits are currently locked.
+    pub locked: bool,
+    /// Topology behavior for preview/release semantics.
+    pub topology_behavior: ControlTopologyBehavior,
+    /// Divergence between source controls and generated recipe.
+    pub divergence: ControlDivergence,
+    /// Feasible options or filmstrip samples.
+    pub options: Vec<FoundryOptionCard>,
+    /// Technical path shown only in tooltips or Advanced Recipe.
+    pub advanced_path: Option<String>,
+    /// Human-facing helper text.
+    pub help: Option<String>,
+}
+
+/// Whole-model option card for choices, providers, and sampled controls.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FoundryOptionCard {
+    /// Owning control ID.
+    pub control_id: String,
+    /// Option value.
+    pub value: ControlValue,
+    /// Human-facing option label.
+    pub label: String,
+    /// Provider role when this option selects a provider.
+    pub provider_role: Option<String>,
+    /// Whole-model preview ID.
+    pub preview_id: Option<String>,
+    /// RGBA8 preview bytes.
+    pub rgba8: Vec<u8>,
+    /// Preview width.
+    pub width: u32,
+    /// Preview height.
+    pub height: u32,
+    /// Camera used for this option preview.
+    pub camera: Option<OrbitCamera>,
+    /// Whether this option is currently selected.
+    pub selected: bool,
+    /// Why this option is unavailable.
+    pub unavailable_reason: Option<String>,
+}
+
+/// Family-pack workspace view.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct FoundryPackView {
+    /// Current pack ID.
+    pub pack_id: Option<String>,
+    /// Source pack document, when the workspace has one.
+    pub pack: Option<FoundryPackDocument>,
+    /// Pack members keyed by member ID.
+    pub members: BTreeMap<String, FoundryDocumentId>,
+    /// Selected member ID.
+    pub selected_member: Option<String>,
+    /// Locks shared across pack members.
+    pub shared_locks: Vec<FoundryLock>,
+    /// Provider choices shared across pack members.
+    pub shared_provider_choices: BTreeMap<String, String>,
+    /// Member-specific override counts.
+    pub member_override_counts: BTreeMap<String, usize>,
+    /// Coherence warnings shown before export.
+    pub coherence_warnings: Vec<String>,
+    /// Whether every member currently satisfies the pack policy.
+    pub coherent: bool,
+    /// Whether the pack can be exported now.
+    pub can_export: bool,
+}
