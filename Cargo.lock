@@ -3927,8 +3927,13 @@ dependencies = [
  "rand_distr",
  "rayon",
  "serde",
+ "serde_json",
  "shape-asset",
  "shape-core",
+ "shape-family",
+ "shape-family-compile",
+ "shape-foundry",
+ "shape-foundry-catalog",
  "thiserror 2.0.18",
 ]
 

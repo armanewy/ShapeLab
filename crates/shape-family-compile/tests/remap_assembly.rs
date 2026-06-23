@@ -562,6 +562,214 @@ fn stale_target_counters_do_not_overwrite_existing_or_source_ids() {
 }
 
 #[test]
+fn repeated_cut_outer_region_aliases_remap_with_distinct_detail_regions() {
+    let mut target = target_recipe();
+    let fragment = fragment(
+        "cut-outer-aliases",
+        "case",
+        recipe_with_parts(
+            vec![definition(
+                PartDefinitionId(1),
+                "cut body",
+                &[RegionId(1)],
+                &[SocketId(1)],
+                vec![
+                    ModelingOperationSpec::RecessedPanelCut {
+                        operation: OperationId(1),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [-0.2, 0.0],
+                        size: [0.3, 0.2],
+                        depth: 0.08,
+                        corner_radius: 0.01,
+                        rim_width: 0.02,
+                        corner_segments: 2,
+                        entry_loop: BoundaryLoopId(1),
+                        floor_loop: BoundaryLoopId(2),
+                        outer_region: RegionId(1),
+                        rim_region: RegionId(10),
+                        wall_region: RegionId(11),
+                        floor_region: RegionId(12),
+                        edge_treatment: CutEdgeTreatment::Hard,
+                    },
+                    ModelingOperationSpec::RectangularThroughCut {
+                        operation: OperationId(2),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [0.2, 0.0],
+                        size: [0.2, 0.12],
+                        corner_radius: 0.01,
+                        rim_width: 0.02,
+                        corner_segments: 2,
+                        entry_loop: BoundaryLoopId(3),
+                        exit_loop: BoundaryLoopId(4),
+                        outer_region: RegionId(1),
+                        rim_region: RegionId(13),
+                        wall_region: RegionId(14),
+                        edge_treatment: CutEdgeTreatment::Hard,
+                    },
+                ],
+            )],
+            vec![instance(PartInstanceId(1), PartDefinitionId(1), None)],
+            vec![PartInstanceId(1)],
+        ),
+        RecipeFragmentExports::default(),
+    );
+
+    let remapped = remap_fragment_assembly(&mut target, &fragment).expect("fragment remaps");
+
+    assert_eq!(remapped.remap.regions.len(), 6);
+    assert_eq!(remapped.remap.regions[&RegionId(1)], RegionId(400));
+    assert_ne!(
+        remapped.remap.regions[&RegionId(10)],
+        remapped.remap.regions[&RegionId(13)]
+    );
+    assert_valid(&target);
+}
+
+#[test]
+fn duplicate_cut_detail_regions_are_rejected() {
+    let mut target = target_recipe();
+    let before = target.clone();
+    let fragment = fragment(
+        "duplicate-cut-detail",
+        "case",
+        recipe_with_parts(
+            vec![definition(
+                PartDefinitionId(1),
+                "cut body",
+                &[RegionId(1)],
+                &[SocketId(1)],
+                vec![
+                    ModelingOperationSpec::RecessedPanelCut {
+                        operation: OperationId(1),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [-0.2, 0.0],
+                        size: [0.3, 0.2],
+                        depth: 0.08,
+                        corner_radius: 0.01,
+                        rim_width: 0.02,
+                        corner_segments: 2,
+                        entry_loop: BoundaryLoopId(1),
+                        floor_loop: BoundaryLoopId(2),
+                        outer_region: RegionId(1),
+                        rim_region: RegionId(10),
+                        wall_region: RegionId(11),
+                        floor_region: RegionId(12),
+                        edge_treatment: CutEdgeTreatment::Hard,
+                    },
+                    ModelingOperationSpec::RectangularThroughCut {
+                        operation: OperationId(2),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [0.2, 0.0],
+                        size: [0.2, 0.12],
+                        corner_radius: 0.01,
+                        rim_width: 0.02,
+                        corner_segments: 2,
+                        entry_loop: BoundaryLoopId(3),
+                        exit_loop: BoundaryLoopId(4),
+                        outer_region: RegionId(1),
+                        rim_region: RegionId(10),
+                        wall_region: RegionId(14),
+                        edge_treatment: CutEdgeTreatment::Hard,
+                    },
+                ],
+            )],
+            vec![instance(PartInstanceId(1), PartDefinitionId(1), None)],
+            vec![PartInstanceId(1)],
+        ),
+        RecipeFragmentExports::default(),
+    );
+
+    let err = remap_fragment_assembly(&mut target, &fragment).expect_err("duplicate rejects");
+
+    assert!(matches!(
+        err,
+        FragmentRemapError::DuplicateMapping {
+            id_kind,
+            id,
+            ..
+        } if id_kind == "region" && id == "10"
+    ));
+    assert_eq!(target, before);
+}
+
+#[test]
+fn duplicate_bevel_detail_regions_are_rejected() {
+    let mut target = target_recipe();
+    let before = target.clone();
+    let fragment = fragment(
+        "duplicate-bevel-detail",
+        "case",
+        recipe_with_parts(
+            vec![definition(
+                PartDefinitionId(1),
+                "cut body",
+                &[RegionId(1)],
+                &[SocketId(1)],
+                vec![
+                    ModelingOperationSpec::RecessedPanelCut {
+                        operation: OperationId(1),
+                        region: RegionId(1),
+                        face: PlanarCutFace::PositiveZ,
+                        center: [0.0, 0.0],
+                        size: [0.3, 0.2],
+                        depth: 0.08,
+                        corner_radius: 0.01,
+                        rim_width: 0.02,
+                        corner_segments: 2,
+                        entry_loop: BoundaryLoopId(1),
+                        floor_loop: BoundaryLoopId(2),
+                        outer_region: RegionId(1),
+                        rim_region: RegionId(10),
+                        wall_region: RegionId(11),
+                        floor_region: RegionId(12),
+                        edge_treatment: CutEdgeTreatment::BevelEligible,
+                    },
+                    ModelingOperationSpec::BevelBoundaryLoop {
+                        operation: OperationId(2),
+                        target_loop: BoundaryLoopId(1),
+                        width: 0.01,
+                        segments: 2,
+                        profile: 1.0,
+                        bevel_region: RegionId(20),
+                        outer_replacement_loop: BoundaryLoopId(3),
+                        inner_replacement_loop: BoundaryLoopId(4),
+                    },
+                    ModelingOperationSpec::BevelBoundaryLoop {
+                        operation: OperationId(3),
+                        target_loop: BoundaryLoopId(2),
+                        width: 0.01,
+                        segments: 2,
+                        profile: 1.0,
+                        bevel_region: RegionId(20),
+                        outer_replacement_loop: BoundaryLoopId(5),
+                        inner_replacement_loop: BoundaryLoopId(6),
+                    },
+                ],
+            )],
+            vec![instance(PartInstanceId(1), PartDefinitionId(1), None)],
+            vec![PartInstanceId(1)],
+        ),
+        RecipeFragmentExports::default(),
+    );
+
+    let err = remap_fragment_assembly(&mut target, &fragment).expect_err("duplicate rejects");
+
+    assert!(matches!(
+        err,
+        FragmentRemapError::DuplicateMapping {
+            id_kind,
+            id,
+            ..
+        } if id_kind == "region" && id == "20"
+    ));
+    assert_eq!(target, before);
+}
+
+#[test]
 fn parent_cycles_are_rejected() {
     let mut target = target_recipe();
     let fragment = fragment(

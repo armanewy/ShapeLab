@@ -342,25 +342,29 @@ fn foundry_build_rejects_model_validation_errors() {
                 .is_some_and(|definition| definition.tags.contains("panel"))
         })
         .expect("panel instance should survive remapping")
-        .id;
+        .clone();
+    let duplicate_panel = shape_asset::PartInstance {
+        id: shape_asset::PartInstanceId(base.recipe.next_ids.part_instance),
+        name: "overlapping duplicate panel".to_owned(),
+        generated_by: None,
+        ..panel.clone()
+    };
     fixture
         .document
         .local_recipe_overrides
         .push(shape_foundry::LocalRecipeOverride {
-            id: shape_foundry::LocalRecipeOverrideId("move-panel-inside-body".to_owned()),
+            id: shape_foundry::LocalRecipeOverrideId("duplicate-panel-overlap".to_owned()),
             base_geometry_fingerprint: base.base_geometry_fingerprint,
             edit_program: shape_asset::AssetEditProgram {
-                label: "move panel inside body".to_owned(),
+                label: "duplicate panel overlap".to_owned(),
                 seed: 23,
-                operations: vec![shape_asset::AssetEdit::SetTransform {
-                    instance: panel,
-                    transform: shape_asset::Transform3 {
-                        translation: [0.0, 0.0, 0.55],
-                        ..shape_asset::Transform3::default()
-                    },
+                operations: vec![shape_asset::AssetEdit::AddInstance {
+                    instance: duplicate_panel.clone(),
                 }],
             },
-            touched_targets: vec![shape_foundry::TouchedSemanticTarget::PartInstance(panel)],
+            touched_targets: vec![shape_foundry::TouchedSemanticTarget::PartInstance(
+                duplicate_panel.id,
+            )],
             survival_policy: shape_foundry::OverrideSurvivalPolicy::Revalidate,
         });
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -450,14 +454,25 @@ fn foundry_build_reports_local_override_divergence() {
     let control_divergence: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("control-divergence.json")).unwrap())
             .unwrap();
-    assert_eq!(control_divergence["body_width"], "DivergedByOverride");
+    assert_eq!(control_divergence["body_proportions"], "DivergedByOverride");
+    let effective_request: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("effective-request.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        effective_request["parameters"]["body_proportions"]["Scalar"],
+        0.45
+    );
     let override_divergence: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(out_dir.join("local-override-divergence.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         override_divergence[0]["diverged_controls"][0]["control_id"],
-        "body_width"
+        "body_proportions"
+    );
+    assert_eq!(
+        override_divergence[0]["diverged_controls"][0]["slots"],
+        serde_json::json!(["body_proportions"])
     );
 }
 

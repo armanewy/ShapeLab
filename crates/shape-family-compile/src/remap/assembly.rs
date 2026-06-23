@@ -238,15 +238,98 @@ fn collect_region_ids(fragment: &RecipeFragment) -> Result<Vec<RegionId>, Fragme
             ids.push(*region_id);
         }
         for operation in &definition.geometry.operations {
-            for region_id in operation.generated_region_ids() {
-                if !seen.insert(region_id) {
-                    return Err(duplicate(&fragment.id, "region", region_id.0.to_string()));
-                }
-                ids.push(region_id);
-            }
+            collect_operation_region_ids(fragment, operation, &mut ids, &mut seen)?;
         }
     }
     Ok(ids)
+}
+
+fn collect_operation_region_ids(
+    fragment: &RecipeFragment,
+    operation: &ModelingOperationSpec,
+    ids: &mut Vec<RegionId>,
+    seen: &mut BTreeSet<RegionId>,
+) -> Result<(), FragmentRemapError> {
+    match operation {
+        ModelingOperationSpec::RecessedPanelCut {
+            region,
+            outer_region,
+            rim_region,
+            wall_region,
+            floor_region,
+            ..
+        } => {
+            collect_cut_outer_region(fragment, ids, seen, *region, *outer_region)?;
+            collect_detail_region(fragment, ids, seen, *rim_region)?;
+            collect_detail_region(fragment, ids, seen, *wall_region)?;
+            collect_detail_region(fragment, ids, seen, *floor_region)?;
+        }
+        ModelingOperationSpec::RectangularThroughCut {
+            region,
+            outer_region,
+            rim_region,
+            wall_region,
+            ..
+        }
+        | ModelingOperationSpec::CircularThroughCut {
+            region,
+            outer_region,
+            rim_region,
+            wall_region,
+            ..
+        } => {
+            collect_cut_outer_region(fragment, ids, seen, *region, *outer_region)?;
+            collect_detail_region(fragment, ids, seen, *rim_region)?;
+            collect_detail_region(fragment, ids, seen, *wall_region)?;
+        }
+        ModelingOperationSpec::BevelBoundaryLoop { bevel_region, .. } => {
+            collect_detail_region(fragment, ids, seen, *bevel_region)?;
+        }
+        ModelingOperationSpec::TransformGeometry { .. }
+        | ModelingOperationSpec::SetBevelProfile { .. }
+        | ModelingOperationSpec::AddPanel { .. }
+        | ModelingOperationSpec::AddTrim { .. }
+        | ModelingOperationSpec::MirrorInstances { .. }
+        | ModelingOperationSpec::LinearArray { .. }
+        | ModelingOperationSpec::RadialArray { .. }
+        | ModelingOperationSpec::ReservedBoolean { .. }
+        | ModelingOperationSpec::ReservedDeformationProgram { .. } => {}
+    }
+    Ok(())
+}
+
+fn collect_cut_outer_region(
+    fragment: &RecipeFragment,
+    ids: &mut Vec<RegionId>,
+    seen: &mut BTreeSet<RegionId>,
+    host_region: RegionId,
+    outer_region: RegionId,
+) -> Result<(), FragmentRemapError> {
+    if seen.insert(outer_region) {
+        ids.push(outer_region);
+        return Ok(());
+    }
+    if outer_region == host_region {
+        return Ok(());
+    }
+    Err(duplicate(
+        &fragment.id,
+        "region",
+        outer_region.0.to_string(),
+    ))
+}
+
+fn collect_detail_region(
+    fragment: &RecipeFragment,
+    ids: &mut Vec<RegionId>,
+    seen: &mut BTreeSet<RegionId>,
+    region: RegionId,
+) -> Result<(), FragmentRemapError> {
+    if !seen.insert(region) {
+        return Err(duplicate(&fragment.id, "region", region.0.to_string()));
+    }
+    ids.push(region);
+    Ok(())
 }
 
 fn collect_boundary_loop_ids(

@@ -1181,7 +1181,7 @@ mod tests {
         let mut required_document = fixture.document.clone();
         required_document
             .control_state
-            .insert("body_width".to_owned(), ControlValue::Scalar(1.6));
+            .insert("body_proportions".to_owned(), ControlValue::Scalar(0.9));
         let required = shape_foundry::compile_foundry_document(&required_document, &fixture)
             .expect("required change should compile");
         assert_ne!(
@@ -1194,13 +1194,13 @@ mod tests {
     fn effective_family_request_contains_defaulted_slots() {
         let fixture = scifi_crate::fixture_catalog();
         let mut document = fixture.document.clone();
-        document.control_state.remove("body_width");
+        document.control_state.remove("body_proportions");
 
         let output = shape_foundry::compile_foundry_document(&document, &fixture)
             .expect("defaulted required control should compile");
         assert_eq!(
-            output.family_request.parameters.get("body_width"),
-            Some(&shape_family_compile::FamilyValue::Scalar(1.2))
+            output.family_request.parameters.get("body_proportions"),
+            Some(&shape_family_compile::FamilyValue::Scalar(0.45))
         );
     }
 
@@ -1248,7 +1248,7 @@ mod tests {
             LocalOverrideApplicationStatus::Revalidated
         );
         assert_eq!(
-            output.control_divergence.get("body_width"),
+            output.control_divergence.get("body_proportions"),
             Some(&shape_foundry::ControlDivergence::DivergedByOverride)
         );
         assert_eq!(output.local_override_divergence_reports.len(), 1);
@@ -1258,7 +1258,7 @@ mod tests {
                 .iter()
                 .map(|control| control.control_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["body_width"]
+            vec!["body_proportions"]
         );
     }
 }

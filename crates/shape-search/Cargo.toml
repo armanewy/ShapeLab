@@ -13,7 +13,14 @@ rayon.workspace = true
 serde.workspace = true
 shape-asset.workspace = true
 shape-core.workspace = true
+shape-foundry.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+shape-family.workspace = true
+shape-family-compile.workspace = true
+shape-foundry-catalog.workspace = true
 
 [[bench]]
 name = "search_quality"

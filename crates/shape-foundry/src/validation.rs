@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use shape_family::ParameterExecutionPolicy;
 
 use crate::{
-    CUSTOMIZER_PROFILE_SCHEMA_VERSION, CatalogContentRef, ChoiceOption, ClosedInterval,
-    ControlKind, ControlSlotBinding, ControlTopologyBehavior, ControlValue, CustomizerControl,
-    CustomizerProfile, DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
+    CATALOG_LOCK_KEY_FAMILY, CATALOG_LOCK_KEY_STYLE, CUSTOMIZER_PROFILE_SCHEMA_VERSION,
+    CatalogContentRef, ChoiceOption, ClosedInterval, ControlKind, ControlSlotBinding,
+    ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
+    DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
     FOUNDRY_PACK_DOCUMENT_SCHEMA_VERSION, FoundryAssetDocument, FoundryCommand, FoundryLockTarget,
     FoundryPackDocument, PackCoherencePolicy, ProviderOption, ResponseCurve, SharedProviderPolicy,
     document_catalog_refs,
@@ -410,6 +411,18 @@ pub fn validate_foundry_pack(pack: &FoundryPackDocument) -> FoundryValidationRep
         "export_profile.profile",
         &pack.export_profile.profile,
     );
+    for (control_id, value) in &pack.shared_controls {
+        validate_identifier(
+            &mut report,
+            format!("shared_controls.{control_id}.key"),
+            control_id,
+        );
+        validate_control_value(
+            &mut report,
+            format!("shared_controls.{control_id}.value"),
+            value,
+        );
+    }
     if pack.members.is_empty() {
         report.push(
             "members",
@@ -449,18 +462,36 @@ pub fn validate_foundry_pack(pack: &FoundryPackDocument) -> FoundryValidationRep
         }
     }
     if let Some(lock) = &pack.catalog_lock {
-        validate_catalog_lock_ref(
+        let shared_family_ref = if pack.coherence_policy == PackCoherencePolicy::ExactFamilyAndStyle
+        {
+            Some(&pack.shared_family_ref)
+        } else {
+            shared_member_catalog_ref(pack, CATALOG_LOCK_KEY_FAMILY)
+        };
+        validate_pack_catalog_lock_ref(
             &mut report,
-            lock.exact_refs.get("family"),
+            lock.exact_refs.get(CATALOG_LOCK_KEY_FAMILY),
             "catalog_lock.exact_refs.family",
-            &pack.shared_family_ref,
+            shared_family_ref,
+            true,
         );
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("style"),
-            "catalog_lock.exact_refs.style",
-            &pack.shared_style_ref,
-        );
+        if pack.coherence_policy == PackCoherencePolicy::ExactFamilyAndStyle {
+            validate_pack_catalog_lock_ref(
+                &mut report,
+                lock.exact_refs.get(CATALOG_LOCK_KEY_STYLE),
+                "catalog_lock.exact_refs.style",
+                Some(&pack.shared_style_ref),
+                true,
+            );
+        } else {
+            validate_pack_catalog_lock_ref(
+                &mut report,
+                lock.exact_refs.get(CATALOG_LOCK_KEY_STYLE),
+                "catalog_lock.exact_refs.style",
+                shared_member_catalog_ref(pack, CATALOG_LOCK_KEY_STYLE),
+                false,
+            );
+        }
     }
     for (member_id, document) in &pack.members {
         validate_identifier(&mut report, format!("members.{member_id}.key"), member_id);
@@ -1007,6 +1038,53 @@ fn validate_catalog_lock_ref(
             "missing_catalog_lock_ref",
             "Catalog lock is missing a required exact content reference.",
         ),
+    }
+}
+
+fn validate_pack_catalog_lock_ref(
+    report: &mut FoundryValidationReport,
+    actual: Option<&CatalogContentRef>,
+    subject: &str,
+    expected: Option<&CatalogContentRef>,
+    required: bool,
+) {
+    match (actual, expected) {
+        (Some(actual), Some(expected)) if actual == expected => {}
+        (Some(_), _) => report.push(
+            subject,
+            "catalog_lock_ref_mismatch",
+            "Catalog lock reference must match a shared pack content reference.",
+        ),
+        (None, _) if required => report.push(
+            subject,
+            "missing_catalog_lock_ref",
+            "Catalog lock is missing a required exact content reference.",
+        ),
+        (None, _) => {}
+    }
+}
+
+fn shared_member_catalog_ref<'a>(
+    pack: &'a FoundryPackDocument,
+    key: &str,
+) -> Option<&'a CatalogContentRef> {
+    let mut documents = pack.members.values();
+    let first_ref = documents
+        .next()
+        .and_then(|document| member_catalog_ref(document, key))?;
+    documents
+        .all(|document| member_catalog_ref(document, key) == Some(first_ref))
+        .then_some(first_ref)
+}
+
+fn member_catalog_ref<'a>(
+    document: &'a FoundryAssetDocument,
+    key: &str,
+) -> Option<&'a CatalogContentRef> {
+    match key {
+        CATALOG_LOCK_KEY_FAMILY => Some(&document.family_content_ref),
+        CATALOG_LOCK_KEY_STYLE => Some(&document.style_content_ref),
+        _ => None,
     }
 }
 

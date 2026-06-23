@@ -308,6 +308,29 @@ pub fn compile_foundry_document_with_options(
     resolver: &impl FoundryCatalogResolver,
     options: FoundryCompilationOptions,
 ) -> Result<FoundryCompilationOutput, FoundryCompilationError> {
+    compile_foundry_document_inner(document, resolver, options, FinalConformancePolicy::Reject)
+}
+
+pub(crate) fn compile_foundry_document_for_pack_report(
+    document: &crate::FoundryAssetDocument,
+    resolver: &impl FoundryCatalogResolver,
+    options: FoundryCompilationOptions,
+) -> Result<FoundryCompilationOutput, FoundryCompilationError> {
+    compile_foundry_document_inner(document, resolver, options, FinalConformancePolicy::Report)
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FinalConformancePolicy {
+    Reject,
+    Report,
+}
+
+fn compile_foundry_document_inner(
+    document: &crate::FoundryAssetDocument,
+    resolver: &impl FoundryCatalogResolver,
+    options: FoundryCompilationOptions,
+    final_conformance_policy: FinalConformancePolicy,
+) -> Result<FoundryCompilationOutput, FoundryCompilationError> {
     let document_validation = validate_foundry_document(document);
     if !document_validation.is_valid() {
         return Err(FoundryCompilationError::DocumentValidationFailed(
@@ -348,7 +371,7 @@ pub fn compile_foundry_document_with_options(
             &base_instantiation.recipe,
             &base_instantiation.artifact,
         );
-        if !report.is_accepted() {
+        if !report.is_accepted() && final_conformance_policy == FinalConformancePolicy::Reject {
             return Err(FoundryCompilationError::FinalConformanceRejected(report));
         }
         Some(report)
@@ -379,7 +402,9 @@ pub fn compile_foundry_document_with_options(
         &final_recipe,
         &artifact,
     );
-    if !final_conformance.is_accepted() {
+    if !final_conformance.is_accepted()
+        && final_conformance_policy == FinalConformancePolicy::Reject
+    {
         return Err(FoundryCompilationError::FinalConformanceRejected(
             final_conformance,
         ));
