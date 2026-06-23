@@ -62,21 +62,28 @@ fn foundry_job_events_expose_matching_job_id() {
             job_id: 42,
             pack: Box::new(FoundryPackView::default()),
         },
-        FoundryJobEvent::PreviewRendered {
+        FoundryJobEvent::PackExportFinished {
             job_id: 43,
+            profile: "game-ready".to_string(),
+            out_dir: std::path::PathBuf::from("pack-out"),
+            member_count: 3,
+        },
+        FoundryJobEvent::PreviewRendered {
+            job_id: 44,
             preview_id: "front".to_string(),
             rgba8: Vec::new(),
             width: 0,
             height: 0,
             camera: OrbitCamera::default(),
+            build: None,
         },
         FoundryJobEvent::ExportFinished {
-            job_id: 44,
+            job_id: 45,
             profile: "blender".to_string(),
             out_dir: std::path::PathBuf::from("out"),
         },
         FoundryJobEvent::Failed {
-            job_id: 45,
+            job_id: 46,
             message: "failed".to_string(),
         },
     ];
@@ -86,7 +93,7 @@ fn foundry_job_events_expose_matching_job_id() {
             .iter()
             .map(FoundryJobEvent::job_id)
             .collect::<Vec<_>>(),
-        vec![42, 43, 44, 45]
+        vec![42, 43, 44, 45, 46]
     );
 }
 

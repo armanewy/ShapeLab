@@ -1,12 +1,12 @@
 //! Background job contracts for the native Foundry surface.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::{collections::BTreeMap, fs};
 
 use shape_compile::export::write_model_package;
 use shape_core::Aabb;
 use shape_foundry::{
-    ControlValue, FoundryAssetDocument, FoundryCatalogResolver, FoundryCommand,
+    ControlValue, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogResolver, FoundryCommand,
     FoundryCompilationOutput, FoundryEdit, FoundryPackCompilationOutput, FoundryPackDocument,
     FoundryStyleChangeContext, SharedProviderPolicy, apply_foundry_command,
     apply_foundry_command_with_style_context, compile_foundry_document, compile_foundry_pack,
@@ -26,6 +26,7 @@ use shape_search::foundry::{
 use super::view_model::{FoundryCandidateCard, FoundryPackView};
 
 const CURRENT_PREVIEW_ID: &str = "current";
+const CANDIDATE_PREVIEW_PIXELS: u32 = 96;
 
 /// Deterministic background work requested by the Foundry app state.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +44,21 @@ pub(crate) enum FoundryJobRequest {
         job_id: u64,
         /// Compiled output to render.
         output: Box<FoundryCompilationOutput>,
+        /// Requested image width.
+        width: u32,
+        /// Requested image height.
+        height: u32,
+    },
+    /// Render a whole-model preview for a transient control value without persisting it.
+    PreviewControlValue {
+        /// Monotonic app-local job ID.
+        job_id: u64,
+        /// Source document snapshot.
+        document: Box<FoundryAssetDocument>,
+        /// Control to sample.
+        control_id: String,
+        /// Transient value to render.
+        value: ControlValue,
         /// Requested image width.
         width: u32,
         /// Requested image height.
@@ -72,6 +88,15 @@ pub(crate) enum FoundryJobRequest {
         job_id: u64,
         /// Pack snapshot.
         pack: Box<FoundryPackDocument>,
+    },
+    /// Compile and export every member in a family pack.
+    ExportPack {
+        /// Monotonic app-local job ID.
+        job_id: u64,
+        /// Pack snapshot.
+        pack: Box<FoundryPackDocument>,
+        /// Destination directory. Each member receives a deterministic child folder.
+        out_dir: PathBuf,
     },
     /// Export an already compiled model package.
     Export {
@@ -110,9 +135,11 @@ impl FoundryJobRequest {
         match self {
             Self::CompileCurrent { job_id, .. }
             | Self::RenderPreview { job_id, .. }
+            | Self::PreviewControlValue { job_id, .. }
             | Self::GenerateCandidates { job_id, .. }
             | Self::ApplyEdit { job_id, .. }
             | Self::CompilePack { job_id, .. }
+            | Self::ExportPack { job_id, .. }
             | Self::Export { job_id, .. } => *job_id,
         }
     }
@@ -132,9 +159,11 @@ impl FoundryJobRequest {
         match self {
             Self::CompileCurrent { .. } => FoundryJobSlot::CompileCurrent,
             Self::RenderPreview { .. } => FoundryJobSlot::RenderPreview,
+            Self::PreviewControlValue { .. } => FoundryJobSlot::RenderPreview,
             Self::GenerateCandidates { .. } => FoundryJobSlot::GenerateCandidates,
             Self::ApplyEdit { .. } => FoundryJobSlot::ApplyEdit,
             Self::CompilePack { .. } => FoundryJobSlot::CompilePack,
+            Self::ExportPack { .. } => FoundryJobSlot::Export,
             Self::Export { .. } => FoundryJobSlot::Export,
         }
     }
@@ -164,6 +193,8 @@ pub(crate) enum FoundryJobEvent {
         height: u32,
         /// Camera used for the preview.
         camera: OrbitCamera,
+        /// Build represented by this preview.
+        build: Option<FoundryBuildStamp>,
     },
     /// Candidate search completed.
     CandidatesGenerated {
@@ -191,6 +222,17 @@ pub(crate) enum FoundryJobEvent {
         job_id: u64,
         /// UI-ready pack view.
         pack: Box<FoundryPackView>,
+    },
+    /// Pack export completed.
+    PackExportFinished {
+        /// Matching app-local job ID.
+        job_id: u64,
+        /// Export profile key.
+        profile: String,
+        /// Destination directory.
+        out_dir: PathBuf,
+        /// Number of member packages written.
+        member_count: usize,
     },
     /// Export completed.
     ExportFinished {
@@ -220,6 +262,7 @@ impl FoundryJobEvent {
             | Self::CandidatesGenerated { job_id, .. }
             | Self::EditApplied { job_id, .. }
             | Self::PackCompiled { job_id, .. }
+            | Self::PackExportFinished { job_id, .. }
             | Self::ExportFinished { job_id, .. }
             | Self::Failed { job_id, .. } => *job_id,
         }
@@ -248,19 +291,42 @@ pub(crate) fn run_foundry_job(
             height,
             ..
         } => render_preview(job_id, &output, width, height, preview_cache),
+        FoundryJobRequest::PreviewControlValue {
+            document,
+            control_id,
+            value,
+            width,
+            height,
+            ..
+        } => render_transient_control_preview(
+            job_id,
+            &document,
+            &control_id,
+            value,
+            (width, height),
+            resolver,
+            preview_cache,
+        ),
         FoundryJobRequest::GenerateCandidates {
             document, request, ..
         } => generate_foundry_candidate_plans(&document, resolver, &request)
-            .map(|output| {
-                let cards = candidate_cards_from_output(&output, Some(request.mode), None);
-                FoundryJobEvent::CandidatesGenerated {
+            .map_err(|error| error.to_string())
+            .and_then(|output| {
+                let cards = candidate_cards_from_output_with_previews(
+                    &document,
+                    &output,
+                    Some(request.mode),
+                    None,
+                    resolver,
+                    preview_cache,
+                )?;
+                Ok(FoundryJobEvent::CandidatesGenerated {
                     job_id,
                     request,
                     output: Box::new(output),
                     cards,
-                }
-            })
-            .map_err(|error| error.to_string()),
+                })
+            }),
         FoundryJobRequest::ApplyEdit { document, edit, .. } => {
             apply_edit_and_compile(&document, &edit, resolver).map(|output| {
                 FoundryJobEvent::EditApplied {
@@ -276,6 +342,9 @@ pub(crate) fn run_foundry_job(
                 pack: Box::new(pack_view_from_output(output)),
             })
             .map_err(|error| format!("{error:?}")),
+        FoundryJobRequest::ExportPack { pack, out_dir, .. } => {
+            export_foundry_pack(job_id, &pack, out_dir, resolver)
+        }
         FoundryJobRequest::Export {
             output,
             profile,
@@ -368,6 +437,7 @@ fn render_preview(
             width: preview.image.width,
             height: preview.image.height,
             camera: preview.camera,
+            build: Some(output.build_stamp.clone()),
         });
     }
 
@@ -386,15 +456,91 @@ fn render_preview(
         width: image.width,
         height: image.height,
         camera,
+        build: Some(output.build_stamp.clone()),
     })
 }
 
+fn export_foundry_pack(
+    job_id: u64,
+    pack: &FoundryPackDocument,
+    out_dir: PathBuf,
+    resolver: &impl FoundryCatalogResolver,
+) -> Result<FoundryJobEvent, String> {
+    let output = compile_foundry_pack(pack, resolver).map_err(|error| format!("{error:?}"))?;
+    fs::create_dir_all(&out_dir).map_err(|error| error.to_string())?;
+    for (member_id, member_output) in &output.member_outputs {
+        let member_dir = out_dir.join(safe_export_segment(member_id));
+        write_model_package(&member_output.recipe, &member_output.artifact, &member_dir)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(FoundryJobEvent::PackExportFinished {
+        job_id,
+        profile: output.pack.export_profile.profile,
+        out_dir,
+        member_count: output.member_outputs.len(),
+    })
+}
+
+fn safe_export_segment(segment: &str) -> String {
+    let sanitized = segment
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "member".to_owned()
+    } else {
+        sanitized
+    }
+}
+
+fn render_transient_control_preview(
+    job_id: u64,
+    document: &FoundryAssetDocument,
+    control_id: &str,
+    value: ControlValue,
+    size: (u32, u32),
+    resolver: &impl FoundryCatalogResolver,
+    preview_cache: &mut FoundryPreviewCache,
+) -> Result<FoundryJobEvent, String> {
+    let mut preview_document = document.clone();
+    apply_foundry_command(
+        &mut preview_document,
+        &FoundryCommand::SetControl {
+            control_id: control_id.to_owned(),
+            value,
+        },
+    )
+    .map_err(|error| format!("{error:?}"))?;
+    let output = compile_foundry_document(&preview_document, resolver)
+        .map_err(|error| format!("{error:?}"))?;
+    let (width, height) = size;
+    render_preview(job_id, &output, width, height, preview_cache)
+}
+
 fn foundry_preview_request(output: &FoundryCompilationOutput) -> FoundryPreviewRequest {
-    let mut request = FoundryPreviewRequest::new(
+    preview_request_for_output(
         CURRENT_PREVIEW_ID,
         FoundryPreviewKind::ChangedRoleOverlay {
             role: "current".to_owned(),
         },
+        output,
+    )
+}
+
+fn preview_request_for_output(
+    preview_id: impl Into<String>,
+    kind: FoundryPreviewKind,
+    output: &FoundryCompilationOutput,
+) -> FoundryPreviewRequest {
+    let mut request = FoundryPreviewRequest::new(
+        preview_id,
+        kind,
         output.build_stamp.geometry_input_fingerprint.0.to_hex(),
         preview_mesh_from_output(output),
     );
@@ -500,6 +646,71 @@ pub(crate) fn candidate_cards_from_output(
             }
         })
         .collect()
+}
+
+fn candidate_cards_from_output_with_previews(
+    parent_document: &FoundryAssetDocument,
+    output: &FoundryCandidateOutput,
+    mode: Option<FoundryCandidateMode>,
+    selected: Option<&shape_foundry::FoundryCandidateId>,
+    resolver: &impl FoundryCatalogResolver,
+    preview_cache: &mut FoundryPreviewCache,
+) -> Result<Vec<FoundryCandidateCard>, String> {
+    let mut cards = candidate_cards_from_output(output, mode, selected);
+    if cards.is_empty() {
+        return Ok(cards);
+    }
+
+    let parent_output = compile_foundry_document(parent_document, resolver)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut requests = vec![preview_request_for_output(
+        "candidate-parent",
+        FoundryPreviewKind::CandidateCard {
+            candidate_id: "parent".to_owned(),
+        },
+        &parent_output,
+    )];
+    for candidate in &output.candidates {
+        let candidate_output = compile_foundry_document(&candidate.document, resolver)
+            .map_err(|error| format!("{error:?}"))?;
+        requests.push(preview_request_for_output(
+            format!("candidate-{}", candidate.id.0),
+            FoundryPreviewKind::CandidateCard {
+                candidate_id: candidate.id.0.clone(),
+            },
+            &candidate_output,
+        ));
+    }
+
+    let mut batch = FoundryPreviewBatchRequest::new(
+        "candidate-directions",
+        requests,
+        FoundryPreviewResolution::from_pixels(CANDIDATE_PREVIEW_PIXELS)
+            .expect("candidate preview size is supported"),
+    );
+    batch.max_parallel_jobs = 4;
+    let rendered = preview_cache
+        .render_batch(batch)
+        .map_err(|error| error.to_string())?;
+    let rendered_by_id = rendered
+        .previews
+        .into_iter()
+        .map(|preview| (preview.preview_id.clone(), preview))
+        .collect::<BTreeMap<_, _>>();
+
+    for card in &mut cards {
+        let preview_id = format!("candidate-{}", card.id.0);
+        let preview = rendered_by_id
+            .get(&preview_id)
+            .ok_or_else(|| format!("candidate preview `{preview_id}` was not rendered"))?;
+        card.preview_id = Some(preview.preview_id.clone());
+        card.rgba8 = preview.image.rgba8.clone();
+        card.width = preview.image.width;
+        card.height = preview.image.height;
+        card.camera = Some(preview.camera.clone());
+    }
+
+    Ok(cards)
 }
 
 fn candidate_subtitle(mode: Option<FoundryCandidateMode>, change_count: usize) -> String {

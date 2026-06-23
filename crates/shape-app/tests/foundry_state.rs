@@ -4,7 +4,11 @@
 #[path = "../src/foundry/mod.rs"]
 mod foundry;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+};
 
 use foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
@@ -107,6 +111,63 @@ fn candidate_job_mode_comes_from_explicit_candidate_request() {
         panic!("expected one candidate job effect");
     };
     assert_eq!(job.candidate_mode(), Some(FoundryCandidateMode::Explore));
+}
+
+#[test]
+fn direction_mode_command_preserves_requested_search_mode() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+    let effects = state
+        .handle_command(FoundryAppCommand::RequestCandidates(
+            FoundryCandidateRequest {
+                seed: 12,
+                proposal_count: 24,
+                result_count: 6,
+                mode: FoundryCandidateMode::Structure,
+                strategy_id: Some("macro".to_owned()),
+            },
+        ))
+        .expect("mode request should schedule");
+
+    let job = start_job(effects);
+    assert_eq!(job.candidate_mode(), Some(FoundryCandidateMode::Structure));
+}
+
+#[test]
+fn transient_control_preview_does_not_schedule_persistent_edit() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+    let effects = state
+        .handle_command(FoundryAppCommand::PreviewControlValue {
+            control_id: "span".to_owned(),
+            value: ControlValue::Scalar(0.25),
+        })
+        .expect("preview should schedule");
+
+    let job = start_job(effects);
+    match job {
+        FoundryJobRequest::PreviewControlValue {
+            job_id,
+            control_id,
+            value,
+            ..
+        } => {
+            assert_eq!(job_id, 1);
+            assert_eq!(control_id, "span");
+            assert_eq!(value, ControlValue::Scalar(0.25));
+        }
+        other => panic!("expected transient preview job, got {other:?}"),
+    }
+    assert!(
+        state
+            .document
+            .as_ref()
+            .is_some_and(|document| !document.control_state.contains_key("span"))
+    );
+    assert!(
+        state
+            .project_file
+            .as_ref()
+            .is_some_and(|project| { project.project.revisions.len() == 1 })
+    );
 }
 
 #[test]
@@ -306,6 +367,39 @@ fn set_style_apply_edit_prunes_incompatible_provider_override() {
 }
 
 #[test]
+fn candidate_generation_job_renders_preview_images_for_cards() {
+    let fixture = RuntimeFixture::new();
+    let request = FoundryJobRequest::GenerateCandidates {
+        job_id: 1,
+        document: Box::new(fixture.document.clone()),
+        request: FoundryCandidateRequest {
+            seed: 33,
+            proposal_count: 24,
+            result_count: 4,
+            mode: FoundryCandidateMode::Refine,
+            strategy_id: None,
+        },
+    };
+
+    let event = run_foundry_job(
+        request,
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    );
+    let FoundryJobEvent::CandidatesGenerated { cards, .. } = event else {
+        panic!("candidate generation should complete, got {event:?}");
+    };
+
+    assert!(!cards.is_empty());
+    assert!(cards.iter().all(|card| {
+        card.width > 0
+            && card.height > 0
+            && card.rgba8.len() == (card.width * card.height * 4) as usize
+            && card.camera.is_some()
+    }));
+}
+
+#[test]
 fn pack_compile_preserves_selected_member_when_it_still_exists() {
     let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
     let mut pack = FoundryPackDocument::new(
@@ -383,6 +477,106 @@ fn add_current_to_pack_tracks_membership_and_schedules_pack_compile() {
 }
 
 #[test]
+fn batch_export_command_registers_pack_export_job_in_reducer() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+    let out_dir = PathBuf::from("pack-export");
+    let pack = FoundryPackDocument::new(
+        "props".to_owned(),
+        content_ref("family", 1),
+        content_ref("style", 2),
+        FoundryPackExportProfile {
+            profile: "default".to_owned(),
+            require_all_members: true,
+        },
+    );
+    state.pack = FoundryPackView {
+        pack_id: Some("props".to_owned()),
+        pack: Some(pack),
+        can_export: true,
+        coherent: true,
+        ..FoundryPackView::default()
+    };
+
+    let effects = state
+        .handle_command(FoundryAppCommand::RequestPackBatchExport {
+            out_dir: out_dir.clone(),
+        })
+        .expect("batch export should schedule pack export");
+
+    let [FoundryAppEffect::StartJob(job)] = effects.as_slice() else {
+        panic!("expected one pack export job effect");
+    };
+    assert!(matches!(
+        job.as_ref(),
+        FoundryJobRequest::ExportPack {
+            job_id: 1,
+            out_dir: actual,
+            ..
+        } if actual == &out_dir
+    ));
+    assert!(state.active_jobs.contains_key(&1));
+}
+
+#[test]
+fn pack_export_job_writes_member_packages() {
+    let fixture = RuntimeFixture::new();
+    let mut pack = FoundryPackDocument::new(
+        "props".to_owned(),
+        fixture.document.family_content_ref.clone(),
+        fixture.document.style_content_ref.clone(),
+        FoundryPackExportProfile {
+            profile: "default".to_owned(),
+            require_all_members: true,
+        },
+    );
+    pack.members
+        .insert("bridge_a".to_owned(), fixture.document.clone());
+    let mut second = fixture.document.clone();
+    second.document_id = FoundryDocumentId("bridge_b".to_owned());
+    second
+        .control_state
+        .insert("radius".to_owned(), ControlValue::Scalar(0.2));
+    pack.members.insert("bridge_b".to_owned(), second);
+    let out_dir = temp_test_dir("foundry-pack-export");
+    let _ = fs::remove_dir_all(&out_dir);
+
+    let event = run_foundry_job(
+        FoundryJobRequest::ExportPack {
+            job_id: 1,
+            pack: Box::new(pack),
+            out_dir: out_dir.clone(),
+        },
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    );
+
+    let FoundryJobEvent::PackExportFinished {
+        out_dir: actual_dir,
+        member_count,
+        ..
+    } = event
+    else {
+        panic!("expected pack export success, got {event:?}");
+    };
+    assert_eq!(actual_dir, out_dir);
+    assert_eq!(member_count, 2);
+    assert!(
+        out_dir
+            .join("bridge_a")
+            .join("asset-manifest.json")
+            .is_file()
+    );
+    assert!(
+        out_dir
+            .join("bridge_b")
+            .join("asset-manifest.json")
+            .is_file()
+    );
+
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
 fn undo_switches_to_parent_revision_and_rebuilds_off_thread() {
     let root = minimal_foundry_document();
     let edit = FoundryEdit {
@@ -447,6 +641,10 @@ fn start_job(effects: Vec<FoundryAppEffect>) -> FoundryJobRequest {
             _ => None,
         })
         .expect("start job effect")
+}
+
+fn temp_test_dir(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("{name}-{}", std::process::id()))
 }
 
 #[derive(Clone, Default)]

@@ -313,6 +313,14 @@ pub(crate) struct DirectionModeAction {
     pub request: FoundryCandidateRequest,
 }
 
+impl DirectionModeAction {
+    /// Convert the mode action into the reducer command that preserves the requested mode.
+    #[must_use]
+    pub(crate) fn app_command(&self) -> FoundryAppCommand {
+        FoundryAppCommand::RequestCandidates(self.request.clone())
+    }
+}
+
 /// A/B comparison state for the selected direction.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DirectionComparisonView {

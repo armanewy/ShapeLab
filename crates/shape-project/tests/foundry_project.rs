@@ -74,6 +74,54 @@ fn save_load_preserves_replayable_branch_history() {
 }
 
 #[test]
+fn role_presence_program_replays_as_persisted_toggle_state() {
+    let temp_dir = tempdir();
+    let path = temp_dir.path().join("role-presence.shapelab-foundry.json");
+    let root_document = document_fixture();
+    let mut project = FoundryProject::new(
+        "Bridge Foundry",
+        root_document.clone(),
+        catalog_lock_for(&root_document),
+        None,
+        None,
+        conformance(),
+    )
+    .unwrap();
+    let mut child_document = root_document.clone();
+    child_document
+        .control_state
+        .insert("side_rail".to_owned(), ControlValue::Toggle(false));
+    child_document.catalog_lock = None;
+    child_document.build_stamp = None;
+
+    project
+        .accept_commands(
+            "Hide side rail",
+            vec![FoundryCommand::SetRolePresence {
+                role: "side_rail".to_owned(),
+                enabled: false,
+            }],
+            child_document,
+            catalog_lock_for(&root_document),
+            None,
+            None,
+            conformance(),
+        )
+        .unwrap();
+
+    project.save_json(&path).unwrap();
+    let loaded = FoundryProject::load_json(&path).unwrap();
+    assert_eq!(
+        loaded
+            .current_document()
+            .unwrap()
+            .control_state
+            .get("side_rail"),
+        Some(&ControlValue::Toggle(false))
+    );
+}
+
+#[test]
 fn load_rejects_revision_when_replay_does_not_match_child_snapshot() {
     let temp_dir = tempdir();
     let path = temp_dir.path().join("bad-replay.shapelab-foundry.json");

@@ -22,6 +22,7 @@ shape-compile.workspace = true
 shape-core.workspace = true
 shape-field.workspace = true
 shape-foundry.workspace = true
+shape-foundry-catalog.workspace = true
 shape-mesh.workspace = true
 shape-modeling-assets.workspace = true
 shape-presets.workspace = true

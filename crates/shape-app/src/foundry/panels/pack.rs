@@ -4,16 +4,17 @@
 //! workspace is a secondary surface that summarizes the existing headless pack
 //! contract and exposes host actions without taking over the single-asset flow.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use shape_foundry::{
     FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget, FoundryPackDocument,
     FoundryValidationReport, SharedProviderPolicy, validate_foundry_pack,
 };
 
-use super::super::{
-    commands::FoundryAppCommand, jobs::FoundryJobRequest, view_model::FoundryPackView,
-};
+use super::super::{commands::FoundryAppCommand, view_model::FoundryPackView};
 
 const DEFAULT_CONTACT_SHEET_COLUMNS: usize = 3;
 
@@ -296,21 +297,21 @@ pub(crate) fn batch_validate_pack(pack: &FoundryPackDocument) -> PackBatchValida
     batch_validation_from_report(true, &report)
 }
 
-/// Build the request that starts the existing headless pack compiler for batch
-/// export. The export action itself remains disabled until the view says the
-/// pack is coherent and exportable.
+/// Build the reducer command that starts the existing headless pack compiler
+/// and exports every compiled member. The reducer owns job IDs and active-job
+/// registration.
 #[must_use]
-pub(crate) fn batch_export_compile_request(
+pub(crate) fn batch_export_command(
     pack_view: &FoundryPackView,
-    job_id: u64,
-) -> Option<FoundryJobRequest> {
+    out_dir: PathBuf,
+) -> Option<FoundryAppCommand> {
     if !pack_panel_view(pack_view).export.enabled {
         return None;
     }
-    Some(FoundryJobRequest::CompilePack {
-        job_id,
-        pack: Box::new(pack_view.pack.as_ref()?.clone()),
-    })
+    pack_view
+        .pack
+        .as_ref()
+        .map(|_| FoundryAppCommand::RequestPackBatchExport { out_dir })
 }
 
 /// Build a contact sheet with a caller-chosen maximum column count.

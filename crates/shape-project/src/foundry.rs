@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use shape_asset::{AssetRecipe, RevisionId};
 use shape_foundry::{
-    CatalogContentRef, FOUNDRY_PROJECT_DOCUMENT_SCHEMA_VERSION, FOUNDRY_PROJECT_KIND,
+    CatalogContentRef, ControlValue, FOUNDRY_PROJECT_DOCUMENT_SCHEMA_VERSION, FOUNDRY_PROJECT_KIND,
     FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogLock, FoundryCommand,
     FoundryConformanceSummary, FoundryEdit, FoundryProjectDocument, FoundryProjectRevision,
     FoundryProjectRevisionProgram, FoundryRecipeSnapshotError, FoundryValidationReport,
@@ -895,12 +895,10 @@ fn apply_semantic_command(
                 document.foundry_locks.push(lock.clone());
             }
         }
-        FoundryCommand::SetRolePresence { .. } => {
-            return Err(unsupported_command(
-                revision,
-                command,
-                "role presence has no persisted field in FoundryAssetDocument",
-            ));
+        FoundryCommand::SetRolePresence { role, enabled } => {
+            document
+                .control_state
+                .insert(role.clone(), ControlValue::Toggle(*enabled));
         }
         FoundryCommand::GenerateCandidates(_)
         | FoundryCommand::AcceptCandidate { .. }

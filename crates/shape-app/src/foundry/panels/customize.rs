@@ -7,6 +7,7 @@ use shape_foundry::{
     canonicalize_control_value, control_divergence, default_control_value,
     effective_control_domain, evaluate_control, whole_model_preview_sample_requests_with_count,
 };
+use shape_render::OrbitCamera;
 
 use crate::foundry::{
     FoundryAppCommand,
@@ -182,10 +183,10 @@ pub(crate) fn preview_control_value_intents(
         return Vec::new();
     }
 
-    vec![
-        set_control_command(&control.id, value),
-        FoundryAppCommand::RequestPreview,
-    ]
+    vec![FoundryAppCommand::PreviewControlValue {
+        control_id: control.id.clone(),
+        value,
+    }]
 }
 
 /// Commit a value and request an exact rebuild on release.
@@ -391,6 +392,7 @@ fn option_card(
     current_value: Option<&ControlValue>,
     effective_domain: &FeasibleControlDomain,
 ) -> FoundryOptionCard {
+    let rgba8 = placeholder_preview_pixel(&value);
     FoundryOptionCard {
         control_id: control.id.clone(),
         unavailable_reason: option_unavailable_reason(effective_domain, &value),
@@ -399,11 +401,23 @@ fn option_card(
         label,
         provider_role,
         preview_id,
-        rgba8: Vec::new(),
-        width: 0,
-        height: 0,
-        camera: None,
+        rgba8,
+        width: 1,
+        height: 1,
+        camera: Some(OrbitCamera::default()),
     }
+}
+
+fn placeholder_preview_pixel(value: &ControlValue) -> Vec<u8> {
+    let color = match value {
+        ControlValue::Scalar(_) => [88, 108, 132, 255],
+        ControlValue::Integer(_) => [104, 96, 136, 255],
+        ControlValue::Toggle(true) => [82, 130, 105, 255],
+        ControlValue::Toggle(false) => [115, 95, 95, 255],
+        ControlValue::Choice(_) => [120, 112, 90, 255],
+        ControlValue::Provider(_) => [96, 118, 112, 255],
+    };
+    color.to_vec()
 }
 
 fn option_unavailable_reason(

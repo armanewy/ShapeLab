@@ -117,6 +117,16 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
     assert_eq!(request.mode, FoundryCandidateMode::Detail);
     assert_eq!(request.seed, 23);
     assert_eq!(request.result_count, VISIBLE_DIRECTION_CANDIDATE_CARDS);
+
+    let explore_action = actions
+        .iter()
+        .find(|action| action.mode == FoundryCandidateMode::Explore)
+        .expect("explore mode exists");
+    assert!(matches!(
+        explore_action.app_command(),
+        FoundryAppCommand::RequestCandidates(request)
+            if request.mode == FoundryCandidateMode::Explore
+    ));
 }
 
 #[test]

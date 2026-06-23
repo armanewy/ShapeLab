@@ -5,11 +5,12 @@
 mod foundry;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use foundry::{
-    FoundryJobRequest,
+    FoundryAppCommand,
     panels::pack::{
-        PackMemberStatus, add_current_asset_to_pack_command, batch_export_compile_request,
+        PackMemberStatus, add_current_asset_to_pack_command, batch_export_command,
         batch_validate_pack, pack_contact_sheet, pack_panel_view, pack_view_from_document,
     },
 };
@@ -140,22 +141,18 @@ fn validation_warnings_gate_export_and_mark_contact_sheet_members() {
 }
 
 #[test]
-fn batch_export_request_uses_existing_pack_compiler_job() {
+fn batch_export_request_requires_destination_directory() {
     let view = pack_view_from_document(fixture_pack(), None);
-    let request = batch_export_compile_request(&view, 77).expect("valid pack should export");
-
-    match request {
-        FoundryJobRequest::CompilePack { job_id, pack } => {
-            assert_eq!(job_id, 77);
-            assert_eq!(pack.pack_id, "roman_bridge_pack");
-            assert_eq!(pack.export_profile.profile, "game-ready");
-        }
-        _ => panic!("expected pack compile request"),
-    }
+    let out_dir = PathBuf::from("pack-out");
+    let command = batch_export_command(&view, out_dir.clone()).expect("valid pack should export");
+    assert_eq!(
+        command,
+        FoundryAppCommand::RequestPackBatchExport { out_dir }
+    );
 
     let mut blocked_view = view;
     blocked_view.can_export = false;
-    assert!(batch_export_compile_request(&blocked_view, 78).is_none());
+    assert!(batch_export_command(&blocked_view, PathBuf::from("blocked")).is_none());
 }
 
 fn fixture_pack() -> FoundryPackDocument {

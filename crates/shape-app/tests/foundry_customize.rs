@@ -63,6 +63,15 @@ fn deck_defaults_to_primary_controls_and_collapsed_advanced() {
         control_ids(&deck.displayed_controls),
         vec!["height", "count", "finish", "support_provider"]
     );
+    assert!(
+        deck.controls
+            .iter()
+            .flat_map(|control| control.options.iter())
+            .all(|option| option.width > 0
+                && option.height > 0
+                && option.rgba8.len() == (option.width * option.height * 4) as usize
+                && option.camera.is_some())
+    );
 
     let height = &deck.primary_controls[0];
     assert_eq!(
@@ -338,14 +347,12 @@ fn command_intents_wrap_generic_foundry_commands_and_exact_release_builds() {
     let height = control(&deck.controls, "height");
 
     let preview = preview_control_value_intents(height, ControlValue::Scalar(0.25));
-    assert_eq!(preview.len(), 2);
-    assert_eq!(preview[1], FoundryAppCommand::RequestPreview);
     assert_eq!(
-        preview[0].single_foundry_command(),
-        Some(&FoundryCommand::SetControl {
+        preview,
+        vec![FoundryAppCommand::PreviewControlValue {
             control_id: "height".to_owned(),
             value: ControlValue::Scalar(0.25)
-        })
+        }]
     );
 
     let release = release_control_value_intents(height, ControlValue::Scalar(0.75));

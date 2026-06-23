@@ -3681,6 +3681,7 @@ dependencies = [
  "shape-family-compile",
  "shape-field",
  "shape-foundry",
+ "shape-foundry-catalog",
  "shape-mesh",
  "shape-modeling-assets",
  "shape-presets",

@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+pub(crate) mod app;
 pub(crate) mod commands;
 pub(crate) mod jobs;
 pub(crate) mod panels;

@@ -6,6 +6,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use shape_asset::RevisionId;
+use shape_core::Aabb;
 use shape_foundry::{
     ControlEvaluationContext, ControlKind, ControlValue, FoundryAssetDocument, FoundryBuildStamp,
     FoundryCandidateId, FoundryCatalogLock, FoundryCommand, FoundryCompilationOutput,
@@ -15,7 +16,9 @@ use shape_foundry::{
     SharedProviderPolicy, control_divergence, default_control_value, effective_control_domain,
     validate_foundry_document,
 };
+use shape_mesh::TriangleMesh;
 use shape_project::foundry::{FoundryProjectFile, FoundryProjectLoadReport};
+use shape_render::{RenderSettings, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
 };
@@ -217,6 +220,10 @@ impl FoundryAppState {
             FoundryAppCommand::RunFoundryCommandProgram { label, commands } => {
                 self.schedule_apply_edit(FoundryEdit { label, commands })
             }
+            FoundryAppCommand::RequestCandidates(request) => self.request_candidates(request),
+            FoundryAppCommand::PreviewControlValue { control_id, value } => {
+                self.preview_control_value(control_id, value)
+            }
             FoundryAppCommand::RequestBuild => self.request_build(),
             FoundryAppCommand::RequestPreview => {
                 self.request_preview(DEFAULT_PREVIEW_PIXELS, DEFAULT_PREVIEW_PIXELS)
@@ -224,6 +231,9 @@ impl FoundryAppState {
             FoundryAppCommand::Save => self.save(),
             FoundryAppCommand::SaveAs(path) => self.save_as(path),
             FoundryAppCommand::Load(path) => Ok(vec![FoundryAppEffect::LoadProject(path)]),
+            FoundryAppCommand::RequestPackBatchExport { out_dir } => {
+                self.batch_export_current_pack(out_dir)
+            }
             FoundryAppCommand::SetAdvancedRecipeOpen(open) => {
                 self.advanced_recipe_open = open;
                 Ok(Vec::new())
@@ -259,6 +269,7 @@ impl FoundryAppState {
                 width,
                 height,
                 camera,
+                build,
                 ..
             } => {
                 self.current_preview = Some(FoundryPreviewImage {
@@ -267,7 +278,7 @@ impl FoundryAppState {
                     width,
                     height,
                     camera,
-                    build: self.current_build.clone(),
+                    build,
                 });
                 true
             }
@@ -298,6 +309,18 @@ impl FoundryAppState {
                     self.selected_pack_member = pack.selected_member.clone();
                 }
                 self.pack = pack;
+                true
+            }
+            FoundryJobEvent::PackExportFinished {
+                profile,
+                out_dir,
+                member_count,
+                ..
+            } => {
+                self.status = Some(format!(
+                    "Exported {member_count} pack member(s) with {profile} to {}",
+                    out_dir.display()
+                ));
                 true
             }
             FoundryJobEvent::ExportFinished {
@@ -364,6 +387,24 @@ impl FoundryAppState {
             job_id,
             document: Box::new(document),
             request,
+        }))
+    }
+
+    /// Request a non-persistent preview for a sampled control value.
+    pub(crate) fn preview_control_value(
+        &mut self,
+        control_id: String,
+        value: ControlValue,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let document = self.current_document()?.clone();
+        let job_id = self.allocate_job_id()?;
+        Ok(self.schedule_job(FoundryJobRequest::PreviewControlValue {
+            job_id,
+            document: Box::new(document),
+            control_id,
+            value,
+            width: DEFAULT_PREVIEW_PIXELS,
+            height: DEFAULT_PREVIEW_PIXELS,
         }))
     }
 
@@ -540,6 +581,26 @@ impl FoundryAppState {
         Ok(self.schedule_job(FoundryJobRequest::CompilePack {
             job_id,
             pack: Box::new(pack),
+        }))
+    }
+
+    fn batch_export_current_pack(
+        &mut self,
+        out_dir: PathBuf,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let pack = self
+            .pack
+            .pack
+            .clone()
+            .ok_or(FoundryAppStateError::MissingPack)?;
+        if !self.pack.can_export {
+            return Err(FoundryAppStateError::PackNotExportable);
+        }
+        let job_id = self.allocate_job_id()?;
+        Ok(self.schedule_job(FoundryJobRequest::ExportPack {
+            job_id,
+            pack: Box::new(pack),
+            out_dir,
         }))
     }
 
@@ -784,6 +845,7 @@ impl FoundryAppState {
         match request {
             FoundryJobRequest::CompileCurrent { document, .. }
             | FoundryJobRequest::GenerateCandidates { document, .. }
+            | FoundryJobRequest::PreviewControlValue { document, .. }
             | FoundryJobRequest::ApplyEdit { document, .. } => self
                 .document
                 .as_ref()
@@ -793,7 +855,8 @@ impl FoundryAppState {
                 .current_output
                 .as_ref()
                 .is_some_and(|current| current.build_stamp == output.build_stamp),
-            FoundryJobRequest::CompilePack { pack, .. } => self
+            FoundryJobRequest::CompilePack { pack, .. }
+            | FoundryJobRequest::ExportPack { pack, .. } => self
                 .pack
                 .pack
                 .as_ref()
@@ -813,6 +876,10 @@ pub(crate) enum FoundryAppStateError {
     MissingSavePath,
     /// Export requires a destination directory.
     MissingExportOutput,
+    /// No family pack is open.
+    MissingPack,
+    /// Current family pack is not ready for batch export.
+    PackNotExportable,
     /// Candidate ID was not generated in the current state.
     UnknownCandidate(FoundryCandidateId),
     /// Revision ID is not present in the current history.
@@ -837,6 +904,10 @@ impl fmt::Display for FoundryAppStateError {
             Self::MissingSavePath => formatter.write_str("foundry save requires a file path"),
             Self::MissingExportOutput => {
                 formatter.write_str("foundry export requires an output directory")
+            }
+            Self::MissingPack => formatter.write_str("foundry pack is required"),
+            Self::PackNotExportable => {
+                formatter.write_str("foundry pack is not ready for batch export")
             }
             Self::UnknownCandidate(candidate) => {
                 write!(formatter, "unknown foundry candidate {:?}", candidate)
@@ -874,6 +945,9 @@ fn job_event_matches_request(event: &FoundryJobEvent, request: &FoundryJobReques
             FoundryJobEvent::PreviewRendered { .. },
             FoundryJobRequest::RenderPreview { .. }
         ) | (
+            FoundryJobEvent::PreviewRendered { .. },
+            FoundryJobRequest::PreviewControlValue { .. }
+        ) | (
             FoundryJobEvent::CandidatesGenerated { .. },
             FoundryJobRequest::GenerateCandidates { .. },
         ) | (
@@ -882,6 +956,9 @@ fn job_event_matches_request(event: &FoundryJobEvent, request: &FoundryJobReques
         ) | (
             FoundryJobEvent::PackCompiled { .. },
             FoundryJobRequest::CompilePack { .. }
+        ) | (
+            FoundryJobEvent::PackExportFinished { .. },
+            FoundryJobRequest::ExportPack { .. }
         ) | (
             FoundryJobEvent::ExportFinished { .. },
             FoundryJobRequest::Export { .. }
@@ -920,6 +997,7 @@ fn control_views_from_output(
     output: &FoundryCompilationOutput,
 ) -> Vec<FoundryControlView> {
     let profile = &output.catalog.customizer_profile;
+    let option_preview = option_preview_from_output(output);
     let sections = profile
         .sections
         .iter()
@@ -950,7 +1028,12 @@ fn control_views_from_output(
                 locked: control_is_locked(document, &control.id, &control.kind),
                 topology_behavior: control.topology_behavior,
                 divergence: control_divergence(control, document),
-                options: option_cards_for_control(control, &domain, value.as_ref()),
+                options: option_cards_for_control(
+                    control,
+                    &domain,
+                    value.as_ref(),
+                    option_preview.as_ref(),
+                ),
                 advanced_path: Some(format!("controls.{}", control.id)),
                 help: None,
             }
@@ -989,7 +1072,13 @@ fn option_cards_for_control(
     control: &shape_foundry::CustomizerControl,
     domain: &shape_foundry::FeasibleControlDomain,
     current: Option<&ControlValue>,
+    preview: Option<&OptionPreviewImage>,
 ) -> Vec<FoundryOptionCard> {
+    let context = OptionCardContext {
+        domain,
+        current,
+        preview,
+    };
     match &control.kind {
         ControlKind::ChoiceGallery { options } => options
             .iter()
@@ -1001,8 +1090,7 @@ fn option_cards_for_control(
                     option.label.clone(),
                     None,
                     Some(option.preview.preview_id.clone()),
-                    domain,
-                    current,
+                    context,
                 )
             })
             .collect(),
@@ -1016,8 +1104,7 @@ fn option_cards_for_control(
                     option.label.clone(),
                     Some(role.clone()),
                     Some(option.preview.preview_id.clone()),
-                    domain,
-                    current,
+                    context,
                 )
             })
             .collect(),
@@ -1032,8 +1119,7 @@ fn option_cards_for_control(
                     control_value_label(value),
                     None,
                     Some(format!("{}-option-{index}", control.id)),
-                    domain,
-                    current,
+                    context,
                 )
             })
             .collect(),
@@ -1046,22 +1132,64 @@ fn option_card(
     label: String,
     provider_role: Option<String>,
     preview_id: Option<String>,
-    domain: &shape_foundry::FeasibleControlDomain,
-    current: Option<&ControlValue>,
+    context: OptionCardContext<'_>,
 ) -> FoundryOptionCard {
     FoundryOptionCard {
         control_id: control_id.to_owned(),
-        selected: current == Some(&value),
-        unavailable_reason: domain.unavailable_reason(&value).map(str::to_owned),
+        selected: context.current == Some(&value),
+        unavailable_reason: context.domain.unavailable_reason(&value).map(str::to_owned),
         value,
         label,
         provider_role,
         preview_id,
-        rgba8: Vec::new(),
-        width: 0,
-        height: 0,
-        camera: None,
+        rgba8: context
+            .preview
+            .map_or_else(Vec::new, |preview| preview.rgba8.clone()),
+        width: context.preview.map_or(0, |preview| preview.width),
+        height: context.preview.map_or(0, |preview| preview.height),
+        camera: context.preview.map(|preview| preview.camera.clone()),
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct OptionCardContext<'a> {
+    domain: &'a shape_foundry::FeasibleControlDomain,
+    current: Option<&'a ControlValue>,
+    preview: Option<&'a OptionPreviewImage>,
+}
+
+#[derive(Debug, Clone)]
+struct OptionPreviewImage {
+    rgba8: Vec<u8>,
+    width: u32,
+    height: u32,
+    camera: shape_render::OrbitCamera,
+}
+
+fn option_preview_from_output(output: &FoundryCompilationOutput) -> Option<OptionPreviewImage> {
+    let mesh = &output.artifact.combined_preview.mesh;
+    let mesh = TriangleMesh {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        indices: mesh.indices.clone(),
+        bounds: Aabb {
+            min: mesh.bounds.min.into(),
+            max: mesh.bounds.max.into(),
+        },
+    };
+    let camera = fit_camera_to_bounds(mesh.bounds);
+    let settings = RenderSettings {
+        width: 64,
+        height: 64,
+        ..RenderSettings::default()
+    };
+    let image = render_mesh(&mesh, &camera, &settings).ok()?;
+    Some(OptionPreviewImage {
+        rgba8: image.rgba8,
+        width: image.width,
+        height: image.height,
+        camera,
+    })
 }
 
 fn control_is_locked(

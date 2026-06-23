@@ -2,8 +2,9 @@
 
 use std::path::PathBuf;
 
-use shape_foundry::{FoundryCandidateId, FoundryCommand, FoundryEdit};
+use shape_foundry::{ControlValue, FoundryCandidateId, FoundryCommand, FoundryEdit};
 use shape_project::foundry::FoundryProject;
+use shape_search::foundry::FoundryCandidateRequest;
 
 use super::jobs::FoundryJobRequest;
 
@@ -30,6 +31,15 @@ pub(crate) enum FoundryAppCommand {
         /// Ordered commands to replay through the generic Foundry API.
         commands: Vec<FoundryCommand>,
     },
+    /// Request candidate generation with an explicit native search policy.
+    RequestCandidates(FoundryCandidateRequest),
+    /// Render a non-persistent preview for a control value.
+    PreviewControlValue {
+        /// Control to sample.
+        control_id: String,
+        /// Transient value to render.
+        value: ControlValue,
+    },
     /// Request an exact rebuild for the current document.
     RequestBuild,
     /// Request fresh whole-model preview images for current state.
@@ -40,6 +50,11 @@ pub(crate) enum FoundryAppCommand {
     SaveAs(PathBuf),
     /// Load a Foundry project file.
     Load(PathBuf),
+    /// Validate, compile, and export the current family pack through the reducer job registry.
+    RequestPackBatchExport {
+        /// Destination directory for member package folders.
+        out_dir: PathBuf,
+    },
     /// Toggle the Advanced Recipe drawer.
     SetAdvancedRecipeOpen(bool),
 }
