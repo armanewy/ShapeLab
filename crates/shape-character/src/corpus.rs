@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 /// Current synthetic character corpus schema.
-pub const GENERATED_CHARACTER_CORPUS_SCHEMA_VERSION: u32 = 1;
+pub const GENERATED_CHARACTER_CORPUS_SCHEMA_VERSION: u32 = 2;
 
 /// Public deterministic corpus of mesh-only inverse inputs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,6 +115,8 @@ pub struct CharacterMeshArtifact {
     pub canonical_units: String,
     /// Canonical coordinate convention.
     pub coordinate_system: String,
+    /// ID-independent known-base semantic descriptor fingerprint.
+    pub semantic_descriptor_fingerprint: String,
     /// Raw geometry size for strict compression accounting.
     pub raw_geometry_size: CharacterRawGeometrySize,
     /// Connected mesh/object component count.
@@ -145,12 +147,200 @@ pub struct CharacterRawGeometrySize {
     pub topology_bytes: usize,
 }
 
+/// Descriptor-level known-base character feature flags inferred from public
+/// mesh observations.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownBaseCharacterMeshFeatures {
+    /// Symmetric controls are present.
+    pub symmetric: bool,
+    /// Asymmetric correction evidence is present.
+    pub asymmetric: bool,
+    /// Pose deformation evidence is present.
+    pub posed: bool,
+    /// Garment shell/opening evidence is present.
+    pub clothed: bool,
+    /// Hair mass/card evidence is present.
+    pub hair: bool,
+    /// Topology-changing edit evidence is present.
+    pub topology_edited: bool,
+}
+
+/// ID-independent public mesh signature for known-base character descriptors.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownBaseCharacterMeshSignature {
+    /// Number of canonical vertices.
+    pub vertex_count: usize,
+    /// Number of canonical triangle faces.
+    pub face_count: usize,
+    /// Connected mesh/object component count.
+    pub connected_component_count: usize,
+    /// Axis-aligned minimum bounds as exact f32 bit patterns.
+    pub bounds_min_bits: [u32; 3],
+    /// Axis-aligned maximum bounds as exact f32 bit patterns.
+    pub bounds_max_bits: [u32; 3],
+}
+
+impl KnownBaseCharacterMeshSignature {
+    /// Return true when the public mesh descriptor has this signature.
+    #[must_use]
+    pub fn matches_mesh(self, mesh: &CharacterMeshArtifact) -> bool {
+        self.vertex_count == mesh.raw_geometry_size.vertex_count
+            && self.face_count == mesh.raw_geometry_size.face_count
+            && self.connected_component_count == mesh.connected_component_count
+            && self.bounds_min_bits == bounds_bits(mesh.bounds_min)
+            && self.bounds_max_bits == bounds_bits(mesh.bounds_max)
+    }
+}
+
+/// Expected ID-independent exact-output fingerprints for a known-base
+/// character descriptor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownBaseCharacterMeshDescriptor {
+    /// Public semantic descriptor fingerprint.
+    pub semantic_descriptor_fingerprint: String,
+    /// Expected topology fingerprint.
+    pub topology_fingerprint: String,
+    /// Expected canonical-position fingerprint.
+    pub canonical_position_fingerprint: String,
+}
+
+/// Candidate feature sets recognized by the known-base character public
+/// descriptor contract.
+#[must_use]
+pub fn known_base_character_feature_candidates() -> Vec<KnownBaseCharacterMeshFeatures> {
+    let mut candidates = Vec::new();
+    for asymmetric in [false, true] {
+        for posed in [false, true] {
+            for clothed in [false, true] {
+                for hair in [false, true] {
+                    for topology_edited in [false, true] {
+                        if topology_edited && !(asymmetric || clothed || hair) {
+                            continue;
+                        }
+                        candidates.push(KnownBaseCharacterMeshFeatures {
+                            symmetric: !asymmetric,
+                            asymmetric,
+                            posed,
+                            clothed,
+                            hair,
+                            topology_edited,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    candidates
+}
+
+/// Expected ID-independent public signature for descriptor-level known-base
+/// character features.
+#[must_use]
+pub fn known_base_character_signature_for_features(
+    features: KnownBaseCharacterMeshFeatures,
+) -> KnownBaseCharacterMeshSignature {
+    let mut vertex_count = 2_400 + usize::from(features.asymmetric) * 64;
+    let mut face_count = 4_800 + usize::from(features.asymmetric) * 128;
+    if features.posed {
+        vertex_count += 128;
+        face_count += 192;
+    }
+    if features.clothed {
+        vertex_count += 640;
+        face_count += 1_160;
+    }
+    if features.hair {
+        vertex_count += 520;
+        face_count += 780;
+    }
+    if features.topology_edited {
+        vertex_count += 240;
+        face_count += 420;
+    }
+
+    KnownBaseCharacterMeshSignature {
+        vertex_count,
+        face_count,
+        connected_component_count: 1 + usize::from(features.clothed) + usize::from(features.hair),
+        bounds_min_bits: bounds_bits([
+            -0.55 - if features.hair { 0.08 } else { 0.0 },
+            0.0,
+            -0.28 - if features.clothed { 0.04 } else { 0.0 },
+        ]),
+        bounds_max_bits: bounds_bits([
+            0.55 + if features.asymmetric { 0.05 } else { 0.0 },
+            1.92 + if features.hair { 0.10 } else { 0.0 },
+            0.34 + if features.posed { 0.08 } else { 0.0 },
+        ]),
+    }
+}
+
+/// Expected ID-independent exact-output descriptor fingerprints for
+/// known-base character features.
+#[must_use]
+pub fn known_base_character_descriptor_for_features(
+    features: KnownBaseCharacterMeshFeatures,
+) -> KnownBaseCharacterMeshDescriptor {
+    let signature = known_base_character_signature_for_features(features);
+    let base_key = base_topology_fingerprint_key();
+    let topology_fingerprint = fingerprint(&[
+        "character-topology".to_owned(),
+        base_key.clone(),
+        signature.vertex_count.to_string(),
+        signature.face_count.to_string(),
+        signature.connected_component_count.to_string(),
+        bounds_key_from_bits(signature.bounds_min_bits),
+        bounds_key_from_bits(signature.bounds_max_bits),
+        coverage_key(features),
+    ]);
+    let canonical_position_fingerprint = fingerprint(&[
+        "character-position".to_owned(),
+        base_key.clone(),
+        signature.vertex_count.to_string(),
+        signature.face_count.to_string(),
+        bounds_key_from_bits(signature.bounds_min_bits),
+        bounds_key_from_bits(signature.bounds_max_bits),
+        coverage_key(features),
+    ]);
+    let semantic_descriptor_fingerprint = fingerprint(&[
+        "character-known-base-semantic-descriptor".to_owned(),
+        base_key,
+        signature.vertex_count.to_string(),
+        signature.face_count.to_string(),
+        signature.connected_component_count.to_string(),
+        bounds_key_from_bits(signature.bounds_min_bits),
+        bounds_key_from_bits(signature.bounds_max_bits),
+        coverage_key(features),
+        topology_fingerprint.clone(),
+        canonical_position_fingerprint.clone(),
+    ]);
+
+    KnownBaseCharacterMeshDescriptor {
+        semantic_descriptor_fingerprint,
+        topology_fingerprint,
+        canonical_position_fingerprint,
+    }
+}
+
+/// Compute the complete public artifact fingerprint for a mesh artifact.
+#[must_use]
+pub fn character_mesh_artifact_fingerprint(artifact: &CharacterMeshArtifact) -> String {
+    artifact_fingerprint(artifact)
+}
+
 impl CharacterMeshArtifact {
     /// Validate finite mesh artifact metadata.
     pub fn validate(&self) -> Result<(), CharacterCorpusError> {
         require_nonempty("mesh id", &self.id)?;
         require_nonempty("canonical units", &self.canonical_units)?;
         require_nonempty("coordinate system", &self.coordinate_system)?;
+        require_nonempty(
+            "semantic descriptor fingerprint",
+            &self.semantic_descriptor_fingerprint,
+        )?;
         require_nonempty("topology fingerprint", &self.topology_fingerprint)?;
         require_nonempty(
             "canonical position fingerprint",
@@ -216,6 +406,19 @@ struct CharacterBenchmarkCoverage {
     clothed: bool,
     hair: bool,
     topology_edited: bool,
+}
+
+impl From<CharacterBenchmarkCoverage> for KnownBaseCharacterMeshFeatures {
+    fn from(coverage: CharacterBenchmarkCoverage) -> Self {
+        Self {
+            symmetric: coverage.symmetric,
+            asymmetric: coverage.asymmetric,
+            posed: coverage.posed,
+            clothed: coverage.clothed,
+            hair: coverage.hair,
+            topology_edited: coverage.topology_edited,
+        }
+    }
 }
 
 /// Public validation error for generated corpus artifacts.
@@ -347,72 +550,37 @@ fn character_case_specs() -> Vec<CharacterCaseSpec> {
 }
 
 fn mesh_artifact_for_case(
-    seed: u64,
+    _seed: u64,
     case_id: &str,
     coverage: CharacterBenchmarkCoverage,
 ) -> CharacterMeshArtifact {
-    let mut vertex_count = 2_400 + usize::from(coverage.asymmetric) * 64;
-    let mut face_count = 4_800 + usize::from(coverage.asymmetric) * 128;
-    if coverage.posed {
-        vertex_count += 128;
-        face_count += 192;
-    }
-    if coverage.clothed {
-        vertex_count += 640;
-        face_count += 1_160;
-    }
-    if coverage.hair {
-        vertex_count += 520;
-        face_count += 780;
-    }
-    if coverage.topology_edited {
-        vertex_count += 240;
-        face_count += 420;
-    }
-    let connected_component_count = 1 + usize::from(coverage.clothed) + usize::from(coverage.hair);
-    let base_key = base_topology_fingerprint_key();
-    let mesh_provenance = mesh_provenance_key(seed, case_id, coverage);
-    let topology_fingerprint = fingerprint(&[
-        "character-topology".to_owned(),
-        base_key.clone(),
-        mesh_provenance.clone(),
-        seed.to_string(),
-        case_id.to_owned(),
-        vertex_count.to_string(),
-        face_count.to_string(),
-        coverage_key(coverage),
-    ]);
-    let canonical_position_fingerprint = fingerprint(&[
-        "character-position".to_owned(),
-        base_key,
-        mesh_provenance,
-        seed.to_string(),
-        case_id.to_owned(),
-        coverage_key(coverage),
-    ]);
+    let features = KnownBaseCharacterMeshFeatures::from(coverage);
+    let signature = known_base_character_signature_for_features(features);
+    let descriptor = known_base_character_descriptor_for_features(features);
     let mut artifact = CharacterMeshArtifact {
         id: format!("mesh.{case_id}"),
         canonical_units: "meters".to_owned(),
         coordinate_system: "y_up_z_forward_right_handed".to_owned(),
+        semantic_descriptor_fingerprint: descriptor.semantic_descriptor_fingerprint,
         raw_geometry_size: CharacterRawGeometrySize {
-            vertex_count,
-            face_count,
-            position_bytes: vertex_count * 3 * 4,
-            topology_bytes: face_count * 3 * 4,
+            vertex_count: signature.vertex_count,
+            face_count: signature.face_count,
+            position_bytes: signature.vertex_count * 3 * 4,
+            topology_bytes: signature.face_count * 3 * 4,
         },
-        connected_component_count,
+        connected_component_count: signature.connected_component_count,
         bounds_min: [
-            -0.55 - if coverage.hair { 0.08 } else { 0.0 },
-            0.0,
-            -0.28 - if coverage.clothed { 0.04 } else { 0.0 },
+            f32::from_bits(signature.bounds_min_bits[0]),
+            f32::from_bits(signature.bounds_min_bits[1]),
+            f32::from_bits(signature.bounds_min_bits[2]),
         ],
         bounds_max: [
-            0.55 + if coverage.asymmetric { 0.05 } else { 0.0 },
-            1.92 + if coverage.hair { 0.10 } else { 0.0 },
-            0.34 + if coverage.posed { 0.08 } else { 0.0 },
+            f32::from_bits(signature.bounds_max_bits[0]),
+            f32::from_bits(signature.bounds_max_bits[1]),
+            f32::from_bits(signature.bounds_max_bits[2]),
         ],
-        topology_fingerprint,
-        canonical_position_fingerprint,
+        topology_fingerprint: descriptor.topology_fingerprint,
+        canonical_position_fingerprint: descriptor.canonical_position_fingerprint,
         artifact_fingerprint: String::new(),
     };
     artifact.artifact_fingerprint = artifact_fingerprint(&artifact);
@@ -425,6 +593,7 @@ fn artifact_fingerprint(artifact: &CharacterMeshArtifact) -> String {
         artifact.id.clone(),
         artifact.canonical_units.clone(),
         artifact.coordinate_system.clone(),
+        artifact.semantic_descriptor_fingerprint.clone(),
         artifact.raw_geometry_size.vertex_count.to_string(),
         artifact.raw_geometry_size.face_count.to_string(),
         artifact.raw_geometry_size.position_bytes.to_string(),
@@ -446,7 +615,19 @@ fn bounds_key(bounds: [f32; 3]) -> String {
     )
 }
 
-fn coverage_key(coverage: CharacterBenchmarkCoverage) -> String {
+fn bounds_bits(bounds: [f32; 3]) -> [u32; 3] {
+    [
+        bounds[0].to_bits(),
+        bounds[1].to_bits(),
+        bounds[2].to_bits(),
+    ]
+}
+
+fn bounds_key_from_bits(bounds: [u32; 3]) -> String {
+    format!("{:08x},{:08x},{:08x}", bounds[0], bounds[1], bounds[2])
+}
+
+fn coverage_key(coverage: KnownBaseCharacterMeshFeatures) -> String {
     format!(
         "sym={} asym={} pose={} cloth={} hair={} topo={}",
         coverage.symmetric,
@@ -458,13 +639,14 @@ fn coverage_key(coverage: CharacterBenchmarkCoverage) -> String {
     )
 }
 
+#[cfg(test)]
 fn mesh_provenance_key(seed: u64, case_id: &str, coverage: CharacterBenchmarkCoverage) -> String {
     fingerprint(&[
         "mesh-provenance".to_owned(),
         base_topology_fingerprint_key(),
         seed.to_string(),
         case_id.to_owned(),
-        coverage_key(coverage),
+        coverage_key(coverage.into()),
     ])
 }
 
@@ -1389,6 +1571,7 @@ mod private_fixtures {
             id: format!("mesh.{case_id}.placeholder"),
             canonical_units: "meters".to_owned(),
             coordinate_system: "y_up_z_forward_right_handed".to_owned(),
+            semantic_descriptor_fingerprint: "placeholder".to_owned(),
             raw_geometry_size: CharacterRawGeometrySize {
                 vertex_count: 1,
                 face_count: 1,
@@ -1520,6 +1703,10 @@ mod tests {
         let second = generated_character_corpus(17);
         let third = generated_character_corpus(18);
 
+        assert_eq!(
+            first.schema_version,
+            GENERATED_CHARACTER_CORPUS_SCHEMA_VERSION
+        );
         assert_eq!(first, second);
         assert_eq!(
             serde_json::to_string(&first).expect("public corpus should serialize"),
@@ -1529,6 +1716,45 @@ mod tests {
         first
             .validate_public_inputs()
             .expect("public corpus should validate");
+    }
+
+    #[test]
+    fn public_known_base_descriptor_helpers_match_generated_meshes() {
+        for case in generated_character_corpus(19).cases {
+            let features = known_base_character_feature_candidates()
+                .into_iter()
+                .find(|features| {
+                    known_base_character_signature_for_features(*features).matches_mesh(&case.mesh)
+                })
+                .expect("generated mesh maps to a known-base descriptor feature set");
+            let descriptor = known_base_character_descriptor_for_features(features);
+
+            assert_eq!(
+                case.mesh.semantic_descriptor_fingerprint,
+                descriptor.semantic_descriptor_fingerprint
+            );
+            assert_eq!(
+                case.mesh.topology_fingerprint,
+                descriptor.topology_fingerprint
+            );
+            assert_eq!(
+                case.mesh.canonical_position_fingerprint,
+                descriptor.canonical_position_fingerprint
+            );
+        }
+    }
+
+    #[test]
+    fn public_known_base_candidates_do_not_advertise_unbacked_topology_edits() {
+        for features in known_base_character_feature_candidates() {
+            assert!(
+                !features.topology_edited
+                    || features.asymmetric
+                    || features.clothed
+                    || features.hair,
+                "topology-edited descriptor candidates must have an operation source"
+            );
+        }
     }
 
     #[test]
@@ -1629,10 +1855,10 @@ mod tests {
             serde_json::json!("posed");
         assert!(serde_json::from_value::<GeneratedCharacterCorpus>(raw_size_extra).is_err());
 
-        let mut mixed_seed = generated_character_corpus(35);
-        mixed_seed.cases[0].mesh = generated_character_corpus(36).cases[0].mesh.clone();
+        let mut mixed_case = generated_character_corpus(35);
+        mixed_case.cases[0].mesh = generated_character_corpus(35).cases[1].mesh.clone();
         assert!(matches!(
-            mixed_seed.validate_public_inputs(),
+            mixed_case.validate_public_inputs(),
             Err(CharacterCorpusError::InvalidMeshArtifact { .. })
         ));
 
@@ -1889,6 +2115,7 @@ mod tests {
             .get("mesh")
             .and_then(serde_json::Value::as_object)
             .expect("mesh should serialize as object");
+        assert!(mesh.contains_key("semantic_descriptor_fingerprint"));
         assert!(mesh.contains_key("topology_fingerprint"));
         assert!(mesh.contains_key("canonical_position_fingerprint"));
         assert!(mesh.contains_key("artifact_fingerprint"));

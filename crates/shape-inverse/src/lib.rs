@@ -7,6 +7,7 @@
 //! reconstruction cannot be proven.
 
 pub mod analysis;
+pub mod character_recovery;
 pub mod deformation_recovery;
 pub mod hypotheses;
 pub mod recovery_gate;
