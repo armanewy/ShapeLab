@@ -25,7 +25,8 @@ use super::jobs::{
     FoundryJobEvent, FoundryJobRequest, FoundryJobSlot, candidate_cards_from_output,
 };
 use super::view_model::{
-    FoundryCandidateCard, FoundryControlView, FoundryOptionCard, FoundryPackView,
+    FoundryCandidateCard, FoundryControlPresentation, FoundryControlView, FoundryOptionCard,
+    FoundryPackView,
 };
 
 const FIRST_JOB_ID: u64 = 1;
@@ -941,6 +942,7 @@ fn control_views_from_output(
                     .and_then(|section| sections.get(section).copied())
                     .map(str::to_owned),
                 kind: control_kind_label(&control.kind).to_owned(),
+                presentation: control_presentation(&control.kind),
                 value: value.clone(),
                 default_value,
                 primary: control.primary,
@@ -954,6 +956,16 @@ fn control_views_from_output(
             }
         })
         .collect()
+}
+
+fn control_presentation(kind: &ControlKind) -> FoundryControlPresentation {
+    match kind {
+        ControlKind::ContinuousAxis { .. } => FoundryControlPresentation::ContinuousMacroAxis,
+        ControlKind::IntegerStepper { .. } => FoundryControlPresentation::Stepper,
+        ControlKind::Toggle { .. } => FoundryControlPresentation::Toggle,
+        ControlKind::ChoiceGallery { .. } => FoundryControlPresentation::ChoiceGallery,
+        ControlKind::ProviderGallery { .. } => FoundryControlPresentation::ProviderGallery,
+    }
 }
 
 fn current_control_value(

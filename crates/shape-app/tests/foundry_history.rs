@@ -190,14 +190,7 @@ fn action_helpers_emit_foundry_app_commands() {
 #[test]
 fn history_view_is_reachable_from_native_foundry_boundary() {
     let path = PathBuf::from("history-asset.shapelab-foundry.json");
-    let state = FoundryAppState {
-        project_file: Some(FoundryProjectFile::clean(
-            branched_project(),
-            Some(path.clone()),
-        )),
-        project_path: Some(path),
-        ..FoundryAppState::default()
-    };
+    let state = state_with_clean_project(path, false);
 
     let view = foundry::build_foundry_history_view(&state);
 
@@ -213,15 +206,7 @@ fn history_view_is_reachable_from_native_foundry_boundary() {
 #[test]
 fn history_view_actions_include_load_and_enabled_dispatches() {
     let path = PathBuf::from("history-asset.shapelab-foundry.json");
-    let state = FoundryAppState {
-        project_file: Some(FoundryProjectFile::clean(
-            branched_project(),
-            Some(path.clone()),
-        )),
-        project_path: Some(path),
-        dirty: true,
-        ..FoundryAppState::default()
-    };
+    let state = state_with_clean_project(path, true);
 
     let view = history::build_history_view(&state);
 
@@ -264,6 +249,17 @@ fn history_view_actions_include_load_and_enabled_dispatches() {
             .as_ref(),
         Some(&history::FoundryHistoryActionDispatch::RequestLoadPath)
     );
+}
+
+fn state_with_clean_project(path: PathBuf, dirty: bool) -> FoundryAppState {
+    let mut state = FoundryAppState::default();
+    state.project_file = Some(FoundryProjectFile::clean(
+        branched_project(),
+        Some(path.clone()),
+    ));
+    state.project_path = Some(path);
+    state.dirty = dirty;
+    state
 }
 
 #[test]
