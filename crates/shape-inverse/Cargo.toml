@@ -10,3 +10,6 @@ serde.workspace = true
 shape-character.workspace = true
 shape-program.workspace = true
 shape-program-verify.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

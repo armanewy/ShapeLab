@@ -9,6 +9,7 @@
 pub mod analysis;
 pub mod character_recovery;
 pub mod deformation_recovery;
+pub mod external_character;
 pub mod hypotheses;
 pub mod recovery_gate;
 pub mod search;
