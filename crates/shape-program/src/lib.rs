@@ -7,10 +7,17 @@
 //! so strict semantic success cannot be achieved by smuggling target geometry
 //! through an opaque residual.
 
+pub mod corpus;
+pub mod deformation;
+pub mod evaluator;
+pub mod selection;
+
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub mod topology;
 
 /// Current schema version for semantic modeling programs.
 pub const MODELING_PROGRAM_SCHEMA_VERSION: u32 = 1;
@@ -273,6 +280,9 @@ pub enum SemanticSelectionPayload {
     },
     SpatialPrimitive {
         shape: SpatialPrimitiveSelection,
+    },
+    BooleanOperand {
+        operand_id: String,
     },
     CompactFalloffField {
         field_id: String,
