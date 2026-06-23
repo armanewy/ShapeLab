@@ -16,8 +16,19 @@ pub(crate) use commands::{FoundryAppCommand, FoundryAppEffect};
 #[allow(unused_imports)]
 pub(crate) use jobs::{FoundryJobEvent, FoundryJobRequest, FoundryJobSlot, run_foundry_job};
 #[allow(unused_imports)]
+pub(crate) use panels::history::{
+    FoundryHistoryActionDispatch, FoundryHistoryActionIntent, FoundryHistoryActionKind,
+    FoundryHistoryView,
+};
+#[allow(unused_imports)]
 pub(crate) use state::{FoundryAppState, FoundryAppStateError, FoundryPreviewImage};
 #[allow(unused_imports)]
 pub(crate) use view_model::{
     FoundryCandidateCard, FoundryControlView, FoundryOptionCard, FoundryPackView,
 };
+
+/// Build the native Foundry semantic history snapshot for app-shell consumers.
+#[must_use]
+pub(crate) fn build_foundry_history_view(state: &FoundryAppState) -> FoundryHistoryView {
+    panels::history::build_history_view(state)
+}
