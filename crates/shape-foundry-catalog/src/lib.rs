@@ -36,9 +36,12 @@ use shape_foundry::{
     document_catalog_refs,
 };
 
+pub mod authoring;
 pub mod roman_bridge;
 pub mod scifi_crate;
 pub mod stylized_lamp;
+
+pub use authoring::*;
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
 const LOCAL_INSTANCE: PartInstanceId = PartInstanceId(91);
@@ -90,6 +93,9 @@ pub struct FoundryCatalogSerializedEntry {
 pub struct FoundryFixtureCatalog {
     /// Fixture slug.
     pub slug: String,
+    /// Catalog manifest version.
+    #[serde(default = "default_catalog_version")]
+    pub catalog_version: u32,
     /// Foundry document that references this catalog.
     pub document: FoundryAssetDocument,
     /// JSON entries keyed by content stable ID.
@@ -103,7 +109,7 @@ impl FoundryFixtureCatalog {
         FoundryCatalogManifest {
             schema_version: FOUNDRY_CATALOG_MANIFEST_SCHEMA_VERSION,
             catalog_id: format!("shape-lab-headless-{}", self.slug),
-            catalog_version: 1,
+            catalog_version: self.catalog_version,
             entries: self
                 .entries
                 .iter()
@@ -274,9 +280,14 @@ fn build_fixture_catalog(spec: FixtureCatalogSpec) -> FoundryFixtureCatalog {
 
     FoundryFixtureCatalog {
         slug: slug.to_owned(),
+        catalog_version: 1,
         document,
         entries,
     }
+}
+
+fn default_catalog_version() -> u32 {
+    1
 }
 
 fn catalog_entry<T: Serialize>(

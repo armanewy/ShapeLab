@@ -39,14 +39,17 @@ use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryCatalogError, FoundryCatalogResolver,
     compile_foundry_document,
 };
+use shape_foundry_catalog::{
+    FoundryAuthorProfilePackage, author_profile_template, validate_author_profile_package,
+};
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::{
-    MeshVisualDescriptor, RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh,
-    visual_descriptor_for_mesh,
+    MeshVisualDescriptor, RenderSettings, RenderedImage, fit_camera_to_bounds,
+    fit_camera_to_bounds_from_angles, render_mesh, visual_descriptor_for_mesh,
 };
 use shape_search::asset::scoring::{
     AssetCandidateInput, AssetScoredCandidate, AssetSelectionPolicy,
@@ -99,6 +102,14 @@ enum Command {
     CompileAsset(CompileAssetArgs),
     /// Build a foundry document through the conformance-checked headless compiler.
     FoundryBuild(FoundryBuildArgs),
+    /// Create a typed Foundry Author profile template.
+    FoundryNewProfile(FoundryNewProfileArgs),
+    /// Validate a typed Foundry Author profile package.
+    FoundryValidateProfile(FoundryProfileArgs),
+    /// Render a preview from a typed Foundry Author profile package.
+    FoundryPreviewProfile(FoundryPreviewProfileArgs),
+    /// Package a typed Foundry Author profile into an exact local catalog.
+    FoundryPackageProfile(FoundryPackageProfileArgs),
     /// Render the cross-domain headless visual Foundry benchmark.
     FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
@@ -211,6 +222,40 @@ struct FoundryBuildArgs {
     /// Foundry document JSON file.
     #[arg(long)]
     document: PathBuf,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct FoundryNewProfileArgs {
+    /// Built-in template slug: roman-bridge, sci-fi-crate, or stylized-lamp.
+    #[arg(long, default_value = "roman-bridge")]
+    template: String,
+    /// Output profile JSON file.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct FoundryProfileArgs {
+    /// Typed Foundry Author profile JSON file.
+    profile: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct FoundryPreviewProfileArgs {
+    /// Typed Foundry Author profile JSON file.
+    profile: PathBuf,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct FoundryPackageProfileArgs {
+    /// Typed Foundry Author profile JSON file.
+    profile: PathBuf,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -387,6 +432,10 @@ fn main() -> anyhow::Result<()> {
         Command::InspectAsset(args) => run_inspect_asset(args),
         Command::CompileAsset(args) => run_compile_asset(args),
         Command::FoundryBuild(args) => run_foundry_build(args),
+        Command::FoundryNewProfile(args) => run_foundry_new_profile(args),
+        Command::FoundryValidateProfile(args) => run_foundry_validate_profile(args),
+        Command::FoundryPreviewProfile(args) => run_foundry_preview_profile(args),
+        Command::FoundryPackageProfile(args) => run_foundry_package_profile(args),
         Command::FoundryVisualBenchmark(args) => {
             foundry_visual_benchmark::run_foundry_visual_benchmark(args)
         }
@@ -929,6 +978,210 @@ fn run_foundry_build(args: FoundryBuildArgs) -> anyhow::Result<()> {
         validity_label(output.final_conformance.is_accepted())
     );
     Ok(())
+}
+
+fn run_foundry_new_profile(args: FoundryNewProfileArgs) -> anyhow::Result<()> {
+    let profile = author_profile_template(&args.template)
+        .with_context(|| format!("unknown Foundry Author template '{}'", args.template))?;
+    if let Some(parent) = args.out.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    write_json(&args.out, &profile)?;
+    println!(
+        "Created Foundry Author profile {} at {}",
+        profile.package_id,
+        args.out.display()
+    );
+    Ok(())
+}
+
+fn run_foundry_validate_profile(args: FoundryProfileArgs) -> anyhow::Result<()> {
+    let profile = load_author_profile(&args.profile)?;
+    let report = validate_author_profile_package(&profile);
+    print_author_validation_report(&report);
+    if !report.is_valid() {
+        bail!(
+            "Foundry Author profile validation failed with {} issue(s)",
+            report.issues.len()
+        );
+    }
+    Ok(())
+}
+
+fn run_foundry_preview_profile(args: FoundryPreviewProfileArgs) -> anyhow::Result<()> {
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    let profile = load_author_profile(&args.profile)?;
+    let report = validate_author_profile_package(&profile);
+    write_json(args.out_dir.join("foundry-author-validation.json"), &report)?;
+    if !report.is_valid() {
+        bail!(
+            "Foundry Author profile validation failed with {} issue(s)",
+            report.issues.len()
+        );
+    }
+
+    let fixture = profile.to_fixture_catalog();
+    let output = compile_foundry_document(&fixture.document, &fixture)
+        .map_err(|error| anyhow::anyhow!("foundry author profile compile failed: {error:#?}"))?;
+    write_author_build_outputs(&args.profile, &profile, &output, &args.out_dir)?;
+    println!(
+        "Rendered Foundry Author profile {} preview to {}",
+        profile.package_id,
+        args.out_dir.display()
+    );
+    Ok(())
+}
+
+fn run_foundry_package_profile(args: FoundryPackageProfileArgs) -> anyhow::Result<()> {
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    let profile = load_author_profile(&args.profile)?;
+    let report = validate_author_profile_package(&profile);
+    write_json(args.out_dir.join("foundry-author-validation.json"), &report)?;
+    if !report.is_valid() {
+        bail!(
+            "Foundry Author profile validation failed with {} issue(s)",
+            report.issues.len()
+        );
+    }
+
+    let fixture = profile.to_fixture_catalog();
+    let output = compile_foundry_document(&fixture.document, &fixture)
+        .map_err(|error| anyhow::anyhow!("foundry author profile compile failed: {error:#?}"))?;
+    write_json(args.out_dir.join("foundry-author-profile.json"), &profile)?;
+    let catalog_dir = args.out_dir.join("catalog");
+    recreate_dir(&catalog_dir)?;
+    fixture
+        .write_to_dir(&catalog_dir)
+        .with_context(|| format!("writing exact catalog to {}", catalog_dir.display()))?;
+    let proof_dir = args.out_dir.join("build-proof");
+    recreate_dir(&proof_dir)?;
+    write_author_build_outputs(&args.profile, &profile, &output, &proof_dir)?;
+    println!(
+        "Packaged Foundry Author profile {} into {}",
+        profile.package_id,
+        args.out_dir.display()
+    );
+    println!("  catalog: {}", catalog_dir.display());
+    println!("  build proof: {}", proof_dir.display());
+    Ok(())
+}
+
+fn load_author_profile(path: &Path) -> anyhow::Result<FoundryAuthorProfilePackage> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn print_author_validation_report(report: &shape_foundry_catalog::FoundryAuthorValidationReport) {
+    println!("Foundry Author profile {}", report.package_id);
+    println!("  primary controls: {}", report.primary_control_count);
+    println!(
+        "  candidate strategies: {}",
+        report.candidate_strategy_count
+    );
+    println!("  preview cameras: {}", report.preview_camera_count);
+    println!("  pack policies: {}", report.pack_policy_count);
+    println!("  catalog entries: {}", report.catalog_entry_count);
+    println!("  status: {}", validity_label(report.is_valid()));
+    for issue in &report.issues {
+        eprintln!("  [{}] {}: {}", issue.code, issue.subject, issue.message);
+    }
+}
+
+fn write_author_build_outputs(
+    profile_path: &Path,
+    profile: &FoundryAuthorProfilePackage,
+    output: &shape_foundry::FoundryCompilationOutput,
+    out_dir: &Path,
+) -> anyhow::Result<()> {
+    write_json(out_dir.join("foundry-document.json"), &output.document)?;
+    write_json(
+        out_dir.join("catalog-lock.json"),
+        &output.catalog.catalog_lock,
+    )?;
+    write_json(
+        out_dir.join("family-conformance.json"),
+        &output.final_conformance,
+    )?;
+    write_json(
+        out_dir.join("conformance-summary.json"),
+        &output.conformance_summary,
+    )?;
+    write_json(
+        out_dir.join("effective-request.json"),
+        &output.family_request,
+    )?;
+    write_json(out_dir.join("recipe.json"), &output.recipe)?;
+    write_json(out_dir.join("build-stamp.json"), &output.build_stamp)?;
+    let loaded = LoadedAsset {
+        label: profile_path.display().to_string(),
+        benchmark: None,
+        recipe: output.recipe.clone(),
+    };
+    let model_config = model_validation_config(&loaded, &output.artifact);
+    let model_report = validate_model(&output.artifact, &model_config);
+    write_json(out_dir.join("model-validation.json"), &model_report)?;
+    if !model_report.is_valid() {
+        bail!(
+            "Foundry Author profile model validation failed with {} issue(s)",
+            model_report.issues.len()
+        );
+    }
+    let grouped_obj = write_grouped_obj_export(&output.artifact, Some(&output.recipe))
+        .context("writing Foundry Author grouped OBJ")?;
+    fs::write(out_dir.join("asset.obj"), grouped_obj.obj)
+        .with_context(|| format!("writing asset.obj to {}", out_dir.display()))?;
+    write_json(out_dir.join("grouped-obj-report.json"), &grouped_obj.report)?;
+    write_json(
+        out_dir.join("preview-cameras.json"),
+        &profile.preview_cameras,
+    )?;
+    let preview_dir = out_dir.join("previews");
+    recreate_dir(&preview_dir)?;
+    if profile.preview_cameras.is_empty() {
+        let preview = render_asset_artifact(&output.artifact, false)?;
+        save_png(&preview, out_dir.join("preview.png"))?;
+    } else {
+        for (index, camera) in profile.preview_cameras.iter().enumerate() {
+            let preview = render_asset_artifact_for_author_camera(&output.artifact, camera)?;
+            let camera_path = preview_dir.join(format!("{}.png", camera.id));
+            save_png(&preview, &camera_path)?;
+            if index == 0 {
+                save_png(&preview, out_dir.join("preview.png"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn recreate_dir(path: &Path) -> anyhow::Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))?;
+    }
+    fs::create_dir_all(path).with_context(|| format!("creating {}", path.display()))
+}
+
+fn render_asset_artifact_for_author_camera(
+    artifact: &shape_compile::AssetArtifact,
+    camera: &shape_foundry_catalog::FoundryAuthorPreviewCamera,
+) -> anyhow::Result<RenderedImage> {
+    let preview_mesh = render_mesh_from_triangles(&artifact.combined_preview);
+    let aspect_ratio = camera.width as f32 / camera.height as f32;
+    let orbit = fit_camera_to_bounds_from_angles(
+        preview_mesh.bounds,
+        camera.orbit_degrees[0],
+        camera.orbit_degrees[1],
+        aspect_ratio,
+    );
+    let settings = RenderSettings {
+        width: camera.width,
+        height: camera.height,
+        ..RenderSettings::default()
+    };
+    render_mesh(&preview_mesh, &orbit, &settings).context("rendering author preview camera")
 }
 
 fn select_visual_candidates(

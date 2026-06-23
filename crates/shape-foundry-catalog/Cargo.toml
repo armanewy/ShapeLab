@@ -10,10 +10,10 @@ serde.workspace = true
 serde_json.workspace = true
 shape-asset.workspace = true
 shape-caesar-assets.workspace = true
+shape-compile.workspace = true
 shape-family.workspace = true
 shape-family-compile.workspace = true
 shape-foundry.workspace = true
 
 [dev-dependencies]
-shape-compile.workspace = true
 tempfile.workspace = true

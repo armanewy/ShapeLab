@@ -566,7 +566,7 @@ fn validate_control(
             );
         }
     }
-    if control.bindings.is_empty() {
+    if control.bindings.is_empty() && !matches!(control.kind, ControlKind::ProviderGallery { .. }) {
         report.push(
             format!("controls.{index}.bindings"),
             "control_without_bindings",
@@ -595,13 +595,6 @@ fn validate_control(
                     "Continuous control defaults must be finite.",
                 );
             }
-            if !(-1.0..=1.0).contains(default) {
-                report.push(
-                    format!("controls.{index}.kind.default"),
-                    "continuous_default_outside_normalized_domain",
-                    "Topology-preserving sliders use normalized -1..1 control values.",
-                );
-            }
             if control.topology_behavior == ControlTopologyBehavior::TopologyChanging {
                 report.push(
                     format!("controls.{index}.topology_behavior"),
@@ -622,16 +615,6 @@ fn validate_control(
                     "missing_continuous_control_interval",
                     "ContinuousAxis controls require at least one continuous interval.",
                 );
-            }
-            for (interval_index, interval) in control.domain.continuous_intervals.iter().enumerate()
-            {
-                if interval.minimum < -1.0 || interval.maximum > 1.0 {
-                    report.push(
-                        format!("controls.{index}.domain.continuous_intervals.{interval_index}"),
-                        "continuous_domain_outside_normalized_range",
-                        "Topology-preserving sliders must use normalized -1..1 domains.",
-                    );
-                }
             }
         }
         ControlKind::IntegerStepper { .. } | ControlKind::Toggle { .. } => {

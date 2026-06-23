@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use shape_decompiler::v3::bend::{BendParameters, evaluate_bend};
-use shape_foundry_catalog::{FoundryFixtureCatalog, headless_fixture_catalogs};
+use shape_foundry_catalog::{
+    FoundryAuthorPreviewCamera, FoundryAuthorProfilePackage, FoundryFixtureCatalog,
+    headless_fixture_catalogs,
+};
 
 #[test]
 fn demo_generates_headless_artifacts() {
@@ -323,6 +326,171 @@ fn foundry_build_generates_headless_outputs_for_fixtures() {
         assert_eq!(verification["checksums_match"], true);
         assert_eq!(verification["topology_matches_manifest"], true);
     }
+}
+
+#[test]
+fn foundry_author_profile_cli_creates_validates_previews_and_packages() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let profile = temp_dir.path().join("roman-author-profile.json");
+    let preview_dir = temp_dir.path().join("preview");
+    let package_dir = temp_dir.path().join("package");
+
+    let new_profile = Command::new(exe)
+        .args(["foundry-new-profile", "--template", "roman-bridge", "--out"])
+        .arg(&profile)
+        .output()
+        .expect("run shape-cli foundry-new-profile");
+    assert!(
+        new_profile.status.success(),
+        "new profile failed: {}",
+        String::from_utf8_lossy(&new_profile.stderr)
+    );
+    assert!(profile.exists());
+    let mut profile_document: FoundryAuthorProfilePackage =
+        serde_json::from_str(&fs::read_to_string(&profile).unwrap()).unwrap();
+    profile_document.preview_cameras[0].width = 320;
+    profile_document.preview_cameras[0].height = 180;
+    profile_document
+        .preview_cameras
+        .push(FoundryAuthorPreviewCamera {
+            id: "side".to_owned(),
+            label: "Side".to_owned(),
+            width: 128,
+            height: 96,
+            orbit_degrees: [90.0, 15.0, 0.0],
+        });
+    fs::write(
+        &profile,
+        serde_json::to_string_pretty(&profile_document).unwrap(),
+    )
+    .unwrap();
+
+    let validate = Command::new(exe)
+        .arg("foundry-validate-profile")
+        .arg(&profile)
+        .output()
+        .expect("run shape-cli foundry-validate-profile");
+    assert!(
+        validate.status.success(),
+        "validate failed: {}",
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    assert!(String::from_utf8_lossy(&validate.stdout).contains("status: valid"));
+
+    let preview = Command::new(exe)
+        .arg("foundry-preview-profile")
+        .arg(&profile)
+        .arg("--out-dir")
+        .arg(&preview_dir)
+        .output()
+        .expect("run shape-cli foundry-preview-profile");
+    assert!(
+        preview.status.success(),
+        "preview failed: {}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    for name in [
+        "foundry-author-validation.json",
+        "foundry-document.json",
+        "family-conformance.json",
+        "model-validation.json",
+        "asset.obj",
+        "preview.png",
+        "preview-cameras.json",
+        "previews/default.png",
+        "previews/side.png",
+    ] {
+        let path = preview_dir.join(name);
+        assert!(path.exists(), "preview should write {name}");
+        assert!(
+            path.metadata().unwrap().len() > 0,
+            "{name} should not be empty"
+        );
+    }
+    assert_eq!(
+        image::image_dimensions(preview_dir.join("previews/default.png")).unwrap(),
+        (320, 180)
+    );
+    assert_eq!(
+        image::image_dimensions(preview_dir.join("previews/side.png")).unwrap(),
+        (128, 96)
+    );
+
+    let package = Command::new(exe)
+        .arg("foundry-package-profile")
+        .arg(&profile)
+        .arg("--out-dir")
+        .arg(&package_dir)
+        .output()
+        .expect("run shape-cli foundry-package-profile");
+    assert!(
+        package.status.success(),
+        "package failed: {}",
+        String::from_utf8_lossy(&package.stderr)
+    );
+    for name in [
+        "foundry-author-profile.json",
+        "foundry-author-validation.json",
+        "catalog/foundry-document.json",
+        "catalog/catalog-manifest.json",
+        "catalog/roman-bridge-family.json",
+        "catalog/roman-bridge-style.json",
+        "catalog/roman-bridge-family-impl.json",
+        "catalog/roman-bridge-style-impl.json",
+        "catalog/roman-bridge-profile.json",
+        "build-proof/preview.png",
+        "build-proof/previews/default.png",
+        "build-proof/previews/side.png",
+        "build-proof/model-validation.json",
+    ] {
+        let path = package_dir.join(name);
+        assert!(path.exists(), "package should write {name}");
+        assert!(
+            path.metadata().unwrap().len() > 0,
+            "{name} should not be empty"
+        );
+    }
+
+    let second_profile = temp_dir.path().join("lamp-author-profile.json");
+    let second_new_profile = Command::new(exe)
+        .args([
+            "foundry-new-profile",
+            "--template",
+            "stylized-lamp",
+            "--out",
+        ])
+        .arg(&second_profile)
+        .output()
+        .expect("run shape-cli foundry-new-profile for lamp");
+    assert!(
+        second_new_profile.status.success(),
+        "second new profile failed: {}",
+        String::from_utf8_lossy(&second_new_profile.stderr)
+    );
+    let repackaged = Command::new(exe)
+        .arg("foundry-package-profile")
+        .arg(&second_profile)
+        .arg("--out-dir")
+        .arg(&package_dir)
+        .output()
+        .expect("rerun shape-cli foundry-package-profile");
+    assert!(
+        repackaged.status.success(),
+        "repackage failed: {}",
+        String::from_utf8_lossy(&repackaged.stderr)
+    );
+    assert!(
+        !package_dir
+            .join("catalog/roman-bridge-family.json")
+            .exists(),
+        "repackaging should remove stale catalog entries"
+    );
+    assert!(
+        package_dir
+            .join("catalog/stylized-lamp-family.json")
+            .exists()
+    );
 }
 
 #[test]
