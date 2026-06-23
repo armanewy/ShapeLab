@@ -228,6 +228,100 @@ fn filmstrip_and_gallery_options_are_deterministic() {
 }
 
 #[test]
+fn deck_divergence_reflects_context_narrowed_domains() {
+    let mut profile = CustomizerProfile::empty("shape", None);
+    let mut height = continuous_axis("height", "Height", true, true);
+    height.divergence = ControlDivergence::Synced;
+    profile.controls.push(height);
+    let document = document_fixture();
+    let conformance_domains = BTreeMap::from([("height".to_owned(), continuous_domain(0.0, 0.5))]);
+    let context =
+        ControlEvaluationContext::with_constraint_range_provider(&[], &conformance_domains);
+
+    let deck = customize_deck(
+        &profile,
+        &document,
+        context,
+        CustomizeDeckOptions {
+            preview_sample_count: 3,
+            ..CustomizeDeckOptions::default()
+        },
+    )
+    .expect("deck should build");
+
+    let height = control(&deck.controls, "height");
+    assert_eq!(height.divergence, ControlDivergence::ConstraintLimited);
+    assert_eq!(
+        height
+            .options
+            .iter()
+            .map(|option| option.value.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ControlValue::Scalar(0.0),
+            ControlValue::Scalar(0.25),
+            ControlValue::Scalar(0.5),
+        ]
+    );
+    assert_eq!(
+        advanced_recipe_rows(&deck)[0].divergence,
+        "Constraint limited"
+    );
+}
+
+#[test]
+fn gallery_options_respect_context_narrowed_domains() {
+    let mut profile = deck_profile();
+    control_mut(&mut profile.controls, "finish")
+        .domain
+        .unavailable_options
+        .clear();
+    let document = document_fixture();
+    let conformance_domains = BTreeMap::from([
+        (
+            "finish".to_owned(),
+            discrete_domain(vec![ControlValue::Choice("smooth".to_owned())]),
+        ),
+        (
+            "support_provider".to_owned(),
+            discrete_domain(vec![ControlValue::Provider("timber".to_owned())]),
+        ),
+    ]);
+    let context =
+        ControlEvaluationContext::with_constraint_range_provider(&[], &conformance_domains);
+
+    let deck = customize_deck(
+        &profile,
+        &document,
+        context,
+        CustomizeDeckOptions::default(),
+    )
+    .expect("deck should build");
+
+    let finish = control(&deck.controls, "finish");
+    assert_eq!(
+        finish
+            .options
+            .iter()
+            .map(|option| option.unavailable_reason.as_deref())
+            .collect::<Vec<_>>(),
+        vec![None, Some("outside current constraints")]
+    );
+    assert!(choose_option_intents(finish, &finish.options[1]).is_empty());
+
+    let provider = control(&deck.controls, "support_provider");
+    assert_eq!(
+        provider
+            .options
+            .iter()
+            .map(|option| option.unavailable_reason.as_deref())
+            .collect::<Vec<_>>(),
+        vec![None, Some("outside current constraints")]
+    );
+    assert!(choose_option_intents(provider, &provider.options[1]).is_empty());
+}
+
+#[test]
 fn command_intents_wrap_generic_foundry_commands_and_exact_release_builds() {
     let profile = deck_profile();
     let mut document = document_fixture();
@@ -285,6 +379,9 @@ fn command_intents_wrap_generic_foundry_commands_and_exact_release_builds() {
             value: ControlValue::Choice("smooth".to_owned())
         })
     );
+    let mut mismatched = available.clone();
+    mismatched.control_id = "detail".to_owned();
+    assert!(choose_option_intents(finish, &mismatched).is_empty());
 }
 
 #[test]
@@ -330,6 +427,35 @@ fn lock_commands_avoid_duplicates_and_downgrade_to_search_protected() {
             }
         })
     );
+}
+
+#[test]
+fn provider_gallery_rows_honor_control_provider_and_role_locks() {
+    for target in [
+        FoundryLockTarget::Control("support_provider".to_owned()),
+        FoundryLockTarget::Provider("support".to_owned()),
+        FoundryLockTarget::Role("support".to_owned()),
+    ] {
+        let profile = deck_profile();
+        let mut document = document_fixture();
+        document.foundry_locks.push(FoundryLock {
+            target,
+            mode: FoundryLockMode::Locked,
+            reason: None,
+        });
+
+        let deck = customize_deck(
+            &profile,
+            &document,
+            ControlEvaluationContext::new(&[]),
+            CustomizeDeckOptions::default(),
+        )
+        .expect("deck should build");
+
+        let provider = control(&deck.controls, "support_provider");
+        assert!(provider.locked);
+        assert!(choose_option_intents(provider, &provider.options[0]).is_empty());
+    }
 }
 
 #[test]
@@ -380,6 +506,13 @@ fn control<'a>(
         .unwrap_or_else(|| panic!("missing control {id}"))
 }
 
+fn control_mut<'a>(controls: &'a mut [CustomizerControl], id: &str) -> &'a mut CustomizerControl {
+    controls
+        .iter_mut()
+        .find(|control| control.id == id)
+        .unwrap_or_else(|| panic!("missing control {id}"))
+}
+
 fn deck_profile() -> CustomizerProfile {
     let mut profile = CustomizerProfile::empty("shape", None);
     profile.controls = vec![
@@ -391,6 +524,24 @@ fn deck_profile() -> CustomizerProfile {
         toggle("debug_path", "Debug Path", true, false),
     ];
     profile
+}
+
+fn continuous_domain(minimum: f32, maximum: f32) -> FeasibleControlDomain {
+    FeasibleControlDomain {
+        continuous_intervals: vec![ClosedInterval { minimum, maximum }],
+        discrete_values: Vec::new(),
+        unavailable_options: BTreeMap::new(),
+        certification: DomainCertification::CertifiedContinuous,
+    }
+}
+
+fn discrete_domain(discrete_values: Vec<ControlValue>) -> FeasibleControlDomain {
+    FeasibleControlDomain {
+        continuous_intervals: Vec::new(),
+        discrete_values,
+        unavailable_options: BTreeMap::new(),
+        certification: DomainCertification::DiscreteSamples,
+    }
 }
 
 fn continuous_axis(id: &str, label: &str, primary: bool, visible: bool) -> CustomizerControl {

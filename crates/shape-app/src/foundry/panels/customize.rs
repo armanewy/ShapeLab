@@ -2,9 +2,10 @@
 
 use shape_foundry::{
     ControlDivergence, ControlEvaluationContext, ControlEvaluationError, ControlKind, ControlValue,
-    CustomizerControl, CustomizerProfile, DEFAULT_PREVIEW_SAMPLE_COUNT, FoundryAssetDocument,
-    FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget, canonicalize_control_value,
-    control_divergence, default_control_value, whole_model_preview_sample_requests_with_count,
+    CustomizerControl, CustomizerProfile, DEFAULT_PREVIEW_SAMPLE_COUNT, FeasibleControlDomain,
+    FoundryAssetDocument, FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget,
+    canonicalize_control_value, control_divergence, default_control_value,
+    effective_control_domain, evaluate_control, whole_model_preview_sample_requests_with_count,
 };
 
 use crate::foundry::{
@@ -108,11 +109,18 @@ pub(crate) fn control_view(
     context: ControlEvaluationContext<'_>,
     preview_sample_count: usize,
 ) -> Result<FoundryControlView, ControlEvaluationError> {
+    let effective_domain = effective_control_domain(control, context)?;
     let default_value = Some(default_control_value(control, context)?);
-    let value = Some(current_control_value(control, document, context)?);
-    let locked = control_is_locked(&document.foundry_locks, &control.id);
-    let divergence = control_divergence(control, document);
-    let options = control_options(control, value.as_ref(), context, preview_sample_count)?;
+    let current_value = current_control_value(control, document, context)?;
+    let locked = control_is_locked(&document.foundry_locks, control);
+    let divergence = row_control_divergence(control, document, context, &current_value)?;
+    let options = control_options(
+        control,
+        Some(&current_value),
+        &effective_domain,
+        context,
+        preview_sample_count,
+    )?;
 
     Ok(FoundryControlView {
         id: control.id.clone(),
@@ -120,7 +128,7 @@ pub(crate) fn control_view(
         section: control.section.clone(),
         kind: control_kind_label(&control.kind).to_owned(),
         presentation: control_presentation(&control.kind),
-        value,
+        value: Some(current_value),
         default_value,
         primary: control.primary,
         visible: control.primary,
@@ -202,7 +210,7 @@ pub(crate) fn choose_option_intents(
     control: &FoundryControlView,
     option: &FoundryOptionCard,
 ) -> Vec<FoundryAppCommand> {
-    if option.unavailable_reason.is_some() {
+    if option.control_id != control.id || option.unavailable_reason.is_some() {
         return Vec::new();
     }
 
@@ -295,9 +303,27 @@ fn current_control_value(
     }
 }
 
+fn row_control_divergence(
+    control: &CustomizerControl,
+    document: &FoundryAssetDocument,
+    context: ControlEvaluationContext<'_>,
+    value: &ControlValue,
+) -> Result<ControlDivergence, ControlEvaluationError> {
+    let document_divergence = control_divergence(control, document);
+    if matches!(
+        document_divergence,
+        ControlDivergence::DivergedByOverride | ControlDivergence::Unavailable
+    ) {
+        return Ok(document_divergence);
+    }
+
+    evaluate_control(control, context, value.clone()).map(|evaluated| evaluated.divergence)
+}
+
 fn control_options(
     control: &CustomizerControl,
     current_value: Option<&ControlValue>,
+    effective_domain: &FeasibleControlDomain,
     context: ControlEvaluationContext<'_>,
     preview_sample_count: usize,
 ) -> Result<Vec<FoundryOptionCard>, ControlEvaluationError> {
@@ -313,6 +339,7 @@ fn control_options(
                     None,
                     Some(option.preview.preview_id.clone()),
                     current_value,
+                    effective_domain,
                 )
             })
             .collect()),
@@ -327,6 +354,7 @@ fn control_options(
                     Some(role.clone()),
                     Some(option.preview.preview_id.clone()),
                     current_value,
+                    effective_domain,
                 )
             })
             .collect()),
@@ -345,6 +373,7 @@ fn control_options(
                                 None,
                                 Some(request.preview_id),
                                 current_value,
+                                effective_domain,
                             )
                         })
                         .collect()
@@ -360,10 +389,11 @@ fn option_card(
     provider_role: Option<String>,
     preview_id: Option<String>,
     current_value: Option<&ControlValue>,
+    effective_domain: &FeasibleControlDomain,
 ) -> FoundryOptionCard {
     FoundryOptionCard {
         control_id: control.id.clone(),
-        unavailable_reason: control.domain.unavailable_reason(&value).map(str::to_owned),
+        unavailable_reason: option_unavailable_reason(effective_domain, &value),
         selected: current_value == Some(&value),
         value,
         label,
@@ -376,11 +406,37 @@ fn option_card(
     }
 }
 
-fn control_is_locked(locks: &[FoundryLock], control_id: &str) -> bool {
-    locks.iter().any(|lock| {
-        lock.target == FoundryLockTarget::Control(control_id.to_owned())
-            && lock.mode == FoundryLockMode::Locked
-    })
+fn option_unavailable_reason(
+    effective_domain: &FeasibleControlDomain,
+    value: &ControlValue,
+) -> Option<String> {
+    if let Some(reason) = effective_domain.unavailable_reason(value) {
+        Some(reason.to_owned())
+    } else if effective_domain.contains_available_value(value) {
+        None
+    } else {
+        Some("outside current constraints".to_owned())
+    }
+}
+
+fn control_is_locked(locks: &[FoundryLock], control: &CustomizerControl) -> bool {
+    lock_target_is_locked(locks, &FoundryLockTarget::Control(control.id.clone()))
+        || match &control.kind {
+            ControlKind::ProviderGallery { role, .. } => {
+                lock_target_is_locked(locks, &FoundryLockTarget::Provider(role.clone()))
+                    || lock_target_is_locked(locks, &FoundryLockTarget::Role(role.clone()))
+            }
+            ControlKind::ContinuousAxis { .. }
+            | ControlKind::IntegerStepper { .. }
+            | ControlKind::Toggle { .. }
+            | ControlKind::ChoiceGallery { .. } => false,
+        }
+}
+
+fn lock_target_is_locked(locks: &[FoundryLock], target: &FoundryLockTarget) -> bool {
+    locks
+        .iter()
+        .any(|lock| lock.target == *target && lock.mode == FoundryLockMode::Locked)
 }
 
 fn control_kind_label(kind: &ControlKind) -> &'static str {
