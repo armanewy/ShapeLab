@@ -1,0 +1,334 @@
+#![forbid(unsafe_code)]
+#![allow(dead_code)]
+
+#[path = "../src/foundry/mod.rs"]
+mod foundry;
+
+use std::path::Path;
+
+use foundry::{FoundryAppCommand, panels::history};
+use shape_asset::RevisionId;
+use shape_foundry::{
+    CatalogContentRef, ControlValue, FoundryAssetDocument, FoundryCandidateId, FoundryCatalogLock,
+    FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, LocalRecipeOverride,
+    ProviderOverride,
+};
+use shape_project::foundry::{FoundryBuildStaleReason, FoundryProject, FoundryProjectLoadReport};
+
+#[test]
+fn semantic_revision_tree_rows_keep_branch_structure() {
+    let project = branched_project();
+
+    let rows = history::build_history_rows(&project);
+
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.revision, row.depth))
+            .collect::<Vec<_>>(),
+        vec![(RevisionId(0), 0), (RevisionId(1), 1), (RevisionId(2), 1)]
+    );
+    assert_eq!(rows[0].branch_label, "2 branches");
+    assert!(
+        rows[0]
+            .badges
+            .iter()
+            .any(|badge| badge.kind == history::FoundryHistoryBadgeKind::Branch)
+    );
+    assert_eq!(rows[1].summary.label, "Height change");
+    assert_eq!(
+        rows[1].summary.detail.as_deref(),
+        Some("Set height to 0.75")
+    );
+    assert_eq!(rows[2].summary.label, "Provider change");
+    assert_eq!(
+        rows[2].summary.detail.as_deref(),
+        Some("Changed shade provider to brass-shade")
+    );
+    assert!(rows[2].selected);
+    assert!(rows[2].on_current_path);
+    assert!(!rows[1].on_current_path);
+    assert_eq!(history::branch_points(&project), vec![RevisionId(0)]);
+}
+
+#[test]
+fn summaries_identify_controls_providers_and_accepted_candidates() {
+    let control = history::command_summary(&FoundryCommand::SetControl {
+        control_id: "height".to_owned(),
+        value: ControlValue::Scalar(0.75),
+    });
+    assert_eq!(
+        control.kind,
+        history::FoundryHistorySummaryKind::ControlEdit
+    );
+    assert_eq!(control.label, "Set height to 0.75");
+    assert_eq!(control.changed_controls, vec!["height"]);
+
+    let provider_ref = content_ref("brass-shade", 9);
+    let provider = history::command_summary(&FoundryCommand::SelectProvider {
+        role: "shade".to_owned(),
+        provider_ref,
+    });
+    assert_eq!(
+        provider.kind,
+        history::FoundryHistorySummaryKind::ProviderChange
+    );
+    assert_eq!(provider.label, "Changed shade provider to brass-shade");
+    assert_eq!(provider.changed_provider_roles, vec!["shade"]);
+
+    let candidate_id = FoundryCandidateId("candidate-7".to_owned());
+    let accepted = history::command_summary(&FoundryCommand::AcceptCandidate {
+        candidate_id: candidate_id.clone(),
+    });
+    assert_eq!(
+        accepted.kind,
+        history::FoundryHistorySummaryKind::CandidateAcceptance
+    );
+    assert_eq!(accepted.label, "Accepted candidate candidate-7");
+    assert_eq!(accepted.accepted_candidate, Some(candidate_id));
+}
+
+#[test]
+fn local_overrides_and_stale_catalogs_surface_as_badges() {
+    let mut document = minimal_foundry_document("override-doc");
+    document
+        .local_recipe_overrides
+        .push(local_override("panel-nudge", "Pinned"));
+    document
+        .local_recipe_overrides
+        .push(local_override("trim-replay", "Revalidate"));
+    let project = FoundryProject::new(
+        "Override asset",
+        document.clone(),
+        FoundryCatalogLock::from_document_refs(&document),
+        None,
+        None,
+        accepted_conformance(),
+    )
+    .expect("project should be valid");
+
+    let mut load_report = FoundryProjectLoadReport::default();
+    load_report.stale_builds.insert(
+        RevisionId(0),
+        vec![
+            FoundryBuildStaleReason::CatalogVersionChanged {
+                stored: 1,
+                current: 2,
+            },
+            FoundryBuildStaleReason::CatalogReferenceChanged {
+                key: "style".to_owned(),
+            },
+        ],
+    );
+    load_report.recovery_revisions.insert(RevisionId(0));
+    load_report.read_only_recovery = true;
+    load_report.verified_recipe_revisions.push(RevisionId(0));
+
+    let rows = history::build_history_rows_with_load_report(&project, Some(&load_report));
+    let badges = &rows[0].badges;
+
+    assert!(badges.iter().any(|badge| {
+        badge.kind == history::FoundryHistoryBadgeKind::LocalOverrides
+            && badge.label == "2 local overrides"
+            && badge.detail.as_deref() == Some("1 pinned, 1 revalidate")
+    }));
+    assert!(
+        badges
+            .iter()
+            .any(|badge| badge.kind == history::FoundryHistoryBadgeKind::StaleCatalog)
+    );
+    assert!(
+        badges
+            .iter()
+            .any(|badge| badge.kind == history::FoundryHistoryBadgeKind::Recovery)
+    );
+    assert!(
+        badges
+            .iter()
+            .any(|badge| badge.kind == history::FoundryHistoryBadgeKind::VerifiedRecipe)
+    );
+    assert_eq!(
+        history::stale_catalog_warning(RevisionId(0), &load_report).as_deref(),
+        Some(
+            "Stored build may be stale: catalog version 1 -> 2, catalog reference changed for style"
+        )
+    );
+}
+
+#[test]
+fn action_helpers_emit_foundry_app_commands() {
+    assert_eq!(
+        history::undo_command().single_foundry_command(),
+        Some(&FoundryCommand::Undo)
+    );
+    assert_eq!(
+        history::switch_revision_command(RevisionId(3)).single_foundry_command(),
+        Some(&FoundryCommand::SwitchRevision {
+            revision_id: RevisionId(3)
+        })
+    );
+    assert_eq!(history::undo_intent(false).command, None);
+    assert_eq!(history::switch_revision_intent(RevisionId(3), true), None);
+    assert_eq!(history::save_command(), FoundryAppCommand::Save);
+    assert_eq!(
+        history::load_command("asset.shapelab-foundry.json"),
+        FoundryAppCommand::Load("asset.shapelab-foundry.json".into())
+    );
+}
+
+#[test]
+fn save_load_status_formats_dirty_unsaved_and_recovery_states() {
+    let clean = history::save_load_status(
+        Some(Path::new("asset.shapelab-foundry.json")),
+        true,
+        false,
+        false,
+    );
+    assert_eq!(clean.state, history::FoundrySaveLoadState::CleanSaved);
+    assert_eq!(
+        clean.path_label.as_deref(),
+        Some("asset.shapelab-foundry.json")
+    );
+    assert!(!clean.can_save);
+
+    let dirty = history::save_load_status(
+        Some(Path::new("asset.shapelab-foundry.json")),
+        true,
+        true,
+        false,
+    );
+    assert_eq!(dirty.state, history::FoundrySaveLoadState::DirtySaved);
+    assert!(dirty.can_save);
+
+    let unsaved = history::save_load_status(None, true, true, false);
+    assert_eq!(unsaved.state, history::FoundrySaveLoadState::Unsaved);
+    assert!(!unsaved.can_save);
+    assert!(unsaved.can_save_as);
+
+    let recovery = history::save_load_status(
+        Some(Path::new("asset.shapelab-foundry.json")),
+        true,
+        true,
+        true,
+    );
+    assert_eq!(
+        recovery.state,
+        history::FoundrySaveLoadState::ReadOnlyRecovery
+    );
+    assert!(!recovery.can_save);
+    assert!(!recovery.can_save_as);
+
+    let empty = history::save_load_status(None, false, false, false);
+    assert_eq!(empty.state, history::FoundrySaveLoadState::NoProject);
+    assert!(!empty.can_save);
+    assert!(empty.can_load);
+}
+
+fn branched_project() -> FoundryProject {
+    let root_document = minimal_foundry_document("root-doc");
+    let mut project = FoundryProject::new(
+        "History asset",
+        root_document.clone(),
+        FoundryCatalogLock::from_document_refs(&root_document),
+        None,
+        None,
+        accepted_conformance(),
+    )
+    .expect("project should be valid");
+
+    let mut control_document = root_document.clone();
+    control_document
+        .control_state
+        .insert("height".to_owned(), ControlValue::Scalar(0.75));
+    project
+        .accept_commands(
+            "Height change",
+            vec![FoundryCommand::SetControl {
+                control_id: "height".to_owned(),
+                value: ControlValue::Scalar(0.75),
+            }],
+            control_document.clone(),
+            FoundryCatalogLock::from_document_refs(&control_document),
+            None,
+            None,
+            accepted_conformance(),
+        )
+        .expect("control revision should be accepted");
+
+    project.undo().expect("root should be undo target");
+
+    let provider_ref = content_ref("brass-shade", 9);
+    let mut provider_document = root_document;
+    provider_document.provider_overrides.insert(
+        "shade".to_owned(),
+        ProviderOverride {
+            role: "shade".to_owned(),
+            provider_ref: provider_ref.clone(),
+        },
+    );
+    project
+        .accept_commands(
+            "Provider change",
+            vec![FoundryCommand::SelectProvider {
+                role: "shade".to_owned(),
+                provider_ref,
+            }],
+            provider_document.clone(),
+            FoundryCatalogLock::from_document_refs(&provider_document),
+            None,
+            None,
+            accepted_conformance(),
+        )
+        .expect("provider revision should be accepted");
+
+    project
+}
+
+fn minimal_foundry_document(document_id: &str) -> FoundryAssetDocument {
+    FoundryAssetDocument::new(
+        FoundryDocumentId(document_id.to_owned()),
+        content_ref("family", 1),
+        content_ref("style", 2),
+        content_ref("family-impl", 3),
+        content_ref("style-impl", 4),
+        content_ref("profile", 5),
+    )
+}
+
+fn accepted_conformance() -> FoundryConformanceSummary {
+    FoundryConformanceSummary {
+        accepted: true,
+        ..FoundryConformanceSummary::default()
+    }
+}
+
+fn local_override(id: &str, policy: &str) -> LocalRecipeOverride {
+    serde_json::from_value(serde_json::json!({
+        "id": id,
+        "base_geometry_fingerprint": fingerprint_hex(12),
+        "edit_program": {
+            "label": "override",
+            "seed": 0,
+            "operations": [
+                { "SetScalar": { "parameter": 1, "value": 0.5 } }
+            ]
+        },
+        "touched_targets": [
+            { "FamilySlot": "height" }
+        ],
+        "survival_policy": policy
+    }))
+    .expect("local override should deserialize")
+}
+
+fn content_ref(stable_id: &str, byte: u8) -> CatalogContentRef {
+    serde_json::from_value(serde_json::json!({
+        "stable_id": stable_id,
+        "schema_version": 1,
+        "fingerprint": fingerprint_hex(byte),
+    }))
+    .expect("catalog reference should deserialize")
+}
+
+fn fingerprint_hex(byte: u8) -> String {
+    format!("{byte:02x}").repeat(32)
+}
