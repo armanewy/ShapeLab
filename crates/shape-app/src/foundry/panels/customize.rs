@@ -113,7 +113,8 @@ pub(crate) fn control_view(
     let effective_domain = effective_control_domain(control, context)?;
     let default_value = Some(default_control_value(control, context)?);
     let current_value = current_control_value(control, document, context)?;
-    let locked = control_is_locked(&document.foundry_locks, control);
+    let locked_reason = control_locked_reason(&document.foundry_locks, control);
+    let locked = locked_reason.is_some();
     let divergence = row_control_divergence(control, document, context, &current_value)?;
     let options = control_options(
         control,
@@ -134,6 +135,7 @@ pub(crate) fn control_view(
         primary: control.primary,
         visible: control.primary,
         locked,
+        locked_reason,
         topology_behavior: control.topology_behavior,
         divergence,
         options,
@@ -237,6 +239,21 @@ pub(crate) fn reset_control_intents(control: &FoundryControlView) -> Vec<Foundry
 #[must_use]
 pub(crate) fn control_can_reset(control: &FoundryControlView) -> bool {
     !control.locked && control.value.is_some() && control.value != control.default_value
+}
+
+/// Return the reason an option action is disabled, if it is disabled.
+#[must_use]
+pub(crate) fn option_action_disabled_reason(
+    control: &FoundryControlView,
+    option: &FoundryOptionCard,
+) -> Option<String> {
+    if let Some(reason) = &control.locked_reason {
+        Some(reason.clone())
+    } else if control.locked {
+        Some("Control is locked.".to_owned())
+    } else {
+        option.unavailable_reason.clone()
+    }
 }
 
 /// Emit a lock-mode change for one control, avoiding duplicate lock commands.
@@ -433,24 +450,32 @@ fn option_unavailable_reason(
     }
 }
 
-fn control_is_locked(locks: &[FoundryLock], control: &CustomizerControl) -> bool {
-    lock_target_is_locked(locks, &FoundryLockTarget::Control(control.id.clone()))
-        || match &control.kind {
+fn control_locked_reason(locks: &[FoundryLock], control: &CustomizerControl) -> Option<String> {
+    lock_target_reason(locks, &FoundryLockTarget::Control(control.id.clone())).or_else(|| {
+        match &control.kind {
             ControlKind::ProviderGallery { role, .. } => {
-                lock_target_is_locked(locks, &FoundryLockTarget::Provider(role.clone()))
-                    || lock_target_is_locked(locks, &FoundryLockTarget::Role(role.clone()))
+                lock_target_reason(locks, &FoundryLockTarget::Provider(role.clone()))
+                    .or_else(|| lock_target_reason(locks, &FoundryLockTarget::Role(role.clone())))
             }
             ControlKind::ContinuousAxis { .. }
             | ControlKind::IntegerStepper { .. }
             | ControlKind::Toggle { .. }
-            | ControlKind::ChoiceGallery { .. } => false,
+            | ControlKind::ChoiceGallery { .. } => None,
         }
+    })
 }
 
-fn lock_target_is_locked(locks: &[FoundryLock], target: &FoundryLockTarget) -> bool {
+fn lock_target_reason(locks: &[FoundryLock], target: &FoundryLockTarget) -> Option<String> {
     locks
         .iter()
-        .any(|lock| lock.target == *target && lock.mode == FoundryLockMode::Locked)
+        .find(|lock| lock.target == *target && lock.mode == FoundryLockMode::Locked)
+        .map(|lock| {
+            lock.reason
+                .as_deref()
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or("Control is locked.")
+                .to_owned()
+        })
 }
 
 fn control_kind_label(kind: &ControlKind) -> &'static str {

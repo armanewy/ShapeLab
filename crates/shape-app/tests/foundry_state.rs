@@ -44,7 +44,9 @@ use shape_foundry::{
 };
 use shape_project::foundry::FoundryProjectFile;
 use shape_render::foundry::FoundryPreviewCache;
-use shape_search::foundry::{FoundryCandidateMode, FoundryCandidateRequest};
+use shape_search::foundry::{
+    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+};
 
 #[test]
 fn request_build_schedules_compile_job_without_compiling_inline() {
@@ -218,7 +220,10 @@ fn stale_job_event_is_rejected_without_touching_current_job() {
     assert!(!accepted);
     assert!(state.stale_jobs.contains(&1));
     assert!(state.active_jobs.contains_key(&2));
-    assert!(state.status.is_none());
+    assert_eq!(
+        state.status.as_deref(),
+        Some("Ignored a background result because newer work is active.")
+    );
 }
 
 #[test]
@@ -263,7 +268,10 @@ fn replacing_project_preserves_monotonic_job_ids_and_rejects_old_events() {
     });
 
     assert!(!accepted);
-    assert_eq!(state.status, None);
+    assert_eq!(
+        state.status.as_deref(),
+        Some("Ignored a background result because newer work is active.")
+    );
     assert!(state.active_jobs.contains_key(&2));
     assert_eq!(
         state
@@ -400,6 +408,287 @@ fn candidate_generation_job_renders_preview_images_for_cards() {
 }
 
 #[test]
+fn candidate_preview_failures_are_isolated_to_their_cards() {
+    let fixture = RuntimeFixture::new();
+    let request = FoundryCandidateRequest {
+        seed: 51,
+        proposal_count: 24,
+        result_count: 4,
+        mode: FoundryCandidateMode::Refine,
+        strategy_id: None,
+    };
+    let mut output =
+        generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
+            .expect("candidate generation should succeed");
+    assert!(
+        output.candidates.len() > 1,
+        "fixture should return multiple candidates for isolation coverage"
+    );
+    output.candidates[0].document.family_content_ref = content_ref("missing-family", 91);
+
+    let cards = foundry::jobs::candidate_cards_from_output_with_previews(
+        &fixture.document,
+        &output,
+        Some(request.mode),
+        None,
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    )
+    .expect("preview failures should not fail candidate card generation");
+
+    assert_eq!(cards.len(), output.candidates.len());
+    assert!(cards.iter().any(|card| {
+        card.preview_failure
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Preview unavailable"))
+            && card.width == 0
+            && card.rgba8.is_empty()
+            && !card.selectable
+    }));
+    assert!(cards.iter().any(|card| {
+        card.preview_failure.is_none()
+            && card.width > 0
+            && card.height > 0
+            && card.rgba8.len() == (card.width * card.height * 4) as usize
+    }));
+}
+
+#[test]
+fn option_cards_render_distinct_whole_model_thumbnails() {
+    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+    let state = compiled_fixture_state(&fixture);
+    let support = state
+        .controls
+        .iter()
+        .find(|control| control.id == "support_rhythm")
+        .expect("support rhythm control");
+
+    assert!(support.options.len() >= 3);
+    assert!(support.options.iter().all(|option| {
+        option.preview_id.is_some()
+            && option.width == 64
+            && option.height == 64
+            && option.rgba8.len() == (option.width * option.height * 4) as usize
+            && option.camera.is_some()
+    }));
+    assert!(
+        support
+            .options
+            .windows(2)
+            .any(|pair| pair[0].rgba8 != pair[1].rgba8),
+        "whole-model option thumbnails should reflect option-applied geometry"
+    );
+}
+
+#[test]
+fn novice_can_create_reinforced_bridge_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    assert_default_foundry_surface(&state);
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "structural_heft".to_owned(),
+            value: ControlValue::Scalar(0.92),
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "support_rhythm".to_owned(),
+            value: ControlValue::Provider("marching_pile_bents".to_owned()),
+        },
+    );
+
+    let document = state.document.as_ref().expect("current bridge document");
+    assert_eq!(
+        document.control_state.get("structural_heft"),
+        Some(&ControlValue::Scalar(0.92))
+    );
+    assert_eq!(
+        document.control_state.get("support_rhythm"),
+        Some(&ControlValue::Provider("marching_pile_bents".to_owned()))
+    );
+    assert_current_mesh_valid(&state);
+}
+
+#[test]
+fn novice_can_create_compact_vented_crate_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    assert_default_foundry_surface(&state);
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "body_proportions".to_owned(),
+            value: ControlValue::Scalar(0.12),
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "vent_density".to_owned(),
+            value: ControlValue::Choice("dense".to_owned()),
+        },
+    );
+
+    let document = state.document.as_ref().expect("current crate document");
+    assert_eq!(
+        document.control_state.get("body_proportions"),
+        Some(&ControlValue::Scalar(0.12))
+    );
+    assert_eq!(
+        document.control_state.get("vent_density"),
+        Some(&ControlValue::Choice("dense".to_owned()))
+    );
+    assert_current_mesh_valid(&state);
+}
+
+#[test]
+fn novice_can_create_tall_lamp_with_new_shade_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::stylized_lamp::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    assert_default_foundry_surface(&state);
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "overall_height".to_owned(),
+            value: ControlValue::Scalar(2.05),
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "shade_style".to_owned(),
+            value: ControlValue::Choice("drum".to_owned()),
+        },
+    );
+
+    let document = state.document.as_ref().expect("current lamp document");
+    assert_eq!(
+        document.control_state.get("overall_height"),
+        Some(&ControlValue::Scalar(2.05))
+    );
+    assert_eq!(
+        document.control_state.get("shade_style"),
+        Some(&ControlValue::Choice("drum".to_owned()))
+    );
+    assert_current_mesh_valid(&state);
+}
+
+#[test]
+fn novice_can_export_three_member_pack_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    add_current_to_fixture_pack(&mut state, &fixture, "balanced");
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "structural_heft".to_owned(),
+            value: ControlValue::Scalar(0.25),
+        },
+    );
+    add_current_to_fixture_pack(&mut state, &fixture, "light");
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "support_rhythm".to_owned(),
+            value: ControlValue::Provider("marching_pile_bents".to_owned()),
+        },
+    );
+    add_current_to_fixture_pack(&mut state, &fixture, "reinforced");
+
+    assert_eq!(state.pack.members.len(), 3);
+    assert!(state.pack.can_export);
+
+    let out_dir = temp_test_dir("foundry-wave22-pack");
+    let _ = fs::remove_dir_all(&out_dir);
+    let effects = state
+        .handle_command(FoundryAppCommand::RequestPackBatchExport {
+            out_dir: out_dir.clone(),
+        })
+        .expect("pack export should schedule");
+    let event = run_fixture_job(start_job(effects), &fixture);
+    let FoundryJobEvent::PackExportFinished { member_count, .. } = event.clone() else {
+        panic!("expected pack export, got {event:?}");
+    };
+    assert_eq!(member_count, 3);
+    assert!(state.handle_job_event(event));
+    for member in ["balanced", "light", "reinforced"] {
+        assert!(
+            out_dir.join(member).join("asset-manifest.json").is_file(),
+            "missing exported pack member {member}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    let effects = state
+        .request_candidates(FoundryCandidateRequest {
+            seed: 77,
+            proposal_count: 24,
+            result_count: 4,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+        })
+        .expect("candidate generation should schedule");
+    let event = run_fixture_job(start_job(effects), &fixture);
+    assert!(state.handle_job_event(event));
+    assert!(
+        state.candidates.len() > 1,
+        "fixture should produce alternatives for reject/branch flow"
+    );
+
+    let rejected = state.candidates[0].id.clone();
+    let accepted = state.candidates[1].id.clone();
+    assert!(
+        state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::RejectCandidate {
+                candidate_id: rejected.clone()
+            }))
+            .expect("reject should not schedule a job")
+            .is_empty()
+    );
+    assert!(!state.candidate_edits.contains_key(&rejected));
+
+    let effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::AcceptCandidate {
+            candidate_id: accepted.clone(),
+        }))
+        .expect("accept should schedule candidate edit");
+    let event = run_fixture_job(start_job(effects), &fixture);
+    assert!(matches!(event, FoundryJobEvent::EditApplied { .. }));
+    assert!(state.handle_job_event(event));
+
+    assert_current_mesh_valid(&state);
+    assert!(state.selected_candidate.is_none());
+    assert!(
+        state
+            .project_file
+            .as_ref()
+            .is_some_and(|project| project.project.revisions.len() > 1)
+    );
+}
+
+#[test]
 fn pack_compile_preserves_selected_member_when_it_still_exists() {
     let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
     let mut pack = FoundryPackDocument::new(
@@ -466,14 +755,30 @@ fn add_current_to_pack_tracks_membership_and_schedules_pack_compile() {
 
     assert_eq!(state.pack.pack_id.as_deref(), Some("props"));
     assert!(state.pack.members.contains_key("crate"));
+    assert_eq!(
+        state
+            .pack
+            .members
+            .get("crate")
+            .map(|document_id| document_id.0.as_str()),
+        Some("crate")
+    );
     assert_eq!(state.selected_pack_member.as_deref(), Some("crate"));
     let [FoundryAppEffect::StartJob(job)] = effects.as_slice() else {
         panic!("expected one pack compile job effect");
     };
-    assert!(matches!(
-        job.as_ref(),
-        FoundryJobRequest::CompilePack { job_id: 1, .. }
-    ));
+    match job.as_ref() {
+        FoundryJobRequest::CompilePack { job_id, pack } => {
+            assert_eq!(*job_id, 1);
+            assert_eq!(
+                pack.members
+                    .get("crate")
+                    .map(|document| document.document_id.0.as_str()),
+                Some("crate")
+            );
+        }
+        other => panic!("expected pack compile job effect, got {other:?}"),
+    }
 }
 
 #[test]
@@ -693,6 +998,89 @@ fn start_job(effects: Vec<FoundryAppEffect>) -> FoundryJobRequest {
             _ => None,
         })
         .expect("start job effect")
+}
+
+fn compiled_fixture_state(
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+) -> FoundryAppState {
+    let mut state = FoundryAppState::new(fixture.document.clone()).expect("fixture state");
+    let request = start_job(state.request_build().expect("build should schedule"));
+    let event = run_fixture_job(request, fixture);
+    assert!(matches!(event, FoundryJobEvent::CompileFinished { .. }));
+    assert!(state.handle_job_event(event));
+    assert!(state.current_output.is_some());
+    assert!(!state.controls.is_empty());
+    state
+}
+
+fn apply_fixture_command(
+    state: &mut FoundryAppState,
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    command: FoundryCommand,
+) {
+    let effects = state
+        .handle_command(FoundryAppCommand::run(command))
+        .expect("command should schedule an edit");
+    let event = run_fixture_job(start_job(effects), fixture);
+    assert!(matches!(event, FoundryJobEvent::EditApplied { .. }));
+    assert!(state.handle_job_event(event));
+}
+
+fn add_current_to_fixture_pack(
+    state: &mut FoundryAppState,
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    member_id: &str,
+) {
+    let effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::AddCurrentToPack {
+            pack_id: "novice_pack".to_owned(),
+            member_id: member_id.to_owned(),
+        }))
+        .expect("add current to pack should schedule compilation");
+    let event = run_fixture_job(start_job(effects), fixture);
+    assert!(
+        matches!(event, FoundryJobEvent::PackCompiled { .. }),
+        "expected pack compilation, got {event:?}"
+    );
+    assert!(state.handle_job_event(event));
+}
+
+fn run_fixture_job(
+    request: FoundryJobRequest,
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+) -> FoundryJobEvent {
+    run_foundry_job(request, fixture, &mut FoundryPreviewCache::default())
+}
+
+fn assert_default_foundry_surface(state: &FoundryAppState) {
+    assert!(!state.advanced_recipe_open);
+    assert!(
+        state
+            .controls
+            .iter()
+            .any(|control| control.primary && control.visible)
+    );
+    assert!(
+        state
+            .controls
+            .iter()
+            .filter(|control| control.primary && control.visible)
+            .all(|control| {
+                !control.label.contains("controls.")
+                    && !control.kind.contains("controls.")
+                    && !control.id.contains("recipe")
+            })
+    );
+}
+
+fn assert_current_mesh_valid(state: &FoundryAppState) {
+    let output = state.current_output.as_ref().expect("current output");
+    let mesh = &output.artifact.combined_preview.mesh;
+    assert!(!mesh.positions.is_empty());
+    assert!(!mesh.indices.is_empty());
+    assert_eq!(mesh.indices.len() % 3, 0);
+    assert!(mesh.bounds.min.iter().all(|value| value.is_finite()));
+    assert!(mesh.bounds.max.iter().all(|value| value.is_finite()));
 }
 
 fn temp_test_dir(name: &str) -> PathBuf {

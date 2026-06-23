@@ -1,13 +1,16 @@
 //! Native desktop host for the Foundry workflow state.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, TextureOptions};
 use shape_foundry::{
-    CatalogContentRef, FoundryCatalogError, FoundryCatalogResolver, FoundryCommand,
+    CatalogContentRef, FoundryBuildStamp, FoundryCatalogError, FoundryCatalogResolver,
+    FoundryCommand,
 };
 use shape_foundry_catalog::{FoundryFixtureCatalog, headless_fixture_catalogs};
 use shape_project::foundry::{
@@ -26,6 +29,7 @@ pub(crate) struct FoundryDesktopApp {
     state: FoundryAppState,
     tab: FoundryTab,
     jobs: FoundryJobCoordinator,
+    texture_cache: FoundryTextureCache,
 }
 
 /// Host-level action requested by the Foundry surface.
@@ -51,6 +55,7 @@ impl Default for FoundryDesktopApp {
             state: FoundryAppState::default(),
             tab: FoundryTab::Directions,
             jobs: FoundryJobCoordinator::default(),
+            texture_cache: FoundryTextureCache::default(),
         }
     }
 }
@@ -227,7 +232,7 @@ impl FoundryDesktopApp {
         }
     }
 
-    fn show_directions(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_directions(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         ui.heading("Directions");
         if self.state.document.is_none() {
@@ -239,21 +244,31 @@ impl FoundryDesktopApp {
             "{} candidate direction(s)",
             self.state.candidates.len()
         ));
+        let current_build = self.state.current_build.as_ref();
+        let texture_cache = &mut self.texture_cache;
         for candidate in &self.state.candidates {
             ui.horizontal(|ui| {
+                let preview_id = candidate_preview_texture_id(candidate);
                 show_rgba_preview(
                     ui,
-                    &format!("foundry-candidate-{}", candidate.id.0),
-                    &candidate.rgba8,
-                    candidate.width,
-                    candidate.height,
-                    96.0,
+                    texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: &preview_id,
+                        build: current_build,
+                        rgba8: &candidate.rgba8,
+                        width: candidate.width,
+                        height: candidate.height,
+                        max_edge: 96.0,
+                    },
                 );
                 ui.vertical(|ui| {
                     ui.label(&candidate.title);
                     ui.weak(&candidate.subtitle);
                     if candidate.width > 0 && candidate.height > 0 {
                         ui.weak(format!("{}x{}", candidate.width, candidate.height));
+                    }
+                    if let Some(reason) = &candidate.preview_failure {
+                        ui.weak(reason);
                     }
                     if candidate.selected {
                         ui.weak("selected");
@@ -278,7 +293,7 @@ impl FoundryDesktopApp {
         commands
     }
 
-    fn show_customize(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_customize(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         ui.heading("Customize");
         self.show_current_preview(ui);
@@ -286,12 +301,17 @@ impl FoundryDesktopApp {
             ui.weak("No compiled customizer controls yet.");
             return commands;
         }
+        let current_build = self.state.current_build.as_ref();
+        let texture_cache = &mut self.texture_cache;
         for control in default_customize_controls(&self.state.controls) {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(&control.label);
                     ui.weak(&control.kind);
                     ui.weak(format!("{} option(s)", control.options.len()));
+                    if let Some(reason) = &control.locked_reason {
+                        ui.weak(reason);
+                    }
                     if ui.button("Select").clicked() {
                         commands.push(customize::select_control_command(Some(control.id.clone())));
                     }
@@ -314,13 +334,18 @@ impl FoundryDesktopApp {
                 });
                 for option in &control.options {
                     ui.horizontal(|ui| {
+                        let preview_id = option_preview_texture_id(option);
                         show_rgba_preview(
                             ui,
-                            &format!("foundry-option-{}-{}", option.control_id, option.label),
-                            &option.rgba8,
-                            option.width,
-                            option.height,
-                            64.0,
+                            texture_cache,
+                            FoundryPreviewDraw {
+                                preview_id: &preview_id,
+                                build: current_build,
+                                rgba8: &option.rgba8,
+                                width: option.width,
+                                height: option.height,
+                                max_edge: 64.0,
+                            },
                         );
                         ui.vertical(|ui| {
                             ui.weak(&option.label);
@@ -331,25 +356,29 @@ impl FoundryDesktopApp {
                                 ui.weak(reason);
                             }
                         });
-                        if ui
-                            .add_enabled(
-                                option.unavailable_reason.is_none() && !control.locked,
-                                egui::Button::new("Preview"),
-                            )
-                            .clicked()
-                        {
+                        let disabled_reason =
+                            customize::option_action_disabled_reason(control, option);
+                        let preview_response =
+                            ui.add_enabled(disabled_reason.is_none(), egui::Button::new("Preview"));
+                        let preview_clicked = if let Some(reason) = &disabled_reason {
+                            preview_response.on_disabled_hover_text(reason).clicked()
+                        } else {
+                            preview_response.clicked()
+                        };
+                        if preview_clicked {
                             commands.extend(customize::preview_control_value_intents(
                                 control,
                                 option.value.clone(),
                             ));
                         }
-                        if ui
-                            .add_enabled(
-                                option.unavailable_reason.is_none() && !control.locked,
-                                egui::Button::new("Apply"),
-                            )
-                            .clicked()
-                        {
+                        let apply_response =
+                            ui.add_enabled(disabled_reason.is_none(), egui::Button::new("Apply"));
+                        let apply_clicked = if let Some(reason) = &disabled_reason {
+                            apply_response.on_disabled_hover_text(reason).clicked()
+                        } else {
+                            apply_response.clicked()
+                        };
+                        if apply_clicked {
                             commands.extend(customize::choose_option_intents(control, option));
                         }
                     });
@@ -432,7 +461,7 @@ impl FoundryDesktopApp {
         commands
     }
 
-    fn show_export(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_export(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         ui.heading("Export");
         self.show_current_preview(ui);
@@ -491,20 +520,36 @@ impl FoundryDesktopApp {
         commands
     }
 
-    fn show_current_preview(&self, ui: &mut egui::Ui) {
+    fn show_current_preview(&mut self, ui: &mut egui::Ui) {
+        let preview = self.state.current_preview.clone();
+        let has_output = self.state.current_output.is_some();
+        let rendering_preview = self
+            .state
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
         ui.horizontal(|ui| {
-            if let Some(preview) = &self.state.current_preview {
+            if let Some(preview) = &preview {
+                let preview_id = format!("current-{}", preview.preview_id);
                 show_rgba_preview(
                     ui,
-                    &format!("foundry-current-{}", preview.preview_id),
-                    &preview.rgba8,
-                    preview.width,
-                    preview.height,
-                    180.0,
+                    &mut self.texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: &preview_id,
+                        build: preview.build.as_ref(),
+                        rgba8: &preview.rgba8,
+                        width: preview.width,
+                        height: preview.height,
+                        max_edge: 180.0,
+                    },
                 );
                 ui.weak(format!("Preview {}x{}", preview.width, preview.height));
-            } else if self.state.current_output.is_some() {
-                ui.weak("Preview queued or available from the toolbar.");
+            } else if has_output {
+                if rendering_preview {
+                    ui.weak("Rendering preview...");
+                } else {
+                    ui.weak("Preview is available from the toolbar.");
+                }
             } else {
                 ui.weak("Build the current asset to render a preview.");
             }
@@ -534,10 +579,8 @@ impl FoundryDesktopApp {
             .pack_id
             .clone()
             .unwrap_or_else(|| "foundry_pack".to_owned());
-        Some(pack::add_current_asset_to_pack_command(
-            pack_id,
-            document.document_id.0.clone(),
-        ))
+        let member_id = unique_pack_member_id(&self.state.pack, &document.document_id.0);
+        Some(pack::add_current_asset_to_pack_command(pack_id, member_id))
     }
 
     fn apply_commands(&mut self, commands: Vec<FoundryAppCommand>, ctx: &egui::Context) {
@@ -653,15 +696,30 @@ struct FoundryToolbarOutput {
 struct FoundryJobCoordinator {
     tx: Option<Sender<FoundryJobEvent>>,
     rx: Option<Receiver<FoundryJobEvent>>,
+    preview_cache: Arc<Mutex<FoundryPreviewCache>>,
 }
 
 impl FoundryJobCoordinator {
     fn submit(&mut self, request: FoundryJobRequest) {
+        let job_id = request.job_id();
         let tx = self.tx().clone();
+        let preview_cache = Arc::clone(&self.preview_cache);
         thread::spawn(move || {
             let resolver = BuiltInFoundryCatalogResolver::default();
-            let mut preview_cache = FoundryPreviewCache::default();
-            let event = run_foundry_job(request, &resolver, &mut preview_cache);
+            let event = if request_uses_preview_cache(&request) {
+                match preview_cache.lock() {
+                    Ok(mut preview_cache) => {
+                        run_foundry_job(request, &resolver, &mut preview_cache)
+                    }
+                    Err(_) => FoundryJobEvent::Failed {
+                        job_id,
+                        message: "Foundry preview cache lock was poisoned.".to_owned(),
+                    },
+                }
+            } else {
+                let mut preview_cache = FoundryPreviewCache::default();
+                run_foundry_job(request, &resolver, &mut preview_cache)
+            };
             let _ = tx.send(event);
         });
     }
@@ -674,6 +732,7 @@ impl FoundryJobCoordinator {
         let (tx, rx) = unbounded();
         self.tx = Some(tx);
         self.rx = Some(rx);
+        self.preview_cache = Arc::new(Mutex::new(FoundryPreviewCache::default()));
     }
 
     fn tx(&mut self) -> &Sender<FoundryJobEvent> {
@@ -689,6 +748,15 @@ impl FoundryJobCoordinator {
         }
         self.rx.as_ref().expect("rx initialized")
     }
+}
+
+fn request_uses_preview_cache(request: &FoundryJobRequest) -> bool {
+    matches!(
+        request,
+        FoundryJobRequest::RenderPreview { .. }
+            | FoundryJobRequest::PreviewControlValue { .. }
+            | FoundryJobRequest::GenerateCandidates { .. }
+    )
 }
 
 struct BuiltInFoundryCatalogResolver {
@@ -768,34 +836,172 @@ fn default_customize_controls(
         .filter(|control| control.primary && control.visible)
 }
 
-fn show_rgba_preview(
-    ui: &mut egui::Ui,
-    texture_name: &str,
-    rgba8: &[u8],
+fn candidate_preview_texture_id(
+    candidate: &crate::foundry::view_model::FoundryCandidateCard,
+) -> String {
+    candidate
+        .preview_id
+        .clone()
+        .unwrap_or_else(|| format!("candidate-{}", candidate.id.0))
+}
+
+fn option_preview_texture_id(option: &crate::foundry::view_model::FoundryOptionCard) -> String {
+    option
+        .preview_id
+        .clone()
+        .unwrap_or_else(|| format!("option-{}-{}", option.control_id, option.label))
+}
+
+fn unique_pack_member_id(pack: &crate::foundry::view_model::FoundryPackView, base: &str) -> String {
+    let base = if base.trim().is_empty() {
+        "member"
+    } else {
+        base.trim()
+    };
+    if !pack.members.contains_key(base) {
+        return base.to_owned();
+    }
+
+    for index in 2.. {
+        let candidate = format!("{base}-{index}");
+        if !pack.members.contains_key(&candidate) {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded member suffix search should always find an unused id")
+}
+
+#[derive(Default)]
+struct FoundryTextureCache {
+    textures: BTreeMap<String, CachedFoundryTexture>,
+}
+
+struct CachedFoundryTexture {
+    identity: FoundryTextureIdentity,
+    texture: egui::TextureHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FoundryTextureIdentity {
+    preview_id: String,
+    build_fingerprint: Option<String>,
+    width: u32,
+    height: u32,
+    rgba_fingerprint: u64,
+}
+
+impl FoundryTextureIdentity {
+    fn new(
+        preview_id: &str,
+        build: Option<&FoundryBuildStamp>,
+        width: u32,
+        height: u32,
+        rgba8: &[u8],
+    ) -> Self {
+        Self {
+            preview_id: preview_id.to_owned(),
+            build_fingerprint: build.map(|build| build.build_fingerprint.0.to_hex()),
+            width,
+            height,
+            rgba_fingerprint: preview_image_fingerprint(rgba8),
+        }
+    }
+
+    fn texture_name(&self) -> String {
+        format!(
+            "foundry-preview-{}-{}x{}-{}-{:016x}",
+            self.preview_id,
+            self.width,
+            self.height,
+            self.build_fingerprint.as_deref().unwrap_or("no-build"),
+            self.rgba_fingerprint
+        )
+    }
+}
+
+impl FoundryTextureCache {
+    fn texture(
+        &mut self,
+        ctx: &egui::Context,
+        preview_id: &str,
+        build: Option<&FoundryBuildStamp>,
+        rgba8: &[u8],
+        width: u32,
+        height: u32,
+    ) -> egui::TextureHandle {
+        let identity = FoundryTextureIdentity::new(preview_id, build, width, height, rgba8);
+        if let Some(cached) = self
+            .textures
+            .get(preview_id)
+            .filter(|cached| cached.identity == identity)
+        {
+            return cached.texture.clone();
+        }
+
+        let color_image =
+            ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba8);
+        let texture =
+            ctx.load_texture(identity.texture_name(), color_image, TextureOptions::LINEAR);
+        self.textures.insert(
+            preview_id.to_owned(),
+            CachedFoundryTexture {
+                identity,
+                texture: texture.clone(),
+            },
+        );
+        texture
+    }
+}
+
+fn preview_image_fingerprint(rgba8: &[u8]) -> u64 {
+    const OFFSET: u64 = 14_695_981_039_346_656_037;
+    const PRIME: u64 = 1_099_511_628_211;
+    rgba8.iter().fold(OFFSET, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+    })
+}
+
+struct FoundryPreviewDraw<'a> {
+    preview_id: &'a str,
+    build: Option<&'a FoundryBuildStamp>,
+    rgba8: &'a [u8],
     width: u32,
     height: u32,
     max_edge: f32,
+}
+
+fn show_rgba_preview(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    preview: FoundryPreviewDraw<'_>,
 ) {
-    let width_usize = width as usize;
-    let height_usize = height as usize;
+    let width_usize = preview.width as usize;
+    let height_usize = preview.height as usize;
     let expected_len = width_usize.saturating_mul(height_usize).saturating_mul(4);
-    if width == 0 || height == 0 || rgba8.len() != expected_len {
-        ui.allocate_space(egui::vec2(max_edge, max_edge));
+    if preview.width == 0 || preview.height == 0 || preview.rgba8.len() != expected_len {
+        ui.allocate_space(egui::vec2(preview.max_edge, preview.max_edge));
         return;
     }
 
-    let color_image = ColorImage::from_rgba_unmultiplied([width_usize, height_usize], rgba8);
-    let texture =
-        ui.ctx()
-            .load_texture(texture_name.to_owned(), color_image, TextureOptions::LINEAR);
-    let scale = (max_edge / width as f32).min(max_edge / height as f32);
-    let size = egui::vec2(width as f32 * scale, height as f32 * scale);
+    let texture = texture_cache.texture(
+        ui.ctx(),
+        preview.preview_id,
+        preview.build,
+        preview.rgba8,
+        preview.width,
+        preview.height,
+    );
+    let scale =
+        (preview.max_edge / preview.width as f32).min(preview.max_edge / preview.height as f32);
+    let size = egui::vec2(preview.width as f32 * scale, preview.height as f32 * scale);
     ui.image((texture.id(), size));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shape_foundry::compile_foundry_document;
 
     #[test]
     fn desktop_foundry_effects_execute_background_jobs() {
@@ -835,6 +1041,94 @@ mod tests {
                 .and_then(|command| command.single_foundry_command().cloned()),
             Some(shape_foundry::FoundryCommand::AddCurrentToPack { .. })
         ));
+    }
+
+    #[test]
+    fn pack_member_ids_increment_for_repeated_ui_adds() {
+        let mut pack = crate::foundry::view_model::FoundryPackView::default();
+        assert_eq!(
+            unique_pack_member_id(&pack, "roman-bridge-doc"),
+            "roman-bridge-doc"
+        );
+
+        pack.members.insert(
+            "roman-bridge-doc".to_owned(),
+            shape_foundry::FoundryDocumentId("roman-bridge-doc".to_owned()),
+        );
+        assert_eq!(
+            unique_pack_member_id(&pack, "roman-bridge-doc"),
+            "roman-bridge-doc-2"
+        );
+
+        pack.members.insert(
+            "roman-bridge-doc-2".to_owned(),
+            shape_foundry::FoundryDocumentId("roman-bridge-doc-2".to_owned()),
+        );
+        assert_eq!(
+            unique_pack_member_id(&pack, "roman-bridge-doc"),
+            "roman-bridge-doc-3"
+        );
+    }
+
+    #[test]
+    fn preview_texture_identity_tracks_preview_id_build_and_pixels() {
+        let bridge = shape_foundry_catalog::roman_bridge::fixture_catalog();
+        let crate_fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+        let build_a = compile_foundry_document(&bridge.document, &bridge)
+            .expect("bridge fixture compiles")
+            .build_stamp;
+        let build_b = compile_foundry_document(&crate_fixture.document, &crate_fixture)
+            .expect("crate fixture compiles")
+            .build_stamp;
+
+        let identity = FoundryTextureIdentity::new(
+            "option-a",
+            Some(&build_a),
+            2,
+            1,
+            &[0, 0, 0, 255, 255, 255, 255, 255],
+        );
+
+        assert_eq!(
+            identity,
+            FoundryTextureIdentity::new(
+                "option-a",
+                Some(&build_a),
+                2,
+                1,
+                &[0, 0, 0, 255, 255, 255, 255, 255],
+            )
+        );
+        assert_ne!(
+            identity,
+            FoundryTextureIdentity::new(
+                "option-b",
+                Some(&build_a),
+                2,
+                1,
+                &[0, 0, 0, 255, 255, 255, 255, 255],
+            )
+        );
+        assert_ne!(
+            identity,
+            FoundryTextureIdentity::new(
+                "option-a",
+                Some(&build_b),
+                2,
+                1,
+                &[0, 0, 0, 255, 255, 255, 255, 255],
+            )
+        );
+        assert_ne!(
+            identity,
+            FoundryTextureIdentity::new(
+                "option-a",
+                Some(&build_a),
+                2,
+                1,
+                &[0, 0, 0, 255, 255, 255, 254, 255],
+            )
+        );
     }
 
     #[test]

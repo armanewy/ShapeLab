@@ -11,8 +11,8 @@ use foundry::{
     panels::customize::{
         CustomizeDeckOptions, advanced_recipe_open_command, advanced_recipe_rows,
         choose_option_intents, control_can_reset, control_lock_command, customize_deck,
-        preview_control_value_intents, release_control_value_intents, reset_control_intents,
-        select_control_command,
+        option_action_disabled_reason, preview_control_value_intents,
+        release_control_value_intents, reset_control_intents, select_control_command,
     },
     view_model::FoundryControlPresentation,
 };
@@ -87,6 +87,7 @@ fn deck_defaults_to_primary_controls_and_collapsed_advanced() {
     let count = &deck.primary_controls[1];
     assert_eq!(count.presentation, FoundryControlPresentation::Stepper);
     assert!(count.locked);
+    assert_eq!(count.locked_reason.as_deref(), Some("fixed"));
     assert!(!control_can_reset(count));
     assert_eq!(
         advanced_recipe_open_command(true),
@@ -377,6 +378,10 @@ fn command_intents_wrap_generic_foundry_commands_and_exact_release_builds() {
 
     let finish = control(&deck.controls, "finish");
     let unavailable = &finish.options[1];
+    assert_eq!(
+        option_action_disabled_reason(finish, unavailable).as_deref(),
+        Some("requires supports")
+    );
     assert!(choose_option_intents(finish, unavailable).is_empty());
     let available = &finish.options[0];
     assert_eq!(
@@ -457,8 +462,43 @@ fn provider_gallery_rows_honor_control_provider_and_role_locks() {
 
         let provider = control(&deck.controls, "support_provider");
         assert!(provider.locked);
+        assert_eq!(
+            option_action_disabled_reason(provider, &provider.options[0]).as_deref(),
+            Some("Control is locked.")
+        );
         assert!(choose_option_intents(provider, &provider.options[0]).is_empty());
     }
+}
+
+#[test]
+fn disabled_option_actions_prefer_lock_reasons_over_domain_reasons() {
+    let profile = deck_profile();
+    let mut document = document_fixture();
+    document.foundry_locks.push(FoundryLock {
+        target: FoundryLockTarget::Control("finish".to_owned()),
+        mode: FoundryLockMode::Locked,
+        reason: Some("Keep finish consistent across the pack".to_owned()),
+    });
+    let deck = customize_deck(
+        &profile,
+        &document,
+        ControlEvaluationContext::new(&[]),
+        CustomizeDeckOptions::default(),
+    )
+    .expect("deck should build");
+
+    let finish = control(&deck.controls, "finish");
+    assert!(finish.locked);
+    assert_eq!(
+        finish.locked_reason.as_deref(),
+        Some("Keep finish consistent across the pack")
+    );
+    assert_eq!(
+        option_action_disabled_reason(finish, &finish.options[1]).as_deref(),
+        Some("Keep finish consistent across the pack")
+    );
+    assert!(preview_control_value_intents(finish, finish.options[0].value.clone()).is_empty());
+    assert!(choose_option_intents(finish, &finish.options[0]).is_empty());
 }
 
 #[test]

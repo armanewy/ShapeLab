@@ -8,13 +8,14 @@ use std::path::PathBuf;
 use shape_asset::RevisionId;
 use shape_core::Aabb;
 use shape_foundry::{
-    ControlEvaluationContext, ControlKind, ControlValue, FoundryAssetDocument, FoundryBuildStamp,
-    FoundryCandidateId, FoundryCatalogLock, FoundryCommand, FoundryCompilationOutput,
-    FoundryConformanceSummary, FoundryEdit, FoundryLock, FoundryLockMode, FoundryLockTarget,
+    CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, FoundryAssetDocument,
+    FoundryBuildStamp, FoundryCandidateId, FoundryCatalogError, FoundryCatalogLock,
+    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput, FoundryConformanceSummary,
+    FoundryDocumentId, FoundryEdit, FoundryLock, FoundryLockMode, FoundryLockTarget,
     FoundryPackDocument, FoundryPackExportProfile, FoundryProjectRevisionProgram,
     FoundryValidationReport, GenerateCandidatesRequest, GeneratedRecipeSnapshot, ProviderOverride,
-    SharedProviderPolicy, control_divergence, default_control_value, effective_control_domain,
-    validate_foundry_document,
+    SharedProviderPolicy, apply_foundry_command, compile_foundry_document, control_divergence,
+    default_control_value, effective_control_domain, validate_foundry_document,
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{FoundryProjectFile, FoundryProjectLoadReport};
@@ -246,15 +247,21 @@ impl FoundryAppState {
         let job_id = event.job_id();
         let Some(request) = self.active_jobs.get(&job_id).cloned() else {
             self.stale_jobs.insert(job_id);
+            self.status =
+                Some("Ignored a background result because newer work is active.".to_owned());
             return false;
         };
         if !self.request_source_is_current(&request) {
             self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
+            self.status = Some("Ignored a background result because the model changed.".to_owned());
             return false;
         }
         if !job_event_matches_request(&event, &request) {
+            self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
+            self.status =
+                Some("Ignored a background result that no longer matches the request.".to_owned());
             return false;
         }
 
@@ -556,7 +563,8 @@ impl FoundryAppState {
         pack_id: String,
         member_id: String,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
-        let document = self.current_document()?.clone();
+        let mut document = self.current_document()?.clone();
+        document.document_id = FoundryDocumentId(member_id.clone());
         let mut pack = self
             .pack
             .pack
@@ -997,13 +1005,13 @@ fn control_views_from_output(
     output: &FoundryCompilationOutput,
 ) -> Vec<FoundryControlView> {
     let profile = &output.catalog.customizer_profile;
-    let option_preview = option_preview_from_output(output);
     let sections = profile
         .sections
         .iter()
         .map(|section| (section.id.as_str(), section.label.as_str()))
         .collect::<BTreeMap<_, _>>();
     let context = ControlEvaluationContext::new(&output.catalog.family.parameter_slots);
+    let option_previews = option_previews_from_output(document, output, context);
     profile
         .controls
         .iter()
@@ -1011,6 +1019,7 @@ fn control_views_from_output(
             let default_value = default_control_value(control, context).ok();
             let value = current_control_value(document, control, default_value.clone());
             let domain = effective_control_domain(control, context).unwrap_or_default();
+            let locked_reason = control_locked_reason(document, &control.id, &control.kind);
             FoundryControlView {
                 id: control.id.clone(),
                 label: control.label.clone(),
@@ -1025,14 +1034,15 @@ fn control_views_from_output(
                 default_value,
                 primary: control.primary,
                 visible: control.visible,
-                locked: control_is_locked(document, &control.id, &control.kind),
+                locked: locked_reason.is_some(),
+                locked_reason,
                 topology_behavior: control.topology_behavior,
                 divergence: control_divergence(control, document),
                 options: option_cards_for_control(
                     control,
                     &domain,
                     value.as_ref(),
-                    option_preview.as_ref(),
+                    &option_previews,
                 ),
                 advanced_path: Some(format!("controls.{}", control.id)),
                 help: None,
@@ -1072,12 +1082,12 @@ fn option_cards_for_control(
     control: &shape_foundry::CustomizerControl,
     domain: &shape_foundry::FeasibleControlDomain,
     current: Option<&ControlValue>,
-    preview: Option<&OptionPreviewImage>,
+    previews: &BTreeMap<String, OptionPreviewImage>,
 ) -> Vec<FoundryOptionCard> {
     let context = OptionCardContext {
         domain,
         current,
-        preview,
+        previews,
     };
     match &control.kind {
         ControlKind::ChoiceGallery { options } => options
@@ -1134,6 +1144,9 @@ fn option_card(
     preview_id: Option<String>,
     context: OptionCardContext<'_>,
 ) -> FoundryOptionCard {
+    let preview = preview_id
+        .as_ref()
+        .and_then(|preview_id| context.previews.get(preview_id));
     FoundryOptionCard {
         control_id: control_id.to_owned(),
         selected: context.current == Some(&value),
@@ -1142,12 +1155,10 @@ fn option_card(
         label,
         provider_role,
         preview_id,
-        rgba8: context
-            .preview
-            .map_or_else(Vec::new, |preview| preview.rgba8.clone()),
-        width: context.preview.map_or(0, |preview| preview.width),
-        height: context.preview.map_or(0, |preview| preview.height),
-        camera: context.preview.map(|preview| preview.camera.clone()),
+        rgba8: preview.map_or_else(Vec::new, |preview| preview.rgba8.clone()),
+        width: preview.map_or(0, |preview| preview.width),
+        height: preview.map_or(0, |preview| preview.height),
+        camera: preview.map(|preview| preview.camera.clone()),
     }
 }
 
@@ -1155,7 +1166,86 @@ fn option_card(
 struct OptionCardContext<'a> {
     domain: &'a shape_foundry::FeasibleControlDomain,
     current: Option<&'a ControlValue>,
-    preview: Option<&'a OptionPreviewImage>,
+    previews: &'a BTreeMap<String, OptionPreviewImage>,
+}
+
+fn option_previews_from_output(
+    document: &FoundryAssetDocument,
+    output: &FoundryCompilationOutput,
+    context: ControlEvaluationContext<'_>,
+) -> BTreeMap<String, OptionPreviewImage> {
+    let resolver = OutputCatalogResolver::from_output(output);
+    let mut previews = BTreeMap::new();
+    for control in &output.catalog.customizer_profile.controls {
+        if !control.primary || !control.visible {
+            continue;
+        }
+        let domain = effective_control_domain(control, context).unwrap_or_default();
+        for (value, preview_id) in option_preview_values(control, &domain) {
+            if previews.contains_key(&preview_id) {
+                continue;
+            }
+            if let Some(preview) =
+                option_preview_for_control_value(document, &resolver, &control.id, value)
+            {
+                previews.insert(preview_id, preview);
+            }
+        }
+    }
+    previews
+}
+
+fn option_preview_values(
+    control: &shape_foundry::CustomizerControl,
+    domain: &shape_foundry::FeasibleControlDomain,
+) -> Vec<(ControlValue, String)> {
+    match &control.kind {
+        ControlKind::ChoiceGallery { options } => options
+            .iter()
+            .map(|option| {
+                (
+                    ControlValue::Choice(option.value.clone()),
+                    option.preview.preview_id.clone(),
+                )
+            })
+            .collect(),
+        ControlKind::ProviderGallery { options, .. } => options
+            .iter()
+            .map(|option| {
+                (
+                    ControlValue::Provider(option.provider_id.clone()),
+                    option.preview.preview_id.clone(),
+                )
+            })
+            .collect(),
+        ControlKind::ContinuousAxis { .. }
+        | ControlKind::IntegerStepper { .. }
+        | ControlKind::Toggle { .. } => domain
+            .discrete_values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (value.clone(), format!("{}-option-{index}", control.id)))
+            .collect(),
+    }
+}
+
+fn option_preview_for_control_value(
+    document: &FoundryAssetDocument,
+    resolver: &OutputCatalogResolver,
+    control_id: &str,
+    value: ControlValue,
+) -> Option<OptionPreviewImage> {
+    let mut preview_document = document.clone();
+    apply_foundry_command(
+        &mut preview_document,
+        &FoundryCommand::SetControl {
+            control_id: control_id.to_owned(),
+            value,
+        },
+    )
+    .ok()?;
+    let output = compile_foundry_document(&preview_document, resolver).ok()?;
+    render_option_preview_from_output(&output)
 }
 
 #[derive(Debug, Clone)]
@@ -1166,7 +1256,9 @@ struct OptionPreviewImage {
     camera: shape_render::OrbitCamera,
 }
 
-fn option_preview_from_output(output: &FoundryCompilationOutput) -> Option<OptionPreviewImage> {
+fn render_option_preview_from_output(
+    output: &FoundryCompilationOutput,
+) -> Option<OptionPreviewImage> {
     let mesh = &output.artifact.combined_preview.mesh;
     let mesh = TriangleMesh {
         positions: mesh.positions.clone(),
@@ -1192,25 +1284,73 @@ fn option_preview_from_output(output: &FoundryCompilationOutput) -> Option<Optio
     })
 }
 
-fn control_is_locked(
+#[derive(Debug, Clone)]
+struct OutputCatalogResolver {
+    entries: BTreeMap<String, String>,
+}
+
+impl OutputCatalogResolver {
+    fn from_output(output: &FoundryCompilationOutput) -> Self {
+        Self {
+            entries: output
+                .catalog
+                .resolved_content
+                .values()
+                .map(|content| {
+                    (
+                        content.content_ref.stable_id.clone(),
+                        content.canonical_json.clone(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl FoundryCatalogResolver for OutputCatalogResolver {
+    fn resolve_catalog_content(
+        &self,
+        content_ref: &CatalogContentRef,
+    ) -> Result<String, FoundryCatalogError> {
+        self.entries
+            .get(&content_ref.stable_id)
+            .cloned()
+            .ok_or_else(|| FoundryCatalogError::MissingContent {
+                content_ref: content_ref.clone(),
+            })
+    }
+}
+
+fn control_locked_reason(
     document: &FoundryAssetDocument,
     control_id: &str,
     kind: &ControlKind,
-) -> bool {
-    document.foundry_locks.iter().any(|lock| {
-        lock.mode == FoundryLockMode::Locked
-            && match (&lock.target, kind) {
-                (FoundryLockTarget::Control(locked), _) => locked == control_id,
-                (
-                    FoundryLockTarget::Provider(locked),
-                    ControlKind::ProviderGallery { role, .. },
-                )
-                | (FoundryLockTarget::Role(locked), ControlKind::ProviderGallery { role, .. }) => {
-                    locked == role
+) -> Option<String> {
+    document
+        .foundry_locks
+        .iter()
+        .find(|lock| {
+            lock.mode == FoundryLockMode::Locked
+                && match (&lock.target, kind) {
+                    (FoundryLockTarget::Control(locked), _) => locked == control_id,
+                    (
+                        FoundryLockTarget::Provider(locked),
+                        ControlKind::ProviderGallery { role, .. },
+                    )
+                    | (
+                        FoundryLockTarget::Role(locked),
+                        ControlKind::ProviderGallery { role, .. },
+                    ) => locked == role,
+                    _ => false,
                 }
-                _ => false,
-            }
-    })
+        })
+        .map(|lock| {
+            lock.reason
+                .as_deref()
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or("Control is locked.")
+                .to_owned()
+        })
 }
 
 fn control_kind_label(kind: &ControlKind) -> &'static str {

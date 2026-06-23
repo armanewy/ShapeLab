@@ -36,6 +36,8 @@ pub(crate) struct FoundryCandidateCard {
     pub height: u32,
     /// Camera shared by cards in the same comparison.
     pub camera: Option<OrbitCamera>,
+    /// Preview-specific failure, without invalidating the candidate itself.
+    pub preview_failure: Option<String>,
     /// Changed customizer controls.
     pub changed_controls: Vec<String>,
     /// Changed provider roles.
@@ -77,6 +79,8 @@ pub(crate) struct FoundryControlView {
     pub visible: bool,
     /// Whether edits are currently locked.
     pub locked: bool,
+    /// Human-facing reason edits are locked, when available.
+    pub locked_reason: Option<String>,
     /// Topology behavior for preview/release semantics.
     pub topology_behavior: ControlTopologyBehavior,
     /// Divergence between source controls and generated recipe.

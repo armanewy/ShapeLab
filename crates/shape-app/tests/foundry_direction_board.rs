@@ -461,6 +461,7 @@ fn candidate_card(
         width: 1,
         height: 1,
         camera: Some(camera.clone()),
+        preview_failure: None,
         changed_controls: vec![format!("control-{slot}")],
         changed_roles: Vec::new(),
         explanations: vec![control_change(

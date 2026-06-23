@@ -635,6 +635,7 @@ pub(crate) fn candidate_cards_from_output(
                 width: 0,
                 height: 0,
                 camera: None,
+                preview_failure: None,
                 changed_controls: candidate.changed_controls.clone(),
                 changed_roles,
                 explanations: candidate.diagnostics.changes.clone(),
@@ -648,7 +649,7 @@ pub(crate) fn candidate_cards_from_output(
         .collect()
 }
 
-fn candidate_cards_from_output_with_previews(
+pub(crate) fn candidate_cards_from_output_with_previews(
     parent_document: &FoundryAssetDocument,
     output: &FoundryCandidateOutput,
     mode: Option<FoundryCandidateMode>,
@@ -661,25 +662,47 @@ fn candidate_cards_from_output_with_previews(
         return Ok(cards);
     }
 
-    let parent_output = compile_foundry_document(parent_document, resolver)
-        .map_err(|error| format!("{error:?}"))?;
-    let mut requests = vec![preview_request_for_output(
+    let parent_output = match compile_foundry_document(parent_document, resolver) {
+        Ok(output) => output,
+        Err(error) => {
+            let message = format!("Parent preview compile failed: {error:?}");
+            for card in &mut cards {
+                card.preview_failure = Some(message.clone());
+            }
+            return Ok(cards);
+        }
+    };
+    let parent_request = preview_request_for_output(
         "candidate-parent",
         FoundryPreviewKind::CandidateCard {
             candidate_id: "parent".to_owned(),
         },
         &parent_output,
-    )];
-    for candidate in &output.candidates {
-        let candidate_output = compile_foundry_document(&candidate.document, resolver)
-            .map_err(|error| format!("{error:?}"))?;
-        requests.push(preview_request_for_output(
-            format!("candidate-{}", candidate.id.0),
-            FoundryPreviewKind::CandidateCard {
-                candidate_id: candidate.id.0.clone(),
-            },
-            &candidate_output,
-        ));
+    );
+    let mut requests = vec![parent_request.clone()];
+    let mut candidate_requests = BTreeMap::new();
+    for (index, candidate) in output.candidates.iter().enumerate() {
+        match compile_foundry_document(&candidate.document, resolver) {
+            Ok(candidate_output) => {
+                let preview_id = format!("candidate-{}", candidate.id.0);
+                let request = preview_request_for_output(
+                    preview_id.clone(),
+                    FoundryPreviewKind::CandidateCard {
+                        candidate_id: candidate.id.0.clone(),
+                    },
+                    &candidate_output,
+                );
+                candidate_requests.insert(preview_id, (index, request.clone()));
+                requests.push(request);
+            }
+            Err(error) => {
+                mark_candidate_preview_compile_failure(&mut cards[index], &error);
+            }
+        }
+    }
+
+    if candidate_requests.is_empty() {
+        return Ok(cards);
     }
 
     let mut batch = FoundryPreviewBatchRequest::new(
@@ -689,28 +712,78 @@ fn candidate_cards_from_output_with_previews(
             .expect("candidate preview size is supported"),
     );
     batch.max_parallel_jobs = 4;
-    let rendered = preview_cache
-        .render_batch(batch)
-        .map_err(|error| error.to_string())?;
-    let rendered_by_id = rendered
-        .previews
-        .into_iter()
-        .map(|preview| (preview.preview_id.clone(), preview))
-        .collect::<BTreeMap<_, _>>();
+    if let Ok(rendered) = preview_cache.render_batch(batch) {
+        let rendered_by_id = rendered
+            .previews
+            .into_iter()
+            .map(|preview| (preview.preview_id.clone(), preview))
+            .collect::<BTreeMap<_, _>>();
 
-    for card in &mut cards {
-        let preview_id = format!("candidate-{}", card.id.0);
-        let preview = rendered_by_id
-            .get(&preview_id)
-            .ok_or_else(|| format!("candidate preview `{preview_id}` was not rendered"))?;
-        card.preview_id = Some(preview.preview_id.clone());
-        card.rgba8 = preview.image.rgba8.clone();
-        card.width = preview.image.width;
-        card.height = preview.image.height;
-        card.camera = Some(preview.camera.clone());
+        for (preview_id, (index, _)) in &candidate_requests {
+            if let Some(preview) = rendered_by_id.get(preview_id) {
+                apply_candidate_preview(&mut cards[*index], preview);
+            } else {
+                cards[*index].preview_failure = Some(format!(
+                    "Candidate preview `{preview_id}` was not rendered."
+                ));
+            }
+        }
+
+        return Ok(cards);
+    }
+
+    for (preview_id, (index, request)) in candidate_requests {
+        let mut batch = FoundryPreviewBatchRequest::new(
+            format!("candidate-direction-{preview_id}"),
+            vec![parent_request.clone(), request],
+            FoundryPreviewResolution::from_pixels(CANDIDATE_PREVIEW_PIXELS)
+                .expect("candidate preview size is supported"),
+        );
+        batch.max_parallel_jobs = 2;
+        match preview_cache.render_batch(batch) {
+            Ok(rendered) => {
+                let preview = rendered
+                    .previews
+                    .iter()
+                    .find(|preview| preview.preview_id == preview_id);
+                if let Some(preview) = preview {
+                    apply_candidate_preview(&mut cards[index], preview);
+                } else {
+                    cards[index].preview_failure = Some(format!(
+                        "Candidate preview `{preview_id}` was not rendered."
+                    ));
+                }
+            }
+            Err(error) => {
+                cards[index].preview_failure = Some(format!("Preview render failed: {error}"));
+            }
+        }
     }
 
     Ok(cards)
+}
+
+fn apply_candidate_preview(
+    card: &mut FoundryCandidateCard,
+    preview: &shape_render::foundry::FoundryRenderedPreview,
+) {
+    card.preview_id = Some(preview.preview_id.clone());
+    card.rgba8 = preview.image.rgba8.clone();
+    card.width = preview.image.width;
+    card.height = preview.image.height;
+    card.camera = Some(preview.camera.clone());
+    card.preview_failure = None;
+}
+
+fn mark_candidate_preview_compile_failure(
+    card: &mut FoundryCandidateCard,
+    _error: &impl std::fmt::Debug,
+) {
+    card.preview_failure = Some("Preview unavailable for this direction.".to_owned());
+    card.validation_label = "Preview unavailable".to_owned();
+    card.validation_detail =
+        Some("This direction cannot be chosen because its preview did not compile.".to_owned());
+    card.selectable = false;
 }
 
 fn candidate_subtitle(mode: Option<FoundryCandidateMode>, change_count: usize) -> String {
