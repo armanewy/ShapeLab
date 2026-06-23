@@ -7,6 +7,7 @@ pub mod corpus;
 pub mod face;
 pub mod garment;
 pub mod hair;
+pub mod prepared;
 pub mod proportion;
 
 use serde::{Deserialize, Serialize};

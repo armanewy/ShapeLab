@@ -1,7 +1,8 @@
 # Foundry vs Inverse Roles
 
-Shape Lab has three distinct surfaces after Wave 20. Keeping them separate
-prevents compiler research from being mistaken for product import capability.
+Shape Lab has four distinct surfaces after Wave 25. Keeping them separate
+prevents authored customization, compiler research, and import diagnostics from
+being mistaken for one another.
 
 ## Visual Foundry
 
@@ -78,6 +79,31 @@ Success measure:
 - Exact success only when proof is complete.
 - Otherwise, the report gives a specific, actionable failure.
 
+## Prepared Template Customization
+
+Audience:
+
+- Users customizing an asset that was already prepared by a trusted authoring
+  pipeline.
+
+Role:
+
+- Apply whole-model controls to prepared templates.
+- Validate authored deformation cages, weights, landmarks, and base
+  fingerprints before customization.
+- Preserve required landmarks and emit deterministic cage-delta programs with
+  no raw mesh payload.
+
+Current scope:
+
+- Known-base humanoid character template in `shape-character::prepared`.
+
+Success measure:
+
+- A user can adjust Body Proportions, Head Shape, Garment Fit, Pose Preset,
+  Silhouette, and Detail Level without seeing cage, weight, vertex, or raw mesh
+  internals.
+
 ## Boundary Rules
 
 - Visual Foundry should not expose inverse compiler internals to novice users.
@@ -85,6 +111,8 @@ Success measure:
   imports.
 - Foundry Author should produce content packages and validation evidence, not
   one-off engine forks for every asset family.
+- Prepared Template Customization should only operate on assets authored with
+  cages, weights, landmarks, and current base fingerprints.
 - Residual or correction-buffer workflows belong in diagnostics, not strict
   success.
 - Import triage may suggest a foundry family only when the report includes a
@@ -104,6 +132,10 @@ Foundry Author
 Semantic Reconstruction Lab
   -> analyze imports and prove or reject strict recovery
   -> suggest known families only when evidence supports the suggestion
+
+Prepared Template Customization
+  -> customize trusted prepared templates through whole-model controls
+  -> reject stale or cross-base preparation metadata
 ```
 
 The surfaces can share semantic IDs, fingerprints, validation reports, and

@@ -11,7 +11,7 @@ recovered assets after Wave 20.
 | Synthetic known-base character corpus meshes | Strict known-base recovery gate | Exact known-base recovery | Yes, only when descriptor proof and runtime proof accept | `shape-character::corpus`, `shape-inverse::character_recovery` | Versioned known-base character grammar only |
 | External clean-character descriptors | Canonicalize, rank, triage, and optionally run known-base strict proof | Analyze character import | Yes only when triage runs strict known-base recovery and it accepts | `shape-inverse::external_character`, `shape-inverse::import_triage` | Diagnostics alone are not editability |
 | Same-topology source/target mesh pairs | Decompile ordered deformation package | Same-topology deformation replay | No strict semantic success when final correction is required | `shape-decompiler` | Requires identical ordered topology |
-| Prepared mesh templates | Future prepared asset customization | Prepared template | Not implemented | Planned backend | Requires cages, weights, landmarks, and authored constraints |
+| Prepared mesh templates | Validate and customize authored known-base templates | Customize prepared template | Not an import recovery path | `shape-character::prepared` | Requires authored cages, weights, landmarks, base fingerprints, and whole-model controls |
 | Arbitrary triangle mesh | Unsupported semantic editability | Diagnostic-only unsupported mesh | No | Failure report only | No general mesh-to-procedural compiler claim |
 | Noisy scans or non-manifold meshes | Invalid or diagnostic-only | Analyze import failed | No | Canonicalization and clean-mesh diagnostics | Requires clean canonical input before ranking |
 | UV/material/rig/animation imports | Out of scope | Unsupported data | No | None | Not part of current modeling/reconstruction scope |
@@ -63,6 +63,8 @@ without a concrete family ID, evidence, and validation path.
 Use these labels:
 
 - "Create with Visual Foundry" for authored family generation.
+- "Customize prepared template" for authored prepared assets with cages,
+  weights, landmarks, and base fingerprints.
 - "Recover exact editable program" only after strict verification accepts.
 - "Analyze import" for external clean-character triage.
 - "Diagnostic-only unsupported mesh" for arbitrary or noisy meshes.

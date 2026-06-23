@@ -2,7 +2,14 @@
 
 ## Cage And Mesh Deformation
 
-Add a backend for prepared imported meshes using deformation cages, weights, and landmark constraints. It should share the same project history, candidate, lock, and search abstractions, while clearly distinguishing prepared meshes from raw unstructured imports.
+Wave 25 adds the first prepared known-base character customization contract in
+`shape-character::prepared`. It validates authored deformation cages, weights,
+landmark constraints, base fingerprints, and the six novice-facing whole-model
+controls before emitting a deterministic no-raw-mesh customization program.
+
+Next steps for this backend are prop templates, app/history integration, and
+candidate generation over the same prepared controls. It must continue to
+clearly distinguish prepared templates from raw unstructured imports.
 
 ## Structural Graph Mutations
 
@@ -23,4 +30,3 @@ Persist user choices as pairwise comparisons and use them to bias future candida
 ## Optional DCC Adapter
 
 Add an export/import adapter for a DCC only after the core model remains useful without it. The adapter should project Shape Lab state outward rather than making external scene files the source of truth.
-
