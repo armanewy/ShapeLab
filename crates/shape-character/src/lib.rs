@@ -3,6 +3,7 @@
 //! Versioned semantic character grammar contracts.
 
 pub mod base;
+pub mod corpus;
 pub mod face;
 pub mod garment;
 pub mod hair;
