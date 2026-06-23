@@ -6,6 +6,12 @@
 //! failure report shape that inverse search must return when exact semantic
 //! reconstruction cannot be proven.
 
+pub mod analysis;
+pub mod deformation_recovery;
+pub mod hypotheses;
+pub mod search;
+pub mod strict;
+
 use serde::{Deserialize, Serialize};
 use shape_program::{
     ModelingOperationKind, ModelingProgram, SemanticBoundaryLoopId, SemanticPartId,
