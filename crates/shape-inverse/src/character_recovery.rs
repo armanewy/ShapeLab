@@ -225,6 +225,18 @@ pub fn run_known_base_character_recovery_suite(
     }
 }
 
+/// Run the known-base recovery gate for one public character mesh descriptor.
+#[must_use]
+pub fn recover_known_base_character_mesh_artifact(
+    case_id: impl Into<String>,
+    mesh: CharacterMeshArtifact,
+) -> KnownBaseCharacterRecoveryCaseReport {
+    recover_character_input(&KnownBaseCharacterRecoveryInput {
+        case_id: case_id.into(),
+        mesh,
+    })
+}
+
 fn recover_character_input(
     input: &KnownBaseCharacterRecoveryInput,
 ) -> KnownBaseCharacterRecoveryCaseReport {

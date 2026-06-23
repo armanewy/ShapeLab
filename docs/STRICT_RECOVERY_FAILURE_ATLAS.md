@@ -40,6 +40,8 @@ Use the most specific report available:
   known-base character recovery metrics.
 - `shape_inverse::external_character::ExternalCharacterAnalysisReport` for
   external clean-character canonicalization and ranking diagnostics.
+- `shape_inverse::import_triage::ImportTriageReport` for product-facing import
+  outcomes and strict-proof gating.
 
 ## Residual Policy
 
@@ -52,4 +54,3 @@ recovery.
 
 The correct unsupported outcome is a useful failure report. Shape Lab should
 prefer a precise failure over a fake editable import.
-

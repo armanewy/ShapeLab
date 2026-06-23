@@ -42,6 +42,13 @@ use shape_foundry::{
 use shape_foundry_catalog::{
     FoundryAuthorProfilePackage, author_profile_template, validate_author_profile_package,
 };
+use shape_inverse::{
+    external_character::{ExternalCharacterAnalysisConfig, ExternalCleanCharacterMeshInput},
+    import_triage::{
+        ImportTriageOutcome, ImportTriageReport, ImportTriageSourceKind,
+        invalid_external_character_import_triage_report, triage_external_clean_character_import,
+    },
+};
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
@@ -110,6 +117,8 @@ enum Command {
     FoundryPreviewProfile(FoundryPreviewProfileArgs),
     /// Package a typed Foundry Author profile into an exact local catalog.
     FoundryPackageProfile(FoundryPackageProfileArgs),
+    /// Triage an external clean-character descriptor without claiming magic import.
+    ImportTriageCharacter(ImportTriageCharacterArgs),
     /// Render the cross-domain headless visual Foundry benchmark.
     FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
@@ -256,6 +265,15 @@ struct FoundryPreviewProfileArgs {
 struct FoundryPackageProfileArgs {
     /// Typed Foundry Author profile JSON file.
     profile: PathBuf,
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+struct ImportTriageCharacterArgs {
+    /// External clean-character descriptor JSON file.
+    descriptor: PathBuf,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -436,6 +454,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryValidateProfile(args) => run_foundry_validate_profile(args),
         Command::FoundryPreviewProfile(args) => run_foundry_preview_profile(args),
         Command::FoundryPackageProfile(args) => run_foundry_package_profile(args),
+        Command::ImportTriageCharacter(args) => run_import_triage_character(args),
         Command::FoundryVisualBenchmark(args) => {
             foundry_visual_benchmark::run_foundry_visual_benchmark(args)
         }
@@ -1070,9 +1089,133 @@ fn run_foundry_package_profile(args: FoundryPackageProfileArgs) -> anyhow::Resul
     Ok(())
 }
 
+fn run_import_triage_character(args: ImportTriageCharacterArgs) -> anyhow::Result<()> {
+    fs::create_dir_all(&args.out_dir)
+        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    clear_import_triage_outputs(&args.out_dir)?;
+    let report = match load_external_character_input(&args.descriptor)? {
+        LoadedExternalCharacterInput::Input(input) => triage_external_clean_character_import(
+            input.as_ref(),
+            &ExternalCharacterAnalysisConfig::default(),
+        ),
+        LoadedExternalCharacterInput::InvalidReport(report) => *report,
+    };
+    write_json(args.out_dir.join("import-triage-report.json"), &report)?;
+    write_json(
+        args.out_dir.join("external-character-analysis.json"),
+        &report.external_character_analysis,
+    )?;
+    write_json(
+        args.out_dir.join("strict-known-base-recovery.json"),
+        &report.strict_known_base_recovery,
+    )?;
+    print_import_triage_report(&report);
+    Ok(())
+}
+
+enum LoadedExternalCharacterInput {
+    Input(Box<ExternalCleanCharacterMeshInput>),
+    InvalidReport(Box<ImportTriageReport>),
+}
+
+fn clear_import_triage_outputs(out_dir: &Path) -> anyhow::Result<()> {
+    for name in [
+        "import-triage-report.json",
+        "external-character-analysis.json",
+        "strict-known-base-recovery.json",
+    ] {
+        let path = out_dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
 fn load_author_profile(path: &Path) -> anyhow::Result<FoundryAuthorProfilePackage> {
     let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn load_external_character_input(path: &Path) -> anyhow::Result<LoadedExternalCharacterInput> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let fallback_source_id = path.display().to_string();
+    let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(LoadedExternalCharacterInput::InvalidReport(Box::new(
+                invalid_external_character_import_triage_report(
+                    fallback_source_id,
+                    format!("descriptor JSON could not be parsed: {error}"),
+                ),
+            )));
+        }
+    };
+    let source_id = value
+        .get("source_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|source_id| !source_id.trim().is_empty())
+        .unwrap_or(&fallback_source_id)
+        .to_owned();
+    match serde_json::from_value::<ExternalCleanCharacterMeshInput>(value) {
+        Ok(input) => Ok(LoadedExternalCharacterInput::Input(Box::new(input))),
+        Err(error) => Ok(LoadedExternalCharacterInput::InvalidReport(Box::new(
+            invalid_external_character_import_triage_report(
+                source_id,
+                format!("external clean-character descriptor could not be parsed: {error}"),
+            ),
+        ))),
+    }
+}
+
+fn print_import_triage_report(report: &ImportTriageReport) {
+    println!("Import triage {}", report.source_id);
+    println!(
+        "  source kind: {}",
+        import_triage_source_kind_label(report.source_kind)
+    );
+    println!("  outcome: {}", import_triage_outcome_label(report.outcome));
+    println!("  label: {}", report.user_facing_label);
+    println!(
+        "  strict recovery proven: {}",
+        report.strict_recovery_proven
+    );
+    println!(
+        "  strict recovery confidence: {:.3}",
+        report.strict_recovery_confidence.0
+    );
+    println!(
+        "  classification confidence: {:.3}",
+        report.classification_confidence.0
+    );
+    println!(
+        "  candidates: {}",
+        report.external_character_analysis.candidates.len()
+    );
+    println!(
+        "  issues: {}",
+        report.external_character_analysis.issues.len()
+    );
+    for reason in &report.external_character_analysis.rejection_reasons {
+        println!("  rejection: {}: {}", reason.path, reason.message);
+    }
+}
+
+fn import_triage_source_kind_label(source_kind: ImportTriageSourceKind) -> &'static str {
+    match source_kind {
+        ImportTriageSourceKind::ExternalCleanCharacterDescriptor => {
+            "external_clean_character_descriptor"
+        }
+    }
+}
+
+fn import_triage_outcome_label(outcome: ImportTriageOutcome) -> &'static str {
+    match outcome {
+        ImportTriageOutcome::ExactEditableRecovery => "exact_editable_recovery",
+        ImportTriageOutcome::KnownBasePartialDiagnostic => "known_base_partial_diagnostic",
+        ImportTriageOutcome::DiagnosticOnlyUnsupported => "diagnostic_only_unsupported",
+        ImportTriageOutcome::InvalidInput => "invalid_input",
+    }
 }
 
 fn print_author_validation_report(report: &shape_foundry_catalog::FoundryAuthorValidationReport) {

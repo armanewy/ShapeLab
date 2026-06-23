@@ -9,7 +9,7 @@ recovered assets after Wave 20.
 | Explicit asset recipes | Compile, validate, export | Modeling Workspace asset | Not an import path | `shape-modeling`, `shape-asset`, `shape-compile` | Requires authored recipe graph |
 | Synthetic hard-surface benchmark meshes | Strict recovery gate | Exact semantic recovery | Yes, only when the strict gate accepts | `shape-inverse::recovery_gate` | Covered synthetic domains only |
 | Synthetic known-base character corpus meshes | Strict known-base recovery gate | Exact known-base recovery | Yes, only when descriptor proof and runtime proof accept | `shape-character::corpus`, `shape-inverse::character_recovery` | Versioned known-base character grammar only |
-| External clean-character descriptors | Canonicalize, rank, and diagnose | Analyze character import | No direct strict success | `shape-inverse::external_character` | May become eligible for a later strict gate, but diagnostics alone are not editability |
+| External clean-character descriptors | Canonicalize, rank, triage, and optionally run known-base strict proof | Analyze character import | Yes only when triage runs strict known-base recovery and it accepts | `shape-inverse::external_character`, `shape-inverse::import_triage` | Diagnostics alone are not editability |
 | Same-topology source/target mesh pairs | Decompile ordered deformation package | Same-topology deformation replay | No strict semantic success when final correction is required | `shape-decompiler` | Requires identical ordered topology |
 | Prepared mesh templates | Future prepared asset customization | Prepared template | Not implemented | Planned backend | Requires cages, weights, landmarks, and authored constraints |
 | Arbitrary triangle mesh | Unsupported semantic editability | Diagnostic-only unsupported mesh | No | Failure report only | No general mesh-to-procedural compiler claim |
@@ -40,13 +40,23 @@ External clean-character analysis can report:
   recovery is not proven.
 - `DiagnosticOnlyUnsupported`: the input is clean enough to analyze, but no
   candidate reaches the reporting threshold.
-- `InvalidInput`: schema, geometry, units, axes, config, clean flags, or
-  correspondences failed validation.
+- `InvalidInput`: schema, geometry, units, axes, config, or correspondences
+  failed validation.
 
 Eligibility is blocked by missing or stale fingerprints, dirty clean-mesh flags,
 left-handed or axis-parity-inconsistent canonicalization, drifted
 correspondences, surplus correspondence evidence, unexplained targets, invalid
 config, duplicate correspondence IDs, and hidden JSON fields.
+Dirty clean-mesh flags are warnings and exact-recovery rejections, not invalid
+input by themselves.
+
+Wave 24 adds `shape-cli import-triage-character`, which writes a product-facing
+triage report. It may use the label "Recover exact editable program" only when
+the composed known-base strict recovery report accepts. Partial and unsupported
+results remain diagnostic reports.
+
+Closest Foundry-family suggestions remain future work. They must not be emitted
+without a concrete family ID, evidence, and validation path.
 
 ## Product Copy Rules
 
@@ -63,4 +73,3 @@ Avoid these labels:
 - "General mesh import"
 - "Automatic proceduralization"
 - "Editable import" when strict verification has not accepted
-

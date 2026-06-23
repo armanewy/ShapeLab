@@ -11,6 +11,7 @@ pub mod character_recovery;
 pub mod deformation_recovery;
 pub mod external_character;
 pub mod hypotheses;
+pub mod import_triage;
 pub mod recovery_gate;
 pub mod search;
 pub mod strict;

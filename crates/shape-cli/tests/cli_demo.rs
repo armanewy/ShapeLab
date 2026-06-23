@@ -9,6 +9,10 @@ use shape_foundry_catalog::{
     FoundryAuthorPreviewCamera, FoundryAuthorProfilePackage, FoundryFixtureCatalog,
     headless_fixture_catalogs,
 };
+use shape_inverse::{
+    external_character::external_input_from_character_mesh_artifact,
+    import_triage::{ImportTriageOutcome, ImportTriageReport},
+};
 
 #[test]
 fn demo_generates_headless_artifacts() {
@@ -1061,6 +1065,145 @@ f 1 2 3
         .expect("run shape-cli invalid bend decompile");
 
     assert!(!status.success());
+}
+
+#[test]
+fn import_triage_character_cli_writes_truthful_reports() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let descriptor = temp_dir.path().join("external-character.json");
+    let out_dir = temp_dir.path().join("triage");
+    let corpus = shape_character::corpus::generated_character_corpus(2401);
+    let exact_input =
+        external_input_from_character_mesh_artifact("cli.triage.exact", &corpus.cases[4].mesh);
+    fs::write(
+        &descriptor,
+        serde_json::to_string_pretty(&exact_input).unwrap(),
+    )
+    .unwrap();
+
+    let exact = Command::new(exe)
+        .arg("import-triage-character")
+        .arg(&descriptor)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("run shape-cli import-triage-character");
+    assert!(
+        exact.status.success(),
+        "exact triage failed: {}",
+        String::from_utf8_lossy(&exact.stderr)
+    );
+    for name in [
+        "import-triage-report.json",
+        "external-character-analysis.json",
+        "strict-known-base-recovery.json",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "triage should write {name}");
+        assert!(
+            path.metadata().unwrap().len() > 0,
+            "{name} should not be empty"
+        );
+    }
+    let exact_report: ImportTriageReport = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("import-triage-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        exact_report.outcome,
+        ImportTriageOutcome::ExactEditableRecovery
+    );
+    assert!(exact_report.strict_recovery_proven);
+    assert_eq!(
+        exact_report.user_facing_label,
+        "Recover exact editable program"
+    );
+
+    let mut partial_input =
+        external_input_from_character_mesh_artifact("cli.triage.partial", &corpus.cases[2].mesh);
+    partial_input.topology_fingerprint = None;
+    partial_input.canonical_position_fingerprint = None;
+    partial_input.semantic_descriptor_fingerprint = None;
+    fs::write(
+        &descriptor,
+        serde_json::to_string_pretty(&partial_input).unwrap(),
+    )
+    .unwrap();
+
+    let partial = Command::new(exe)
+        .arg("import-triage-character")
+        .arg(&descriptor)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("rerun shape-cli import-triage-character");
+    assert!(
+        partial.status.success(),
+        "partial triage failed: {}",
+        String::from_utf8_lossy(&partial.stderr)
+    );
+    let partial_report: ImportTriageReport = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("import-triage-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        partial_report.outcome,
+        ImportTriageOutcome::KnownBasePartialDiagnostic
+    );
+    assert!(!partial_report.strict_recovery_proven);
+    assert_eq!(
+        partial_report.user_facing_label,
+        "Known-base partial diagnostic"
+    );
+    let strict_report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("strict-known-base-recovery.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(strict_report.is_null());
+
+    let mut hidden_field = serde_json::to_value(&partial_input).unwrap();
+    hidden_field.as_object_mut().unwrap().insert(
+        "source_program".to_owned(),
+        serde_json::json!({"program_id": "private.answer.key"}),
+    );
+    fs::write(
+        &descriptor,
+        serde_json::to_string_pretty(&hidden_field).unwrap(),
+    )
+    .unwrap();
+    let hidden = Command::new(exe)
+        .arg("import-triage-character")
+        .arg(&descriptor)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("rerun shape-cli import-triage-character with hidden field");
+    assert!(
+        hidden.status.success(),
+        "hidden-field triage should write invalid report: {}",
+        String::from_utf8_lossy(&hidden.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&hidden.stdout).contains("outcome: invalid_input"),
+        "stdout should use snake_case outcome"
+    );
+    assert!(
+        String::from_utf8_lossy(&hidden.stderr).is_empty(),
+        "diagnostic triage should not write normal reasons to stderr"
+    );
+    let hidden_report: ImportTriageReport = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("import-triage-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(hidden_report.outcome, ImportTriageOutcome::InvalidInput);
+    assert!(!hidden_report.strict_recovery_proven);
+    assert!(hidden_report.strict_known_base_recovery.is_none());
+    let hidden_strict_report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("strict-known-base-recovery.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(hidden_strict_report.is_null());
 }
 
 #[test]

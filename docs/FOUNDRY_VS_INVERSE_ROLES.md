@@ -70,6 +70,7 @@ Current scope:
 - Hard-surface strict recovery gate.
 - Known-base character recovery gate.
 - External clean-character canonicalization and diagnostic classification.
+- Product-facing external clean-character import triage.
 - Same-topology deformation replay tooling.
 
 Success measure:
@@ -86,7 +87,10 @@ Success measure:
   one-off engine forks for every asset family.
 - Residual or correction-buffer workflows belong in diagnostics, not strict
   success.
-- Import triage may suggest a foundry family, but suggestion is not recovery.
+- Import triage may suggest a foundry family only when the report includes a
+  concrete family ID and evidence path. A suggestion is not recovery.
+- Import triage may claim exact editable recovery only when the strict recovery
+  proof embedded in the report accepts.
 
 ## Flow Between Surfaces
 
@@ -105,4 +109,3 @@ Semantic Reconstruction Lab
 The surfaces can share semantic IDs, fingerprints, validation reports, and
 export packages. They should not share user-facing claims unless the underlying
 proof level matches the claim.
-

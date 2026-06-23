@@ -23,6 +23,7 @@ shape-field.workspace = true
 shape-family-compile.workspace = true
 shape-foundry.workspace = true
 shape-foundry-catalog.workspace = true
+shape-inverse.workspace = true
 shape-mesh.workspace = true
 shape-modeling-assets.workspace = true
 shape-poly.workspace = true
@@ -32,4 +33,5 @@ shape-render.workspace = true
 shape-search.workspace = true
 
 [dev-dependencies]
+shape-character.workspace = true
 tempfile.workspace = true
