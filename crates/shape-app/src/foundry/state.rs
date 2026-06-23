@@ -237,6 +237,11 @@ impl FoundryAppState {
             self.stale_jobs.insert(job_id);
             return false;
         };
+        if !self.request_source_is_current(&request) {
+            self.active_jobs.remove(&job_id);
+            self.stale_jobs.insert(job_id);
+            return false;
+        }
         if !job_event_matches_request(&event, &request) {
             self.stale_jobs.insert(job_id);
             return false;
@@ -276,11 +281,22 @@ impl FoundryAppState {
             }
             FoundryJobEvent::EditApplied { edit, output, .. } => {
                 self.apply_edit_output(*edit, *output);
+                self.stale_obsolete_active_jobs_except(job_id);
                 true
             }
             FoundryJobEvent::PackCompiled { pack, .. } => {
-                self.selected_pack_member = pack.selected_member.clone();
-                self.pack = *pack;
+                let mut pack = *pack;
+                if let Some(selected) = self
+                    .selected_pack_member
+                    .clone()
+                    .filter(|selected| pack.members.contains_key(selected))
+                {
+                    pack.selected_member = Some(selected.clone());
+                    self.selected_pack_member = Some(selected);
+                } else {
+                    self.selected_pack_member = pack.selected_member.clone();
+                }
+                self.pack = pack;
                 true
             }
             FoundryJobEvent::ExportFinished {
@@ -669,6 +685,21 @@ impl FoundryAppState {
         self.active_jobs.clear();
     }
 
+    fn stale_obsolete_active_jobs_except(&mut self, retained_job_id: u64) {
+        let stale = self
+            .active_jobs
+            .iter()
+            .filter_map(|(job_id, request)| {
+                (*job_id != retained_job_id && !self.request_source_is_current(request))
+                    .then_some(*job_id)
+            })
+            .collect::<Vec<_>>();
+        for job_id in stale {
+            self.active_jobs.remove(&job_id);
+            self.stale_jobs.insert(job_id);
+        }
+    }
+
     fn allocate_job_id(&mut self) -> Result<u64, FoundryAppStateError> {
         let job_id = self.next_job_id;
         self.next_job_id = self
@@ -740,6 +771,27 @@ impl FoundryAppState {
         self.candidates.clear();
         self.candidate_output = None;
         self.candidate_edits.clear();
+    }
+
+    fn request_source_is_current(&self, request: &FoundryJobRequest) -> bool {
+        match request {
+            FoundryJobRequest::CompileCurrent { document, .. }
+            | FoundryJobRequest::GenerateCandidates { document, .. }
+            | FoundryJobRequest::ApplyEdit { document, .. } => self
+                .document
+                .as_ref()
+                .is_some_and(|current| document_sources_match(document, current)),
+            FoundryJobRequest::RenderPreview { output, .. }
+            | FoundryJobRequest::Export { output, .. } => self
+                .current_output
+                .as_ref()
+                .is_some_and(|current| current.build_stamp == output.build_stamp),
+            FoundryJobRequest::CompilePack { pack, .. } => self
+                .pack
+                .pack
+                .as_ref()
+                .is_some_and(|current| current == pack.as_ref()),
+        }
     }
 }
 
@@ -828,6 +880,21 @@ fn job_event_matches_request(event: &FoundryJobEvent, request: &FoundryJobReques
             FoundryJobRequest::Export { .. }
         ) | (FoundryJobEvent::Failed { .. }, _)
     )
+}
+
+fn document_sources_match(left: &FoundryAssetDocument, right: &FoundryAssetDocument) -> bool {
+    left.schema_version == right.schema_version
+        && left.document_id == right.document_id
+        && left.family_content_ref == right.family_content_ref
+        && left.style_content_ref == right.style_content_ref
+        && left.family_implementation_ref == right.family_implementation_ref
+        && left.style_implementation_ref == right.style_implementation_ref
+        && left.customizer_profile_ref == right.customizer_profile_ref
+        && left.control_state == right.control_state
+        && left.provider_overrides == right.provider_overrides
+        && left.foundry_locks == right.foundry_locks
+        && left.local_recipe_overrides == right.local_recipe_overrides
+        && left.seed == right.seed
 }
 
 fn candidate_request_from_command(request: GenerateCandidatesRequest) -> FoundryCandidateRequest {

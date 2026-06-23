@@ -8,7 +8,9 @@ use shape_core::Aabb;
 use shape_foundry::{
     ControlValue, FoundryAssetDocument, FoundryCatalogResolver, FoundryCommand,
     FoundryCompilationOutput, FoundryEdit, FoundryPackCompilationOutput, FoundryPackDocument,
-    SharedProviderPolicy, apply_foundry_command, compile_foundry_document, compile_foundry_pack,
+    FoundryStyleChangeContext, SharedProviderPolicy, apply_foundry_command,
+    apply_foundry_command_with_style_context, compile_foundry_document, compile_foundry_pack,
+    resolve_foundry_catalog,
 };
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
@@ -301,9 +303,40 @@ fn apply_edit_and_compile(
 ) -> Result<FoundryCompilationOutput, String> {
     let mut document = document.clone();
     for command in &edit.commands {
-        apply_foundry_command(&mut document, command).map_err(|error| format!("{error:?}"))?;
+        apply_edit_command(&mut document, command, resolver)?;
     }
     compile_foundry_document(&document, resolver).map_err(|error| format!("{error:?}"))
+}
+
+fn apply_edit_command(
+    document: &mut FoundryAssetDocument,
+    command: &FoundryCommand,
+    resolver: &impl FoundryCatalogResolver,
+) -> Result<(), String> {
+    if let FoundryCommand::SetStyle {
+        style_content_ref,
+        style_implementation_ref,
+    } = command
+    {
+        let mut context_document = document.clone();
+        context_document.style_content_ref = style_content_ref.clone();
+        context_document.style_implementation_ref = style_implementation_ref.clone();
+        context_document.catalog_lock = None;
+        context_document.build_stamp = None;
+        let catalog = resolve_foundry_catalog(&context_document, resolver)
+            .map_err(|error| format!("{error:?}"))?;
+        let style_context = FoundryStyleChangeContext {
+            profile: Some(&catalog.customizer_profile),
+            family_implementation: Some(&catalog.family_implementation),
+            style_implementation: Some(&catalog.style_implementation),
+        };
+        apply_foundry_command_with_style_context(document, command, style_context)
+            .map_err(|error| format!("{error:?}"))?;
+        return Ok(());
+    }
+
+    apply_foundry_command(document, command).map_err(|error| format!("{error:?}"))?;
+    Ok(())
 }
 
 fn render_preview(

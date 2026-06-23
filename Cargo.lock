@@ -3677,6 +3677,8 @@ dependencies = [
  "shape-asset",
  "shape-compile",
  "shape-core",
+ "shape-family",
+ "shape-family-compile",
  "shape-field",
  "shape-foundry",
  "shape-mesh",

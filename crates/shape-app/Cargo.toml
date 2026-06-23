@@ -28,3 +28,7 @@ shape-presets.workspace = true
 shape-project.workspace = true
 shape-render.workspace = true
 shape-search.workspace = true
+
+[dev-dependencies]
+shape-family.workspace = true
+shape-family-compile.workspace = true
