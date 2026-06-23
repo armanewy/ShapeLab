@@ -497,6 +497,17 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
             accepted_candidate: None,
         },
         FoundryCommand::SetLock { lock } => lock_change_summary(lock),
+        FoundryCommand::ClearLock { target } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::LockChange,
+            label: format!("Cleared {}", lock_target_label(target)),
+            detail: None,
+            changed_controls: match target {
+                FoundryLockTarget::Control(control) => vec![control.clone()],
+                _ => Vec::new(),
+            },
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
         FoundryCommand::GenerateCandidates(request) => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::CandidateGeneration,
             label: format!("Generated {} candidates", request.count),
@@ -902,14 +913,7 @@ fn start_summary() -> FoundryHistorySummary {
 }
 
 fn lock_change_summary(lock: &shape_foundry::FoundryLock) -> FoundryHistorySummary {
-    let target = match &lock.target {
-        FoundryLockTarget::Control(control) => format!("control {control}"),
-        FoundryLockTarget::Role(role) => format!("role {role}"),
-        FoundryLockTarget::Provider(role) => format!("provider {role}"),
-        FoundryLockTarget::Override(id) => format!("override {id}"),
-        FoundryLockTarget::ExportProfile(profile) => format!("export profile {profile}"),
-        FoundryLockTarget::Custom(target) => target.clone(),
-    };
+    let target = lock_target_label(&lock.target);
     let mode = match lock.mode {
         FoundryLockMode::Locked => "Locked",
         FoundryLockMode::SearchProtected => "Protected",
@@ -921,6 +925,17 @@ fn lock_change_summary(lock: &shape_foundry::FoundryLock) -> FoundryHistorySumma
         changed_controls: Vec::new(),
         changed_provider_roles: Vec::new(),
         accepted_candidate: None,
+    }
+}
+
+fn lock_target_label(target: &FoundryLockTarget) -> String {
+    match target {
+        FoundryLockTarget::Control(control) => format!("control {control}"),
+        FoundryLockTarget::Role(role) => format!("role {role}"),
+        FoundryLockTarget::Provider(role) => format!("provider {role}"),
+        FoundryLockTarget::Override(id) => format!("override {id}"),
+        FoundryLockTarget::ExportProfile(profile) => format!("export profile {profile}"),
+        FoundryLockTarget::Custom(target) => target.clone(),
     }
 }
 

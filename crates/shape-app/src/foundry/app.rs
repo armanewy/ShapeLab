@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, TextureOptions};
-use shape_foundry::{CatalogContentRef, FoundryCatalogError, FoundryCatalogResolver};
+use shape_foundry::{
+    CatalogContentRef, FoundryCatalogError, FoundryCatalogResolver, FoundryCommand,
+};
 use shape_foundry_catalog::{FoundryFixtureCatalog, headless_fixture_catalogs};
 use shape_project::foundry::{
     FOUNDRY_PROJECT_FILE_SUFFIX, FoundryProject, FoundryProjectFile, ensure_foundry_project_path,
@@ -26,12 +28,21 @@ pub(crate) struct FoundryDesktopApp {
     jobs: FoundryJobCoordinator,
 }
 
+/// Host-level action requested by the Foundry surface.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum FoundryDesktopAction {
+    /// Switch Asset Modeling Lab to its explicit recipe workspace.
+    OpenModelingWorkspace,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FoundryTab {
     Directions,
     Customize,
-    History,
     Pack,
+    AdvancedRecipe,
+    History,
+    Export,
 }
 
 impl Default for FoundryDesktopApp {
@@ -46,13 +57,20 @@ impl Default for FoundryDesktopApp {
 
 impl FoundryDesktopApp {
     /// Draw the Foundry workflow surface.
-    pub(crate) fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    pub(crate) fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        frame: &mut eframe::Frame,
+    ) -> Option<FoundryDesktopAction> {
         let ctx = ui.ctx().clone();
         self.poll_jobs(&ctx);
 
         let mut commands = Vec::new();
+        let mut host_action = None;
         egui::Panel::top("foundry_toolbar").show_inside(ui, |ui| {
-            commands.extend(self.show_toolbar(ui));
+            let output = self.show_toolbar(ui);
+            commands.extend(output.commands);
+            host_action = output.host_action;
         });
         egui::Panel::bottom("foundry_status")
             .default_size(28.0)
@@ -77,14 +95,21 @@ impl FoundryDesktopApp {
                 ui.heading("Foundry");
                 ui.selectable_value(&mut self.tab, FoundryTab::Directions, "Directions");
                 ui.selectable_value(&mut self.tab, FoundryTab::Customize, "Customize");
-                ui.selectable_value(&mut self.tab, FoundryTab::History, "History");
                 ui.selectable_value(&mut self.tab, FoundryTab::Pack, "Pack");
+                ui.selectable_value(&mut self.tab, FoundryTab::AdvancedRecipe, "Advanced Recipe");
+                ui.selectable_value(&mut self.tab, FoundryTab::History, "History");
+                ui.selectable_value(&mut self.tab, FoundryTab::Export, "Export");
             });
         egui::CentralPanel::default().show_inside(ui, |ui| match self.tab {
             FoundryTab::Directions => commands.extend(self.show_directions(ui)),
             FoundryTab::Customize => commands.extend(self.show_customize(ui)),
-            FoundryTab::History => commands.extend(self.show_history(ui)),
             FoundryTab::Pack => commands.extend(self.show_pack(ui)),
+            FoundryTab::AdvancedRecipe => {
+                commands.push(FoundryAppCommand::SetAdvancedRecipeOpen(true));
+                commands.extend(self.show_advanced_recipe(ui));
+            }
+            FoundryTab::History => commands.extend(self.show_history(ui)),
+            FoundryTab::Export => commands.extend(self.show_export(ui)),
         });
 
         self.apply_commands(commands, &ctx);
@@ -92,26 +117,51 @@ impl FoundryDesktopApp {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         let _ = frame;
+        host_action
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_toolbar(&mut self, ui: &mut egui::Ui) -> FoundryToolbarOutput {
         let mut commands = Vec::new();
+        let mut host_action = None;
         ui.horizontal(|ui| {
             let has_document = self.state.document.is_some();
             let has_output = self.state.current_output.is_some();
-            if ui.button("New Bridge").clicked() {
-                self.load_fixture(
-                    shape_foundry_catalog::roman_bridge::fixture_catalog(),
-                    ui.ctx(),
-                );
-            }
-            if ui.button("New Crate").clicked() {
-                self.load_fixture(
-                    shape_foundry_catalog::scifi_crate::fixture_catalog(),
-                    ui.ctx(),
-                );
-            }
-            if ui.button("Open").clicked()
+            ui.menu_button("New", |ui| {
+                ui.label("From Asset Family");
+                if ui.button("Roman Timber Bridge").clicked() {
+                    self.load_fixture(
+                        shape_foundry_catalog::roman_bridge::fixture_catalog(),
+                        ui.ctx(),
+                    );
+                    ui.close();
+                }
+                if ui.button("Sci-Fi Industrial Crate").clicked() {
+                    self.load_fixture(
+                        shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                        ui.ctx(),
+                    );
+                    ui.close();
+                }
+                if ui.button("Stylized Furniture Lamp").clicked() {
+                    self.load_fixture(
+                        shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+                        ui.ctx(),
+                    );
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("From Existing Recipe").clicked() {
+                    host_action = Some(FoundryDesktopAction::OpenModelingWorkspace);
+                    ui.close();
+                }
+                if ui.button("Open Foundry Project").clicked()
+                    && let Some(path) = open_foundry_project_file()
+                {
+                    commands.push(FoundryAppCommand::Load(path));
+                    ui.close();
+                }
+            });
+            if ui.button("Open Foundry Project").clicked()
                 && let Some(path) = open_foundry_project_file()
             {
                 commands.push(FoundryAppCommand::Load(path));
@@ -144,6 +194,24 @@ impl FoundryDesktopApp {
             {
                 commands.push(FoundryAppCommand::RequestPreview);
             }
+            if ui
+                .add_enabled(has_output, egui::Button::new("Export"))
+                .clicked()
+            {
+                self.tab = FoundryTab::Export;
+            }
+            if ui
+                .add_enabled(
+                    self.state
+                        .project_file
+                        .as_ref()
+                        .is_some_and(|project| project.project.can_undo()),
+                    egui::Button::new("Undo"),
+                )
+                .clicked()
+            {
+                commands.push(history::undo_command());
+            }
             for action in directions::direction_mode_actions(None, 0, None) {
                 if ui
                     .add_enabled(has_document, egui::Button::new(action.label))
@@ -153,7 +221,10 @@ impl FoundryDesktopApp {
                 }
             }
         });
-        commands
+        FoundryToolbarOutput {
+            commands,
+            host_action,
+        }
     }
 
     fn show_directions(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
@@ -215,7 +286,7 @@ impl FoundryDesktopApp {
             ui.weak("No compiled customizer controls yet.");
             return commands;
         }
-        for control in &self.state.controls {
+        for control in default_customize_controls(&self.state.controls) {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(&control.label);
@@ -223,6 +294,13 @@ impl FoundryDesktopApp {
                     ui.weak(format!("{} option(s)", control.options.len()));
                     if ui.button("Select").clicked() {
                         commands.push(customize::select_control_command(Some(control.id.clone())));
+                    }
+                    let lock_label = if control.locked { "Unlock" } else { "Lock" };
+                    if ui.button(lock_label).clicked()
+                        && let Some(command) =
+                            customize::control_lock_command(control, !control.locked)
+                    {
+                        commands.push(command);
                     }
                     if ui
                         .add_enabled(
@@ -281,6 +359,40 @@ impl FoundryDesktopApp {
         commands
     }
 
+    fn show_advanced_recipe(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+        let commands = Vec::new();
+        ui.heading("Advanced Recipe");
+        if let Some(document) = &self.state.document {
+            ui.label(format!("Document: {}", document.document_id.0));
+            ui.weak(format!("Family: {}", document.family_content_ref.stable_id));
+            ui.weak(format!("Style: {}", document.style_content_ref.stable_id));
+            ui.separator();
+            ui.label("Control bindings");
+            for control in &self.state.controls {
+                ui.horizontal(|ui| {
+                    ui.label(&control.label);
+                    ui.weak(&control.id);
+                    if let Some(path) = &control.advanced_path {
+                        ui.weak(path);
+                    }
+                    if control.locked {
+                        ui.weak("locked");
+                    }
+                });
+            }
+            if let Some(snapshot) = &self.state.recipe_snapshot {
+                ui.separator();
+                ui.weak(format!(
+                    "Generated recipe fingerprint: {}",
+                    snapshot.recipe_fingerprint.0.to_hex()
+                ));
+            }
+        } else {
+            ui.weak("Open a Foundry project or create an asset family.");
+        }
+        commands
+    }
+
     fn show_history(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         let view = history::build_history_view(&self.state);
@@ -316,6 +428,30 @@ impl FoundryDesktopApp {
                     commands.push(command);
                 }
             });
+        }
+        commands
+    }
+
+    fn show_export(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        ui.heading("Export");
+        self.show_current_preview(ui);
+        let can_export = self.state.current_output.is_some();
+        if ui
+            .add_enabled(can_export, egui::Button::new("Export Current Asset"))
+            .clicked()
+            && let Some(out_dir) = select_asset_export_dir()
+        {
+            commands.push(FoundryAppCommand::run(FoundryCommand::Export {
+                profile: "default".to_owned(),
+                out_dir: Some(out_dir.to_string_lossy().to_string()),
+            }));
+        }
+        if self.state.pack.can_export {
+            ui.weak("Pack export is available from the Pack tab.");
+        }
+        if !can_export {
+            ui.weak("Build the current asset before exporting.");
         }
         commands
     }
@@ -498,6 +634,7 @@ impl FoundryDesktopApp {
                 Ok(effects) => {
                     state.status = Some(format!("Loaded {} fixture.", fixture.slug));
                     self.state = state;
+                    self.tab = FoundryTab::Directions;
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -505,6 +642,11 @@ impl FoundryDesktopApp {
             Err(error) => self.state.status = Some(error.to_string()),
         }
     }
+}
+
+struct FoundryToolbarOutput {
+    commands: Vec<FoundryAppCommand>,
+    host_action: Option<FoundryDesktopAction>,
 }
 
 #[derive(Default)]
@@ -600,6 +742,12 @@ fn select_pack_export_dir() -> Option<PathBuf> {
         .pick_folder()
 }
 
+fn select_asset_export_dir() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Export Current Foundry Asset")
+        .pick_folder()
+}
+
 fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return path;
@@ -610,6 +758,14 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 
     let base_name = file_name.strip_suffix(".json").unwrap_or(file_name);
     path.with_file_name(format!("{base_name}{FOUNDRY_PROJECT_FILE_SUFFIX}"))
+}
+
+fn default_customize_controls(
+    controls: &[crate::foundry::view_model::FoundryControlView],
+) -> impl Iterator<Item = &crate::foundry::view_model::FoundryControlView> {
+    controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
 }
 
 fn show_rgba_preview(
@@ -679,5 +835,70 @@ mod tests {
                 .and_then(|command| command.single_foundry_command().cloned()),
             Some(shape_foundry::FoundryCommand::AddCurrentToPack { .. })
         ));
+    }
+
+    #[test]
+    fn desktop_foundry_exposes_wave_ten_tabs_and_lamp_profile() {
+        let tabs = [
+            FoundryTab::Directions,
+            FoundryTab::Customize,
+            FoundryTab::Pack,
+            FoundryTab::AdvancedRecipe,
+            FoundryTab::History,
+            FoundryTab::Export,
+        ];
+        assert_eq!(tabs.len(), 6);
+
+        let ctx = egui::Context::default();
+        let mut app = FoundryDesktopApp::default();
+        app.load_fixture(
+            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            &ctx,
+        );
+
+        for _ in 0..200 {
+            app.poll_jobs(&ctx);
+            if app.state.current_output.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(app.tab, FoundryTab::Directions);
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .map(|document| document.family_content_ref.stable_id.as_str()),
+            Some("stylized-lamp-family")
+        );
+        assert!(app.state.current_output.is_some());
+    }
+
+    #[test]
+    fn default_customize_surface_hides_non_primary_and_hidden_controls() {
+        let ctx = egui::Context::default();
+        let mut app = FoundryDesktopApp::default();
+        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+
+        for _ in 0..200 {
+            app.poll_jobs(&ctx);
+            if !app.state.controls.is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let default_ids = default_customize_controls(&app.state.controls)
+            .map(|control| control.id.as_str())
+            .collect::<Vec<_>>();
+        assert!(default_ids.contains(&"body_proportions"));
+        assert!(!default_ids.contains(&"has_trim"));
+        assert!(!default_ids.contains(&"runtime_wear"));
+        assert!(!default_ids.contains(&"advisory_weathering"));
+        assert!(
+            default_customize_controls(&app.state.controls)
+                .all(|control| control.primary && control.visible)
+        );
     }
 }

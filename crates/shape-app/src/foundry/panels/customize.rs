@@ -249,16 +249,16 @@ pub(crate) fn control_lock_command(
         return None;
     }
 
-    let mode = if locked {
-        FoundryLockMode::Locked
-    } else {
-        FoundryLockMode::SearchProtected
-    };
+    let target = FoundryLockTarget::Control(control.id.clone());
+    if !locked {
+        return Some(FoundryAppCommand::run(FoundryCommand::ClearLock { target }));
+    }
+
     Some(FoundryAppCommand::run(FoundryCommand::SetLock {
         lock: FoundryLock {
-            target: FoundryLockTarget::Control(control.id.clone()),
-            mode,
-            reason: locked.then(|| "Locked from customizer deck".to_owned()),
+            target,
+            mode: FoundryLockMode::Locked,
+            reason: Some("Locked from customizer deck".to_owned()),
         },
     }))
 }

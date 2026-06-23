@@ -895,6 +895,11 @@ fn apply_semantic_command(
                 document.foundry_locks.push(lock.clone());
             }
         }
+        FoundryCommand::ClearLock { target } => {
+            document
+                .foundry_locks
+                .retain(|existing| existing.target != *target);
+        }
         FoundryCommand::SetRolePresence { role, enabled } => {
             document
                 .control_state
@@ -937,6 +942,7 @@ fn command_name(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetRolePresence { .. } => "set_role_presence",
         FoundryCommand::SetStyle { .. } => "set_style",
         FoundryCommand::SetLock { .. } => "set_lock",
+        FoundryCommand::ClearLock { .. } => "clear_lock",
         FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         FoundryCommand::RejectCandidate { .. } => "reject_candidate",

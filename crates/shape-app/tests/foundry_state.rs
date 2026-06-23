@@ -577,6 +577,58 @@ fn pack_export_job_writes_member_packages() {
 }
 
 #[test]
+fn current_asset_export_command_writes_model_package() {
+    let fixture = RuntimeFixture::new();
+    let mut state = FoundryAppState::new(fixture.document.clone()).expect("valid state");
+    let compile_request = start_job(state.request_build().expect("build should schedule"));
+    let compile_event = run_foundry_job(
+        compile_request,
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    );
+    assert!(matches!(
+        compile_event,
+        FoundryJobEvent::CompileFinished { .. }
+    ));
+    assert!(state.handle_job_event(compile_event));
+
+    let out_dir = temp_test_dir("foundry-current-export");
+    let _ = fs::remove_dir_all(&out_dir);
+    let effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::Export {
+            profile: "default".to_owned(),
+            out_dir: Some(out_dir.to_string_lossy().to_string()),
+        }))
+        .expect("export should schedule");
+    let export_request = start_job(effects);
+    assert!(matches!(
+        export_request,
+        FoundryJobRequest::Export {
+            job_id: 2,
+            out_dir: ref actual_dir,
+            ..
+        } if actual_dir == &out_dir
+    ));
+
+    let event = run_foundry_job(
+        export_request,
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    );
+    let FoundryJobEvent::ExportFinished {
+        out_dir: actual_dir,
+        ..
+    } = event
+    else {
+        panic!("expected export success, got {event:?}");
+    };
+    assert_eq!(actual_dir, out_dir);
+    assert!(out_dir.join("asset-manifest.json").is_file());
+
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
 fn undo_switches_to_parent_revision_and_rebuilds_off_thread() {
     let root = minimal_foundry_document();
     let edit = FoundryEdit {

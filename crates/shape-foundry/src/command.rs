@@ -5,7 +5,8 @@ use shape_asset::RevisionId;
 
 use crate::{
     CatalogContentRef, ControlValue, FoundryAssetDocument, FoundryCandidateId,
-    FoundryCandidateSummary, FoundryLock, FoundryValidationReport, GenerateCandidatesRequest,
+    FoundryCandidateSummary, FoundryLock, FoundryLockTarget, FoundryValidationReport,
+    GenerateCandidatesRequest,
 };
 
 /// Serializable command API for foundry automation.
@@ -49,6 +50,11 @@ pub enum FoundryCommand {
     SetLock {
         /// Lock row.
         lock: FoundryLock,
+    },
+    /// Remove one foundry lock/protection row.
+    ClearLock {
+        /// Lock target to clear.
+        target: FoundryLockTarget,
     },
     /// Generate candidates.
     GenerateCandidates(GenerateCandidatesRequest),

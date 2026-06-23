@@ -378,6 +378,7 @@ pub fn validate_foundry_command(
                 );
             }
         }
+        FoundryCommand::ClearLock { .. } => {}
         FoundryCommand::Export { profile, .. } => {
             validate_identifier(&mut report, "export.profile", profile);
         }

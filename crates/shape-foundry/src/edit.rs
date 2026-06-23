@@ -228,6 +228,12 @@ pub fn apply_foundry_command_with_style_context(
             }
             Ok(FoundryCommandApplicationReport::default())
         }
+        crate::FoundryCommand::ClearLock { target } => {
+            document
+                .foundry_locks
+                .retain(|existing| existing.target != *target);
+            Ok(FoundryCommandApplicationReport::default())
+        }
         crate::FoundryCommand::GenerateCandidates(_)
         | crate::FoundryCommand::AcceptCandidate { .. }
         | crate::FoundryCommand::RejectCandidate { .. }
@@ -441,6 +447,7 @@ fn command_kind(command: &crate::FoundryCommand) -> &'static str {
         crate::FoundryCommand::SetRolePresence { .. } => "set_role_presence",
         crate::FoundryCommand::SetStyle { .. } => "set_style",
         crate::FoundryCommand::SetLock { .. } => "set_lock",
+        crate::FoundryCommand::ClearLock { .. } => "clear_lock",
         crate::FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         crate::FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         crate::FoundryCommand::RejectCandidate { .. } => "reject_candidate",

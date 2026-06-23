@@ -2,16 +2,19 @@
 
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
-The current desktop app starts in **Asset Modeling Lab**, a part-aware forward-modeling workflow for explicit polygon assets. The legacy implicit editor remains available from the mode switcher.
+The current desktop app starts in **Asset Modeling Lab**. Its primary surface is
+Visual Foundry, a whole-model customizer for asset families; the explicit
+Modeling Workspace remains available inside Asset Modeling Lab, and the legacy
+implicit editor remains available from the mode switcher.
 
 The product slice proves a category-independent loop:
 
 1. Open a local desktop app.
-2. Choose a modeled asset template.
-3. View named parts, parameters, locks, validation, and branch history.
-4. Generate several coherent semantic futures.
+2. Choose an asset family.
+3. Generate several coherent whole-model directions.
 4. Choose one direction.
-5. Repeat while keeping branchable history.
+5. Customize primary controls and lock traits.
+6. Export a single asset or a small family pack while keeping branchable history.
 
 ## Build
 
@@ -26,14 +29,18 @@ Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPOR
 
 The native app opens a local `egui` desktop workspace with:
 
-- Asset Modeling Lab template choices for Industrial Crate, Explicit Desk Lamp, and Stylized Stool
+- Visual Foundry profiles for Roman Timber Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp
+- a direction board, customizer deck, pack workspace, Advanced Recipe tab, history tab, and export tab
+- whole-model candidate cards and whole-model customizer previews
+- reducer-backed locks, undo, save/open, current export, and pack export
+- Asset Modeling Lab template choices for Industrial Crate, Explicit Desk Lamp, and Stylized Stool in the Modeling Workspace
 - a rendered asset viewport with orbit, pan, zoom, fit, selected-part overlays, and wireframe display
 - a part tree, inspector, locks, validation, branch history, status bar, and candidate gallery
 - background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
 - branch-preserving `.shapelab-asset.json` save/open, grouped OBJ export, and canonical model-package export
 - a switchable legacy implicit editor for the older SDF shape-document workflow
 
-Startup shows the Asset Modeling Lab template picker. The hidden legacy implicit mode is initialized only after the user switches to it.
+Startup shows Asset Modeling Lab with Visual Foundry selected. The explicit Modeling Workspace and hidden legacy implicit mode are initialized only after the user switches to them.
 
 ## Architecture
 

@@ -392,7 +392,7 @@ fn command_intents_wrap_generic_foundry_commands_and_exact_release_builds() {
 }
 
 #[test]
-fn lock_commands_avoid_duplicates_and_downgrade_to_search_protected() {
+fn lock_commands_avoid_duplicates_and_clear_locks() {
     let profile = deck_profile();
     let mut document = document_fixture();
     document.foundry_locks.push(FoundryLock {
@@ -413,12 +413,8 @@ fn lock_commands_avoid_duplicates_and_downgrade_to_search_protected() {
     let unlock = control_lock_command(locked_height, false).expect("unlock intent");
     assert_eq!(
         unlock.single_foundry_command(),
-        Some(&FoundryCommand::SetLock {
-            lock: FoundryLock {
-                target: FoundryLockTarget::Control("height".to_owned()),
-                mode: FoundryLockMode::SearchProtected,
-                reason: None,
-            }
+        Some(&FoundryCommand::ClearLock {
+            target: FoundryLockTarget::Control("height".to_owned()),
         })
     );
 

@@ -1,7 +1,7 @@
 # Foundry App Contracts
 
-Wave 8 freezes the native application boundary for the Foundry workflow without
-implementing the reducer, workers, or panels.
+The native Foundry application boundary is implemented as the whole-model
+Visual Foundry surface inside Asset Modeling Lab.
 
 ## Modules
 
@@ -12,7 +12,9 @@ The native Foundry surface is rooted at `crates/shape-app/src/foundry`:
 - `jobs.rs` owns `FoundryJobRequest` and `FoundryJobEvent`.
 - `view_model.rs` owns `FoundryCandidateCard`, `FoundryControlView`,
   `FoundryOptionCard`, and `FoundryPackView`.
-- `panels/*` are empty panel boundaries reserved for Wave 9.
+- `app.rs` owns the native egui host, background worker coordinator, file
+  dialogs, and built-in catalog resolver.
+- `panels/*` own toolkit-agnostic view helpers and command intent helpers.
 
 ## Command Boundary
 
@@ -27,6 +29,7 @@ UI-only commands are limited to app concerns:
 - requesting build or preview jobs
 - requesting project file save/load
 - opening or closing Advanced Recipe
+- requesting app-hosted pack export with a destination directory
 
 This keeps automation, replay, persistence, and native UI on the same generic
 Foundry command contract.
@@ -41,11 +44,13 @@ Foundry command contract.
   search mode and deterministic proposal settings
 - replayable edit application
 - pack compilation
-- export
+- current asset export
+- pack export
 
 `FoundryJobEvent` returns compiled outputs, previews, candidates, pack views,
-export completion, or failure diagnostics with the same app-local job ID so the
-future state reducer can reject stale results deterministically.
+export completion, pack export completion, or failure diagnostics with the same
+app-local job ID so the state reducer can reject stale results
+deterministically.
 
 ## View Models
 
@@ -62,13 +67,8 @@ not the primary novice-facing surface.
 
 ## Non-Goals
 
-This wave intentionally does not implement:
+Current non-goals:
 
-- state reduction
-- background worker execution
-- candidate search wiring
-- egui panel rendering
-- project persistence execution
 - native GPU viewport integration
-
-Those are Wave 9 responsibilities built on the contracts frozen here.
+- natural-language parsing
+- materials, UVs, rigging, or animation

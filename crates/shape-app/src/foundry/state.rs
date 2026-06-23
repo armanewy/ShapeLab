@@ -1275,6 +1275,7 @@ fn foundry_command_label(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetRolePresence { .. } => "Set role presence",
         FoundryCommand::SetStyle { .. } => "Set style",
         FoundryCommand::SetLock { .. } => "Set lock",
+        FoundryCommand::ClearLock { .. } => "Clear lock",
         FoundryCommand::GenerateCandidates(_) => "Generate candidates",
         FoundryCommand::AcceptCandidate { .. } => "Accept candidate",
         FoundryCommand::RejectCandidate { .. } => "Reject candidate",
