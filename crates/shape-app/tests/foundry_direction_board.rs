@@ -386,7 +386,7 @@ fn board_validation_requires_six_filled_candidate_images() {
     assert!(!empty_board.validation.is_valid());
 
     let mut candidates = six_candidates(&camera);
-    candidates[3].rgba8.clear();
+    candidates[3].rgba8 = vec![1, 2, 3];
     let missing_image_board =
         direction_board_view(&parent, &candidates, DirectionBoardState::default());
 
@@ -396,6 +396,12 @@ fn board_validation_requires_six_filled_candidate_images() {
     );
     assert!(!missing_image_board.validation.preview_images_present);
     assert!(!missing_image_board.validation.is_valid());
+
+    candidates[3].rgba8.clear();
+    let empty_image_board =
+        direction_board_view(&parent, &candidates, DirectionBoardState::default());
+    assert!(!empty_image_board.validation.preview_images_present);
+    assert!(!empty_image_board.validation.is_valid());
 }
 
 fn parent_card(camera: OrbitCamera) -> FoundryCandidateCard {

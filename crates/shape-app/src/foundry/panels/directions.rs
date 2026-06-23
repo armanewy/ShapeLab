@@ -195,7 +195,10 @@ impl DirectionPreviewView {
     /// Return true when this preview carries pixels and dimensions.
     #[must_use]
     pub(crate) fn has_image(&self) -> bool {
-        !self.rgba8.is_empty() && self.width > 0 && self.height > 0
+        let expected_len = (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4));
+        self.width > 0 && self.height > 0 && expected_len == Some(self.rgba8.len())
     }
 }
 
