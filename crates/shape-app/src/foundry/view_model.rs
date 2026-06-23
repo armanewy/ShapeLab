@@ -65,6 +65,8 @@ pub(crate) struct FoundryControlView {
     pub section: Option<String>,
     /// Human-facing control kind label.
     pub kind: String,
+    /// Deterministic control presentation.
+    pub presentation: FoundryControlPresentation,
     /// Current control value.
     pub value: Option<ControlValue>,
     /// Authored default value, when available.
@@ -85,6 +87,21 @@ pub(crate) struct FoundryControlView {
     pub advanced_path: Option<String>,
     /// Human-facing helper text.
     pub help: Option<String>,
+}
+
+/// Deterministic presentation kind for one customizer control.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum FoundryControlPresentation {
+    /// Continuous macro axis, usually backed by several family slots.
+    ContinuousMacroAxis,
+    /// Integer stepper.
+    Stepper,
+    /// Binary toggle.
+    Toggle,
+    /// Whole-model choice gallery.
+    ChoiceGallery,
+    /// Whole-model provider gallery.
+    ProviderGallery,
 }
 
 /// Whole-model option card for choices, providers, and sampled controls.
