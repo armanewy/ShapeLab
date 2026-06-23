@@ -3848,6 +3848,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shape-inverse"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "shape-program",
+ "shape-program-verify",
+]
+
+[[package]]
 name = "shape-mesh"
 version = "0.1.0"
 dependencies = [
@@ -3895,6 +3904,25 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "shape-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-program"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "shape-program-verify"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shape-program",
  "thiserror 2.0.18",
 ]
 

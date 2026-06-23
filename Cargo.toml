@@ -17,10 +17,13 @@ members = [
     "crates/shape-modeling",
     "crates/shape-modeling-assets",
     "crates/shape-poly",
+    "crates/shape-program",
+    "crates/shape-program-verify",
     "crates/shape-presets",
     "crates/shape-project",
     "crates/shape-render",
     "crates/shape-search",
+    "crates/shape-inverse",
 ]
 resolver = "3"
 
@@ -69,7 +72,10 @@ shape-mesh = { path = "crates/shape-mesh" }
 shape-modeling = { path = "crates/shape-modeling" }
 shape-modeling-assets = { path = "crates/shape-modeling-assets" }
 shape-poly = { path = "crates/shape-poly" }
+shape-program = { path = "crates/shape-program" }
+shape-program-verify = { path = "crates/shape-program-verify" }
 shape-presets = { path = "crates/shape-presets" }
 shape-project = { path = "crates/shape-project" }
 shape-render = { path = "crates/shape-render" }
 shape-search = { path = "crates/shape-search" }
+shape-inverse = { path = "crates/shape-inverse" }
