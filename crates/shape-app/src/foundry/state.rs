@@ -371,7 +371,13 @@ impl FoundryAppState {
         &mut self,
         project_file: FoundryProjectFile,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
-        *self = Self::from_project_file(project_file)?;
+        let next_job_id = self.next_job_id;
+        let mut stale_jobs = self.stale_jobs.clone();
+        stale_jobs.extend(self.active_jobs.keys().copied());
+        let mut loaded = Self::from_project_file(project_file)?;
+        loaded.next_job_id = next_job_id;
+        loaded.stale_jobs = stale_jobs;
+        *self = loaded;
         self.request_build()
     }
 

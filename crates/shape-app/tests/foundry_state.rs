@@ -161,6 +161,59 @@ fn stale_job_event_is_rejected_without_touching_current_job() {
 }
 
 #[test]
+fn replacing_project_preserves_monotonic_job_ids_and_rejects_old_events() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+    state
+        .request_build()
+        .expect("old project build should schedule");
+    assert!(state.active_jobs.contains_key(&1));
+
+    let mut loaded_document = minimal_foundry_document();
+    loaded_document.document_id = FoundryDocumentId("loaded-doc".to_owned());
+    let loaded_project = FoundryProjectFile::new(
+        "Loaded",
+        loaded_document.clone(),
+        FoundryCatalogLock::from_document_refs(&loaded_document),
+        None,
+        None,
+        FoundryConformanceSummary::default(),
+    )
+    .expect("loaded project should be valid");
+
+    let effects = state
+        .replace_loaded_project(loaded_project)
+        .expect("project replacement should schedule a build");
+
+    let [FoundryAppEffect::StartJob(job)] = effects.as_slice() else {
+        panic!("expected one compile job effect for loaded project");
+    };
+    assert!(matches!(
+        job.as_ref(),
+        FoundryJobRequest::CompileCurrent { job_id: 2, document }
+            if document.document_id.0 == "loaded-doc"
+    ));
+    assert!(state.stale_jobs.contains(&1));
+    assert!(!state.active_jobs.contains_key(&1));
+    assert!(state.active_jobs.contains_key(&2));
+
+    let accepted = state.handle_job_event(FoundryJobEvent::Failed {
+        job_id: 1,
+        message: "old project job failed late".to_owned(),
+    });
+
+    assert!(!accepted);
+    assert_eq!(state.status, None);
+    assert!(state.active_jobs.contains_key(&2));
+    assert_eq!(
+        state
+            .document
+            .as_ref()
+            .map(|document| document.document_id.0.as_str()),
+        Some("loaded-doc")
+    );
+}
+
+#[test]
 fn edit_completion_stales_jobs_scheduled_from_previous_document() {
     let fixture = RuntimeFixture::new();
     let mut state = FoundryAppState::new(fixture.document.clone()).expect("valid state");
