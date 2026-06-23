@@ -13,6 +13,7 @@ members = [
     "crates/shape-foundry-catalog",
     "crates/shape-gamekit",
     "crates/shape-caesar-assets",
+    "crates/shape-character",
     "crates/shape-mesh",
     "crates/shape-modeling",
     "crates/shape-modeling-assets",
@@ -59,6 +60,7 @@ thiserror = "2.0.18"
 
 shape-asset = { path = "crates/shape-asset" }
 shape-caesar-assets = { path = "crates/shape-caesar-assets" }
+shape-character = { path = "crates/shape-character" }
 shape-compile = { path = "crates/shape-compile" }
 shape-core = { path = "crates/shape-core" }
 shape-decompiler = { path = "crates/shape-decompiler" }
