@@ -25,6 +25,8 @@ editability.
 - Strict semantic reconstruction is a truth engine for covered grammars.
 - External import analysis is useful when it explains why exact recovery is or
   is not eligible.
+- Optional LLM support is only a command adapter over existing typed Foundry
+  commands, not text-to-geometry or model-specific core code.
 
 ## What Not To Promise
 
@@ -33,6 +35,7 @@ editability.
 - Recovering semantics from noisy scans.
 - Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
 - UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
+- Natural-language geometry generation or direct recipe mutation by an LLM.
 - General character production, rigged characters, or garment simulation.
 
 ## Approved Labels

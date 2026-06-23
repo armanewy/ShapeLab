@@ -47,3 +47,19 @@ resolve catalog
 
 The final conformance report governs acceptance and export. Required rows that
 are failed, deferred, unsupported, missing, or not evaluated block acceptance.
+
+## Optional LLM Adapter Boundary
+
+`shape-foundry` also exposes an optional structured LLM command adapter contract.
+It does not call an LLM, parse natural language, mutate recipes directly, or
+generate geometry. External chat/model code may translate user language into a
+small `FoundryLlmIntent` value; the adapter then returns visible control
+descriptors, an LLM-safe state summary, or a validated `FoundryCommand`.
+
+The LLM-facing surface is limited to visible controls, provider options exposed
+by provider-gallery controls, explicit safe candidate strategies, current
+proposed candidates, and host-approved export profiles. Mutating command plans
+require preview before commit and an undo checkpoint. Export plans require host
+confirmation, and the host chooses export destinations outside the adapter.
+
+See `docs/FOUNDRY_LLM_COMMAND_ADAPTER.md`.
