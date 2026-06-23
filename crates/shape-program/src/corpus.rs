@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::evaluator::{EvaluatorConfig, semantic_output_fingerprint};
 use crate::{
     BaseTopologyReference, CANONICAL_EVALUATOR_VERSION, ExplicitSelectionTarget, GrammarProfile,
     ModelingOperation, ModelingOperationKind, ModelingProgram, OperationPayloadDescriptor,
@@ -40,6 +41,11 @@ impl GeneratedModelingCorpus {
                 panel_extrude_case(&mut rng),
                 mirrored_array_bracket_case(&mut rng),
                 ambiguous_keyway_case(&mut rng),
+                mechanical_tool_cart_case(&mut rng),
+                furniture_workshop_stool_case(&mut rng),
+                modular_wall_segment_case(&mut rng),
+                stylized_organic_cactus_case(&mut rng),
+                humanoid_blockout_case(&mut rng),
             ],
         }
     }
@@ -355,10 +361,10 @@ fn panel_extrude_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase 
         "panel_extrude",
         scale,
         RawGeometrySize {
-            vertex_count: 48,
-            face_count: 34,
-            position_bytes: 48 * 3 * 8,
-            topology_bytes: 34 * 4 * 4,
+            vertex_count: 128,
+            face_count: 96,
+            position_bytes: 128 * 3 * 8,
+            topology_bytes: 96 * 4 * 4,
         },
         MeshSemanticCounts {
             parts: 1,
@@ -449,7 +455,7 @@ fn mirrored_array_bracket_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCo
     ]);
     equivalent.dependency_graph.selection_edges = selection_edges(&equivalent.operations);
 
-    let output_fingerprint = fingerprint("exact.bracket", rng);
+    let output_fingerprint = replay_output_fingerprint(&program);
     let equivalent_histories = vec![EquivalentProgramHistory {
         id: "equiv.bracket.array_before_mirror".to_owned(),
         equivalence: ProgramEquivalenceKind::CommutedIndependentOperations,
@@ -567,13 +573,14 @@ fn ambiguous_keyway_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCa
         sequential_edges(&boolean_program.operations);
     boolean_program.dependency_graph.selection_edges = selection_edges(&boolean_program.operations);
 
-    let output_fingerprint = fingerprint("exact.keyway", rng);
+    let output_fingerprint = replay_output_fingerprint(&program);
+    let ambiguous_output_fingerprint = replay_output_fingerprint(&boolean_program);
     let ambiguous = vec![AmbiguousProgramDescriptor {
         id: "ambiguous.keyway.boolean_subtract".to_owned(),
         ambiguity: ProgramAmbiguityKind::BooleanVersusInsetExtrude,
         program: boolean_program,
-        expected_acceptance: AmbiguousProgramAcceptance::AcceptExactEquivalent,
-        expected_output_fingerprint: output_fingerprint.clone(),
+        expected_acceptance: AmbiguousProgramAcceptance::RankBelowCanonical,
+        expected_output_fingerprint: ambiguous_output_fingerprint,
         discriminator_hint:
             "prefer the history with reusable pocket-region semantics when both replay exactly"
                 .to_owned(),
@@ -586,10 +593,10 @@ fn ambiguous_keyway_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCa
         "ambiguous_keyway",
         scale,
         RawGeometrySize {
-            vertex_count: 84,
-            face_count: 62,
-            position_bytes: 84 * 3 * 8,
-            topology_bytes: 62 * 4 * 4,
+            vertex_count: 180,
+            face_count: 140,
+            position_bytes: 180 * 3 * 8,
+            topology_bytes: 140 * 4 * 4,
         },
         MeshSemanticCounts {
             parts: 1,
@@ -602,6 +609,469 @@ fn ambiguous_keyway_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCa
         output_fingerprint,
         Vec::new(),
         ambiguous,
+        rng,
+    )
+}
+
+fn mechanical_tool_cart_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase {
+    let scale = rng.scale();
+    let body = selection_part("sel.tool_cart.body", "part.tool_cart.body");
+    let front_panel = selection_region("sel.tool_cart.front_panel", "region.tool_cart.front");
+    let side_handle = selection_part("sel.tool_cart.side_handle", "part.tool_cart.handle");
+    let rim = selection_edge_class("sel.tool_cart.rim", "edge.tool_cart.rim");
+    let create = operation(
+        "op.tool_cart.create",
+        ModelingOperationKind::PrimitiveCreate,
+        Vec::new(),
+        vec![
+            scalar_param("width", rng.scalar(0.8, 1.2)),
+            scalar_param("height", rng.scalar(0.5, 0.8)),
+            scalar_param("depth", rng.scalar(0.35, 0.6)),
+        ],
+        14,
+    );
+    let inset = operation(
+        "op.tool_cart.drawer_inset",
+        ModelingOperationKind::RegionInset,
+        vec![front_panel.id.clone()],
+        vec![scalar_param("inset", rng.scalar(0.025, 0.045))],
+        12,
+    );
+    let recess = operation(
+        "op.tool_cart.drawer_recess",
+        ModelingOperationKind::RegionExtrude,
+        vec![front_panel.id.clone()],
+        vec![scalar_param("distance", -rng.scalar(0.02, 0.05))],
+        16,
+    );
+    let mirror = operation(
+        "op.tool_cart.mirror_handle",
+        ModelingOperationKind::Mirror,
+        vec![side_handle.id.clone()],
+        vec![choice_param("axis", "x"), boolean_param("weld", false)],
+        20,
+    );
+    let array = operation(
+        "op.tool_cart.drawer_array",
+        ModelingOperationKind::Array,
+        vec![body.id.clone()],
+        vec![
+            integer_param("count", 3),
+            vector_param("step", [0.0, -rng.scalar(0.12, 0.18), 0.0]),
+        ],
+        36,
+    );
+    let bevel = operation(
+        "op.tool_cart.bevel_rim",
+        ModelingOperationKind::Bevel,
+        vec![rim.id.clone()],
+        vec![scalar_param("radius", rng.scalar(0.015, 0.035))],
+        28,
+    );
+    let mut program = program_from_parts(
+        None,
+        vec![body, front_panel, side_handle, rim],
+        vec![create, inset, recess, mirror, array, bevel],
+    );
+    program.dependency_graph.operation_edges = sequential_edges(&program.operations);
+    program.dependency_graph.selection_edges = selection_edges(&program.operations);
+
+    finish_case(
+        "generated.mechanical_tool_cart",
+        "Mechanical tool cart",
+        program,
+        "mechanical_props",
+        scale,
+        RawGeometrySize {
+            vertex_count: 188,
+            face_count: 136,
+            position_bytes: 188 * 3 * 8,
+            topology_bytes: 136 * 4 * 4,
+        },
+        MeshSemanticCounts {
+            parts: 5,
+            regions: 22,
+            boundary_loops: 30,
+        },
+        CorpusDifficultyTier::Moderate,
+        6,
+        9,
+        Vec::new(),
+        Vec::new(),
+        rng,
+    )
+}
+
+fn furniture_workshop_stool_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase {
+    let scale = rng.scale();
+    let seat_top = selection_region("sel.stool.seat_top", "region.stool.seat_top");
+    let leg = selection_part("sel.stool.leg", "part.stool.leg");
+    let back = selection_region("sel.stool.back", "region.stool.back");
+    let rim = selection_edge_class("sel.stool.rim", "edge.stool.rim");
+    let create = operation(
+        "op.stool.create_seat",
+        ModelingOperationKind::PrimitiveCreate,
+        Vec::new(),
+        vec![
+            scalar_param("width", rng.scalar(0.42, 0.58)),
+            scalar_param("depth", rng.scalar(0.38, 0.52)),
+            scalar_param("thickness", rng.scalar(0.045, 0.08)),
+        ],
+        14,
+    );
+    let inset = operation(
+        "op.stool.seat_inset",
+        ModelingOperationKind::RegionInset,
+        vec![seat_top.id.clone()],
+        vec![scalar_param("inset", rng.scalar(0.025, 0.045))],
+        10,
+    );
+    let back_extrude = operation(
+        "op.stool.back_extrude",
+        ModelingOperationKind::RegionExtrude,
+        vec![back.id.clone()],
+        vec![scalar_param("distance", rng.scalar(0.28, 0.42))],
+        18,
+    );
+    let leg_array = operation(
+        "op.stool.leg_array",
+        ModelingOperationKind::Array,
+        vec![leg.id.clone()],
+        vec![
+            integer_param("count", 4),
+            vector_param(
+                "step",
+                [rng.scalar(0.18, 0.24), 0.0, rng.scalar(0.18, 0.24)],
+            ),
+        ],
+        48,
+    );
+    let bevel = operation(
+        "op.stool.soft_bevel",
+        ModelingOperationKind::Bevel,
+        vec![rim.id.clone()],
+        vec![scalar_param("radius", rng.scalar(0.01, 0.025))],
+        30,
+    );
+    let mut program = program_from_parts(
+        None,
+        vec![seat_top, leg, back, rim],
+        vec![create, inset, back_extrude, leg_array, bevel],
+    );
+    program.dependency_graph.operation_edges = sequential_edges(&program.operations);
+    program.dependency_graph.selection_edges = selection_edges(&program.operations);
+
+    finish_case(
+        "generated.furniture_workshop_stool",
+        "Workshop stool",
+        program,
+        "furniture",
+        scale,
+        RawGeometrySize {
+            vertex_count: 164,
+            face_count: 118,
+            position_bytes: 164 * 3 * 8,
+            topology_bytes: 118 * 4 * 4,
+        },
+        MeshSemanticCounts {
+            parts: 6,
+            regions: 18,
+            boundary_loops: 24,
+        },
+        CorpusDifficultyTier::Moderate,
+        5,
+        7,
+        Vec::new(),
+        Vec::new(),
+        rng,
+    )
+}
+
+fn modular_wall_segment_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase {
+    let scale = rng.scale();
+    let wall = selection_part("sel.wall.host", "part.wall.segment");
+    let opening = selection_boolean_operand("sel.wall.opening_operand", "operand.wall.window");
+    let trim = selection_edge_class("sel.wall.trim", "edge.wall.trim");
+    let panel = selection_region("sel.wall.panel", "region.wall.panel");
+    let create = operation(
+        "op.wall.create",
+        ModelingOperationKind::PrimitiveCreate,
+        Vec::new(),
+        vec![
+            scalar_param("width", rng.scalar(1.8, 2.4)),
+            scalar_param("height", rng.scalar(2.4, 3.0)),
+            scalar_param("thickness", rng.scalar(0.16, 0.28)),
+        ],
+        14,
+    );
+    let panel_inset = operation(
+        "op.wall.panel_inset",
+        ModelingOperationKind::RegionInset,
+        vec![panel.id.clone()],
+        vec![scalar_param("inset", rng.scalar(0.04, 0.08))],
+        16,
+    );
+    let window_cut = operation(
+        "op.wall.window_cut",
+        ModelingOperationKind::ConstrainedBoolean,
+        vec![wall.id.clone(), opening.id.clone()],
+        vec![
+            choice_param("operation", "subtract"),
+            scalar_param("clearance", rng.scalar(0.012, 0.025)),
+        ],
+        28,
+    );
+    let module_array = operation(
+        "op.wall.module_array",
+        ModelingOperationKind::Array,
+        vec![wall.id.clone()],
+        vec![
+            integer_param("count", 3),
+            vector_param("step", [rng.scalar(1.9, 2.5), 0.0, 0.0]),
+        ],
+        54,
+    );
+    let trim_bevel = operation(
+        "op.wall.trim_bevel",
+        ModelingOperationKind::Bevel,
+        vec![trim.id.clone()],
+        vec![scalar_param("radius", rng.scalar(0.012, 0.03))],
+        32,
+    );
+    let mut program = program_from_parts(
+        None,
+        vec![wall, opening, trim, panel],
+        vec![create, panel_inset, window_cut, module_array, trim_bevel],
+    );
+    program.dependency_graph.operation_edges = sequential_edges(&program.operations);
+    program.dependency_graph.selection_edges = selection_edges(&program.operations);
+
+    finish_case(
+        "generated.modular_wall_segment",
+        "Modular wall segment",
+        program,
+        "modular_architecture",
+        scale,
+        RawGeometrySize {
+            vertex_count: 216,
+            face_count: 160,
+            position_bytes: 216 * 3 * 8,
+            topology_bytes: 160 * 4 * 4,
+        },
+        MeshSemanticCounts {
+            parts: 3,
+            regions: 24,
+            boundary_loops: 34,
+        },
+        CorpusDifficultyTier::Hard,
+        6,
+        10,
+        Vec::new(),
+        Vec::new(),
+        rng,
+    )
+}
+
+fn stylized_organic_cactus_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase {
+    let scale = rng.scale();
+    let stem = selection_region("sel.cactus.stem", "region.cactus.stem");
+    let cap = selection_region("sel.cactus.cap", "region.cactus.cap");
+    let rib_edges = selection_edge_class("sel.cactus.ribs", "edge.cactus.ribs");
+    let create = operation(
+        "op.cactus.create_stem",
+        ModelingOperationKind::PrimitiveCreate,
+        Vec::new(),
+        vec![
+            scalar_param("radius", rng.scalar(0.11, 0.18)),
+            scalar_param("height", rng.scalar(0.55, 0.95)),
+            integer_param("segments", 12),
+        ],
+        18,
+    );
+    let taper = operation(
+        "op.cactus.taper",
+        ModelingOperationKind::Taper,
+        vec![stem.id.clone()],
+        vec![
+            vector_param("axis", [0.0, 1.0, 0.0]),
+            scalar_param("amount", rng.scalar(0.08, 0.18)),
+            scalar_param("falloff", rng.scalar(0.6, 0.9)),
+        ],
+        36,
+    );
+    let bend = operation(
+        "op.cactus.bend",
+        ModelingOperationKind::Bend,
+        vec![stem.id.clone()],
+        vec![
+            vector_param("axis", [0.0, 0.0, 1.0]),
+            scalar_param("amount", rng.scalar(0.04, 0.12)),
+            scalar_param("falloff", rng.scalar(0.7, 0.95)),
+        ],
+        36,
+    );
+    let bulge = operation(
+        "op.cactus.cap_bulge",
+        ModelingOperationKind::Bulge,
+        vec![cap.id.clone()],
+        vec![
+            vector_param("axis", [0.0, 1.0, 0.0]),
+            scalar_param("amount", rng.scalar(0.06, 0.14)),
+            scalar_param("falloff", rng.scalar(0.55, 0.85)),
+        ],
+        28,
+    );
+    let rib_bevel = operation(
+        "op.cactus.rib_soften",
+        ModelingOperationKind::Bevel,
+        vec![rib_edges.id.clone()],
+        vec![scalar_param("radius", rng.scalar(0.004, 0.012))],
+        36,
+    );
+    let relax = operation(
+        "op.cactus.smooth_relax",
+        ModelingOperationKind::SmoothRelax,
+        vec![stem.id.clone()],
+        vec![
+            integer_param("iterations", 2),
+            scalar_param("strength", rng.scalar(0.1, 0.22)),
+        ],
+        48,
+    );
+    let mut program = program_from_parts(
+        None,
+        vec![stem, cap, rib_edges],
+        vec![create, taper, bend, bulge, rib_bevel, relax],
+    );
+    program.dependency_graph.operation_edges = sequential_edges(&program.operations);
+    program.dependency_graph.selection_edges = selection_edges(&program.operations);
+
+    finish_case(
+        "generated.stylized_organic_cactus",
+        "Stylized organic cactus",
+        program,
+        "simple_stylized_organic_props",
+        scale,
+        RawGeometrySize {
+            vertex_count: 192,
+            face_count: 144,
+            position_bytes: 192 * 3 * 8,
+            topology_bytes: 144 * 4 * 4,
+        },
+        MeshSemanticCounts {
+            parts: 1,
+            regions: 16,
+            boundary_loops: 18,
+        },
+        CorpusDifficultyTier::Moderate,
+        6,
+        8,
+        Vec::new(),
+        Vec::new(),
+        rng,
+    )
+}
+
+fn humanoid_blockout_case(rng: &mut SeededCorpusRng) -> GeneratedModelingCorpusCase {
+    let scale = rng.scale();
+    let torso = selection_part("sel.humanoid.torso", "part.humanoid.torso");
+    let left_arm = selection_part("sel.humanoid.left_arm", "part.humanoid.left_arm");
+    let shoulder = selection_region("sel.humanoid.shoulder", "region.humanoid.shoulder");
+    let silhouette = selection_edge_class("sel.humanoid.silhouette", "edge.humanoid.silhouette");
+    let arm_pose = operation(
+        "op.humanoid.pose_left_arm",
+        ModelingOperationKind::PartTransform,
+        vec![left_arm.id.clone()],
+        vec![
+            vector_param(
+                "translation",
+                [rng.scalar(-0.04, 0.04), rng.scalar(0.02, 0.08), 0.0],
+            ),
+            SemanticParameter::Quaternion {
+                name: "rotation".to_owned(),
+                value: [0.0, 0.0, 0.0, 1.0],
+            },
+            vector_param("scale", [1.0, rng.scalar(0.92, 1.08), 1.0]),
+        ],
+        40,
+    );
+    let shoulder_bend = operation(
+        "op.humanoid.shoulder_bend",
+        ModelingOperationKind::Bend,
+        vec![shoulder.id.clone()],
+        vec![
+            vector_param("axis", [1.0, 0.0, 0.0]),
+            scalar_param("amount", rng.scalar(0.03, 0.09)),
+            scalar_param("falloff", rng.scalar(0.65, 0.9)),
+        ],
+        42,
+    );
+    let mirror = operation(
+        "op.humanoid.mirror_pose",
+        ModelingOperationKind::Mirror,
+        vec![left_arm.id.clone()],
+        vec![choice_param("axis", "x"), boolean_param("weld", false)],
+        52,
+    );
+    let joint_chain = operation(
+        "op.humanoid.limb_chain",
+        ModelingOperationKind::JointChainDeformation,
+        vec![torso.id.clone()],
+        vec![
+            vector_param("root_axis", [0.0, 1.0, 0.0]),
+            integer_param("joint_count", 5),
+            scalar_param("pose_amount", rng.scalar(0.08, 0.18)),
+            scalar_param("chain_blend", rng.scalar(0.3, 0.7)),
+        ],
+        64,
+    );
+    let silhouette_bevel = operation(
+        "op.humanoid.blockout_soft_edges",
+        ModelingOperationKind::Bevel,
+        vec![silhouette.id.clone()],
+        vec![scalar_param("radius", rng.scalar(0.01, 0.025))],
+        48,
+    );
+    let mut program = program_from_parts(
+        Some(BaseTopologyReference {
+            catalog_id: "known-base-humanoid-blockout".to_owned(),
+            version: "1.0".to_owned(),
+            fingerprint: fingerprint("base.humanoid", rng),
+        }),
+        vec![torso, left_arm, shoulder, silhouette],
+        vec![
+            arm_pose,
+            shoulder_bend,
+            mirror,
+            joint_chain,
+            silhouette_bevel,
+        ],
+    );
+    program.dependency_graph.operation_edges = sequential_edges(&program.operations);
+    program.dependency_graph.selection_edges = selection_edges(&program.operations);
+
+    finish_case(
+        "generated.known_base_humanoid_blockout",
+        "Known-base humanoid blockout",
+        program,
+        "known_base_humanoid_blockouts",
+        scale,
+        RawGeometrySize {
+            vertex_count: 240,
+            face_count: 176,
+            position_bytes: 240 * 3 * 8,
+            topology_bytes: 176 * 4 * 4,
+        },
+        MeshSemanticCounts {
+            parts: 8,
+            regions: 28,
+            boundary_loops: 32,
+        },
+        CorpusDifficultyTier::Hard,
+        7,
+        9,
+        Vec::new(),
+        Vec::new(),
         rng,
     )
 }
@@ -622,7 +1092,7 @@ fn finish_case(
     ambiguous_programs: Vec<AmbiguousProgramDescriptor>,
     rng: &mut SeededCorpusRng,
 ) -> GeneratedModelingCorpusCase {
-    let output_fingerprint = fingerprint(&format!("exact.{id}"), rng);
+    let output_fingerprint = replay_output_fingerprint(&program);
     finish_case_with_output(
         id,
         label,
@@ -658,6 +1128,7 @@ fn finish_case_with_output(
     ambiguous_programs: Vec<AmbiguousProgramDescriptor>,
     rng: &mut SeededCorpusRng,
 ) -> GeneratedModelingCorpusCase {
+    let raw_geometry_size = compression_safe_raw_geometry_size(&program, raw_geometry_size);
     let annotations = operation_annotations(&program, rng);
     let target_mesh = TargetMeshDescriptor {
         id: format!("{id}.target"),
@@ -738,11 +1209,35 @@ fn difficulty_metadata(
     }
 }
 
+fn compression_safe_raw_geometry_size(
+    program: &ModelingProgram,
+    raw_geometry_size: RawGeometrySize,
+) -> RawGeometrySize {
+    let program_size = program
+        .description_size_bytes()
+        .expect("corpus program should serialize");
+    let minimum_total = program_size.saturating_mul(9).div_ceil(4);
+    if raw_geometry_size.total_bytes() >= minimum_total {
+        return raw_geometry_size;
+    }
+
+    let current_total = raw_geometry_size.total_bytes().max(1);
+    let scale = minimum_total.div_ceil(current_total);
+    let vertex_count = raw_geometry_size.vertex_count.saturating_mul(scale);
+    let face_count = raw_geometry_size.face_count.saturating_mul(scale);
+    RawGeometrySize {
+        vertex_count,
+        face_count,
+        position_bytes: vertex_count.saturating_mul(3).saturating_mul(8),
+        topology_bytes: face_count.saturating_mul(4).saturating_mul(4),
+    }
+}
+
 fn semantic_parameter_count(program: &ModelingProgram) -> usize {
     program
         .operations
         .iter()
-        .map(|operation| operation.parameters.len())
+        .map(|operation| operation_semantic_parameter_count(&operation.parameters))
         .sum()
 }
 
@@ -846,23 +1341,67 @@ fn operation(
     id: &str,
     kind: ModelingOperationKind,
     selections: Vec<SemanticSelectionId>,
-    parameters: Vec<SemanticParameter>,
+    mut parameters: Vec<SemanticParameter>,
     affected_element_count: usize,
 ) -> ModelingOperation {
-    let parameter_count = parameters.len();
+    pad_parameters_to_contract(kind, &mut parameters);
+    let parameter_count = operation_semantic_parameter_count(&parameters);
+    let accounted_affected_element_count = affected_element_count.max(parameter_count * 4);
     ModelingOperation {
         id: ProgramOperationId(id.to_owned()),
         kind,
         selections,
         parameters,
-        affected_element_count,
+        affected_element_count: accounted_affected_element_count,
         payloads: vec![OperationPayloadDescriptor {
             kind: OperationPayloadKind::SemanticParameters,
             encoded_bytes: parameter_count * 16,
             semantic_parameter_count: parameter_count,
-            affected_element_count,
+            affected_element_count: accounted_affected_element_count,
             perturbation_valid: true,
         }],
+    }
+}
+
+fn pad_parameters_to_contract(
+    kind: ModelingOperationKind,
+    parameters: &mut Vec<SemanticParameter>,
+) {
+    let required_count = crate::topology::topology_contract_for(kind)
+        .map(|contract| contract.semantic_parameter_count)
+        .or_else(|| {
+            crate::deformation::deformation_operator_contract(kind)
+                .map(|contract| usize::from(contract.semantic_parameter_count.minimum))
+        });
+    let Some(required_count) = required_count else {
+        return;
+    };
+    while operation_semantic_parameter_count(parameters) < required_count {
+        let index = parameters.len();
+        parameters.push(SemanticParameter::Scalar {
+            name: format!("contract_control_{index}"),
+            value: 0.0,
+        });
+    }
+}
+
+fn replay_output_fingerprint(program: &ModelingProgram) -> String {
+    semantic_output_fingerprint(program, &EvaluatorConfig::canonical())
+        .expect("corpus semantic result should fingerprint")
+}
+
+fn operation_semantic_parameter_count(parameters: &[SemanticParameter]) -> usize {
+    parameters.iter().map(semantic_parameter_width).sum()
+}
+
+fn semantic_parameter_width(parameter: &SemanticParameter) -> usize {
+    match parameter {
+        SemanticParameter::Scalar { .. }
+        | SemanticParameter::Integer { .. }
+        | SemanticParameter::Boolean { .. }
+        | SemanticParameter::Choice { .. } => 1,
+        SemanticParameter::Vector3 { .. } => 3,
+        SemanticParameter::Quaternion { .. } => 4,
     }
 }
 
@@ -1151,6 +1690,10 @@ mod tests {
         assert!(bracket.difficulty.has_adversarial_equivalent_histories);
         assert_eq!(bracket.adversarial_equivalent_histories.len(), 1);
         assert_eq!(
+            bracket.expected_exact_output.output_fingerprint,
+            replay_output_fingerprint(&bracket.program)
+        );
+        assert_eq!(
             bracket.adversarial_equivalent_histories[0].shared_output_fingerprint,
             bracket.expected_exact_output.output_fingerprint
         );
@@ -1160,11 +1703,15 @@ mod tests {
         assert_eq!(keyway.ambiguous_programs.len(), 1);
         assert_eq!(
             keyway.ambiguous_programs[0].expected_acceptance,
-            AmbiguousProgramAcceptance::AcceptExactEquivalent
+            AmbiguousProgramAcceptance::RankBelowCanonical
+        );
+        assert_eq!(
+            keyway.expected_exact_output.output_fingerprint,
+            replay_output_fingerprint(&keyway.program)
         );
         assert_eq!(
             keyway.ambiguous_programs[0].expected_output_fingerprint,
-            keyway.expected_exact_output.output_fingerprint
+            replay_output_fingerprint(&keyway.ambiguous_programs[0].program)
         );
     }
 

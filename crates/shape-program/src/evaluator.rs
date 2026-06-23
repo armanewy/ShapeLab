@@ -20,6 +20,7 @@ use crate::{
 pub const EVALUATOR_CONTRACT_SCHEMA_VERSION: u32 = 1;
 
 const SEMANTIC_RESULT_FINGERPRINT_DOMAIN: &str = "shape-program.evaluator.semantic-result.v1";
+const SEMANTIC_OUTPUT_FINGERPRINT_DOMAIN: &str = "shape-program.evaluator.semantic-output.v1";
 const STAGE_FINGERPRINT_DOMAIN: &str = "shape-program.evaluator.stage.v1";
 const TRACE_FINGERPRINT_DOMAIN: &str = "shape-program.evaluator.trace.v1";
 const ADAPTER_CACHE_FINGERPRINT_DOMAIN: &str = "shape-program.evaluator.adapter-cache.v1";
@@ -512,6 +513,48 @@ pub fn build_replay_trace(
     })
 }
 
+/// Fingerprint canonical semantic output independent of admissible program-order
+/// differences. This is not a replay trace fingerprint; it intentionally omits
+/// operation ordinals and dependency edges so commuted equivalent histories can
+/// still declare the same output.
+pub fn semantic_output_fingerprint(
+    program: &ModelingProgram,
+    config: &EvaluatorConfig,
+) -> Result<String, EvaluatorContractError> {
+    validate_evaluator_contract(program, config)?;
+    validate_deterministic_operation_order(program)?;
+
+    let mut operations = program
+        .operations
+        .iter()
+        .enumerate()
+        .map(|(operation_index, operation)| {
+            canonical_operation(operation_index, operation, config.float_rules)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    operations.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut selections = program
+        .selections
+        .iter()
+        .map(|selection| canonical_selection(selection, config.float_rules))
+        .collect::<Result<Vec<_>, _>>()?;
+    selections.sort_by(|left, right| left.id.cmp(&right.id));
+
+    fingerprint_serializable(
+        SEMANTIC_OUTPUT_FINGERPRINT_DOMAIN,
+        &SemanticOutputFingerprintInput {
+            config: config.clone(),
+            schema_version: program.schema_version,
+            grammar_profile: program.grammar_profile,
+            base_topology: program.base_topology.clone(),
+            operations,
+            selections,
+            canonical_evaluator_version: program.canonical_evaluator_version.clone(),
+        },
+    )
+}
+
 /// Evaluator contract validation and fingerprint errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EvaluatorContractError {
@@ -914,6 +957,17 @@ struct ReplayTraceFingerprintInput {
     config: EvaluatorConfig,
     operations: Vec<ReplayTraceOperation>,
     stage_fingerprints: Vec<StageFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SemanticOutputFingerprintInput {
+    config: EvaluatorConfig,
+    schema_version: u32,
+    grammar_profile: GrammarProfile,
+    base_topology: Option<BaseTopologyReference>,
+    operations: Vec<CanonicalModelingOperation>,
+    selections: Vec<CanonicalSemanticSelection>,
+    canonical_evaluator_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

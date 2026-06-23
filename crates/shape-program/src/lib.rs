@@ -10,6 +10,7 @@
 pub mod corpus;
 pub mod deformation;
 pub mod evaluator;
+pub mod runtime;
 pub mod selection;
 
 use std::collections::BTreeSet;
