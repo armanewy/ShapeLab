@@ -6,7 +6,7 @@ in usability events.
 
 ## Benchmark Findings
 
-The three built-in profiles pass the MVP usability gate:
+The original three MVP profiles pass the Wave 10 usability gate:
 
 - Time to first build is recorded in the benchmark metrics.
 - Time to first export is recorded after coherent pack export.

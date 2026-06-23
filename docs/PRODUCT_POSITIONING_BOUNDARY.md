@@ -16,8 +16,10 @@ editability.
 ## What To Emphasize
 
 - Visual Foundry is the primary novice-facing product surface.
-- The three current built-in profiles are Roman Timber Bridge, Sci-Fi
-  Industrial Crate, and Stylized Furniture Lamp.
+- The ten current built-in profiles are Roman Timber Bridge, Sci-Fi Industrial
+  Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered
+  Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and
+  Storybook Tree.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
 - Strict semantic reconstruction is a truth engine for covered grammars.
@@ -70,6 +72,8 @@ The strongest product proof remains:
 - Create a reinforced Roman bridge.
 - Create a compact vented sci-fi crate family.
 - Create a tall stylized lamp with a different shade.
+- Open and customize one of the seven expansion profiles through the same
+  whole-model controls.
 - Export a pack without using Advanced Recipe.
 
 ## Decision Rule
@@ -80,4 +84,3 @@ When a capability is ambiguous, choose the narrower claim:
 - If ranking succeeded but proof did not, call it analysis or eligibility.
 - If the input is outside known grammars, call it diagnostic-only.
 - If the feature exists only in docs or planned backends, call it future work.
-

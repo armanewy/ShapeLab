@@ -48,6 +48,21 @@ cargo run -p shape-app --release
 8. Export Current Asset.
 9. Confirm the export folder contains `asset-manifest.json`.
 
+## Wave 26 Expansion Profiles
+
+For each profile below, open New -> From Asset Family, wait for the preview,
+open Customize, change at least one continuous control, change one choice or
+toggle control, generate Explore directions, and confirm six whole-model cards
+appear without opening Advanced Recipe.
+
+- Market Stall Kit
+- Sci-Fi Door Panel
+- Coopered Storage Barrel
+- Wayfinding Signpost
+- Workshop Chair
+- Market Handcart
+- Storybook Tree
+
 ## Save, Reload, and History
 
 1. Save As a `.shapelab-foundry.json` project.
@@ -62,7 +77,7 @@ cargo run -p shape-app --release
 ```text
 cargo build -p shape-cli --release
 target/release/shape-cli.exe foundry-visual-benchmark --profile roman-bridge --proposal-count 72 --out-dir target/visual-foundry-mvp/roman-bridge --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
-target/release/shape-cli.exe foundry-visual-benchmark --profile scifi-crate --proposal-count 72 --out-dir target/visual-foundry-mvp/scifi-crate --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
+target/release/shape-cli.exe foundry-visual-benchmark --profile sci-fi-crate --proposal-count 72 --out-dir target/visual-foundry-mvp/sci-fi-crate --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
 target/release/shape-cli.exe foundry-visual-benchmark --profile stylized-lamp --proposal-count 72 --out-dir target/visual-foundry-mvp/stylized-lamp --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
 ```
 

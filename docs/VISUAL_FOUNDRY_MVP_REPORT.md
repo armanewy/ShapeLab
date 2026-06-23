@@ -41,7 +41,7 @@ Commands run locally:
 ```text
 cargo build -p shape-cli --release
 target/release/shape-cli.exe foundry-visual-benchmark --profile roman-bridge --proposal-count 72 --out-dir target/visual-foundry-mvp/roman-bridge --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
-target/release/shape-cli.exe foundry-visual-benchmark --profile scifi-crate --proposal-count 72 --out-dir target/visual-foundry-mvp/scifi-crate --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
+target/release/shape-cli.exe foundry-visual-benchmark --profile sci-fi-crate --proposal-count 72 --out-dir target/visual-foundry-mvp/sci-fi-crate --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
 target/release/shape-cli.exe foundry-visual-benchmark --profile stylized-lamp --proposal-count 72 --out-dir target/visual-foundry-mvp/stylized-lamp --blender-exe "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
 ```
 
@@ -50,7 +50,7 @@ Results:
 | Profile | Refine | Explore | Primary controls | Provider options | Pack members | Invalid current state | Blender reopen |
 | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | roman-bridge | 6 | 6 | 7 | 9 / 9 | 3 | false | true |
-| scifi-crate | 6 | 6 | 7 | 0 / 0 | 3 | false | true |
+| sci-fi-crate | 6 | 6 | 7 | 0 / 0 | 3 | false | true |
 | stylized-lamp | 6 | 6 | 7 | 0 / 0 | 3 | false | true |
 
 All three runs reported `advanced_recipe_required: false` and candidate

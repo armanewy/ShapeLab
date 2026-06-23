@@ -37,6 +37,7 @@ use shape_foundry::{
 };
 
 pub mod authoring;
+pub mod expanded_profiles;
 pub mod roman_bridge;
 pub mod scifi_crate;
 pub mod stylized_lamp;
@@ -160,10 +161,44 @@ impl FoundryCatalogResolver for FoundryFixtureCatalog {
 /// Return every built-in headless fixture catalog.
 #[must_use]
 pub fn headless_fixture_catalogs() -> Vec<FoundryFixtureCatalog> {
+    built_in_fixture_catalogs_with_labels()
+        .into_iter()
+        .map(|(_, fixture)| fixture)
+        .collect()
+}
+
+/// Return every built-in headless fixture catalog with its product label.
+#[must_use]
+pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixtureCatalog)> {
     vec![
-        roman_bridge::fixture_catalog(),
-        scifi_crate::fixture_catalog(),
-        stylized_lamp::fixture_catalog(),
+        ("Roman Timber Bridge", roman_bridge::fixture_catalog()),
+        ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
+        ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
+        (
+            "Market Stall Kit",
+            expanded_profiles::market_stall_fixture_catalog(),
+        ),
+        (
+            "Sci-Fi Door Panel",
+            expanded_profiles::scifi_door_fixture_catalog(),
+        ),
+        (
+            "Coopered Storage Barrel",
+            expanded_profiles::barrel_fixture_catalog(),
+        ),
+        (
+            "Wayfinding Signpost",
+            expanded_profiles::signpost_fixture_catalog(),
+        ),
+        ("Workshop Chair", expanded_profiles::chair_fixture_catalog()),
+        (
+            "Market Handcart",
+            expanded_profiles::handcart_fixture_catalog(),
+        ),
+        (
+            "Storybook Tree",
+            expanded_profiles::stylized_tree_fixture_catalog(),
+        ),
     ]
 }
 
@@ -975,7 +1010,11 @@ fn fragment(
     recipe.next_ids.parameter = scalar_paths.len() as u64 + 1;
     recipe.next_ids.operation = next_operation;
     recipe.next_ids.socket = 8;
-    assert!(validate_asset_recipe(&recipe).is_valid());
+    let validation_report = validate_asset_recipe(&recipe);
+    assert!(
+        validation_report.is_valid(),
+        "fixture fragment {id} should validate: {validation_report:#?}"
+    );
     RecipeFragment {
         schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
         id: id.to_owned(),

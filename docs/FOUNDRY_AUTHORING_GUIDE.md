@@ -42,6 +42,11 @@ Create a starting profile:
 cargo run -p shape-cli -- foundry-new-profile --template roman-bridge --out author-profile.json
 ```
 
+Built-in templates are `roman-bridge`, `sci-fi-crate`, `stylized-lamp`,
+`market-stall`, `sci-fi-door`, `storage-barrel`, `signpost`,
+`workshop-chair`, `handcart`, and `stylized-tree`. The compact
+`scifi-crate` spelling is accepted as a compatibility alias.
+
 Validate the profile:
 
 ```powershell

@@ -238,7 +238,8 @@ struct FoundryBuildArgs {
 
 #[derive(Debug, clap::Args)]
 struct FoundryNewProfileArgs {
-    /// Built-in template slug: roman-bridge, sci-fi-crate, or stylized-lamp.
+    /// Built-in template slug such as roman-bridge, sci-fi-crate, stylized-lamp, market-stall,
+    /// sci-fi-door, storage-barrel, signpost, workshop-chair, handcart, or stylized-tree.
     #[arg(long, default_value = "roman-bridge")]
     template: String,
     /// Output profile JSON file.

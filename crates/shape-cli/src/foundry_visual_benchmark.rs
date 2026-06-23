@@ -22,7 +22,9 @@ use shape_foundry::{
     effective_control_domain, evaluate_control_state, explain_control_delta,
     whole_model_preview_sample_requests_with_count,
 };
-use shape_foundry_catalog::{FoundryFixtureCatalog, roman_bridge, scifi_crate, stylized_lamp};
+use shape_foundry_catalog::{
+    FoundryFixtureCatalog, expanded_profiles, roman_bridge, scifi_crate, stylized_lamp,
+};
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
     FoundryChangedRoleOverlay, FoundryPreviewBatchRequest, FoundryPreviewCache,
@@ -73,17 +75,41 @@ pub struct FoundryVisualBenchmarkArgs {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum FoundryVisualBenchmarkProfile {
+    #[value(name = "roman-bridge")]
     RomanBridge,
+    #[value(name = "sci-fi-crate", alias = "scifi-crate")]
     ScifiCrate,
+    #[value(name = "stylized-lamp")]
     StylizedLamp,
+    #[value(name = "market-stall")]
+    MarketStall,
+    #[value(name = "sci-fi-door")]
+    SciFiDoor,
+    #[value(name = "storage-barrel")]
+    StorageBarrel,
+    #[value(name = "signpost")]
+    Signpost,
+    #[value(name = "workshop-chair")]
+    WorkshopChair,
+    #[value(name = "handcart")]
+    Handcart,
+    #[value(name = "stylized-tree")]
+    StylizedTree,
 }
 
 impl FoundryVisualBenchmarkProfile {
     fn slug(self) -> &'static str {
         match self {
             Self::RomanBridge => "roman-bridge",
-            Self::ScifiCrate => "scifi-crate",
+            Self::ScifiCrate => "sci-fi-crate",
             Self::StylizedLamp => "stylized-lamp",
+            Self::MarketStall => "market-stall",
+            Self::SciFiDoor => "sci-fi-door",
+            Self::StorageBarrel => "storage-barrel",
+            Self::Signpost => "signpost",
+            Self::WorkshopChair => "workshop-chair",
+            Self::Handcart => "handcart",
+            Self::StylizedTree => "stylized-tree",
         }
     }
 
@@ -92,6 +118,13 @@ impl FoundryVisualBenchmarkProfile {
             Self::RomanBridge => roman_bridge::fixture_catalog(),
             Self::ScifiCrate => scifi_crate::fixture_catalog(),
             Self::StylizedLamp => stylized_lamp::fixture_catalog(),
+            Self::MarketStall => expanded_profiles::market_stall_fixture_catalog(),
+            Self::SciFiDoor => expanded_profiles::scifi_door_fixture_catalog(),
+            Self::StorageBarrel => expanded_profiles::barrel_fixture_catalog(),
+            Self::Signpost => expanded_profiles::signpost_fixture_catalog(),
+            Self::WorkshopChair => expanded_profiles::chair_fixture_catalog(),
+            Self::Handcart => expanded_profiles::handcart_fixture_catalog(),
+            Self::StylizedTree => expanded_profiles::stylized_tree_fixture_catalog(),
         }
     }
 }
@@ -2135,5 +2168,37 @@ impl From<FoundryPreviewCacheStats> for PreviewCacheSummary {
             misses: value.misses,
             evictions: value.evictions,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visual_benchmark_profiles_cover_canonical_slugs_and_aliases() {
+        for slug in [
+            "roman-bridge",
+            "sci-fi-crate",
+            "stylized-lamp",
+            "market-stall",
+            "sci-fi-door",
+            "storage-barrel",
+            "signpost",
+            "workshop-chair",
+            "handcart",
+            "stylized-tree",
+        ] {
+            let profile = FoundryVisualBenchmarkProfile::from_str(slug, false)
+                .unwrap_or_else(|error| panic!("{slug} should parse: {error}"));
+            assert_eq!(profile.slug(), slug);
+            assert_eq!(profile.fixture().slug, slug);
+        }
+
+        let compact_crate = FoundryVisualBenchmarkProfile::from_str("scifi-crate", false)
+            .expect("compact sci-fi crate alias should parse");
+        assert_eq!(compact_crate, FoundryVisualBenchmarkProfile::ScifiCrate);
+        assert_eq!(compact_crate.slug(), "sci-fi-crate");
+        assert_eq!(compact_crate.fixture().slug, "sci-fi-crate");
     }
 }

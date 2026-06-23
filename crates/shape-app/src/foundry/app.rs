@@ -12,7 +12,9 @@ use shape_foundry::{
     CatalogContentRef, FoundryBuildStamp, FoundryCatalogError, FoundryCatalogResolver,
     FoundryCommand,
 };
-use shape_foundry_catalog::{FoundryFixtureCatalog, headless_fixture_catalogs};
+use shape_foundry_catalog::{
+    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, headless_fixture_catalogs,
+};
 use shape_project::foundry::{
     FOUNDRY_PROJECT_FILE_SUFFIX, FoundryProject, FoundryProjectFile, ensure_foundry_project_path,
 };
@@ -133,26 +135,11 @@ impl FoundryDesktopApp {
             let has_output = self.state.current_output.is_some();
             ui.menu_button("New", |ui| {
                 ui.label("From Asset Family");
-                if ui.button("Roman Timber Bridge").clicked() {
-                    self.load_fixture(
-                        shape_foundry_catalog::roman_bridge::fixture_catalog(),
-                        ui.ctx(),
-                    );
-                    ui.close();
-                }
-                if ui.button("Sci-Fi Industrial Crate").clicked() {
-                    self.load_fixture(
-                        shape_foundry_catalog::scifi_crate::fixture_catalog(),
-                        ui.ctx(),
-                    );
-                    ui.close();
-                }
-                if ui.button("Stylized Furniture Lamp").clicked() {
-                    self.load_fixture(
-                        shape_foundry_catalog::stylized_lamp::fixture_catalog(),
-                        ui.ctx(),
-                    );
-                    ui.close();
+                for (label, fixture) in built_in_fixture_catalogs_with_labels() {
+                    if ui.button(label).clicked() {
+                        self.load_fixture(fixture, ui.ctx());
+                        ui.close();
+                    }
                 }
                 ui.separator();
                 if ui.button("From Existing Recipe").clicked() {

@@ -715,22 +715,48 @@ fn foundry_visual_benchmark_generates_usability_gate_artifacts() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let out_dir = temp_dir.path().join("visual-benchmark");
 
+    let metrics = run_foundry_visual_benchmark(exe, "roman-bridge", &out_dir);
+    assert_eq!(metrics["profile"], "roman-bridge");
+    assert!(
+        metrics["primary_controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|control| control["control_kind"] == "continuous_axis")
+            .all(|control| control["sample_count"] == 5),
+        "continuous controls should render five samples"
+    );
+
+    let refine: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("refine/candidates.json")).unwrap())
+            .unwrap();
+    let candidates = refine["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 6);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| !candidate["explanations"].as_array().unwrap().is_empty()),
+        "every candidate should carry a structured explanation"
+    );
+}
+
+fn run_foundry_visual_benchmark(exe: &str, profile: &str, out_dir: &Path) -> serde_json::Value {
     let output = Command::new(exe)
         .args([
             "foundry-visual-benchmark",
             "--profile",
-            "roman-bridge",
+            profile,
             "--proposal-count",
             "24",
             "--skip-blender",
             "--out-dir",
         ])
-        .arg(&out_dir)
+        .arg(out_dir)
         .output()
         .expect("run shape-cli foundry-visual-benchmark");
     assert!(
         output.status.success(),
-        "foundry visual benchmark failed: {}",
+        "{profile} foundry visual benchmark failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -757,16 +783,15 @@ fn foundry_visual_benchmark_generates_usability_gate_artifacts() {
         "coherent-pack/pack-report.json",
     ] {
         let path = out_dir.join(name);
-        assert!(path.exists(), "benchmark should write {name}");
+        assert!(path.exists(), "{profile} benchmark should write {name}");
         assert!(
             path.metadata().expect("metadata").len() > 0,
-            "{name} is empty"
+            "{profile} {name} is empty"
         );
     }
 
     let metrics: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("metrics.json")).unwrap()).unwrap();
-    assert_eq!(metrics["profile"], "roman-bridge");
     assert_eq!(metrics["advanced_recipe_required"], false);
     assert_eq!(metrics["all_primary_controls_measurable"], true);
     assert_eq!(metrics["invalid_state_became_current"], false);
@@ -784,30 +809,10 @@ fn foundry_visual_benchmark_generates_usability_gate_artifacts() {
             .expect("candidate mode summary");
         assert_eq!(
             summary["returned_count"], 6,
-            "{mode} should return six candidates"
+            "{profile} {mode} should return six candidates"
         );
     }
-    assert!(
-        metrics["primary_controls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|control| control["control_kind"] == "continuous_axis")
-            .all(|control| control["sample_count"] == 5),
-        "continuous controls should render five samples"
-    );
-
-    let refine: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(out_dir.join("refine/candidates.json")).unwrap())
-            .unwrap();
-    let candidates = refine["candidates"].as_array().unwrap();
-    assert_eq!(candidates.len(), 6);
-    assert!(
-        candidates
-            .iter()
-            .all(|candidate| !candidate["explanations"].as_array().unwrap().is_empty()),
-        "every candidate should carry a structured explanation"
-    );
+    metrics
 }
 
 fn write_foundry_fixture(fixture: &FoundryFixtureCatalog, catalog_dir: &Path) -> PathBuf {

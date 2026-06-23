@@ -22,6 +22,13 @@ Current scope:
 - Roman Timber Bridge.
 - Sci-Fi Industrial Crate.
 - Stylized Furniture Lamp.
+- Market Stall Kit.
+- Sci-Fi Door Panel.
+- Coopered Storage Barrel.
+- Wayfinding Signpost.
+- Workshop Chair.
+- Market Handcart.
+- Storybook Tree.
 
 Success measure:
 
@@ -45,11 +52,12 @@ Current scope:
 
 - Rust-authored profiles and style-kit bindings.
 - Headless foundry benchmarks and conformance tests.
+- A typed profile package format and authoring CLI.
+- Validator, preview, and packaging commands for new family catalogs.
 
 Future scope:
 
-- A typed profile package format and authoring CLI.
-- Validator, preview, and packaging commands for new family catalogs.
+- A visual authoring surface for profile packages.
 
 ## Semantic Reconstruction Lab
 

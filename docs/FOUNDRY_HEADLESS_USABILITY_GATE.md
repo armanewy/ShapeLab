@@ -1,18 +1,31 @@
 # Foundry Headless Usability Gate
 
-Wave 7 adds a deterministic visual-foundry benchmark for the three built-in
-profiles:
+Wave 7 added a deterministic visual-foundry benchmark for the original three
+built-in profiles:
 
 ```text
 shape-cli foundry-visual-benchmark --profile roman-bridge --out-dir target/foundry-benchmark/roman-bridge
-shape-cli foundry-visual-benchmark --profile scifi-crate --out-dir target/foundry-benchmark/scifi-crate
+shape-cli foundry-visual-benchmark --profile sci-fi-crate --out-dir target/foundry-benchmark/sci-fi-crate
 shape-cli foundry-visual-benchmark --profile stylized-lamp --out-dir target/foundry-benchmark/stylized-lamp
 ```
 
-Each profile writes source documents, catalog locks, the customizer profile,
+Wave 26 keeps the same benchmark entry point and expands accepted profile slugs
+to `roman-bridge`, `sci-fi-crate`, `stylized-lamp`, `market-stall`,
+`sci-fi-door`, `storage-barrel`, `signpost`, `workshop-chair`, `handcart`, and
+`stylized-tree`. The compact `scifi-crate` spelling remains accepted as a
+compatibility alias.
+
+A benchmark run writes source documents, catalog locks, the customizer profile,
 parent previews, Refine and Explore contact sheets, auxiliary silhouette,
 structure, and detail sheets, control strips, option galleries, validation,
-metrics, and one coherent three-member pack.
+metrics, and one coherent three-member pack for the selected profile.
+
+The automated full-artifact smoke test remains intentionally limited to the
+original Roman bridge profile because it renders previews and exports a pack.
+Wave 26 expansion profiles are covered by catalog compile/model validation,
+typed authoring, six-card Explore generation, six valid topology-preserving
+Refine supplement samples, coherent three-member pack compilation, and the
+cheap visual-benchmark slug/fixture mapping test.
 
 ## Gate Verdict
 
@@ -22,13 +35,13 @@ opening Advanced Recipe.
 
 ## Manual Run Evidence
 
-The Wave 7 branch was run locally against all three built-in profiles in
+The Wave 7 branch was run locally against the original three built-in profiles in
 `target/foundry-benchmark` with Blender 4.5 available:
 
 | Profile | Refine | Explore | Primary controls | Provider options | Pack members | Blender reopen |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `roman-bridge` | 6 | 6 | 7 | 9 / 9 | 3 | passed |
-| `scifi-crate` | 6 | 6 | 7 | 0 / 0 | 3 | passed |
+| `sci-fi-crate` | 6 | 6 | 7 | 0 / 0 | 3 | passed |
 | `stylized-lamp` | 6 | 6 | 7 | 0 / 0 | 3 | passed |
 
 All three runs reported measurable primary controls, no invalid current state,

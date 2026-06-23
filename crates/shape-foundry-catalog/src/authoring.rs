@@ -26,8 +26,7 @@ use shape_foundry::{
 };
 
 use crate::{
-    FoundryCatalogSerializedEntry, FoundryFixtureCatalog, catalog_entry, roman_bridge, scifi_crate,
-    stylized_lamp,
+    FoundryCatalogSerializedEntry, FoundryFixtureCatalog, catalog_entry, headless_fixture_catalogs,
 };
 
 /// Current schema version for Foundry Author profile packages.
@@ -208,13 +207,25 @@ impl FoundryAuthorProfilePackage {
 /// Return a built-in fixture as a typed author profile template.
 #[must_use]
 pub fn author_profile_template(template: &str) -> Option<FoundryAuthorProfilePackage> {
-    let fixture = match template {
-        "roman-bridge" | "bridge" => roman_bridge::fixture_catalog(),
-        "sci-fi-crate" | "scifi-crate" | "crate" => scifi_crate::fixture_catalog(),
-        "stylized-lamp" | "lamp" => stylized_lamp::fixture_catalog(),
-        _ => return None,
-    };
-    Some(author_profile_from_fixture(&fixture))
+    let normalized = template.replace('_', "-");
+    let compact = compact_template_slug(&normalized);
+    headless_fixture_catalogs()
+        .into_iter()
+        .find(|fixture| {
+            let fixture_compact = compact_template_slug(&fixture.slug);
+            fixture.slug == normalized
+                || fixture_compact == compact
+                || fixture.slug.ends_with(&format!("-{normalized}"))
+                || normalized.ends_with(&format!("-{}", fixture.slug))
+        })
+        .map(|fixture| author_profile_from_fixture(&fixture))
+}
+
+fn compact_template_slug(slug: &str) -> String {
+    slug.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Build a typed author package from an existing exact fixture catalog.

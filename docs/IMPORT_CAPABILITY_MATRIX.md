@@ -5,7 +5,7 @@ recovered assets after Wave 20.
 
 | Input class | Current outcome | User-facing label | Exact editable recovery | Evidence path | Boundary |
 | --- | --- | --- | --- | --- | --- |
-| Visual Foundry built-in profiles | Generate, customize, pack, export | Create asset family | Not an import path | `shape-foundry`, `shape-family-compile`, `shape-compile` | Product-ready for the three authored profiles |
+| Visual Foundry built-in profiles | Generate, customize, pack, export | Create asset family | Not an import path | `shape-foundry`, `shape-family-compile`, `shape-compile` | Product-ready for the ten authored profiles |
 | Explicit asset recipes | Compile, validate, export | Modeling Workspace asset | Not an import path | `shape-modeling`, `shape-asset`, `shape-compile` | Requires authored recipe graph |
 | Synthetic hard-surface benchmark meshes | Strict recovery gate | Exact semantic recovery | Yes, only when the strict gate accepts | `shape-inverse::recovery_gate` | Covered synthetic domains only |
 | Synthetic known-base character corpus meshes | Strict known-base recovery gate | Exact known-base recovery | Yes, only when descriptor proof and runtime proof accept | `shape-character::corpus`, `shape-inverse::character_recovery` | Versioned known-base character grammar only |

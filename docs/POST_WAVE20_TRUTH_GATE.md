@@ -12,8 +12,10 @@ reconstruction, not as a general mesh-to-procedural compiler.
 Demonstrated product capability:
 
 - A novice can use Visual Foundry to create, branch, customize, pack, and export
-  coherent variants for Roman Timber Bridge, Sci-Fi Industrial Crate, and
-  Stylized Furniture Lamp without opening Advanced Recipe.
+  coherent variants from ten built-in authored profiles without opening
+  Advanced Recipe. The original full-benchmark profiles are Roman Timber Bridge,
+  Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26 adds seven
+  expansion profiles through the same Foundry catalog and compile path.
 - A technical user can use the explicit Modeling Workspace and authored asset
   recipes for part-aware hard-surface assets.
 - The semantic program IR can strictly verify compact modeling programs under
@@ -48,7 +50,7 @@ correspondence-incomplete results.
 What can a novice user do today without Advanced Recipe?
 
 - Open Asset Modeling Lab in Visual Foundry.
-- Pick one of the three built-in foundry profiles.
+- Pick one of the ten built-in foundry profiles.
 - Generate six Refine and six Explore directions where profile controls support
   them.
 - Customize primary controls, lock traits, branch history, export one asset, or
@@ -61,8 +63,8 @@ What can a foundry author do today?
   export profiles.
 - Validate and exercise those profiles through the existing headless foundry
   benchmark.
-- They cannot yet author a new catalog package through a standalone profile
-  schema or authoring CLI.
+- Create, validate, preview, and package a typed local Foundry Author profile
+  through the `shape-cli foundry-*profile` commands.
 
 What asset classes compile cleanly from families?
 
@@ -107,6 +109,7 @@ Honest product demos:
 - Create a reinforced Roman bridge in Visual Foundry.
 - Create a compact vented sci-fi crate family in Visual Foundry.
 - Create a tall stylized lamp with a different shade in Visual Foundry.
+- Open and customize a Wave 26 expansion profile in Visual Foundry.
 - Export a small family pack and reopen the generated package.
 
 Honest research demos:
@@ -117,4 +120,3 @@ Honest research demos:
 - Same-topology deformation decompiler replay verification.
 
 Do not present research demos as general product import/edit workflows.
-

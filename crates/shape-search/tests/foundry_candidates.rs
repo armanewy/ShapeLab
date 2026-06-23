@@ -8,11 +8,14 @@ use shape_foundry::{
     FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget, ProviderOption,
     WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
-use shape_foundry_catalog::{FoundryFixtureCatalog, scifi_crate, stylized_lamp};
+use shape_foundry_catalog::{
+    FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, stylized_lamp,
+};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateRejectionReason, FoundryCandidateRequest,
     generate_foundry_candidate_plans,
 };
+use std::collections::BTreeSet;
 
 fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
     FoundryCandidateRequest {
@@ -42,6 +45,63 @@ fn same_seed_is_deterministic() {
 
     assert_eq!(first, second);
     assert!(!first.candidates.is_empty());
+}
+
+#[test]
+fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
+    for fixture in headless_fixture_catalogs().into_iter().filter(|fixture| {
+        !matches!(
+            fixture.slug.as_str(),
+            "roman-bridge" | "sci-fi-crate" | "stylized-lamp"
+        )
+    }) {
+        let output = generate_foundry_candidate_plans(
+            &fixture.document,
+            &fixture,
+            &FoundryCandidateRequest {
+                seed: 101,
+                proposal_count: 24,
+                result_count: 6,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+            },
+        )
+        .unwrap_or_else(|error| panic!("{} candidates should generate: {error:#?}", fixture.slug));
+
+        assert_eq!(
+            output.candidates.len(),
+            6,
+            "{} should produce six direction candidates",
+            fixture.slug
+        );
+        assert!(
+            output
+                .candidates
+                .iter()
+                .all(|candidate| candidate.changed_controls.len() >= 2),
+            "{} candidates should combine multiple whole-model controls",
+            fixture.slug
+        );
+        let changed_controls = output
+            .candidates
+            .iter()
+            .flat_map(|candidate| candidate.changed_controls.iter().map(String::as_str))
+            .collect::<BTreeSet<_>>();
+        let structural_controls = [
+            "body_variant",
+            "accent_style",
+            "detail_density",
+            "has_accessory",
+        ]
+        .into_iter()
+        .filter(|control| changed_controls.contains(control))
+        .count();
+        assert!(
+            structural_controls >= 3,
+            "{} candidates should cover at least three structural/detail/accessory controls: {changed_controls:?}",
+            fixture.slug
+        );
+    }
 }
 
 #[test]
