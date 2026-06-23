@@ -11,6 +11,7 @@ use crate::{
     CustomizerProfile, DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
     FOUNDRY_PACK_DOCUMENT_SCHEMA_VERSION, FoundryAssetDocument, FoundryCommand, FoundryLockTarget,
     FoundryPackDocument, PackCoherencePolicy, ProviderOption, ResponseCurve, SharedProviderPolicy,
+    document_catalog_refs,
 };
 
 /// One foundry contract validation issue.
@@ -165,36 +166,24 @@ pub fn validate_foundry_document(document: &FoundryAssetDocument) -> FoundryVali
         }
     }
     if let Some(lock) = &document.catalog_lock {
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("family"),
-            "catalog_lock.exact_refs.family",
-            &document.family_content_ref,
-        );
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("style"),
-            "catalog_lock.exact_refs.style",
-            &document.style_content_ref,
-        );
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("family_impl"),
-            "catalog_lock.exact_refs.family_impl",
-            &document.family_implementation_ref,
-        );
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("style_impl"),
-            "catalog_lock.exact_refs.style_impl",
-            &document.style_implementation_ref,
-        );
-        validate_catalog_lock_ref(
-            &mut report,
-            lock.exact_refs.get("customizer_profile"),
-            "catalog_lock.exact_refs.customizer_profile",
-            &document.customizer_profile_ref,
-        );
+        let expected_refs = document_catalog_refs(document);
+        for (key, expected) in &expected_refs {
+            validate_catalog_lock_ref(
+                &mut report,
+                lock.exact_refs.get(key),
+                &format!("catalog_lock.exact_refs.{key}"),
+                expected,
+            );
+        }
+        for key in lock.exact_refs.keys() {
+            if !expected_refs.contains_key(key) {
+                report.push(
+                    format!("catalog_lock.exact_refs.{key}"),
+                    "extra_catalog_lock_ref",
+                    "Catalog lock contains an unused exact content reference.",
+                );
+            }
+        }
     }
     report
 }
@@ -233,7 +222,8 @@ pub fn validate_customizer_profile(profile: &CustomizerProfile) -> FoundryValida
     }
 
     let mut control_ids = BTreeSet::new();
-    let mut visible_slot_owners = BTreeMap::<String, String>::new();
+    let mut slot_owners = BTreeMap::<String, String>::new();
+    let mut provider_role_owners = BTreeMap::<String, String>::new();
     let mut primary_count = 0_u32;
     for (index, control) in profile.controls.iter().enumerate() {
         validate_control(
@@ -241,7 +231,8 @@ pub fn validate_customizer_profile(profile: &CustomizerProfile) -> FoundryValida
             index,
             control,
             &section_ids,
-            &mut visible_slot_owners,
+            &mut slot_owners,
+            &mut provider_role_owners,
         );
         if !control_ids.insert(control.id.as_str()) {
             report.push(
@@ -316,6 +307,18 @@ pub fn validate_foundry_command(
         }
         FoundryCommand::ResetControl { control_id } => {
             validate_identifier(&mut report, "reset_control.control_id", control_id);
+            if let Some(profile) = profile
+                && !profile
+                    .controls
+                    .iter()
+                    .any(|control| control.id == *control_id)
+            {
+                report.push(
+                    "reset_control.control_id",
+                    "unknown_command_control",
+                    "ResetControl references an unknown control.",
+                );
+            }
         }
         FoundryCommand::SelectProvider { role, provider_ref } => {
             validate_identifier(&mut report, "select_provider.role", role);
@@ -516,7 +519,8 @@ fn validate_control(
     index: usize,
     control: &CustomizerControl,
     section_ids: &BTreeSet<&str>,
-    visible_slot_owners: &mut BTreeMap<String, String>,
+    slot_owners: &mut BTreeMap<String, String>,
+    provider_role_owners: &mut BTreeMap<String, String>,
 ) {
     validate_identifier(report, format!("controls.{index}.id"), &control.id);
     validate_non_empty(report, format!("controls.{index}.label"), &control.label);
@@ -539,15 +543,12 @@ fn validate_control(
     }
     for (binding_index, binding) in control.bindings.iter().enumerate() {
         validate_control_binding(report, index, binding_index, control.visible, binding);
-        if control.visible
-            && let Some(previous) =
-                visible_slot_owners.insert(binding.slot.clone(), control.id.clone())
-        {
+        if let Some(previous) = slot_owners.insert(binding.slot.clone(), control.id.clone()) {
             report.push(
                 format!("controls.{index}.bindings.{binding_index}.slot"),
                 "conflicting_control_ownership",
                 format!(
-                    "Family slot `{}` is already owned by visible control `{previous}`.",
+                    "Family slot `{}` is already owned by control `{previous}`.",
                     binding.slot
                 ),
             );
@@ -560,6 +561,13 @@ fn validate_control(
                     format!("controls.{index}.kind.default"),
                     "non_finite_control_default",
                     "Continuous control defaults must be finite.",
+                );
+            }
+            if !(-1.0..=1.0).contains(default) {
+                report.push(
+                    format!("controls.{index}.kind.default"),
+                    "continuous_default_outside_normalized_domain",
+                    "Topology-preserving sliders use normalized -1..1 control values.",
                 );
             }
             if control.topology_behavior == ControlTopologyBehavior::TopologyChanging {
@@ -583,15 +591,55 @@ fn validate_control(
                     "ContinuousAxis controls require at least one continuous interval.",
                 );
             }
+            for (interval_index, interval) in control.domain.continuous_intervals.iter().enumerate()
+            {
+                if interval.minimum < -1.0 || interval.maximum > 1.0 {
+                    report.push(
+                        format!("controls.{index}.domain.continuous_intervals.{interval_index}"),
+                        "continuous_domain_outside_normalized_range",
+                        "Topology-preserving sliders must use normalized -1..1 domains.",
+                    );
+                }
+            }
         }
-        ControlKind::IntegerStepper { .. } | ControlKind::Toggle { .. } => {}
+        ControlKind::IntegerStepper { .. } | ControlKind::Toggle { .. } => {
+            if !control.domain.continuous_intervals.is_empty() {
+                report.push(
+                    format!("controls.{index}.domain.continuous_intervals"),
+                    "continuous_domain_for_discrete_control",
+                    "Discrete controls must expose discrete values rather than continuous intervals.",
+                );
+            }
+        }
         ControlKind::ChoiceGallery { options } => {
             validate_choice_options(report, index, options);
+            validate_choice_domain(report, index, control, options);
         }
         ControlKind::ProviderGallery { role, options } => {
             validate_identifier(report, format!("controls.{index}.kind.role"), role);
+            if let Some(first_control_id) =
+                provider_role_owners.insert(role.clone(), control.id.clone())
+            {
+                report.push(
+                    format!("controls.{index}.kind.role"),
+                    "conflicting_provider_role_owner",
+                    format!(
+                        "Provider role `{role}` is already controlled by `{first_control_id}`."
+                    ),
+                );
+            }
             validate_provider_options(report, index, options);
+            validate_provider_domain(report, index, control, options);
         }
+    }
+    if control.topology_behavior == ControlTopologyBehavior::TopologyChanging
+        && !control.domain.continuous_intervals.is_empty()
+    {
+        report.push(
+            format!("controls.{index}.domain.continuous_intervals"),
+            "topology_changing_continuous_domain",
+            "Topology-changing controls must be represented by discrete values only.",
+        );
     }
     validate_domain(report, index, control);
 }
@@ -627,14 +675,22 @@ fn validate_domain(
     control_index: usize,
     control: &CustomizerControl,
 ) {
-    if control.domain.continuous_intervals.is_empty()
-        && control.domain.discrete_values.is_empty()
-        && control.domain.unavailable_options.is_empty()
-    {
+    let available_discrete_count = control
+        .domain
+        .discrete_values
+        .iter()
+        .filter(|value| {
+            !control
+                .domain
+                .unavailable_options
+                .contains_key(&control_value_option_key(value))
+        })
+        .count();
+    if control.domain.continuous_intervals.is_empty() && available_discrete_count == 0 {
         report.push(
             format!("controls.{control_index}.domain"),
             "empty_feasible_control_domain",
-            "A control domain must expose at least one available or unavailable value.",
+            "A control domain must expose at least one available value.",
         );
     }
     for (index, interval) in control.domain.continuous_intervals.iter().enumerate() {
@@ -650,6 +706,13 @@ fn validate_domain(
             format!("controls.{control_index}.domain.discrete_values.{index}"),
             value,
         );
+        if !control_value_matches_kind(&control.kind, value) {
+            report.push(
+                format!("controls.{control_index}.domain.discrete_values.{index}"),
+                "control_domain_value_kind_mismatch",
+                "Control domain value type must match the control kind.",
+            );
+        }
     }
     for (option, reason) in &control.domain.unavailable_options {
         validate_identifier(
@@ -763,6 +826,95 @@ fn validate_provider_options(
     }
 }
 
+fn validate_choice_domain(
+    report: &mut FoundryValidationReport,
+    control_index: usize,
+    control: &CustomizerControl,
+    options: &[ChoiceOption],
+) {
+    let option_ids = options
+        .iter()
+        .map(|option| option.value.as_str())
+        .collect::<BTreeSet<_>>();
+    validate_symbolic_domain(
+        report,
+        control_index,
+        control,
+        &option_ids,
+        "choice",
+        |value| match value {
+            ControlValue::Choice(value) => Some(value.as_str()),
+            _ => None,
+        },
+    );
+}
+
+fn validate_provider_domain(
+    report: &mut FoundryValidationReport,
+    control_index: usize,
+    control: &CustomizerControl,
+    options: &[ProviderOption],
+) {
+    let option_ids = options
+        .iter()
+        .map(|option| option.provider_id.as_str())
+        .collect::<BTreeSet<_>>();
+    validate_symbolic_domain(
+        report,
+        control_index,
+        control,
+        &option_ids,
+        "provider",
+        |value| match value {
+            ControlValue::Provider(value) => Some(value.as_str()),
+            _ => None,
+        },
+    );
+}
+
+fn validate_symbolic_domain(
+    report: &mut FoundryValidationReport,
+    control_index: usize,
+    control: &CustomizerControl,
+    option_ids: &BTreeSet<&str>,
+    option_kind: &str,
+    value_key: impl Fn(&ControlValue) -> Option<&str>,
+) {
+    let mut covered_options = BTreeSet::new();
+    for (value_index, value) in control.domain.discrete_values.iter().enumerate() {
+        let Some(key) = value_key(value) else {
+            continue;
+        };
+        if !option_ids.contains(key) {
+            report.push(
+                format!("controls.{control_index}.domain.discrete_values.{value_index}"),
+                format!("unknown_{option_kind}_domain_value"),
+                format!("Control domain references an unknown {option_kind} option."),
+            );
+        }
+        covered_options.insert(key);
+    }
+    for option in control.domain.unavailable_options.keys() {
+        if !option_ids.contains(option.as_str()) {
+            report.push(
+                format!("controls.{control_index}.domain.unavailable_options.{option}"),
+                format!("unknown_unavailable_{option_kind}_option"),
+                format!("Unavailable option references an unknown {option_kind} option."),
+            );
+        }
+        covered_options.insert(option.as_str());
+    }
+    for option in option_ids {
+        if !covered_options.contains(option) {
+            report.push(
+                format!("controls.{control_index}.domain"),
+                format!("missing_{option_kind}_option_domain"),
+                format!("Every {option_kind} option must be marked available or unavailable."),
+            );
+        }
+    }
+}
+
 fn validate_response_curve(
     report: &mut FoundryValidationReport,
     subject: String,
@@ -794,6 +946,13 @@ fn validate_response_curve(
                         format!("{subject}.points.{index}"),
                         "non_increasing_response_curve_input",
                         "Response curve input points must be strictly increasing.",
+                    );
+                }
+                if index > 0 && !(output - previous_output).is_finite() {
+                    report.push(
+                        format!("{subject}.points.{index}"),
+                        "non_finite_response_curve_output",
+                        "Response curve interpolation must not produce non-finite output.",
                     );
                 }
                 if *monotonic && output < previous_output {

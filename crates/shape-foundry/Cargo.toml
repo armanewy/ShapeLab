@@ -7,6 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 shape-asset.workspace = true
+shape-compile.workspace = true
 shape-family.workspace = true
 shape-family-compile.workspace = true

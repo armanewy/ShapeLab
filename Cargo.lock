@@ -3809,7 +3809,9 @@ name = "shape-foundry"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "shape-asset",
+ "shape-compile",
  "shape-family",
  "shape-family-compile",
 ]
@@ -3892,6 +3894,7 @@ dependencies = [
  "shape-asset",
  "shape-compile",
  "shape-core",
+ "shape-foundry",
  "shape-search",
  "thiserror 2.0.18",
 ]

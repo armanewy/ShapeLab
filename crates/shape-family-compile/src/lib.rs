@@ -48,6 +48,9 @@ pub const STYLE_IMPLEMENTATION_SCHEMA_VERSION: u32 = 3;
 /// Current schema version for executable recipe fragments.
 pub const RECIPE_FRAGMENT_SCHEMA_VERSION: u32 = 2;
 
+/// Package version for executable family compilation.
+pub const SHAPE_FAMILY_COMPILE_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Executable family binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
