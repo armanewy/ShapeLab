@@ -4,16 +4,18 @@
 #[path = "../src/foundry/mod.rs"]
 mod foundry;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use foundry::{FoundryAppCommand, panels::history};
+use foundry::{FoundryAppCommand, FoundryAppState, panels::history};
 use shape_asset::RevisionId;
 use shape_foundry::{
     CatalogContentRef, ControlValue, FoundryAssetDocument, FoundryCandidateId, FoundryCatalogLock,
     FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, LocalRecipeOverride,
     ProviderOverride,
 };
-use shape_project::foundry::{FoundryBuildStaleReason, FoundryProject, FoundryProjectLoadReport};
+use shape_project::foundry::{
+    FoundryBuildStaleReason, FoundryProject, FoundryProjectFile, FoundryProjectLoadReport,
+};
 
 #[test]
 fn semantic_revision_tree_rows_keep_branch_structure() {
@@ -166,12 +168,101 @@ fn action_helpers_emit_foundry_app_commands() {
             revision_id: RevisionId(3)
         })
     );
-    assert_eq!(history::undo_intent(false).command, None);
+    assert_eq!(history::undo_intent(false).dispatch, None);
     assert_eq!(history::switch_revision_intent(RevisionId(3), true), None);
     assert_eq!(history::save_command(), FoundryAppCommand::Save);
     assert_eq!(
         history::load_command("asset.shapelab-foundry.json"),
         FoundryAppCommand::Load("asset.shapelab-foundry.json".into())
+    );
+    assert_eq!(
+        history::save_as_command("asset-copy.shapelab-foundry.json"),
+        FoundryAppCommand::SaveAs("asset-copy.shapelab-foundry.json".into())
+    );
+    assert_eq!(
+        history::load_intent("asset.shapelab-foundry.json").dispatch,
+        Some(history::FoundryHistoryActionDispatch::Command(
+            FoundryAppCommand::Load("asset.shapelab-foundry.json".into())
+        ))
+    );
+}
+
+#[test]
+fn history_view_is_reachable_from_native_foundry_boundary() {
+    let path = PathBuf::from("history-asset.shapelab-foundry.json");
+    let state = FoundryAppState {
+        project_file: Some(FoundryProjectFile::clean(
+            branched_project(),
+            Some(path.clone()),
+        )),
+        project_path: Some(path),
+        ..FoundryAppState::default()
+    };
+
+    let view = foundry::build_foundry_history_view(&state);
+
+    assert_eq!(view.rows.len(), 3);
+    assert_eq!(view.rows[0].branch_label, "2 branches");
+    assert!(view.actions.iter().any(|action| {
+        action.kind == history::FoundryHistoryActionKind::Load
+            && action.dispatch.as_ref()
+                == Some(&history::FoundryHistoryActionDispatch::RequestLoadPath)
+    }));
+}
+
+#[test]
+fn history_view_actions_include_load_and_enabled_dispatches() {
+    let path = PathBuf::from("history-asset.shapelab-foundry.json");
+    let state = FoundryAppState {
+        project_file: Some(FoundryProjectFile::clean(
+            branched_project(),
+            Some(path.clone()),
+        )),
+        project_path: Some(path),
+        dirty: true,
+        ..FoundryAppState::default()
+    };
+
+    let view = history::build_history_view(&state);
+
+    assert_eq!(
+        view.actions
+            .iter()
+            .map(|action| action.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            history::FoundryHistoryActionKind::Undo,
+            history::FoundryHistoryActionKind::Save,
+            history::FoundryHistoryActionKind::SaveAs,
+            history::FoundryHistoryActionKind::Load,
+        ]
+    );
+    assert!(view.actions.iter().all(|action| {
+        if action.enabled {
+            action.dispatch.is_some()
+        } else {
+            action.dispatch.is_none()
+        }
+    }));
+    assert_eq!(
+        action(&view, history::FoundryHistoryActionKind::Save)
+            .dispatch
+            .as_ref(),
+        Some(&history::FoundryHistoryActionDispatch::Command(
+            FoundryAppCommand::Save
+        ))
+    );
+    assert_eq!(
+        action(&view, history::FoundryHistoryActionKind::SaveAs)
+            .dispatch
+            .as_ref(),
+        Some(&history::FoundryHistoryActionDispatch::RequestSaveAsPath)
+    );
+    assert_eq!(
+        action(&view, history::FoundryHistoryActionKind::Load)
+            .dispatch
+            .as_ref(),
+        Some(&history::FoundryHistoryActionDispatch::RequestLoadPath)
     );
 }
 
@@ -203,6 +294,15 @@ fn save_load_status_formats_dirty_unsaved_and_recovery_states() {
     assert_eq!(unsaved.state, history::FoundrySaveLoadState::Unsaved);
     assert!(!unsaved.can_save);
     assert!(unsaved.can_save_as);
+
+    let clean_without_path = history::save_load_status(None, true, false, false);
+    assert_eq!(
+        clean_without_path.state,
+        history::FoundrySaveLoadState::Unsaved
+    );
+    assert_eq!(clean_without_path.label, "Unsaved project");
+    assert!(!clean_without_path.can_save);
+    assert!(clean_without_path.can_save_as);
 
     let recovery = history::save_load_status(
         Some(Path::new("asset.shapelab-foundry.json")),
@@ -281,6 +381,16 @@ fn branched_project() -> FoundryProject {
         .expect("provider revision should be accepted");
 
     project
+}
+
+fn action(
+    view: &history::FoundryHistoryView,
+    kind: history::FoundryHistoryActionKind,
+) -> &history::FoundryHistoryActionIntent {
+    view.actions
+        .iter()
+        .find(|action| action.kind == kind)
+        .expect("history action should exist")
 }
 
 fn minimal_foundry_document(document_id: &str) -> FoundryAssetDocument {

@@ -125,8 +125,19 @@ pub(crate) struct FoundryHistoryActionIntent {
     pub label: String,
     /// Whether the action is currently enabled.
     pub enabled: bool,
-    /// Command to emit when enabled.
-    pub command: Option<FoundryAppCommand>,
+    /// Dispatch payload to emit when enabled.
+    pub dispatch: Option<FoundryHistoryActionDispatch>,
+}
+
+/// Dispatch payload emitted by a history action.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FoundryHistoryActionDispatch {
+    /// Emit a concrete app command.
+    Command(FoundryAppCommand),
+    /// Ask the native shell for a Save As destination before saving.
+    RequestSaveAsPath,
+    /// Ask the native shell for a project path before loading.
+    RequestLoadPath,
 }
 
 /// High-level history action kind.
@@ -188,6 +199,7 @@ pub(crate) fn build_history_view(state: &FoundryAppState) -> FoundryHistoryView 
     actions.push(undo_intent(can_undo));
     actions.push(save_intent(status.can_save));
     actions.push(save_as_intent(status.can_save_as));
+    actions.push(load_request_intent(status.can_load));
     FoundryHistoryView {
         rows,
         status,
@@ -273,7 +285,7 @@ pub(crate) fn undo_intent(can_undo: bool) -> FoundryHistoryActionIntent {
         kind: FoundryHistoryActionKind::Undo,
         label: "Undo".to_owned(),
         enabled: can_undo,
-        command: can_undo.then(undo_command),
+        dispatch: can_undo.then(|| FoundryHistoryActionDispatch::Command(undo_command())),
     }
 }
 
@@ -295,7 +307,9 @@ pub(crate) fn switch_revision_intent(
         kind: FoundryHistoryActionKind::SwitchRevision,
         label: format!("Switch to revision {}", revision.0),
         enabled: true,
-        command: Some(switch_revision_command(revision)),
+        dispatch: Some(FoundryHistoryActionDispatch::Command(
+            switch_revision_command(revision),
+        )),
     })
 }
 
@@ -309,7 +323,9 @@ pub(crate) fn branch_from_revision_intent(
         kind: FoundryHistoryActionKind::BranchFromRevision,
         label: format!("Branch from revision {}", revision.0),
         enabled: true,
-        command: Some(switch_revision_command(revision)),
+        dispatch: Some(FoundryHistoryActionDispatch::Command(
+            switch_revision_command(revision),
+        )),
     })
 }
 
@@ -326,7 +342,7 @@ pub(crate) fn save_intent(can_save: bool) -> FoundryHistoryActionIntent {
         kind: FoundryHistoryActionKind::Save,
         label: "Save".to_owned(),
         enabled: can_save,
-        command: can_save.then(save_command),
+        dispatch: can_save.then(|| FoundryHistoryActionDispatch::Command(save_command())),
     }
 }
 
@@ -343,7 +359,7 @@ pub(crate) fn save_as_intent(can_save_as: bool) -> FoundryHistoryActionIntent {
         kind: FoundryHistoryActionKind::SaveAs,
         label: "Save As".to_owned(),
         enabled: can_save_as,
-        command: None,
+        dispatch: can_save_as.then_some(FoundryHistoryActionDispatch::RequestSaveAsPath),
     }
 }
 
@@ -361,7 +377,18 @@ pub(crate) fn load_intent(path: impl Into<PathBuf>) -> FoundryHistoryActionInten
         kind: FoundryHistoryActionKind::Load,
         label: format!("Load {}", path_label(Some(path.as_path()))),
         enabled: true,
-        command: Some(load_command(path)),
+        dispatch: Some(FoundryHistoryActionDispatch::Command(load_command(path))),
+    }
+}
+
+/// Build a load request intent. The concrete path is supplied later by the shell UI.
+#[must_use]
+pub(crate) fn load_request_intent(can_load: bool) -> FoundryHistoryActionIntent {
+    FoundryHistoryActionIntent {
+        kind: FoundryHistoryActionKind::Load,
+        label: "Load".to_owned(),
+        enabled: can_load,
+        dispatch: can_load.then_some(FoundryHistoryActionDispatch::RequestLoadPath),
     }
 }
 
@@ -727,7 +754,21 @@ pub(crate) fn save_load_status(
                 detail: None,
             }],
         },
-        (false, _) => FoundrySaveLoadStatus {
+        (false, false) => FoundrySaveLoadStatus {
+            state: FoundrySaveLoadState::Unsaved,
+            label: "Unsaved project".to_owned(),
+            detail: Some("Choose a path before saving.".to_owned()),
+            path_label,
+            can_save: false,
+            can_save_as: true,
+            can_load: true,
+            badges: vec![FoundryHistoryBadge {
+                kind: FoundryHistoryBadgeKind::Unsaved,
+                label: "Unsaved".to_owned(),
+                detail: None,
+            }],
+        },
+        (false, true) => FoundrySaveLoadStatus {
             state: FoundrySaveLoadState::CleanSaved,
             label: "Saved".to_owned(),
             detail: None,
