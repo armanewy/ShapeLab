@@ -12,11 +12,11 @@ pub(crate) mod state;
 pub(crate) mod view_model;
 
 #[allow(unused_imports)]
-pub(crate) use commands::FoundryAppCommand;
+pub(crate) use commands::{FoundryAppCommand, FoundryAppEffect};
 #[allow(unused_imports)]
-pub(crate) use jobs::{FoundryJobEvent, FoundryJobRequest};
+pub(crate) use jobs::{FoundryJobEvent, FoundryJobRequest, FoundryJobSlot, run_foundry_job};
 #[allow(unused_imports)]
-pub(crate) use state::FoundryAppState;
+pub(crate) use state::{FoundryAppState, FoundryAppStateError, FoundryPreviewImage};
 #[allow(unused_imports)]
 pub(crate) use view_model::{
     FoundryCandidateCard, FoundryControlView, FoundryOptionCard, FoundryPackView,

@@ -3,6 +3,9 @@
 use std::path::PathBuf;
 
 use shape_foundry::{FoundryCandidateId, FoundryCommand, FoundryEdit};
+use shape_project::foundry::FoundryProject;
+
+use super::jobs::FoundryJobRequest;
 
 /// Native UI intent boundary for Foundry.
 ///
@@ -57,4 +60,20 @@ impl FoundryAppCommand {
             _ => None,
         }
     }
+}
+
+/// Side effects requested by the Foundry state reducer.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FoundryAppEffect {
+    /// Run deterministic background work off the UI thread.
+    StartJob(Box<FoundryJobRequest>),
+    /// Persist a project snapshot to disk.
+    SaveProject {
+        /// Destination path.
+        path: PathBuf,
+        /// Project payload to write.
+        project: Box<FoundryProject>,
+    },
+    /// Load a Foundry project file.
+    LoadProject(PathBuf),
 }
