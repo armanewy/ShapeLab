@@ -12,11 +12,11 @@ use shape_compile::{compile_asset, export::write_grouped_obj_export};
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, ExaggerationPolicy, ExportRequirement, FamilyDefaultValue,
-    FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet, FamilyStylePolicyOverrides,
-    GeometricConstraint, LengthUnit, LengthValue, NormalizedBevelProfile, ParameterExecutionPolicy,
-    ParameterRange, PartPrototype, PartRole, ProfileLanguage, RepetitionPolicy, RoleMultiplicity,
-    RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
-    VariantMode, VariantRule,
+    FamilyParameterKind, FamilyParameterSlot, FamilyRuleExecutionPolicy, FamilyStyleFacet,
+    FamilyStylePolicyOverrides, GeometricConstraint, LengthUnit, LengthValue,
+    NormalizedBevelProfile, ParameterExecutionPolicy, ParameterRange, PartPrototype, PartRole,
+    ProfileLanguage, RepetitionPolicy, RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement,
+    STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy, VariantMode, VariantRule,
 };
 use shape_family_compile::remap::FragmentRemap;
 use shape_family_compile::{
@@ -1040,6 +1040,7 @@ fn validation_constraints_do_not_change_geometry_identity() {
         id: "body-clearance-contract".to_owned(),
         roles: vec!["body".to_owned()],
         kind: ConstraintKind::Clearance,
+        execution_policy: FamilyRuleExecutionPolicy::Advisory,
     });
     let kit = scifi_industrial_style_kit();
     let implementation = crate_implementation();
@@ -3070,6 +3071,7 @@ fn bridge_family(style_kits: &[&str]) -> AssetFamilySchema {
             anchor_role: Some("connector".to_owned()),
             compatibility_tags: vec!["load_path".to_owned()],
             required: true,
+            execution_policy: FamilyRuleExecutionPolicy::Required,
         }],
         allowed_operations: vec![
             AllowedOperationKind::Primitive,
@@ -3110,6 +3112,7 @@ fn bridge_family(style_kits: &[&str]) -> AssetFamilySchema {
             id: "deck_supported".to_owned(),
             roles: vec!["deck".to_owned(), "support".to_owned()],
             kind: ConstraintKind::MustSupport,
+            execution_policy: FamilyRuleExecutionPolicy::Required,
         }],
         variant_rules: vec![VariantRule {
             id: "support_rhythm".to_owned(),

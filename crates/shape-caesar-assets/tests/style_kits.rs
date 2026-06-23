@@ -2,9 +2,10 @@ use shape_caesar_assets::style_kits::roman_timber_engineering_style_kit;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     ConstraintKind, ExportRequirement, FamilyDefaultValue, FamilyParameterKind,
-    FamilyParameterSlot, GeometricConstraint, LengthUnit, ParameterExecutionPolicy, ParameterRange,
-    PartRole, RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement, VariantMode,
-    VariantRule, validate_family_style_compatibility, validate_style_kit,
+    FamilyParameterSlot, FamilyRuleExecutionPolicy, GeometricConstraint, LengthUnit,
+    ParameterExecutionPolicy, ParameterRange, PartRole, RoleMultiplicity, RoleProvision,
+    RuntimeMetadataRequirement, VariantMode, VariantRule, validate_family_style_compatibility,
+    validate_style_kit,
 };
 
 fn generic_bridge_family() -> AssetFamilySchema {
@@ -27,6 +28,7 @@ fn generic_bridge_family() -> AssetFamilySchema {
             anchor_role: Some("connector".to_owned()),
             compatibility_tags: vec!["load_path".to_owned()],
             required: true,
+            execution_policy: FamilyRuleExecutionPolicy::Required,
         }],
         allowed_operations: vec![
             AllowedOperationKind::Primitive,
@@ -55,6 +57,7 @@ fn generic_bridge_family() -> AssetFamilySchema {
             id: "deck_supported".to_owned(),
             roles: vec!["deck".to_owned(), "support".to_owned()],
             kind: ConstraintKind::MustSupport,
+            execution_policy: FamilyRuleExecutionPolicy::Required,
         }],
         variant_rules: vec![VariantRule {
             id: "support_rhythm".to_owned(),

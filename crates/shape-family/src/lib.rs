@@ -99,7 +99,7 @@ pub enum RoleProvision {
 }
 
 /// Rule describing how roles can attach or depend on each other.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AttachmentRule {
     /// Stable rule identifier.
     pub id: String,
@@ -113,6 +113,63 @@ pub struct AttachmentRule {
     pub compatibility_tags: Vec<String>,
     /// Whether the attachment is required for validity.
     pub required: bool,
+    /// Whether this rule is enforced by the asset compiler, kept advisory, or deferred to runtime.
+    pub execution_policy: FamilyRuleExecutionPolicy,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentRuleWire {
+    id: String,
+    from_role: String,
+    to_role: String,
+    anchor_role: Option<String>,
+    compatibility_tags: Vec<String>,
+    required: bool,
+    #[serde(default)]
+    execution_policy: Option<FamilyRuleExecutionPolicy>,
+}
+
+impl<'de> Deserialize<'de> for AttachmentRule {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = AttachmentRuleWire::deserialize(deserializer)?;
+        Ok(Self {
+            id: wire.id,
+            from_role: wire.from_role,
+            to_role: wire.to_role,
+            anchor_role: wire.anchor_role,
+            compatibility_tags: wire.compatibility_tags,
+            required: wire.required,
+            execution_policy: wire.execution_policy.unwrap_or_else(|| {
+                FamilyRuleExecutionPolicy::from_required_attachment(wire.required)
+            }),
+        })
+    }
+}
+
+/// Execution policy for family-level conformance rules.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FamilyRuleExecutionPolicy {
+    /// The generated asset must satisfy this rule before it is accepted.
+    Required,
+    /// The rule is reported for quality and guidance but does not reject an asset.
+    #[default]
+    Advisory,
+    /// The rule is intentionally deferred to a runtime/export adapter.
+    RuntimeOnly,
+}
+
+impl FamilyRuleExecutionPolicy {
+    fn from_required_attachment(required: bool) -> Self {
+        if required {
+            Self::Required
+        } else {
+            Self::Advisory
+        }
+    }
 }
 
 /// Theme-neutral modeling operation classes.
@@ -253,6 +310,9 @@ pub struct GeometricConstraint {
     pub roles: Vec<String>,
     /// Constraint class.
     pub kind: ConstraintKind,
+    /// Whether this constraint is enforced by the asset compiler, kept advisory, or deferred.
+    #[serde(default)]
+    pub execution_policy: FamilyRuleExecutionPolicy,
 }
 
 /// Theme-neutral constraint classes.
@@ -1036,6 +1096,32 @@ fn validate_attachment_rules(
                 "missing_required_attachment_tag",
                 "Required attachment rules must include at least one compatibility tag.",
             );
+        }
+        match (rule.required, rule.execution_policy) {
+            (true, FamilyRuleExecutionPolicy::Required)
+            | (
+                false,
+                FamilyRuleExecutionPolicy::Advisory | FamilyRuleExecutionPolicy::RuntimeOnly,
+            ) => {}
+            (
+                true,
+                FamilyRuleExecutionPolicy::Advisory | FamilyRuleExecutionPolicy::RuntimeOnly,
+            ) => {
+                push_issue(
+                    report,
+                    Some(format!("attachment_rules.{index}.execution_policy")),
+                    "required_attachment_policy_mismatch",
+                    "Required attachment rules must use Required execution policy.",
+                );
+            }
+            (false, FamilyRuleExecutionPolicy::Required) => {
+                push_issue(
+                    report,
+                    Some(format!("attachment_rules.{index}.execution_policy")),
+                    "optional_attachment_policy_mismatch",
+                    "Optional attachment rules must not use Required execution policy.",
+                );
+            }
         }
         validate_identifier_list(
             report,

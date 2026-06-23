@@ -8,7 +8,7 @@ use shape_asset::{
 };
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
-    RoleMultiplicity, RoleProvision,
+    FamilyRuleExecutionPolicy, RoleMultiplicity, RoleProvision,
 };
 use shape_family_compile::remap::{
     FragmentRemap,
@@ -1052,6 +1052,7 @@ fn rule(id: &str, from_role: &str, to_role: &str, tags: &[&str]) -> AttachmentRu
         anchor_role: None,
         compatibility_tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         required: true,
+        execution_policy: FamilyRuleExecutionPolicy::Required,
     }
 }
 

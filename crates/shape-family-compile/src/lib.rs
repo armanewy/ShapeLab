@@ -7,6 +7,7 @@
 //! parameter bindings are explicit scalar or presence/prototype choices, and
 //! unsupported binding features fail instead of being ignored.
 
+pub mod conformance;
 pub mod identity;
 pub mod remap;
 

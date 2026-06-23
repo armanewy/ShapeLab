@@ -9,6 +9,8 @@ members = [
     "crates/shape-field",
     "crates/shape-family",
     "crates/shape-family-compile",
+    "crates/shape-foundry",
+    "crates/shape-foundry-catalog",
     "crates/shape-gamekit",
     "crates/shape-caesar-assets",
     "crates/shape-mesh",
@@ -60,6 +62,8 @@ shape-decompiler = { path = "crates/shape-decompiler" }
 shape-family = { path = "crates/shape-family" }
 shape-family-compile = { path = "crates/shape-family-compile" }
 shape-field = { path = "crates/shape-field" }
+shape-foundry = { path = "crates/shape-foundry" }
+shape-foundry-catalog = { path = "crates/shape-foundry-catalog" }
 shape-gamekit = { path = "crates/shape-gamekit" }
 shape-mesh = { path = "crates/shape-mesh" }
 shape-modeling = { path = "crates/shape-modeling" }

@@ -3805,6 +3805,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "shape-foundry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "shape-asset",
+ "shape-family",
+ "shape-family-compile",
+]
+
+[[package]]
+name = "shape-foundry-catalog"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "shape-family-compile",
+ "shape-foundry",
+]
+
+[[package]]
 name = "shape-gamekit"
 version = "0.1.0"
 dependencies = [

@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, AttachmentRule,
     BevelPolicy, ConstraintKind, DetailModule, ExaggerationPolicy, ExportRequirement,
-    FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, FamilyStyleFacet,
-    FamilyStylePolicyOverrides, GeometricConstraint, LengthUnit, LengthValue,
+    FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot, FamilyRuleExecutionPolicy,
+    FamilyStyleFacet, FamilyStylePolicyOverrides, GeometricConstraint, LengthUnit, LengthValue,
     NormalizedBevelProfile, ParameterExecutionPolicy, ParameterRange, PartPrototype, PartRole,
     ProfileLanguage, ReadabilityThreshold, RepetitionPolicy, RoleMultiplicity, RoleProportion,
     RoleProvision, RuntimeMetadataRequirement, STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
@@ -50,6 +50,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                 anchor_role: Some("connector".to_owned()),
                 compatibility_tags: vec!["load_path".to_owned()],
                 required: true,
+                execution_policy: FamilyRuleExecutionPolicy::Required,
             },
             AttachmentRule {
                 id: "deck_span".to_owned(),
@@ -58,6 +59,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                 anchor_role: None,
                 compatibility_tags: vec!["surface".to_owned()],
                 required: true,
+                execution_policy: FamilyRuleExecutionPolicy::Required,
             },
         ],
         allowed_operations: vec![
@@ -104,11 +106,13 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                 id: "supports_touch_spans".to_owned(),
                 roles: vec!["support".to_owned(), "span".to_owned()],
                 kind: ConstraintKind::MustSupport,
+                execution_policy: FamilyRuleExecutionPolicy::Required,
             },
             GeometricConstraint {
                 id: "deck_has_clearance".to_owned(),
                 roles: vec!["deck".to_owned(), "connector".to_owned()],
                 kind: ConstraintKind::Clearance,
+                execution_policy: FamilyRuleExecutionPolicy::Advisory,
             },
         ],
         variant_rules: vec![
@@ -139,6 +143,65 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
         compatible_style_kits: vec![style_kit.to_owned()],
         tags: vec!["modular".to_owned(), "hard_surface".to_owned()],
     }
+}
+
+#[test]
+fn legacy_attachment_rules_derive_execution_policy_from_required_flag() {
+    let required: AttachmentRule = serde_json::from_str(
+        r#"{
+            "id":"support_span",
+            "from_role":"support",
+            "to_role":"span",
+            "anchor_role":null,
+            "compatibility_tags":["load_path"],
+            "required":true
+        }"#,
+    )
+    .expect("legacy required rule parses");
+    let optional: AttachmentRule = serde_json::from_str(
+        r#"{
+            "id":"trim_panel",
+            "from_role":"trim",
+            "to_role":"panel",
+            "anchor_role":null,
+            "compatibility_tags":[],
+            "required":false
+        }"#,
+    )
+    .expect("legacy optional rule parses");
+
+    assert_eq!(
+        required.execution_policy,
+        FamilyRuleExecutionPolicy::Required
+    );
+    assert_eq!(
+        optional.execution_policy,
+        FamilyRuleExecutionPolicy::Advisory
+    );
+}
+
+#[test]
+fn attachment_required_flag_and_execution_policy_must_agree() {
+    let mut family = bridge_family("roman_timber_engineering");
+    family.attachment_rules[0].execution_policy = FamilyRuleExecutionPolicy::Advisory;
+    let report = validate_asset_family_schema(&family);
+
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "required_attachment_policy_mismatch")
+    );
+
+    let mut family = bridge_family("roman_timber_engineering");
+    family.attachment_rules[0].required = false;
+    let report = validate_asset_family_schema(&family);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "optional_attachment_policy_mismatch")
+    );
 }
 
 fn role(

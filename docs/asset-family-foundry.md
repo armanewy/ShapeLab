@@ -93,9 +93,32 @@ Cross-fragment port bindings use explicit `parent_role`/`parent_port` and `child
 
 Family parameter slots declare a `ParameterExecutionPolicy`. `RequiredBinding` is the default and requires at least one executable binding in the implementation. `AdvisoryOnly` and `RuntimeOnly` slots can be accepted as semantic intent, but executable geometry bindings may not consume them. The compiler rejects unbound required slots, non-executable parameter bindings, conflicting provider-selection bindings, conflicting presence bindings, and non-finite or degenerate scalar transforms.
 
+Attachment rules and geometric constraints declare a `FamilyRuleExecutionPolicy`. Required attachment rules use `Required`; optional attachment rules use `Advisory` or `RuntimeOnly`. Legacy attachment payloads that omit the policy derive it from the existing `required` flag. Geometric constraints default to `Advisory` so older descriptive constraints do not become hard blockers until an implementation supplies executable constraint bindings.
+
 Instantiated recipes derive `AssetId` from a canonical, domain-separated BLAKE3 geometry-input fingerprint. The report also exposes foundry-intent, conformance-contract, build, recipe, and artifact fingerprints. Geometry identity is limited to executable recipe inputs such as selected fragments, executable parameter values and bindings, base recipe geometry inputs, active export selectors, and cross-fragment attachment bindings. Foundry intent preserves advisory/runtime values and request seed; conformance/build identity preserves validation contracts, recipe-level constraints and relationships, export contracts, and selected-fragment export tags. The ID is not the seed and does not rely on schema-version bumps to detect content changes.
 
 Typed fragment remap reports intentionally retain source IDs as map keys for auditability. The no-source-ID invariant applies to the instantiated recipe, compiled artifact, exported provenance, parameter application targets, and other generated outputs, not to the audit map that explains how source IDs were rewritten.
+
+## Foundry Source Layer
+
+The semantic foundry source lives in `shape-foundry`. `FoundryAssetDocument` records exact catalog references for the family, style, executable implementations, and customizer profile. It also stores control state, provider overrides, foundry locks, local recipe overrides, a deterministic seed, an optional catalog lock, and an optional build stamp.
+
+Catalog manifests live in `shape-foundry-catalog`. A `FoundryCatalogLock` pins exact content references keyed by semantic lock roles such as `family`, `style`, `family_impl`, `style_impl`, and `customizer_profile`. Locks can carry embedded snapshots for read-only recovery.
+
+Customizer controls use whole-model previews and `FeasibleControlDomain`, not a single numeric range. Continuous sliders are valid only for certified continuous domains with at least one continuous interval. Topology-changing controls are discrete. Provider galleries store `ControlValue::Provider` in the same control-state and command path as scalar, integer, toggle, and choice controls. Local overrides carry the base `GeometryInputFingerprint`, touched semantic targets, and a survival policy so style/provider changes cannot silently reinterpret an edit.
+
+Family conformance reports are distinct from foundry document validation. The runtime build order is:
+
+```text
+instantiate base
+-> optional preliminary conformance
+-> apply local overrides
+-> validate recipe
+-> compile final artifact
+-> run authoritative final conformance
+```
+
+The final conformance report governs acceptance and export. Required rows reject when they are failed, deferred, unsupported, missing, or not evaluated, even if the flattened issue list is incomplete. Advisory failures and runtime-only deferred rows remain reportable but non-blocking.
 
 The first binding language is intentionally small:
 
