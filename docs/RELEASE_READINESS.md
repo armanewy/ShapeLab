@@ -80,9 +80,15 @@ GPU viewport/rendering work remains a future optional backend. Release checks do
 not require GPU-specific code beyond the native graphics support already needed
 by the desktop framework.
 
-## Verification
+## Release Candidate Claim
 
-Wave 30 release verification should include:
+A release-candidate readiness claim is valid only after the archive-first
+product boundary is verified. It does not claim installers, signing,
+notarization, package-manager publishing, app-store publishing, arbitrary
+imported-mesh editability, LLM integration, UVs, materials, rigging, animation,
+or marketplace workflows.
+
+Run and preserve evidence for:
 
 ```bash
 cargo fmt --all --check
@@ -96,3 +102,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 cargo build --release --workspace
 ```
+
+Manual completion of [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](RELEASE_CANDIDATE_MANUAL_GATE.md)
+is also required before making the claim.

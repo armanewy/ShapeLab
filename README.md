@@ -25,11 +25,12 @@ cargo run -p shape-app --release
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
 
 The native app opens a local `egui` desktop workspace with:
 
-- Visual Foundry profiles for Roman Timber Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp
+- Visual Foundry as the primary novice-facing product surface
+- ten built-in Visual Foundry profiles: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
 - a direction board, customizer deck, pack workspace, Advanced Recipe tab, history tab, and export tab
 - whole-model candidate cards and whole-model customizer previews
 - reducer-backed locks, undo, save/open, current export, and pack export
@@ -111,6 +112,12 @@ pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets
 
 Each run writes project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON file.
 
+Generate a release-readiness report with computed Visual Foundry evidence:
+
+```bash
+cargo run -p shape-cli -- release-readiness --verify-visual-gate
+```
+
 Compile and export explicit benchmark assets:
 
 ```bash
@@ -151,14 +158,17 @@ The decompiler requires identical ordered topology and writes canonical binary m
 
 The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationship selectors, and revisions.
 
-The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path.
+The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path. Arbitrary imported meshes are not semantically editable unless they fit a known grammar and strict verification proves exact recovery.
+
+Release readiness is archive-first only. The repository documents manual package contents, but installers, code signing, notarization, package-manager publishing, and app-store publishing are not implemented.
 
 ## Non-Goals Before MVP Gate
 
 - Natural-language modeling
-- LLM integration
+- LLM integration, LLM geometry generation, or direct LLM recipe mutation
 - General Blender integration beyond the decompiler reconstruction script
 - General imported mesh editing without known vertex correspondence
 - Rigging, animation, UVs, or texturing
+- Materials or marketplace publishing workflows
 - GPU compute or a custom GPU viewport
 - Cloud or collaborative features
