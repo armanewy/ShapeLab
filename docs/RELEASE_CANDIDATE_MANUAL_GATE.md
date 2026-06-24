@@ -10,6 +10,11 @@ Also complete the screenshot-oriented UI checklist in
 does not prove visual polish, viewport dominance, or whether the next action is
 obvious to a human.
 
+For any kit claimed as Usable or Showcase, preserve the HQ quality benchmark
+output described in [`docs/HQ_ASSET_QUALITY_BAR.md`](HQ_ASSET_QUALITY_BAR.md).
+Release readiness can pass while a kit remains Prototype; Showcase requires
+human/pro approval and adversarial visual review.
+
 Run the native app from the repository root:
 
 ```bash
@@ -53,6 +58,7 @@ For each run, record:
 - Undo count.
 - Technical surface exposure, expected to remain zero.
 - Option-thumbnail completeness.
+- HQ quality tier and blockers for any reviewed kit.
 - Perceived performance or stutter.
 - Export and reopen success.
 
@@ -89,6 +95,7 @@ Invisible controls:
 Invalid attempts:
 Undo count:
 Option-thumbnail completeness:
+HQ quality tier and blockers:
 Perceived performance or stutter:
 Notes:
 ```

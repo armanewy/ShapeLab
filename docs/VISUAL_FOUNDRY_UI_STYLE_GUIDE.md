@@ -111,3 +111,5 @@ Before claiming release readiness for UI changes:
   required screenshots for launch, profile selection, directions, customize,
   pack, export, disabled reasons, status, 1280x800, and 1440x900. Notes may add
   context, but cannot replace screenshots.
+- For any kit-quality claim, run `shape-cli hq-quality-benchmark` and keep the
+  quality tier separate from UI release readiness.

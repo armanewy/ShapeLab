@@ -25,6 +25,9 @@ editability.
 - Release-readiness reports can verify the direct Visual Foundry shell contract
   with `--verify-product-ui-gate`, but manual screenshots remain required for
   visual polish and usability claims.
+- HQ quality reports can baseline authored content with clay views, contact
+  sheets, mesh validity, semantic parts, candidate survival, visible-control
+  evidence, export/reopen status, and unsupported-output records.
 - Strict semantic reconstruction is a truth engine for covered grammars.
 - External import analysis is useful when it explains why exact recovery is or
   is not eligible.
@@ -42,6 +45,8 @@ editability.
 - Recovering semantics from noisy scans.
 - Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
 - UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
+- Photoreal output or textured reference parity from the current clay mesh
+  pipeline.
 - Natural-language geometry generation or direct recipe mutation by an LLM.
 - Editing a DCC scene and expecting Shape Lab to infer the semantic source.
 - Cloud preference models, hidden telemetry, or preference-driven semantic
@@ -89,6 +94,7 @@ The strongest product proof remains:
   whole-model controls.
 - Export a pack with zero technical surface exposure.
 - Complete the UI manual gate screenshots at 1280x800 and 1440x900.
+- Preserve HQ quality evidence for any kit claimed as Usable or Showcase.
 
 ## Decision Rule
 

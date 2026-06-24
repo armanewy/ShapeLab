@@ -2,9 +2,11 @@
 
 Wave 30 added an explicit release-readiness contract for the native Shape Lab
 loop. Wave 31.5 extends it with a headless product UI gate for the redesigned
-Visual Foundry shell. The intent is to make performance, UI surface, and
-packaging status auditable without claiming unimplemented GPU, installer,
-signing, or app-store work.
+Visual Foundry shell. Wave 32 adds a separate HQ asset quality benchmark. The
+intent is to make performance, UI surface, packaging status, and authored
+content quality evidence auditable without claiming unimplemented GPU,
+installer, signing, app-store, UV, material, rigging, animation, marketplace, or
+photoreal work.
 
 ## Machine-Readable Report
 
@@ -38,6 +40,12 @@ The JSON report records:
   not configured;
 - the current split between headless panel/reducer tests and deferred
   desktop-window pixel regression tests.
+
+Release readiness is not the same as Showcase asset quality. A Visual Foundry
+build can be product-ready while some kits remain Prototype. Use
+`shape-cli hq-quality-benchmark` and the tier rules in
+[`HQ_ASSET_QUALITY_BAR.md`](HQ_ASSET_QUALITY_BAR.md) before making Usable or
+Showcase claims for individual kits.
 
 ## Performance Boundary
 
@@ -111,6 +119,34 @@ GPU viewport/rendering work remains a future optional backend. Release checks do
 not require GPU-specific code beyond the native graphics support already needed
 by the desktop framework.
 
+## HQ Asset Quality Boundary
+
+Wave 32 adds:
+
+```bash
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile all --out-dir target/hq-benchmark --verify-export
+```
+
+The benchmark emits `quality-report.json`, clay view PNGs, `contact-sheet.png`,
+`mesh-stats.json`, `semantic-parts.json`, `candidate-report.json`,
+`controls-visibility-report.json`, and `export-reopen-report.json`.
+
+The report records Draft, Prototype, Usable, or Showcase status. Showcase cannot
+be achieved from automation alone; it requires human approval and adversarial
+visual review markers. Photoreal screenshots, textures, materials, UVs,
+rigging, animation, and marketplace packages are recorded as unsupported rather
+than implied.
+
+An automated Usable result is evidence, not automatic catalog exposure. Novice
+catalog exposure remains disabled by default until human review approval is
+recorded for the kit.
+
+The Wave 32 baseline is intentionally honest: some current built-in kits remain
+Prototype because fewer than six candidates survive compile, model validation,
+and preview rendering. That does not invalidate release readiness; it records
+catalog quality work separately from the product shell gate.
+
 ## Release Candidate Claim
 
 A release-candidate readiness claim is valid only after the archive-first
@@ -130,6 +166,8 @@ cargo run -p shape-cli -- release-readiness --verify-product-ui-gate --out targe
 cargo test -p shape-render --test foundry_preview
 cargo test -p shape-search --test foundry_candidates
 cargo test -p shape-cli release_readiness
+cargo test -p shape-cli hq_quality
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 cargo build --release --workspace

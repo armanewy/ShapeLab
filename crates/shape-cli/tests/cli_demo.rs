@@ -962,6 +962,113 @@ fn foundry_build_replays_deterministically_and_reports_catalog_mismatch() {
 }
 
 #[test]
+fn hq_quality_benchmark_emits_honest_quality_report() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("hq-quality");
+
+    let output = Command::new(exe)
+        .args([
+            "hq-quality-benchmark",
+            "--profile",
+            "roman-bridge",
+            "--out-dir",
+        ])
+        .arg(&out_dir)
+        .arg("--json")
+        .output()
+        .expect("run shape-cli hq-quality-benchmark");
+    assert!(
+        output.status.success(),
+        "hq quality benchmark failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for name in [
+        "contact-sheet.png",
+        "front.png",
+        "three-quarter.png",
+        "side.png",
+        "back.png",
+        "wireframe.png",
+        "silhouette.png",
+        "mesh-stats.json",
+        "semantic-parts.json",
+        "candidate-report.json",
+        "controls-visibility-report.json",
+        "export-reopen-report.json",
+        "quality-report.json",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "HQ benchmark should write {name}");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "HQ benchmark {name} is empty"
+        );
+    }
+
+    let stdout_report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout quality report");
+    let file_report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("quality-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(stdout_report, file_report);
+    assert_eq!(file_report["schema_version"], 1);
+    assert_eq!(file_report["profile_id"], "roman-bridge");
+    assert_eq!(file_report["quality_tier_requested"], "usable");
+    assert_eq!(file_report["quality_tier_achieved"], "prototype");
+    assert_eq!(file_report["export_status"], "not_run");
+    assert_eq!(file_report["reopen_status"], "not_run");
+    assert_eq!(file_report["six_direction_availability"], false);
+    assert!(
+        file_report["quality_tier_blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|blocker| blocker
+                .as_str()
+                .unwrap()
+                .contains("six surviving direction candidates"))
+    );
+    assert_eq!(file_report["placeholder_thumbnail_detected"], false);
+    assert_eq!(
+        file_report["novice_catalog_exposure_allowed_by_default"],
+        false
+    );
+    assert_eq!(
+        file_report["visible_control_difference_evidence"]["changed_control_count"],
+        file_report["primary_control_count"]
+    );
+    assert!(
+        file_report["visible_control_difference_evidence"]["controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|control| control["visual_delta_from_parent"].as_u64().unwrap() > 0),
+        "every changed control should include rendered image delta evidence"
+    );
+    assert!(
+        file_report["unsupported_outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["output"] == "photoreal_render")
+    );
+
+    let export_report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("export-reopen-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(export_report["export_status"], "not_run");
+    assert!(
+        export_report["not_run_reason"]
+            .as_str()
+            .unwrap()
+            .contains("--verify-export")
+    );
+}
+
+#[test]
 fn foundry_visual_benchmark_generates_usability_gate_artifacts() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");

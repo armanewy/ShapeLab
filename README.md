@@ -25,7 +25,7 @@ cargo run -p shape-app --release
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
 
 The native app opens a local `egui` desktop workspace with:
 
@@ -120,6 +120,18 @@ cargo run -p shape-cli -- release-readiness --verify-product-ui-gate
 The visual gate computes catalog/render evidence. The product UI gate verifies
 the direct Visual Foundry shell contract and still requires the human screenshot
 checklist in [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md).
+
+Generate HQ asset quality evidence for authored Visual Foundry content:
+
+```bash
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile all --out-dir target/hq-benchmark --verify-export
+```
+
+The HQ benchmark records clay views, contact sheets, mesh validity, semantic
+parts, candidate survival, visible-control evidence, export/reopen status, and
+unsupported outputs. It separates release readiness from Showcase-quality asset
+approval.
 
 Compile and export explicit benchmark assets:
 
