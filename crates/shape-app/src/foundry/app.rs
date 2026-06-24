@@ -22,6 +22,7 @@ use shape_render::foundry::FoundryPreviewCache;
 
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
+    FoundryPreviewImage,
     panels::{customize, directions, history, pack},
     run_foundry_job,
     ui::{
@@ -64,6 +65,8 @@ const NEED_HISTORY_REASON: &str = "No earlier project step is available.";
 const NEED_DIRECTION_REASON: &str = "This direction is not ready to choose.";
 const NEED_RESET_REASON: &str = "This control is already at its starting value.";
 const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
+const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
+const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 
 impl Default for FoundryDesktopApp {
     fn default() -> Self {
@@ -450,15 +453,32 @@ impl FoundryDesktopApp {
             },
         );
         if self.state.document.is_none() {
-            ui.weak("Open a Foundry project to generate whole-model directions.");
+            product_empty_state(
+                ui,
+                "Choose an asset first",
+                "Pick a template or open a project to generate directions.",
+            );
             return commands;
         }
-        ui.add_space(10.0);
+        ui.add_space(12.0);
+
+        product_card(ui, false, |ui| {
+            ui.label(
+                RichText::new("CURRENT DIRECTION")
+                    .color(VisualFoundryTokens::dark().colors.accent_hover)
+                    .small(),
+            );
+            self.show_current_preview_sized(ui, 340.0);
+        });
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
-            let has_document = self.state.document.is_some();
             let has_output = self.state.current_output.is_some();
-            let mode_actions = directions::direction_mode_actions(None, 0, None);
-            if let Some(generate_action) = mode_actions.first()
+            let mode_actions = direction_mode_actions_for_panel();
+            let generate_action = mode_actions
+                .iter()
+                .find(|action| action.label == "Explore")
+                .or_else(|| mode_actions.first());
+            if let Some(generate_action) = generate_action
                 && action_button(
                     ui,
                     &ActionSpec::enabled("Generate Directions", ButtonTone::Primary),
@@ -467,16 +487,12 @@ impl FoundryDesktopApp {
             {
                 commands.push(generate_action.app_command());
             }
-            if action_button(
-                ui,
-                &action_spec(
-                    has_document,
-                    "Build Asset",
-                    ButtonTone::Secondary,
-                    NEED_PROJECT_REASON,
-                ),
-            )
-            .clicked()
+            if !has_output
+                && action_button(
+                    ui,
+                    &ActionSpec::enabled("Build Asset", ButtonTone::Secondary),
+                )
+                .clicked()
             {
                 commands.push(FoundryAppCommand::RequestBuild);
             }
@@ -493,179 +509,144 @@ impl FoundryDesktopApp {
             {
                 commands.push(FoundryAppCommand::RequestPreview);
             }
-            for action in mode_actions {
-                if action_button(ui, &ActionSpec::enabled(action.label, ButtonTone::Quiet))
-                    .clicked()
+        });
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new("Direction focus")
+                    .color(VisualFoundryTokens::dark().colors.text_muted)
+                    .small(),
+            );
+            for mode_action in direction_mode_actions_for_panel() {
+                if action_button(
+                    ui,
+                    &ActionSpec::enabled(mode_action.label, ButtonTone::Quiet),
+                )
+                .clicked()
                 {
-                    commands.push(action.app_command());
+                    commands.push(mode_action.app_command());
                 }
             }
         });
-        ui.add_space(12.0);
-        self.show_current_preview(ui);
-        ui.label(format!(
-            "{} candidate direction(s)",
-            self.state.candidates.len()
-        ));
+        ui.add_space(14.0);
+        let direction_count_label = direction_board_count_label(self.state.candidates.len());
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Explore Directions",
+                title: "Whole-model candidates",
+                subtitle: Some(direction_count_label.as_str()),
+            },
+        );
+        ui.add_space(8.0);
+        if self.state.candidates.is_empty() {
+            product_empty_state(
+                ui,
+                "No directions yet",
+                "Generate directions to compare six coherent whole-model options.",
+            );
+            return commands;
+        }
+
         let current_build = self.state.current_build.as_ref();
         let texture_cache = &mut self.texture_cache;
-        for candidate in &self.state.candidates {
-            ui.horizontal(|ui| {
-                let preview_id = candidate_preview_texture_id(candidate);
-                show_rgba_preview(
-                    ui,
-                    texture_cache,
-                    FoundryPreviewDraw {
-                        preview_id: &preview_id,
-                        build: current_build,
-                        rgba8: &candidate.rgba8,
-                        width: candidate.width,
-                        height: candidate.height,
-                        max_edge: 96.0,
-                    },
-                );
-                ui.vertical(|ui| {
-                    ui.label(&candidate.title);
-                    ui.weak(&candidate.subtitle);
-                    if candidate.width > 0 && candidate.height > 0 {
-                        ui.weak(format!("{}x{}", candidate.width, candidate.height));
-                    }
-                    if let Some(reason) = &candidate.preview_failure {
-                        ui.weak(reason);
-                    }
-                    if candidate.selected {
-                        ui.weak("selected");
-                    }
-                });
-                if ui.button("Select").clicked() {
-                    commands.push(FoundryAppCommand::SelectCandidate(Some(
-                        candidate.id.clone(),
-                    )));
-                }
-                let choose_reason = candidate
-                    .preview_failure
-                    .as_deref()
-                    .unwrap_or(NEED_DIRECTION_REASON);
-                if button_with_disabled_reason(ui, candidate.selectable, "Choose", choose_reason)
-                    .clicked()
-                {
-                    commands.push(directions::accept_candidate_command(candidate.id.clone()));
-                }
-                if ui.button("Reject").clicked() {
-                    commands.push(directions::reject_candidate_command(candidate.id.clone()));
+        for row in self.state.candidates.chunks(3) {
+            ui.columns(3, |columns| {
+                for (column, candidate) in columns.iter_mut().zip(row) {
+                    commands.extend(show_direction_candidate_card(
+                        column,
+                        texture_cache,
+                        current_build,
+                        candidate,
+                    ));
                 }
             });
+            ui.add_space(8.0);
         }
         commands
     }
 
     fn show_customize(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
-        ui.heading("Customize");
-        self.show_current_preview(ui);
-        if self.state.controls.is_empty() {
-            ui.weak("This model has no quick controls yet.");
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Customize",
+                title: "Adjust controls",
+                subtitle: Some("Tune the main asset controls and lock the parts you want to keep."),
+            },
+        );
+        if self.state.document.is_none() {
+            product_empty_state(
+                ui,
+                "Choose an asset first",
+                "Pick a template or open a project before customizing.",
+            );
             return commands;
         }
-        let current_build = self.state.current_build.as_ref();
-        let texture_cache = &mut self.texture_cache;
-        for control in default_customize_controls(&self.state.controls) {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(&control.label);
-                    ui.weak(product_control_summary(control));
-                    ui.weak(format!("{} option(s)", control.options.len()));
-                    if let Some(reason) = &control.locked_reason {
-                        ui.weak(reason);
-                    }
-                    if ui.button("Select").clicked() {
-                        commands.push(customize::select_control_command(Some(control.id.clone())));
-                    }
-                    let lock_label = if control.locked { "Unlock" } else { "Lock" };
-                    if ui.button(lock_label).clicked()
-                        && let Some(command) =
-                            customize::control_lock_command(control, !control.locked)
-                    {
-                        commands.push(command);
-                    }
-                    if button_with_disabled_reason(
-                        ui,
-                        customize::control_can_reset(control),
-                        "Reset",
-                        NEED_RESET_REASON,
-                    )
-                    .clicked()
-                    {
-                        commands.extend(customize::reset_control_intents(control));
-                    }
-                });
-                for option in &control.options {
-                    ui.horizontal(|ui| {
-                        let preview_id = option_preview_texture_id(option);
-                        show_rgba_preview(
-                            ui,
-                            texture_cache,
-                            FoundryPreviewDraw {
-                                preview_id: &preview_id,
-                                build: current_build,
-                                rgba8: &option.rgba8,
-                                width: option.width,
-                                height: option.height,
-                                max_edge: 64.0,
-                            },
-                        );
-                        ui.vertical(|ui| {
-                            ui.weak(&option.label);
-                            if option.selected {
-                                ui.weak("current");
-                            }
-                            if let Some(reason) = &option.unavailable_reason {
-                                ui.weak(reason);
-                            }
-                        });
-                        let disabled_reason =
-                            customize::option_action_disabled_reason(control, option);
-                        let preview_response =
-                            ui.add_enabled(disabled_reason.is_none(), egui::Button::new("Preview"));
-                        let preview_clicked = if let Some(reason) = &disabled_reason {
-                            preview_response.on_disabled_hover_text(reason).clicked()
-                        } else {
-                            preview_response.clicked()
-                        };
-                        if preview_clicked {
-                            commands.extend(customize::preview_control_value_intents(
-                                control,
-                                option.value.clone(),
-                            ));
-                        }
-                        let apply_response =
-                            ui.add_enabled(disabled_reason.is_none(), egui::Button::new("Apply"));
-                        let apply_clicked = if let Some(reason) = &disabled_reason {
-                            apply_response.on_disabled_hover_text(reason).clicked()
-                        } else {
-                            apply_response.clicked()
-                        };
-                        if apply_clicked {
-                            commands.extend(customize::choose_option_intents(control, option));
-                        }
-                    });
-                }
+        ui.add_space(10.0);
+        ui.columns(2, |columns| {
+            product_card(&mut columns[0], false, |ui| {
+                ui.label(
+                    RichText::new("WHOLE-MODEL PREVIEW")
+                        .color(VisualFoundryTokens::dark().colors.accent_hover)
+                        .small(),
+                );
+                self.show_current_preview_sized(ui, 320.0);
             });
-        }
+
+            let controls = display_customize_controls(&self.state.controls);
+            if controls.is_empty() {
+                product_empty_state(
+                    &mut columns[1],
+                    "No quick controls yet",
+                    "This asset has no quick controls yet.",
+                );
+                return;
+            }
+
+            columns[1].label(
+                RichText::new(format!("{} primary controls", controls.len()))
+                    .color(VisualFoundryTokens::dark().colors.text_muted),
+            );
+            columns[1].add_space(8.0);
+            let current_build = self.state.current_build.as_ref();
+            let texture_cache = &mut self.texture_cache;
+            for control in controls {
+                commands.extend(show_customize_control_card(
+                    &mut columns[1],
+                    texture_cache,
+                    current_build,
+                    control,
+                ));
+                columns[1].add_space(8.0);
+            }
+        });
         commands
     }
 
     fn show_history(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         let view = history::build_history_view(&self.state);
-        ui.heading("History");
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Project",
+                title: "Project history",
+                subtitle: Some("Review previous project steps and branch from a saved point."),
+            },
+        );
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
             for action in &view.actions {
-                if button_with_disabled_reason(
+                if action_button(
                     ui,
-                    action.enabled,
-                    &action.label,
-                    NEED_HISTORY_REASON,
+                    &action_spec(
+                        action.enabled,
+                        &action.label,
+                        ButtonTone::Secondary,
+                        NEED_HISTORY_REASON,
+                    ),
                 )
                 .clicked()
                     && let Some(command) = self.history_dispatch_command(action.dispatch.as_ref())
@@ -674,64 +655,117 @@ impl FoundryDesktopApp {
                 }
             }
         });
-        ui.label(format!("{} revision(s)", view.rows.len()));
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(format!("{} saved step(s)", view.rows.len()))
+                .color(VisualFoundryTokens::dark().colors.text_muted),
+        );
         for row in view.rows {
-            ui.horizontal(|ui| {
-                ui.label(row.label);
-                if row.selected {
-                    ui.weak("current");
-                }
-                if let Some(intent) = &row.switch_intent
-                    && ui.button("Switch").clicked()
-                    && let Some(command) = self.history_dispatch_command(intent.dispatch.as_ref())
-                {
-                    commands.push(command);
-                }
-                if let Some(intent) = &row.branch_intent
-                    && ui.button("Branch").clicked()
-                    && let Some(command) = self.history_dispatch_command(intent.dispatch.as_ref())
-                {
-                    commands.push(command);
-                }
+            product_card(ui, row.selected, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(product_panel_message(&row.label, "Project step"));
+                    if row.selected {
+                        ui.weak("Current");
+                    }
+                    if let Some(intent) = &row.switch_intent
+                        && action_button(ui, &ActionSpec::enabled("Switch", ButtonTone::Quiet))
+                            .clicked()
+                        && let Some(command) =
+                            self.history_dispatch_command(intent.dispatch.as_ref())
+                    {
+                        commands.push(command);
+                    }
+                    if let Some(intent) = &row.branch_intent
+                        && action_button(ui, &ActionSpec::enabled("Branch", ButtonTone::Quiet))
+                            .clicked()
+                        && let Some(command) =
+                            self.history_dispatch_command(intent.dispatch.as_ref())
+                    {
+                        commands.push(command);
+                    }
+                });
             });
+            ui.add_space(8.0);
         }
         commands
     }
 
     fn show_export(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
-        ui.heading("Export");
-        self.show_current_preview(ui);
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Export",
+                title: "Export ready",
+                subtitle: Some("Send the current asset or prepared pack to disk."),
+            },
+        );
+        ui.add_space(10.0);
+        product_card(ui, false, |ui| {
+            ui.label(
+                RichText::new("CURRENT ASSET")
+                    .color(VisualFoundryTokens::dark().colors.accent_hover)
+                    .small(),
+            );
+            self.show_current_preview_sized(ui, 320.0);
+        });
+        ui.add_space(12.0);
         let can_export = self.state.current_output.is_some();
-        if button_with_disabled_reason(ui, can_export, "Export Current Asset", NEED_MODEL_REASON)
+        product_card(ui, can_export, |ui| {
+            let colors = VisualFoundryTokens::dark().colors;
+            ui.label(RichText::new(export_readiness_label(can_export)).color(colors.text));
+            ui.label(
+                RichText::new(export_readiness_detail(
+                    can_export,
+                    self.state.pack.can_export,
+                ))
+                .color(colors.text_muted)
+                .small(),
+            );
+            ui.add_space(8.0);
+            if action_button(
+                ui,
+                &action_spec(
+                    can_export,
+                    "Export Current Asset",
+                    ButtonTone::Primary,
+                    NEED_MODEL_REASON,
+                ),
+            )
             .clicked()
-            && let Some(out_dir) = select_asset_export_dir()
-        {
-            commands.push(FoundryAppCommand::run(FoundryCommand::Export {
-                profile: "default".to_owned(),
-                out_dir: Some(out_dir.to_string_lossy().to_string()),
-            }));
-        }
-        if self.state.pack.can_export {
-            ui.weak("Pack export is available from the Pack tab.");
-        }
-        if !can_export {
-            ui.weak("Build the current asset before exporting.");
-        }
+                && let Some(out_dir) = select_asset_export_dir()
+            {
+                commands.push(FoundryAppCommand::run(FoundryCommand::Export {
+                    profile: "default".to_owned(),
+                    out_dir: Some(out_dir.to_string_lossy().to_string()),
+                }));
+            }
+        });
         commands
     }
 
-    fn show_pack(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_pack(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         let view = pack::pack_panel_view(&self.state.pack);
-        ui.heading("Pack");
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Pack",
+                title: "Pack preview",
+                subtitle: Some("Collect coherent variants before exporting a set."),
+            },
+        );
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
             let add_enabled = self.state.document.is_some();
-            if button_with_disabled_reason(
+            if action_button(
                 ui,
-                add_enabled,
-                "Add Current Asset",
-                NEED_PROJECT_REASON,
+                &action_spec(
+                    add_enabled,
+                    "Add Current Asset",
+                    ButtonTone::Primary,
+                    NEED_PROJECT_REASON,
+                ),
             )
             .clicked()
                 && let Some(command) = self.add_current_to_pack_command()
@@ -741,13 +775,17 @@ impl FoundryDesktopApp {
             let batch_export_reason = view
                 .export
                 .disabled_reason
-                .as_deref()
-                .unwrap_or(NEED_PACK_MEMBER_REASON);
-            if button_with_disabled_reason(
+                .as_ref()
+                .map(|reason| product_panel_message(reason, NEED_PACK_MEMBER_REASON))
+                .unwrap_or_else(|| NEED_PACK_MEMBER_REASON.to_owned());
+            if action_button(
                 ui,
-                view.export.enabled,
-                "Batch Export",
-                batch_export_reason,
+                &action_spec(
+                    view.export.enabled,
+                    "Export Pack",
+                    ButtonTone::Secondary,
+                    batch_export_reason.as_str(),
+                ),
             )
             .clicked()
                 && let Some(out_dir) = select_pack_export_dir()
@@ -756,20 +794,69 @@ impl FoundryDesktopApp {
                 commands.push(command);
             }
         });
+        ui.add_space(12.0);
         if !view.active {
-            ui.weak("No family pack workspace is open.");
+            product_empty_state(
+                ui,
+                "Pack is empty",
+                "Add the current asset to start a pack.",
+            );
             return commands;
         }
-        ui.label(format!("{} member(s)", view.members.len()));
-        if view.export.enabled {
-            ui.weak("Batch export ready");
-        } else if let Some(reason) = &view.export.disabled_reason {
-            ui.weak(reason);
-        }
+        ui.columns(2, |columns| {
+            let current_preview = self.state.current_preview.clone();
+            let current_build = self.state.current_build.as_ref();
+            let texture_cache = &mut self.texture_cache;
+            product_card(&mut columns[0], false, |ui| {
+                ui.label(
+                    RichText::new("Contact sheet")
+                        .color(VisualFoundryTokens::dark().colors.accent_hover)
+                        .small(),
+                );
+                ui.label(
+                    RichText::new(format!("{} assets in pack", view.contact_sheet.cells.len()))
+                        .color(VisualFoundryTokens::dark().colors.text),
+                );
+                ui.add_space(6.0);
+                show_pack_contact_sheet(
+                    ui,
+                    texture_cache,
+                    current_preview.as_ref(),
+                    current_build,
+                    &view.contact_sheet,
+                );
+            });
+
+            product_card(&mut columns[1], view.export.enabled, |ui| {
+                let colors = VisualFoundryTokens::dark().colors;
+                ui.label(RichText::new(pack_readiness_label(&view)).color(colors.text));
+                ui.label(
+                    RichText::new(pack_readiness_detail(&view))
+                        .color(colors.text_muted)
+                        .small(),
+                );
+                if !view.coherence_warnings.is_empty() {
+                    ui.add_space(8.0);
+                    for warning in view.coherence_warnings.iter().take(3) {
+                        ui.label(
+                            RichText::new(product_panel_message(
+                                &warning.message,
+                                "Pack needs attention before export.",
+                            ))
+                            .color(colors.warning),
+                        );
+                    }
+                }
+            });
+        });
         commands
     }
 
     fn show_current_preview(&mut self, ui: &mut egui::Ui) {
+        self.show_current_preview_sized(ui, 180.0);
+    }
+
+    fn show_current_preview_sized(&mut self, ui: &mut egui::Ui, max_edge: f32) {
         let preview = self.state.current_preview.clone();
         let has_output = self.state.current_output.is_some();
         let rendering_preview = self
@@ -789,10 +876,10 @@ impl FoundryDesktopApp {
                         rgba8: &preview.rgba8,
                         width: preview.width,
                         height: preview.height,
-                        max_edge: 180.0,
+                        max_edge,
                     },
                 );
-                ui.weak(format!("Preview {}x{}", preview.width, preview.height));
+                ui.weak("Whole-model preview");
             } else if has_output {
                 if rendering_preview {
                     ui.weak("Rendering preview...");
@@ -1224,6 +1311,17 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Generate Directions",
         "Build Asset",
         "Refresh Preview",
+        "Current Direction",
+        "Whole-model candidates",
+        "No directions yet",
+        "Generate six coherent whole-model options.",
+        "Generate directions to compare six coherent whole-model options.",
+        "Direction focus",
+        "Refine",
+        "Explore",
+        "Silhouette",
+        "Structure",
+        "Detail",
         "Save",
         "Undo",
         "No project",
@@ -1239,13 +1337,54 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Preview ready",
         "Preview available",
         "Preview waiting",
+        "Preview",
         "Pack: 0 assets",
         "Export complete",
         "Pack export complete",
+        "Current asset ready",
+        "Needs a model first",
         HOME_SUBTITLE,
         "Pick a template to generate whole-model directions.",
         "Explore directions",
         "Generate coherent whole-model options from the current asset.",
+        "Current Direction",
+        "Pick a template or open a project to generate directions.",
+        "Preview could not be rendered for this direction.",
+        "Preview this direction before choosing it.",
+        "Project history",
+        "Review previous project steps and branch from a saved point.",
+        "saved step(s)",
+        "Project step",
+        "Adjust controls",
+        "Tune the main asset controls and lock the parts you want to keep.",
+        "Choose an asset first",
+        "Pick a template or open a project before customizing.",
+        "Whole-model preview",
+        "No quick controls yet",
+        "This asset has no quick controls yet.",
+        "Try",
+        "More options",
+        "This option is not available right now.",
+        "This control is locked.",
+        "Export ready",
+        "Send the current asset or prepared pack to disk.",
+        "Current Asset",
+        "Export this asset here, or export the prepared pack from Pack.",
+        "Export the current asset as an individual result.",
+        "Pack preview",
+        "Collect coherent variants before exporting a set.",
+        "Add Current Asset",
+        "Export Pack",
+        "Pack is empty",
+        "Add the current asset to start a pack.",
+        "assets in pack",
+        "Pack asset",
+        "Add assets to export",
+        "Needs attention",
+        "Contact sheet",
+        "Pack needs attention before export.",
+        "Resolve pack warnings before export.",
+        "All assets are ready for pack export.",
         NEED_PROJECT_REASON,
         NEED_SAVE_LOCATION_REASON,
         NEED_MODEL_REASON,
@@ -1255,7 +1394,6 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         NEED_PACK_MEMBER_REASON,
         "This model has no quick controls yet.",
         "Build the current asset before exporting.",
-        "Batch export ready",
         "No family pack workspace is open.",
         "Preview is ready to refresh.",
         "Whole-model options",
@@ -1279,6 +1417,491 @@ fn product_control_summary(
         "Whole-model options"
     } else {
         "Primary control"
+    }
+}
+
+fn product_card<R>(
+    ui: &mut egui::Ui,
+    selected: bool,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let tokens = VisualFoundryTokens::dark();
+    let stroke_color = if selected {
+        tokens.colors.accent_hover
+    } else {
+        tokens.colors.stroke
+    };
+    egui::Frame::new()
+        .fill(if selected {
+            tokens.colors.accent_soft
+        } else {
+            tokens.colors.panel
+        })
+        .stroke(egui::Stroke::new(1.0, stroke_color))
+        .corner_radius(egui::CornerRadius::same(tokens.radius.lg as u8))
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, add_contents)
+}
+
+fn product_empty_state(ui: &mut egui::Ui, title: &str, message: &str) {
+    product_card(ui, false, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.label(RichText::new(title).color(colors.text).strong());
+        ui.label(RichText::new(message).color(colors.text_muted).small());
+    });
+}
+
+fn product_panel_message(message: &str, fallback: &str) -> String {
+    let trimmed = message.trim();
+    let lowercase = trimmed.to_ascii_lowercase();
+    let raw_markers = [
+        "\\",
+        "/",
+        "::",
+        "_",
+        "members.",
+        "document",
+        "catalog",
+        "schema",
+        "validation",
+        "diagnostic",
+        "recipe",
+    ];
+    if trimmed.is_empty()
+        || crate::foundry::ui::copy::first_forbidden_product_term(trimmed).is_some()
+        || raw_markers.iter().any(|marker| lowercase.contains(marker))
+    {
+        fallback.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn direction_board_count_label(count: usize) -> String {
+    if count == 0 {
+        "Generate six coherent whole-model options.".to_owned()
+    } else {
+        format!("{count} coherent whole-model option(s)")
+    }
+}
+
+fn direction_mode_actions_for_panel() -> Vec<directions::DirectionModeAction> {
+    directions::direction_mode_actions(None, 0, None)
+}
+
+fn show_direction_candidate_card(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    candidate: &crate::foundry::view_model::FoundryCandidateCard,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    product_card(ui, candidate.selected, |ui| {
+        let preview_id = candidate_preview_texture_id(candidate);
+        show_rgba_preview(
+            ui,
+            texture_cache,
+            FoundryPreviewDraw {
+                preview_id: &preview_id,
+                build: current_build,
+                rgba8: &candidate.rgba8,
+                width: candidate.width,
+                height: candidate.height,
+                max_edge: 150.0,
+            },
+        );
+        ui.add_space(6.0);
+        ui.label(RichText::new(&candidate.title).strong());
+        ui.label(RichText::new(&candidate.subtitle).small());
+        if candidate.selected {
+            ui.weak("Current direction");
+        }
+        if let Some(reason) = &candidate.preview_failure {
+            ui.label(
+                RichText::new(product_panel_message(
+                    reason,
+                    "Preview could not be rendered for this direction.",
+                ))
+                .color(VisualFoundryTokens::dark().colors.warning),
+            );
+        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if action_button(ui, &ActionSpec::enabled("Select", ButtonTone::Quiet)).clicked() {
+                commands.push(FoundryAppCommand::SelectCandidate(Some(
+                    candidate.id.clone(),
+                )));
+            }
+            let choose_reason = candidate
+                .preview_failure
+                .as_ref()
+                .map(|reason| {
+                    product_panel_message(reason, "Preview this direction before choosing it.")
+                })
+                .unwrap_or_else(|| NEED_DIRECTION_REASON.to_owned());
+            if action_button(
+                ui,
+                &action_spec(
+                    candidate.selectable,
+                    "Choose Direction",
+                    ButtonTone::Primary,
+                    choose_reason.as_str(),
+                ),
+            )
+            .clicked()
+            {
+                commands.push(directions::accept_candidate_command(candidate.id.clone()));
+            }
+            if action_button(ui, &ActionSpec::enabled("Reject", ButtonTone::Quiet)).clicked() {
+                commands.push(directions::reject_candidate_command(candidate.id.clone()));
+            }
+        });
+    });
+    commands
+}
+
+fn show_customize_control_card(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    control: &crate::foundry::view_model::FoundryControlView,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    product_card(ui, control.locked, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new(&control.label).strong());
+                ui.label(
+                    RichText::new(product_control_summary(control))
+                        .color(colors.text_muted)
+                        .small(),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if action_button(
+                    ui,
+                    &action_spec(
+                        customize::control_can_reset(control),
+                        "Reset",
+                        ButtonTone::Quiet,
+                        NEED_RESET_REASON,
+                    ),
+                )
+                .clicked()
+                {
+                    commands.extend(customize::reset_control_intents(control));
+                }
+                let lock_label = if control.locked { "Unlock" } else { "Lock" };
+                if action_button(ui, &ActionSpec::enabled(lock_label, ButtonTone::Quiet)).clicked()
+                    && let Some(command) = customize::control_lock_command(control, !control.locked)
+                {
+                    commands.push(command);
+                }
+                if action_button(ui, &ActionSpec::enabled("Focus", ButtonTone::Quiet)).clicked() {
+                    commands.push(customize::select_control_command(Some(control.id.clone())));
+                }
+            });
+        });
+        if let Some(reason) = &control.locked_reason {
+            ui.label(
+                RichText::new(product_panel_message(reason, "This control is locked."))
+                    .color(colors.text_muted)
+                    .small(),
+            );
+        }
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for option in control.options.iter().take(CONTROL_FILMSTRIP_LIMIT) {
+                commands.extend(show_customize_option_tile(
+                    ui,
+                    texture_cache,
+                    current_build,
+                    control,
+                    option,
+                    true,
+                ));
+            }
+        });
+        let remaining_options = control
+            .options
+            .iter()
+            .skip(CONTROL_FILMSTRIP_LIMIT)
+            .collect::<Vec<_>>();
+        if !remaining_options.is_empty() {
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("More options")
+                    .color(colors.text_muted)
+                    .small(),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for option in remaining_options {
+                    commands.extend(show_customize_option_tile(
+                        ui,
+                        texture_cache,
+                        current_build,
+                        control,
+                        option,
+                        false,
+                    ));
+                }
+            });
+        }
+    });
+    commands
+}
+
+fn show_customize_option_tile(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    control: &crate::foundry::view_model::FoundryControlView,
+    option: &crate::foundry::view_model::FoundryOptionCard,
+    show_preview: bool,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    product_card(ui, option.selected, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.set_min_width(if show_preview { 124.0 } else { 108.0 });
+        if show_preview {
+            let preview_id = option_preview_texture_id(option);
+            show_rgba_preview(
+                ui,
+                texture_cache,
+                FoundryPreviewDraw {
+                    preview_id: &preview_id,
+                    build: current_build,
+                    rgba8: &option.rgba8,
+                    width: option.width,
+                    height: option.height,
+                    max_edge: 58.0,
+                },
+            );
+        }
+        ui.label(&option.label);
+        if option.selected {
+            ui.weak("Current");
+        }
+        let disabled_reason = customize::option_action_disabled_reason(control, option);
+        let disabled_message = disabled_reason
+            .as_ref()
+            .map(|reason| product_panel_message(reason, "This option is not available right now."))
+            .unwrap_or_else(|| "This option is not available right now.".to_owned());
+        if let Some(reason) = &option.unavailable_reason {
+            ui.label(
+                RichText::new(product_panel_message(
+                    reason,
+                    "This option is not available right now.",
+                ))
+                .color(colors.warning)
+                .small(),
+            );
+        }
+        if action_button(
+            ui,
+            &action_spec(
+                disabled_reason.is_none(),
+                "Try",
+                ButtonTone::Quiet,
+                disabled_message.as_str(),
+            ),
+        )
+        .clicked()
+        {
+            commands.extend(customize::preview_control_value_intents(
+                control,
+                option.value.clone(),
+            ));
+        }
+        if action_button(
+            ui,
+            &action_spec(
+                disabled_reason.is_none(),
+                "Apply",
+                ButtonTone::Secondary,
+                disabled_message.as_str(),
+            ),
+        )
+        .clicked()
+        {
+            commands.extend(customize::choose_option_intents(control, option));
+        }
+    });
+    commands
+}
+
+fn display_customize_controls(
+    controls: &[crate::foundry::view_model::FoundryControlView],
+) -> Vec<&crate::foundry::view_model::FoundryControlView> {
+    default_customize_controls(controls)
+        .take(CUSTOMIZE_PRIMARY_CONTROL_LIMIT)
+        .collect()
+}
+
+fn pack_member_display_name(member: &pack::PackMemberRow) -> String {
+    let title = asset_title_from_id(&member.document_id);
+    if title == "Shape Lab Project" {
+        "Pack asset".to_owned()
+    } else {
+        title.to_owned()
+    }
+}
+
+fn pack_cell_display_name(cell: &pack::PackContactSheetCell) -> String {
+    let title = asset_title_from_id(&cell.document_id);
+    if title == "Shape Lab Project" {
+        "Pack asset".to_owned()
+    } else {
+        title.to_owned()
+    }
+}
+
+fn show_pack_contact_sheet(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_preview: Option<&FoundryPreviewImage>,
+    current_build: Option<&FoundryBuildStamp>,
+    sheet: &pack::PackContactSheet,
+) {
+    if sheet.cells.is_empty() {
+        product_empty_state(
+            ui,
+            "Pack is empty",
+            "Add the current asset to start a pack.",
+        );
+        return;
+    }
+
+    let columns = sheet.columns.max(1);
+    for row in 0..sheet.rows {
+        ui.columns(columns, |column_uis| {
+            for cell in sheet.cells.iter().filter(|cell| cell.row == row) {
+                let column_index = cell.column.min(column_uis.len().saturating_sub(1));
+                product_card(&mut column_uis[column_index], cell.selected, |ui| {
+                    ui.set_min_height(144.0);
+                    show_pack_cell_thumbnail(
+                        ui,
+                        texture_cache,
+                        current_preview,
+                        current_build,
+                        cell,
+                    );
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(pack_cell_display_name(cell)).strong());
+                    let status = match cell.status {
+                        pack::PackMemberStatus::Ready => "Ready",
+                        pack::PackMemberStatus::NeedsAttention => "Needs attention",
+                    };
+                    ui.label(RichText::new(status).small());
+                    if cell.selected {
+                        ui.weak("Current");
+                    }
+                    if cell.override_count > 0 {
+                        ui.weak(format!("{} adjustment(s)", cell.override_count));
+                    }
+                });
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
+fn show_pack_cell_thumbnail(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_preview: Option<&FoundryPreviewImage>,
+    current_build: Option<&FoundryBuildStamp>,
+    cell: &pack::PackContactSheetCell,
+) {
+    if cell.selected
+        && let Some(preview) = current_preview
+    {
+        let preview_id = format!("pack-current-{}", preview.preview_id);
+        show_rgba_preview(
+            ui,
+            texture_cache,
+            FoundryPreviewDraw {
+                preview_id: &preview_id,
+                build: preview.build.as_ref().or(current_build),
+                rgba8: &preview.rgba8,
+                width: preview.width,
+                height: preview.height,
+                max_edge: 88.0,
+            },
+        );
+        return;
+    }
+
+    pack_thumbnail_placeholder(ui, cell);
+}
+
+fn pack_thumbnail_placeholder(ui: &mut egui::Ui, cell: &pack::PackContactSheetCell) {
+    let colors = VisualFoundryTokens::dark().colors;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(88.0, 62.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(6), colors.panel_subtle);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(1.0, colors.stroke_strong),
+        egui::StrokeKind::Inside,
+    );
+    let band_height = rect.height() * 0.34;
+    let band = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.bottom() - band_height),
+        rect.right_bottom(),
+    );
+    ui.painter()
+        .rect_filled(band, egui::CornerRadius::same(4), colors.accent_soft);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        pack_thumbnail_marker(cell),
+        egui::FontId::proportional(11.0),
+        colors.text_muted,
+    );
+}
+
+fn pack_thumbnail_marker(cell: &pack::PackContactSheetCell) -> &'static str {
+    if cell.selected { "Current" } else { "Preview" }
+}
+
+fn pack_readiness_label(view: &pack::PackPanelView) -> &'static str {
+    if view.export.enabled {
+        "Export ready"
+    } else if view.members.is_empty() {
+        "Add assets to export"
+    } else {
+        "Needs attention"
+    }
+}
+
+fn pack_readiness_detail(view: &pack::PackPanelView) -> String {
+    if view.export.enabled {
+        "All assets are ready for pack export.".to_owned()
+    } else if let Some(reason) = &view.export.disabled_reason {
+        product_panel_message(reason, "Resolve pack warnings before export.")
+    } else {
+        "Add at least one asset before exporting a pack.".to_owned()
+    }
+}
+
+fn export_readiness_label(can_export: bool) -> &'static str {
+    if can_export {
+        "Current asset ready"
+    } else {
+        "Needs a model first"
+    }
+}
+
+fn export_readiness_detail(can_export: bool, pack_ready: bool) -> &'static str {
+    if can_export && pack_ready {
+        "Export this asset here, or export the prepared pack from Pack."
+    } else if can_export {
+        "Export the current asset as an individual result."
+    } else {
+        "Build the current asset before exporting."
     }
 }
 
@@ -1609,6 +2232,22 @@ mod tests {
     }
 
     #[test]
+    fn directions_panel_exposes_all_generation_modes() {
+        let labels = direction_mode_actions_for_panel()
+            .into_iter()
+            .map(|action| action.label)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            labels,
+            vec!["Refine", "Explore", "Silhouette", "Structure", "Detail"]
+        );
+        for label in labels {
+            assert!(crate::foundry::ui::copy::first_forbidden_product_term(label).is_none());
+        }
+    }
+
+    #[test]
     fn launch_save_state_does_not_claim_project_is_saved() {
         let mut app = FoundryDesktopApp::default();
         assert_eq!(app.save_state_pill(), ("No project", StatusTone::Neutral));
@@ -1657,7 +2296,9 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
 
-        let controls = default_customize_controls(&app.state.controls).collect::<Vec<_>>();
+        let controls = display_customize_controls(&app.state.controls);
+        assert!(controls.len() <= CUSTOMIZE_PRIMARY_CONTROL_LIMIT);
+        assert!(!controls.is_empty());
         assert!(
             controls
                 .iter()
@@ -1671,6 +2312,113 @@ mod tests {
         assert!(
             crate::foundry::ui::copy::labels_are_product_safe(&visible),
             "visible customize summaries contain implementation copy: {visible:?}"
+        );
+    }
+
+    #[test]
+    fn compact_filmstrip_does_not_hide_remaining_options() {
+        let ctx = egui::Context::default();
+        let mut app = FoundryDesktopApp::default();
+        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+
+        for _ in 0..200 {
+            app.poll_jobs(&ctx);
+            if app
+                .state
+                .controls
+                .iter()
+                .any(|control| control.options.len() > CONTROL_FILMSTRIP_LIMIT)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let control = display_customize_controls(&app.state.controls)
+            .into_iter()
+            .find(|control| control.options.len() > CONTROL_FILMSTRIP_LIMIT)
+            .expect("fixture exposes a control with more options than the filmstrip");
+        let filmstrip_count = control.options.iter().take(CONTROL_FILMSTRIP_LIMIT).count();
+        let more_count = control.options.iter().skip(CONTROL_FILMSTRIP_LIMIT).count();
+
+        assert_eq!(filmstrip_count, CONTROL_FILMSTRIP_LIMIT);
+        assert!(more_count > 0);
+        assert_eq!(filmstrip_count + more_count, control.options.len());
+    }
+
+    #[test]
+    fn pack_member_labels_hide_source_document_ids() {
+        let member = pack::PackMemberRow {
+            member_id: "roman-bridge-doc".to_owned(),
+            name: "roman-bridge-doc".to_owned(),
+            document_id: "roman-bridge-doc".to_owned(),
+            selected: false,
+            override_count: 0,
+        };
+
+        let label = pack_member_display_name(&member);
+        assert_eq!(label, "Roman Timber Bridge");
+        assert!(!label.contains("-doc"));
+
+        let cell = pack::PackContactSheetCell {
+            row: 0,
+            column: 0,
+            member_id: "roman-bridge-doc".to_owned(),
+            name: "roman-bridge-doc".to_owned(),
+            document_id: "roman-bridge-doc".to_owned(),
+            status: pack::PackMemberStatus::Ready,
+            override_count: 0,
+            selected: false,
+        };
+        let cell_label = pack_cell_display_name(&cell);
+        assert_eq!(cell_label, "Roman Timber Bridge");
+        assert!(!cell_label.contains("-doc"));
+    }
+
+    #[test]
+    fn pack_contact_sheet_uses_product_safe_thumbnail_markers() {
+        let current_cell = pack::PackContactSheetCell {
+            row: 0,
+            column: 0,
+            member_id: "roman-bridge-doc".to_owned(),
+            name: "roman-bridge-doc".to_owned(),
+            document_id: "roman-bridge-doc".to_owned(),
+            status: pack::PackMemberStatus::Ready,
+            override_count: 0,
+            selected: true,
+        };
+        let other_cell = pack::PackContactSheetCell {
+            selected: false,
+            ..current_cell.clone()
+        };
+
+        assert_eq!(pack_thumbnail_marker(&current_cell), "Current");
+        assert_eq!(pack_thumbnail_marker(&other_cell), "Preview");
+        assert!(crate::foundry::ui::copy::labels_are_product_safe(&[
+            pack_thumbnail_marker(&current_cell),
+            pack_thumbnail_marker(&other_cell)
+        ]));
+    }
+
+    #[test]
+    fn product_panel_messages_replace_raw_backend_details() {
+        assert_eq!(
+            product_panel_message(
+                "members.roman-bridge-doc.document_id failed validation",
+                "Pack needs attention before export."
+            ),
+            "Pack needs attention before export."
+        );
+        assert_eq!(
+            product_panel_message(
+                "Could not render C:\\tmp\\preview.png",
+                "Preview could not be rendered for this direction."
+            ),
+            "Preview could not be rendered for this direction."
+        );
+        assert_eq!(
+            product_panel_message("This option is locked.", "Fallback"),
+            "This option is locked."
         );
     }
 
