@@ -2,9 +2,10 @@
 
 Wave 30 added an explicit release-readiness contract for the native Shape Lab
 loop. Wave 31.5 extends it with a headless product UI gate for the redesigned
-Visual Foundry shell. Wave 32 adds a separate HQ asset quality benchmark. The
-intent is to make performance, UI surface, packaging status, and authored
-content quality evidence auditable without claiming unimplemented GPU,
+Visual Foundry shell. Wave 32 adds a separate HQ asset quality benchmark. Wave
+33 adds Foundry kit package validation and review manifests. The intent is to
+make performance, UI surface, packaging status, curated kit metadata, and
+authored content quality evidence auditable without claiming unimplemented GPU,
 installer, signing, app-store, UV, material, rigging, animation, marketplace, or
 photoreal work.
 
@@ -29,9 +30,10 @@ The JSON report records:
 - the Visual Foundry product UI gate. Without `--verify-product-ui-gate`, this
   records the expected direct Visual Foundry shell contract. With
   `--verify-product-ui-gate`, it verifies the default product-visible copy
-  inventory, direct nonblank startup, ten home profiles, the six-card direction
-  board, five direction modes, core profile compile/start evidence, pack/export
-  readiness representation, and disabled-state reasons;
+  inventory, direct nonblank startup, zero default-visible pending kits, ten
+  installed preview-catalog kits, the six-card direction board, five direction
+  modes, core profile compile/start evidence, pack/export readiness
+  representation, and disabled-state reasons;
 - the deterministic CPU preview path and bounded preview-cache capacity;
 - duplicate preview-cache miss coalescing for repeated keys in one batch;
 - Foundry candidate generation proposal bounds and returned-candidate caps;
@@ -74,10 +76,12 @@ thumbnails with RGBA bytes and a camera for every built-in profile. A 1x1
 placeholder pixel is only acceptable in isolated panel helper tests that do not
 have a compiled Foundry document.
 
-The release gate also requires all ten built-in profiles to open through the
-default novice surface with seven primary controls and zero technical surface
-exposure. Deterministic contact sheets and sample export artifacts are produced
-by `shape-cli foundry-visual-benchmark` for demo review.
+The release gate also requires all ten built-in profiles to compile and render
+through the explicit preview/release evidence path with seven primary controls
+and zero technical surface exposure. Default novice catalog exposure is now
+controlled by Wave 33 kit review policy. Deterministic contact sheets and
+sample export artifacts are produced by `shape-cli foundry-visual-benchmark`
+for demo review.
 
 The all-profile thumbnail test is marked `#[ignore]` so it does not slow every
 workspace test run. It must be run explicitly before a release-readiness claim.
@@ -95,7 +99,7 @@ a fast headless gate over the native Visual Foundry product shell. It verifies:
 - no default Legacy, Implicit, Asset Modeling Lab, Modeling Workspace, Advanced
   Recipe, scalar path, provider ID, role binding, fragment/remap, operation ID,
   semantic ID, conformance binding, SDF, compiler, or decompiler copy;
-- ten product home profiles;
+- zero default-visible pending kits and ten installed preview-catalog kits;
 - startup is not blank;
 - Advanced Recipe is not visible in the default path;
 - the direction board reserves six whole-model candidate cards and exposes
@@ -147,6 +151,26 @@ Prototype because fewer than six candidates survive compile, model validation,
 and preview rendering. That does not invalidate release readiness; it records
 catalog quality work separately from the product shell gate.
 
+## Foundry Kit Package Boundary
+
+Wave 33 adds:
+
+```bash
+cargo run -p shape-cli -- foundry-kit validate roman-bridge
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit contact-sheet roman-bridge --out-dir target/foundry-kit/roman-contact
+cargo run -p shape-cli -- foundry-kit package roman-bridge --out-dir target/foundry-kit/roman-package
+cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json
+```
+
+Kit validation checks versioned metadata, refs, compatibility, required role and
+provider-slot coverage, duplicate visible control ownership, the seven-control
+default novice limit, quality evidence, and visibility policy. Built-in kit
+metadata records automated Wave 32 tiers, but default novice exposure remains
+off until manual review approval is recorded. The review command converts an HQ
+quality report into review-manifest evidence after checking that the report
+matches the kit profile/style.
+
 ## Release Candidate Claim
 
 A release-candidate readiness claim is valid only after the archive-first
@@ -167,6 +191,9 @@ cargo test -p shape-render --test foundry_preview
 cargo test -p shape-search --test foundry_candidates
 cargo test -p shape-cli release_readiness
 cargo test -p shape-cli hq_quality
+cargo test -p shape-cli foundry_kit
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast

@@ -86,6 +86,26 @@ The generated `catalog` directory can be built with the existing command:
 cargo run -p shape-cli -- foundry-build --catalog packaged-profile/catalog --document packaged-profile/catalog/foundry-document.json --out-dir build
 ```
 
+## Kit Packaging
+
+Wave 33 adds a curated kit packaging layer above Foundry Author profiles. A
+Foundry kit summarizes the exact authored family/style/provider/control content
+with product-facing metadata, quality gates, compatibility policy, and review
+evidence. It does not replace the exact catalog or compiler path.
+
+Built-in kits can be inspected and packaged with:
+
+```powershell
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit package roman-bridge --out-dir kit-package
+```
+
+Authoring remains technical. The Visual Foundry kit-card layer consumes only
+product-safe data such as display name, quality badge, style name, category
+chips, review status, clay-preview status, and plain-language hidden reasons.
+Pending kits stay hidden from the default novice catalog until review approval
+is recorded.
+
 ## Authoring Rules
 
 Keep the novice surface small. A profile should expose no more than seven

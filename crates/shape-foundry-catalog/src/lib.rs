@@ -38,11 +38,13 @@ use shape_foundry::{
 
 pub mod authoring;
 pub mod expanded_profiles;
+pub mod kits;
 pub mod roman_bridge;
 pub mod scifi_crate;
 pub mod stylized_lamp;
 
 pub use authoring::*;
+pub use kits::*;
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
 const LOCAL_INSTANCE: PartInstanceId = PartInstanceId(91);

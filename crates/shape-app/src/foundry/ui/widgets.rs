@@ -128,6 +128,7 @@ impl<'a> SectionHeaderSpec<'a> {
 pub(crate) struct ProfileCardSpec<'a> {
     pub title: &'a str,
     pub description: &'a str,
+    pub badge: Option<&'a str>,
     pub action: ActionSpec<'a>,
 }
 
@@ -135,6 +136,9 @@ impl<'a> ProfileCardSpec<'a> {
     pub(crate) fn validate(self) -> Result<(), WidgetSpecError> {
         validate_visible_label(self.title)?;
         validate_visible_label(self.description)?;
+        if let Some(badge) = self.badge {
+            validate_visible_label(badge)?;
+        }
         self.action.validate()
     }
 }
@@ -387,6 +391,9 @@ pub(crate) fn status_banner(ui: &mut egui::Ui, spec: StatusBannerSpec<'_>) -> eg
 pub(crate) fn profile_card(ui: &mut egui::Ui, spec: ProfileCardSpec<'_>) -> ActionCardResponse {
     let mut action = None;
     let card = framed_card(ui, false, |ui| {
+        if let Some(badge) = spec.badge {
+            let _ = status_pill(ui, StatusPillSpec::new(badge, StatusTone::Working));
+        }
         ui.strong(spec.title);
         ui.label(RichText::new(spec.description).small());
         ui.add_space(6.0);
@@ -644,6 +651,7 @@ mod tests {
         let profile = ProfileCardSpec {
             title: "Roman Timber Bridge",
             description: "A sturdy bridge family with direction and width choices.",
+            badge: Some("Preview"),
             action: ActionSpec::enabled("Start", ButtonTone::Primary),
         };
         let direction = DirectionCardSpec {

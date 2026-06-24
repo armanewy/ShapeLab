@@ -1,14 +1,15 @@
 //! Headless product UI gate for the Visual Foundry app shell.
 
 use shape_foundry::{ControlKind, compile_foundry_document};
-use shape_foundry_catalog::{
-    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, roman_bridge, scifi_crate,
-    stylized_lamp,
-};
+use shape_foundry_catalog::{FoundryFixtureCatalog, roman_bridge, scifi_crate, stylized_lamp};
 
 use crate::foundry::{
     app::rendered_action_labels_for_default_shell,
-    app::{default_app_launches_on_home, product_visible_strings_for_default_shell},
+    app::{
+        default_app_launches_on_home, default_product_home_profile_count,
+        developer_preview_product_home_profile_count, installed_product_kit_count,
+        product_visible_strings_for_default_shell,
+    },
     panels::directions::{
         DIRECTION_BOARD_MODES, VISIBLE_DIRECTION_CANDIDATE_CARDS, direction_mode_actions,
     },
@@ -22,8 +23,12 @@ pub struct ProductUiGateReport {
     pub app_shell: &'static str,
     /// Whether removed product surfaces are still present in default product copy.
     pub legacy_surfaces_present: bool,
-    /// Number of built-in product profiles shown by the home screen.
+    /// Number of kit-backed templates visible in the default novice home screen.
     pub product_home_profiles: usize,
+    /// Number of installed built-in kits available to preview/developer catalogs.
+    pub installed_kit_count: usize,
+    /// Number of built-in kits visible when preview catalog mode is enabled.
+    pub developer_preview_kit_count: usize,
     /// Whether startup would land on a blank/non-actionable surface.
     pub startup_blank: bool,
     /// Whether Advanced Recipe is exposed in the default product path.
@@ -66,7 +71,9 @@ impl ProductUiGateReport {
             && !self.startup_blank
             && !self.default_advanced_recipe_visible
             && !self.default_raw_technical_terms_visible
-            && self.product_home_profiles == 10
+            && self.product_home_profiles == 0
+            && self.installed_kit_count == 10
+            && self.developer_preview_kit_count == 10
             && self.directions_board_gate
             && self.customize_deck_gate
             && self.pack_gate
@@ -155,7 +162,9 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
             action.request.result_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
                 && action.request.proposal_count >= 24
         });
-    let product_home_profiles = built_in_fixture_catalogs_with_labels().len();
+    let product_home_profiles = default_product_home_profile_count();
+    let installed_kit_count = installed_product_kit_count();
+    let developer_preview_kit_count = developer_preview_product_home_profile_count();
     let core_profiles = core_profile_fixtures()
         .into_iter()
         .map(|(label, fixture)| profile_gate(label, fixture))
@@ -180,6 +189,8 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         app_shell: "direct_visual_foundry",
         legacy_surfaces_present,
         product_home_profiles,
+        installed_kit_count,
+        developer_preview_kit_count,
         startup_blank: !default_app_launches_on_home(),
         default_advanced_recipe_visible,
         default_raw_technical_terms_visible: !forbidden_terms_found.is_empty(),
@@ -256,7 +267,9 @@ mod tests {
 
         assert!(report.passed(), "{report:#?}");
         assert_eq!(report.app_shell, "direct_visual_foundry");
-        assert_eq!(report.product_home_profiles, 10);
+        assert_eq!(report.product_home_profiles, 0);
+        assert_eq!(report.installed_kit_count, 10);
+        assert_eq!(report.developer_preview_kit_count, 10);
         assert_eq!(report.direction_candidate_slots, 6);
         assert_eq!(
             report.direction_modes,

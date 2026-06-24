@@ -8,6 +8,7 @@
 pub(crate) mod app;
 pub(crate) mod commands;
 pub(crate) mod jobs;
+pub(crate) mod kit_view;
 pub(crate) mod panels;
 pub(crate) mod state;
 pub(crate) mod ui;

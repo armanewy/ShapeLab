@@ -244,7 +244,7 @@ fn invalid_candidate_validation_blocks_choose_but_keeps_reject_available() {
     assert_eq!(card.validation_badge.rejection_count, 2);
     assert_eq!(
         card.validation_badge.detail.as_deref(),
-        Some("2 compile rejected")
+        Some("2 build unavailable")
     );
     assert!(card.actions.choose.is_none());
     assert!(matches!(

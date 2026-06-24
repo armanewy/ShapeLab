@@ -73,11 +73,19 @@ pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Recent Projects",
 ];
 
-pub(crate) const FORBIDDEN_PRODUCT_TERMS: [&str; 25] = [
+pub(crate) const FORBIDDEN_PRODUCT_TERMS: &[&str] = &[
     "Legacy Implicit Mode",
     "Asset Modeling Lab",
     "Modeling Workspace",
     "Advanced Recipe",
+    "ProviderPack",
+    "provider pack",
+    "socket",
+    "port ID",
+    "port id",
+    "family facet",
+    "raw recipe",
+    "recipe",
     "raw scalar path",
     "scalar path",
     "scalar",
@@ -99,7 +107,10 @@ pub(crate) const FORBIDDEN_PRODUCT_TERMS: [&str; 25] = [
     "role binding",
     "role provider",
     "conformance binding",
+    "conformance",
 ];
+
+pub(crate) const FORBIDDEN_PRODUCT_TOKEN_TERMS: &[&str] = &["port", "ports", "facet", "facets"];
 
 #[must_use]
 pub(crate) fn default_product_labels() -> Vec<&'static str> {
@@ -118,10 +129,22 @@ pub(crate) fn default_product_labels() -> Vec<&'static str> {
 #[must_use]
 pub(crate) fn first_forbidden_product_term(text: &str) -> Option<&'static str> {
     let lowercase = text.to_ascii_lowercase();
-    FORBIDDEN_PRODUCT_TERMS
+    let phrase = FORBIDDEN_PRODUCT_TERMS
         .iter()
         .copied()
-        .find(|term| lowercase.contains(&term.to_ascii_lowercase()))
+        .find(|term| lowercase.contains(&term.to_ascii_lowercase()));
+    phrase.or_else(|| {
+        FORBIDDEN_PRODUCT_TOKEN_TERMS
+            .iter()
+            .copied()
+            .find(|term| contains_forbidden_token(&lowercase, term))
+    })
+}
+
+fn contains_forbidden_token(lowercase: &str, token: &str) -> bool {
+    lowercase
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|part| part == token)
 }
 
 #[must_use]
@@ -163,5 +186,11 @@ mod tests {
             Some("provider ID")
         );
         assert_eq!(first_forbidden_product_term("Export ready"), None);
+        assert_eq!(first_forbidden_product_term("Export pack"), None);
+        assert_eq!(
+            first_forbidden_product_term("socket port details"),
+            Some("socket")
+        );
+        assert_eq!(first_forbidden_product_term("style facets"), Some("facets"));
     }
 }

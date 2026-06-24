@@ -25,19 +25,21 @@ cargo run -p shape-app --release
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/FOUNDRY_KIT_SYSTEM.md`](docs/FOUNDRY_KIT_SYSTEM.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
 
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- ten built-in Visual Foundry profiles: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
+- ten installed Visual Foundry kit-backed profiles available to preview/developer catalogs: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
 - a Choose screen, direction board, customizer deck, pack workspace, and export flow
 - whole-model candidate cards and whole-model customizer previews
 - reducer-backed locks, undo, save/open, current export, and pack export
 - background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
 - branch-preserving `.shapelab-foundry.json` save/open, grouped OBJ export, and canonical model-package export
 
-Startup shows the Visual Foundry "Choose what to make" home screen.
+Startup shows the Visual Foundry "Choose what to make" home screen. Pending
+kits are hidden from the default novice catalog until review approval is
+recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 
 ## Architecture
 
@@ -132,6 +134,17 @@ The HQ benchmark records clay views, contact sheets, mesh validity, semantic
 parts, candidate survival, visible-control evidence, export/reopen status, and
 unsupported outputs. It separates release readiness from Showcase-quality asset
 approval.
+
+Inspect and package curated Foundry kit metadata:
+
+```bash
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit package roman-bridge --out-dir target/foundry-kit/roman-package
+```
+
+Kits summarize authored family/style/provider/control content, quality gates,
+compatibility policy, and review evidence while keeping the exact Foundry
+compiler path as the geometry source of truth.
 
 Compile and export explicit benchmark assets:
 

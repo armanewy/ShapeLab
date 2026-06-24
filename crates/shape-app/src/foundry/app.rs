@@ -1,6 +1,7 @@
 //! Native desktop host for the Foundry workflow state.
 
 use std::collections::BTreeMap;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -23,6 +24,7 @@ use shape_render::foundry::FoundryPreviewCache;
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
     FoundryPreviewImage,
+    kit_view::built_in_kit_card_views,
     panels::{customize, directions, history, pack},
     run_foundry_job,
     ui::{
@@ -43,6 +45,7 @@ pub(crate) struct FoundryDesktopApp {
     jobs: FoundryJobCoordinator,
     texture_cache: FoundryTextureCache,
     recent_projects: Vec<PathBuf>,
+    developer_preview_catalog: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -67,6 +70,7 @@ const NEED_RESET_REASON: &str = "This control is already at its starting value."
 const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
+const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const ACTION_EXPORT: &str = "Export";
 const ACTION_SAVE: &str = "Save";
 const ACTION_UNDO: &str = "Undo";
@@ -143,6 +147,7 @@ impl Default for FoundryDesktopApp {
             jobs: FoundryJobCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
             recent_projects: Vec::new(),
+            developer_preview_catalog: developer_preview_catalog_enabled(),
         }
     }
 }
@@ -500,18 +505,30 @@ impl FoundryDesktopApp {
             ui.label(RichText::new("Pick a template to generate whole-model directions.").small());
         });
         ui.add_space(14.0);
+        let profiles = product_home_profiles(self.developer_preview_catalog);
+        if profiles.is_empty() {
+            product_empty_state(
+                ui,
+                "No reviewed templates yet",
+                "Open an existing project. Reviewed templates will appear here after approval.",
+            );
+            return;
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.columns(2, |columns| {
-                for (index, (label, fixture)) in built_in_fixture_catalogs_with_labels()
-                    .into_iter()
-                    .enumerate()
-                {
+                for (index, profile) in profiles.into_iter().enumerate() {
                     let column = &mut columns[index % 2];
+                    let description = format!(
+                        "{}. {}",
+                        profile.style_name,
+                        profile_description(&profile.fixture.slug)
+                    );
                     let response = profile_card(
                         column,
                         ProfileCardSpec {
-                            title: label,
-                            description: profile_description(&fixture.slug),
+                            title: profile.label,
+                            description: &description,
+                            badge: Some(&profile.quality_badge),
                             action: ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
                         },
                     );
@@ -520,7 +537,7 @@ impl FoundryDesktopApp {
                         .as_ref()
                         .is_some_and(egui::Response::clicked)
                     {
-                        self.load_fixture(fixture, column.ctx());
+                        self.load_fixture(profile.fixture, column.ctx());
                     }
                     column.add_space(8.0);
                 }
@@ -1298,6 +1315,8 @@ fn product_safe_status(status: &str) -> String {
         "Export complete".to_owned()
     } else if status.contains('\\') || status.contains('/') {
         "Project path needs attention".to_owned()
+    } else if crate::foundry::ui::copy::first_forbidden_product_term(status).is_some() {
+        "Project needs attention".to_owned()
     } else {
         status.to_owned()
     }
@@ -1373,6 +1392,55 @@ fn profile_description(slug: &str) -> &'static str {
         }
         _ => "A built-in asset template ready for visual direction generation.",
     }
+}
+
+struct ProductHomeProfile {
+    label: &'static str,
+    fixture: FoundryFixtureCatalog,
+    quality_badge: String,
+    style_name: String,
+}
+
+fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProfile> {
+    let cards = built_in_kit_card_views();
+    built_in_fixture_catalogs_with_labels()
+        .into_iter()
+        .filter_map(|(label, fixture)| {
+            let card = cards
+                .iter()
+                .find(|card| card.source_profile_slug.as_deref() == Some(fixture.slug.as_str()))?;
+            if card.hidden_by_default && !developer_preview_enabled {
+                return None;
+            }
+            Some(ProductHomeProfile {
+                label,
+                fixture,
+                quality_badge: card.quality_badge.clone(),
+                style_name: card.style_name.clone(),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn default_product_home_profile_count() -> usize {
+    product_home_profiles(false).len()
+}
+
+pub(crate) fn developer_preview_product_home_profile_count() -> usize {
+    product_home_profiles(true).len()
+}
+
+pub(crate) fn installed_product_kit_count() -> usize {
+    built_in_kit_card_views().len()
+}
+
+fn developer_preview_catalog_enabled() -> bool {
+    env::var(PREVIEW_CATALOG_ENV_VAR).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
@@ -1484,15 +1552,13 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Preview is ready to refresh.",
         "Whole-model options",
         "Primary control",
+        "No reviewed templates yet",
+        "Open an existing project. Reviewed templates will appear here after approval.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
         strings.push(step.label);
         strings.push(step.detail);
-    }
-    for (label, fixture) in built_in_fixture_catalogs_with_labels() {
-        strings.push(label);
-        strings.push(profile_description(&fixture.slug));
     }
     strings
 }
@@ -2258,13 +2324,17 @@ mod tests {
     }
 
     #[test]
-    fn product_home_lists_ten_profiles() {
-        let labels = built_in_fixture_catalogs_with_labels()
-            .into_iter()
-            .map(|(label, _)| label)
+    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_ten() {
+        assert_eq!(installed_product_kit_count(), 10);
+        assert_eq!(default_product_home_profile_count(), 0);
+
+        let profiles = product_home_profiles(true);
+        let labels = profiles
+            .iter()
+            .map(|profile| profile.label)
             .collect::<Vec<_>>();
 
-        assert_eq!(labels.len(), 10);
+        assert_eq!(profiles.len(), 10);
         assert!(labels.contains(&"Roman Timber Bridge"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(labels.contains(&"Stylized Furniture Lamp"));
@@ -2580,6 +2650,14 @@ mod tests {
         assert_eq!(
             product_safe_status("Exported 3 pack member(s) with default to C:\\exports\\pack"),
             "Pack export complete"
+        );
+        assert_eq!(
+            product_safe_status("provider socket failed conformance check"),
+            "Project needs attention"
+        );
+        assert_eq!(
+            product_safe_status("recipe fragment remap failed"),
+            "Project needs attention"
         );
     }
 

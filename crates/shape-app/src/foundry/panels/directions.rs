@@ -767,12 +767,12 @@ fn rejection_detail(
 
 fn rejection_label(reason: FoundryCandidateRejectionReason) -> &'static str {
     match reason {
-        FoundryCandidateRejectionReason::EmptyProgram => "empty program",
-        FoundryCandidateRejectionReason::DuplicateProgram => "duplicate program",
-        FoundryCandidateRejectionReason::EditRejected => "edit rejected",
-        FoundryCandidateRejectionReason::CompileRejected => "compile rejected",
-        FoundryCandidateRejectionReason::ConformanceRejected => "conformance rejected",
-        FoundryCandidateRejectionReason::DescriptorRejected => "descriptor rejected",
+        FoundryCandidateRejectionReason::EmptyProgram => "missing useful changes",
+        FoundryCandidateRejectionReason::DuplicateProgram => "too similar",
+        FoundryCandidateRejectionReason::EditRejected => "change unavailable",
+        FoundryCandidateRejectionReason::CompileRejected => "build unavailable",
+        FoundryCandidateRejectionReason::ConformanceRejected => "quality check failed",
+        FoundryCandidateRejectionReason::DescriptorRejected => "visual match too weak",
     }
 }
 
@@ -851,4 +851,30 @@ fn previews_share_fixed_camera(a: &DirectionPreviewView, b: &DirectionPreviewVie
         && b.scope == DirectionImageScope::WholeModel
         && a.camera.is_some()
         && a.camera == b.camera
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::foundry::ui::copy::first_forbidden_product_term;
+
+    #[test]
+    fn rejection_detail_copy_is_product_safe() {
+        let rejections = BTreeMap::from([
+            (FoundryCandidateRejectionReason::EmptyProgram, 1),
+            (FoundryCandidateRejectionReason::DuplicateProgram, 1),
+            (FoundryCandidateRejectionReason::EditRejected, 1),
+            (FoundryCandidateRejectionReason::CompileRejected, 1),
+            (FoundryCandidateRejectionReason::ConformanceRejected, 1),
+            (FoundryCandidateRejectionReason::DescriptorRejected, 1),
+        ]);
+        let detail = rejection_detail(&rejections).expect("rejection detail");
+        assert_eq!(
+            first_forbidden_product_term(&detail),
+            None,
+            "direction rejection detail should be product-safe: {detail}"
+        );
+    }
 }

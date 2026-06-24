@@ -7,7 +7,7 @@ use std::process::Command;
 use shape_decompiler::v3::bend::{BendParameters, evaluate_bend};
 use shape_foundry_catalog::{
     FoundryAuthorPreviewCamera, FoundryAuthorProfilePackage, FoundryFixtureCatalog,
-    headless_fixture_catalogs,
+    built_in_foundry_kit_package, headless_fixture_catalogs,
 };
 use shape_inverse::{
     external_character::external_input_from_character_mesh_artifact,
@@ -97,7 +97,7 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
             .expect("file should be readiness JSON");
     assert_eq!(stdout_report, file_report);
 
-    assert_eq!(stdout_report["schema_version"].as_u64(), Some(4));
+    assert_eq!(stdout_report["schema_version"].as_u64(), Some(5));
     assert_eq!(
         stdout_report["visual_product_gate"]["verification_status"],
         "not-run"
@@ -149,6 +149,14 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     );
     assert_eq!(
         stdout_report["product_ui_gate"]["product_home_profiles"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["installed_kit_count"].as_u64(),
+        Some(10)
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["developer_preview_kit_count"].as_u64(),
         Some(10)
     );
     assert_eq!(stdout_report["product_ui_gate"]["startup_blank"], false);
@@ -213,7 +221,7 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
     );
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
-    assert_eq!(report["schema_version"].as_u64(), Some(4));
+    assert_eq!(report["schema_version"].as_u64(), Some(5));
     assert_eq!(
         report["visual_product_gate"]["verification_status"],
         "verified"
@@ -269,12 +277,14 @@ fn release_readiness_verifies_product_ui_gate_when_requested() {
     );
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
-    assert_eq!(report["schema_version"].as_u64(), Some(4));
+    assert_eq!(report["schema_version"].as_u64(), Some(5));
     let gate = &report["product_ui_gate"];
     assert_eq!(gate["verification_status"], "verified");
     assert_eq!(gate["app_shell"], "direct_visual_foundry");
     assert_eq!(gate["legacy_surfaces_present"], false);
-    assert_eq!(gate["product_home_profiles"].as_u64(), Some(10));
+    assert_eq!(gate["product_home_profiles"].as_u64(), Some(0));
+    assert_eq!(gate["installed_kit_count"].as_u64(), Some(10));
+    assert_eq!(gate["developer_preview_kit_count"].as_u64(), Some(10));
     assert_eq!(gate["startup_blank"], false);
     assert_eq!(gate["default_advanced_recipe_visible"], false);
     assert_eq!(gate["default_raw_technical_terms_visible"], false);
@@ -746,6 +756,287 @@ fn foundry_author_profile_cli_creates_validates_previews_and_packages() {
         package_dir
             .join("catalog/stylized-lamp-family.json")
             .exists()
+    );
+}
+
+#[test]
+fn foundry_kit_cli_inspects_packages_and_rejects_incoherent_metadata() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let package_dir = temp_dir.path().join("kit-package");
+
+    let inspect = Command::new(exe)
+        .args(["foundry-kit", "inspect", "roman-bridge"])
+        .output()
+        .expect("run shape-cli foundry-kit inspect");
+    assert!(
+        inspect.status.success(),
+        "inspect failed: {}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&inspect.stdout);
+    assert!(stdout.contains("Foundry kit: Roman Timber Bridge"));
+    assert!(stdout.contains("quality tier: Prototype"));
+    assert!(stdout.contains("default catalog: hidden"));
+
+    let package_status = Command::new(exe)
+        .args(["foundry-kit", "package", "roman-bridge", "--out-dir"])
+        .arg(&package_dir)
+        .status()
+        .expect("run shape-cli foundry-kit package");
+    assert!(package_status.success());
+    for name in [
+        "foundry-kit-package.json",
+        "kit-manifest.json",
+        "family-blueprint.json",
+        "provider-pack.json",
+        "style-pack.json",
+        "control-profile.json",
+        "candidate-strategy-pack.json",
+        "quality-gate-profile.json",
+        "compatibility-matrix.json",
+        "review-manifest.json",
+        "kit-catalog-manifest.json",
+        "build-proof/preview.png",
+        "build-proof/model-package/asset-manifest.json",
+    ] {
+        let path = package_dir.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+
+    let validate_status = Command::new(exe)
+        .args(["foundry-kit", "validate"])
+        .arg(package_dir.join("foundry-kit-package.json"))
+        .status()
+        .expect("run shape-cli foundry-kit validate");
+    assert!(validate_status.success());
+
+    let mut invalid_package = built_in_foundry_kit_package("roman-bridge").expect("kit package");
+    invalid_package.kit.provider_pack_id = "missing-provider-pack".to_owned();
+    let invalid_path = temp_dir.path().join("invalid-kit.json");
+    fs::write(
+        &invalid_path,
+        serde_json::to_string_pretty(&invalid_package).unwrap(),
+    )
+    .unwrap();
+    let invalid = Command::new(exe)
+        .args(["foundry-kit", "validate"])
+        .arg(&invalid_path)
+        .output()
+        .expect("run shape-cli foundry-kit validate invalid");
+    assert!(!invalid.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("missing_provider_pack_ref"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&invalid.stderr)
+    );
+}
+
+#[test]
+fn foundry_kit_cli_renders_contact_sheet_for_builtin() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("contact-sheet");
+
+    let status = Command::new(exe)
+        .args(["foundry-kit", "contact-sheet", "sci-fi-crate", "--out-dir"])
+        .arg(&out_dir)
+        .status()
+        .expect("run shape-cli foundry-kit contact-sheet");
+    assert!(status.success());
+    for name in [
+        "front.png",
+        "three-quarter.png",
+        "side.png",
+        "back.png",
+        "wireframe.png",
+        "contact-sheet.png",
+        "foundry-kit-package.json",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "{name} should exist");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "{name} is empty"
+        );
+    }
+}
+
+#[test]
+fn foundry_kit_build_proof_rejects_forged_builtin_source_package() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let mut forged_package = built_in_foundry_kit_package("roman-bridge").expect("bridge kit");
+    forged_package.kit.display_name = "Forged Bridge Kit".to_owned();
+    let kit_path = temp_dir.path().join("forged-foundry-kit-package.json");
+    fs::write(
+        &kit_path,
+        serde_json::to_string_pretty(&forged_package).unwrap(),
+    )
+    .unwrap();
+
+    let validate = Command::new(exe)
+        .args(["foundry-kit", "validate"])
+        .arg(&kit_path)
+        .status()
+        .expect("run shape-cli foundry-kit validate forged package");
+    assert!(
+        validate.success(),
+        "forged metadata remains internally valid"
+    );
+
+    let preview = Command::new(exe)
+        .args(["foundry-kit", "preview"])
+        .arg(&kit_path)
+        .args(["--out-dir"])
+        .arg(temp_dir.path().join("preview"))
+        .output()
+        .expect("run shape-cli foundry-kit preview forged package");
+    assert!(!preview.status.success());
+    assert!(
+        String::from_utf8_lossy(&preview.stderr).contains("canonical built-in kit package"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+
+    let mut forged_review_package =
+        built_in_foundry_kit_package("roman-bridge").expect("bridge kit");
+    forged_review_package.review_manifest.visual_review_notes =
+        vec!["Forged review evidence.".to_owned()];
+    let forged_review_path = temp_dir
+        .path()
+        .join("forged-review-foundry-kit-package.json");
+    fs::write(
+        &forged_review_path,
+        serde_json::to_string_pretty(&forged_review_package).unwrap(),
+    )
+    .unwrap();
+    let package = Command::new(exe)
+        .args(["foundry-kit", "package"])
+        .arg(&forged_review_path)
+        .args(["--out-dir"])
+        .arg(temp_dir.path().join("forged-review-package"))
+        .output()
+        .expect("run shape-cli foundry-kit package forged review package");
+    assert!(!package.status.success());
+    assert!(
+        String::from_utf8_lossy(&package.stderr).contains("canonical built-in kit package"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&package.stderr)
+    );
+}
+
+#[test]
+fn foundry_kit_review_rejects_mismatched_quality_report_and_clears_stale_contact_sheet() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let mismatched_report = temp_dir.path().join("mismatched-quality-report.json");
+    fs::write(
+        &mismatched_report,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "profile_id": "sci-fi-crate",
+            "quality_tier_requested": "usable",
+            "quality_tier_achieved": "usable",
+            "human_approval_status": "approved",
+            "adversarial_review_status": "pending",
+            "contact_sheet_available": true,
+            "quality_tier_blockers": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mismatched_out = temp_dir.path().join("mismatched-review.json");
+    let mismatched = Command::new(exe)
+        .args(["foundry-kit", "review", "roman-bridge", "--quality-report"])
+        .arg(&mismatched_report)
+        .args(["--out"])
+        .arg(&mismatched_out)
+        .output()
+        .expect("run mismatched foundry-kit review");
+    assert!(!mismatched.status.success());
+    assert!(
+        String::from_utf8_lossy(&mismatched.stderr).contains("does not match kit source profile"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&mismatched.stderr)
+    );
+
+    let missing_contact_report = temp_dir.path().join("missing-contact-quality-report.json");
+    fs::write(
+        &missing_contact_report,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "profile_id": "sci-fi-crate",
+            "quality_tier_requested": "usable",
+            "quality_tier_achieved": "usable",
+            "human_approval_status": "approved",
+            "adversarial_review_status": "pending",
+            "contact_sheet_available": true,
+            "quality_tier_blockers": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let missing_contact_out = temp_dir.path().join("missing-contact-review.json");
+    let missing_contact = Command::new(exe)
+        .args(["foundry-kit", "review", "sci-fi-crate", "--quality-report"])
+        .arg(&missing_contact_report)
+        .args(["--out"])
+        .arg(&missing_contact_out)
+        .output()
+        .expect("run foundry-kit review without claimed contact sheet");
+    assert!(!missing_contact.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing_contact.stderr).contains("contact_sheet_available"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&missing_contact.stderr)
+    );
+
+    let crate_package = built_in_foundry_kit_package("sci-fi-crate").expect("crate kit");
+    assert!(
+        !crate_package.review_manifest.contact_sheet_paths.is_empty(),
+        "fixture should start with automated contact sheet metadata"
+    );
+    let no_contact_report = temp_dir.path().join("no-contact-quality-report.json");
+    fs::write(
+        &no_contact_report,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "profile_id": "sci-fi-crate",
+            "kit_id": crate_package.style_pack.style_id,
+            "style_id": crate_package.style_pack.style_id,
+            "quality_tier_requested": "usable",
+            "quality_tier_achieved": "prototype",
+            "human_approval_status": "pending",
+            "adversarial_review_status": "pending",
+            "contact_sheet_available": false,
+            "quality_tier_blockers": ["Contact sheet missing"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let review_out = temp_dir.path().join("review-no-contact.json");
+    let review = Command::new(exe)
+        .args(["foundry-kit", "review", "sci-fi-crate", "--quality-report"])
+        .arg(&no_contact_report)
+        .args(["--out"])
+        .arg(&review_out)
+        .output()
+        .expect("run foundry-kit review without contact sheet");
+    assert!(
+        review.status.success(),
+        "review failed: {}",
+        String::from_utf8_lossy(&review.stderr)
+    );
+    let review_manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&review_out).unwrap()).unwrap();
+    assert!(
+        review_manifest["contact_sheet_paths"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "stale contact-sheet paths should be cleared"
     );
 }
 

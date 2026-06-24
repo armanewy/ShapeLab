@@ -16,10 +16,11 @@ editability.
 ## What To Emphasize
 
 - Visual Foundry is the primary novice-facing product surface.
-- The ten current built-in profiles are Roman Timber Bridge, Sci-Fi Industrial
-  Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered
-  Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and
-  Storybook Tree.
+- The ten current built-in kit-backed profiles are installed for preview and
+  QA: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp,
+  Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding
+  Signpost, Workshop Chair, Market Handcart, and Storybook Tree. Default novice
+  exposure remains gated by kit review approval.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
 - Release-readiness reports can verify the direct Visual Foundry shell contract
@@ -28,6 +29,8 @@ editability.
 - HQ quality reports can baseline authored content with clay views, contact
   sheets, mesh validity, semantic parts, candidate survival, visible-control
   evidence, export/reopen status, and unsupported-output records.
+- Foundry kits package curated authored content with review evidence and
+  visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.
 - External import analysis is useful when it explains why exact recovery is or
   is not eligible.
@@ -95,6 +98,8 @@ The strongest product proof remains:
 - Export a pack with zero technical surface exposure.
 - Complete the UI manual gate screenshots at 1280x800 and 1440x900.
 - Preserve HQ quality evidence for any kit claimed as Usable or Showcase.
+- Validate, inspect, and package curated kits before exposing them in the
+  default novice catalog.
 
 ## Decision Rule
 

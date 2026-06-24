@@ -105,8 +105,9 @@ Before claiming release readiness for UI changes:
 
 - Run `cargo run -p shape-cli -- release-readiness --verify-product-ui-gate`.
 - Confirm the product UI gate reports `app_shell: direct_visual_foundry`,
-  `startup_blank: false`, ten home profiles, no default Advanced Recipe, no raw
-  technical terms, and pass states for directions, customize, pack, and export.
+  `startup_blank: false`, zero default-visible pending kits, ten installed
+  preview-catalog kits, no default Advanced Recipe, no raw technical terms, and
+  pass states for directions, customize, pack, and export.
 - Complete [`FOUNDRY_UI_MANUAL_GATE.md`](FOUNDRY_UI_MANUAL_GATE.md) with
   required screenshots for launch, profile selection, directions, customize,
   pack, export, disabled reasons, status, 1280x800, and 1440x900. Notes may add

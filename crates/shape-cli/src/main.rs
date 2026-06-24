@@ -74,6 +74,7 @@ use shape_search::foundry::{
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
+mod foundry_kit_cli;
 mod foundry_visual_benchmark;
 mod hq_quality;
 
@@ -89,7 +90,7 @@ const CONTACT_CARD_SIZE: u32 = 256;
 const CONTACT_LABEL_HEIGHT: u32 = 28;
 const CONTACT_PADDING: u32 = 12;
 const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;
-const RELEASE_READINESS_SCHEMA_VERSION: u32 = 4;
+const RELEASE_READINESS_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
@@ -129,6 +130,8 @@ enum Command {
     ImportTriageCharacter(ImportTriageCharacterArgs),
     /// Render the cross-domain headless visual Foundry benchmark.
     FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
+    /// Validate, inspect, preview, package, and review curated Foundry kits.
+    FoundryKit(foundry_kit_cli::FoundryKitArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Emit an HQ asset quality report and contact-sheet evidence.
@@ -408,6 +411,8 @@ struct ReleaseProductUiGate {
     app_shell: &'static str,
     legacy_surfaces_present: bool,
     product_home_profiles: usize,
+    installed_kit_count: usize,
+    developer_preview_kit_count: usize,
     startup_blank: bool,
     default_advanced_recipe_visible: bool,
     default_raw_technical_terms_visible: bool,
@@ -633,6 +638,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryVisualBenchmark(args) => {
             foundry_visual_benchmark::run_foundry_visual_benchmark(args)
         }
+        Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
         Command::Decompile(args) => run_decompile(args),
@@ -1321,7 +1327,7 @@ fn release_readiness_report(
 
     Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
-        milestone: "Wave 31.5 - Visual Foundry Product UI Gate",
+        milestone: "Wave 33 - Foundry Kit Visibility Gate",
         visual_product_gate,
         product_ui_gate,
         performance: ReleasePerformanceReadiness {
@@ -1365,6 +1371,9 @@ fn release_readiness_report(
             "cargo test -p shape-render --test foundry_preview",
             "cargo test -p shape-search --test foundry_candidates",
             "cargo test -p shape-cli release_readiness",
+            "cargo test -p shape-cli foundry_kit",
+            "cargo run -p shape-cli -- foundry-kit inspect roman-bridge",
+            "cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json",
             "cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored",
             "cargo run -p shape-cli -- release-readiness --verify-product-ui-gate",
             "cargo clippy --workspace --all-targets -- -D warnings",
@@ -1380,7 +1389,9 @@ fn unverified_release_product_ui_gate() -> ReleaseProductUiGate {
         verification_command: "shape-cli release-readiness --verify-product-ui-gate",
         app_shell: "direct_visual_foundry",
         legacy_surfaces_present: false,
-        product_home_profiles: 10,
+        product_home_profiles: 0,
+        installed_kit_count: 10,
+        developer_preview_kit_count: 10,
         startup_blank: false,
         default_advanced_recipe_visible: false,
         default_raw_technical_terms_visible: false,
@@ -1407,6 +1418,8 @@ fn verified_release_product_ui_gate() -> anyhow::Result<ReleaseProductUiGate> {
         app_shell: report.app_shell,
         legacy_surfaces_present: report.legacy_surfaces_present,
         product_home_profiles: report.product_home_profiles,
+        installed_kit_count: report.installed_kit_count,
+        developer_preview_kit_count: report.developer_preview_kit_count,
         startup_blank: report.startup_blank,
         default_advanced_recipe_visible: report.default_advanced_recipe_visible,
         default_raw_technical_terms_visible: report.default_raw_technical_terms_visible,
