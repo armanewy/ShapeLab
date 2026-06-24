@@ -30,3 +30,9 @@ Persist user choices as pairwise comparisons and use them to bias future candida
 ## Optional DCC Adapter
 
 Add an export/import adapter for a DCC only after the core model remains useful without it. The adapter should project Shape Lab state outward rather than making external scene files the source of truth.
+
+Wave 28 adds the output side of this boundary to canonical model packages:
+`dcc-adapter.json`, `dcc_rebuild.py`, and `dcc-verification.json`. These sidecars
+project semantic parts, collections, metadata, and variant-control labels outward
+while recording that DCC scenes are not source documents and edited DCC scene
+import is unsupported.

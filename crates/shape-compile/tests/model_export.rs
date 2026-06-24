@@ -10,9 +10,11 @@ use shape_asset::{
     PartInstance, PartInstanceId, RegionId, SurfaceRegionSpec, SurfaceRole, Transform3,
 };
 use shape_compile::export::{
-    ASSET_MANIFEST_FILE, CanonicalPartMesh, ExportError, PROVENANCE_FILE, RECIPE_FILE,
-    VALIDATION_FILE, encode_part_meshbin, export_counts, ordered_parts, read_model_package,
-    read_part_meshbin, verify_model_package, write_grouped_obj_export, write_model_package,
+    ASSET_MANIFEST_FILE, CanonicalPartMesh, DCC_ADAPTER_MANIFEST_FILE, DCC_REBUILD_SCRIPT_FILE,
+    DCC_VERIFICATION_FILE, DccAdapterOptions, DccVariantControl, ExportError, PROVENANCE_FILE,
+    RECIPE_FILE, VALIDATION_FILE, encode_part_meshbin, export_counts, ordered_parts,
+    read_model_package, read_part_meshbin, verify_model_package, write_grouped_obj_export,
+    write_model_package, write_model_package_with_dcc_options,
 };
 use shape_compile::{AssetArtifact, compile_asset};
 
@@ -219,6 +221,288 @@ fn region_provenance_and_validation_sidecars_are_preserved() {
     assert!(package_dir.join(RECIPE_FILE).exists());
     assert!(package_dir.join(PROVENANCE_FILE).exists());
     assert!(package_dir.join(VALIDATION_FILE).exists());
+    assert!(package_dir.join(DCC_ADAPTER_MANIFEST_FILE).exists());
+    assert!(package_dir.join(DCC_REBUILD_SCRIPT_FILE).exists());
+    assert!(package_dir.join(DCC_VERIFICATION_FILE).exists());
+}
+
+#[test]
+fn dcc_adapter_sidecars_project_package_outward_not_source_of_truth() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("dcc-sidecars");
+
+    write_model_package(&recipe, &artifact, &package_dir).expect("package");
+    let package = read_model_package(&package_dir).expect("package should verify");
+
+    assert_eq!(
+        package.dcc_adapter.source_recipe_hash,
+        artifact.source_recipe_hash
+    );
+    assert!(
+        !package
+            .dcc_adapter
+            .source_of_truth
+            .dcc_scene_is_source_of_truth
+    );
+    assert!(
+        !package
+            .dcc_adapter
+            .source_of_truth
+            .external_scene_import_supported
+    );
+    assert_eq!(
+        package.dcc_adapter.files.asset_manifest,
+        ASSET_MANIFEST_FILE
+    );
+    assert_eq!(package.dcc_adapter.semantic_parts.len(), 2);
+    assert!(package.dcc_adapter.semantic_parts.iter().any(|part| {
+        part.part_id == "part-001"
+            && part.object_name == "part_001_base_plate"
+            && part
+                .metadata
+                .iter()
+                .any(|field| field.key == "shape_lab_instance_id" && field.value == "1")
+    }));
+    assert!(package.dcc_adapter.collections.iter().any(|collection| {
+        collection.id == "shape_lab_asset"
+            && collection.part_ids == vec!["part-001".to_owned(), "part-002".to_owned()]
+    }));
+    assert!(package.dcc_verification.canonical_package_verified);
+    assert!(!package.dcc_verification.dcc_scene_is_source_of_truth);
+    assert!(!package.dcc_verification.external_scene_import_supported);
+    assert_eq!(package.dcc_verification.semantic_part_count, 2);
+}
+
+#[test]
+fn legacy_schema_one_package_without_dcc_sidecars_still_reads() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("legacy-no-dcc");
+    let paths = write_model_package(&recipe, &artifact, &package_dir).expect("package");
+    fs::remove_file(&paths.dcc_adapter).expect("remove dcc adapter");
+    fs::remove_file(&paths.dcc_rebuild).expect("remove dcc rebuild");
+    fs::remove_file(&paths.dcc_verification).expect("remove dcc verification");
+    strip_dcc_manifest_file_fields(&paths.manifest);
+
+    let package = read_model_package(&package_dir).expect("legacy package should verify");
+
+    assert_eq!(
+        package.dcc_adapter.source_recipe_hash,
+        artifact.source_recipe_hash
+    );
+    assert_eq!(package.dcc_adapter.semantic_parts.len(), 2);
+    assert!(package.dcc_adapter.variant_controls.is_empty());
+    assert!(package.dcc_verification.canonical_package_verified);
+}
+
+#[test]
+fn declared_dcc_sidecars_are_required_and_bound_to_manifest() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("dcc-integrity");
+    let paths = write_model_package(&recipe, &artifact, &package_dir).expect("package");
+
+    fs::remove_file(&paths.dcc_adapter).expect("remove declared dcc adapter");
+    assert!(read_model_package(&package_dir).is_err());
+
+    write_model_package(&recipe, &artifact, &package_dir).expect("rewrite package");
+    let mut adapter: Value =
+        serde_json::from_slice(&fs::read(&paths.dcc_adapter).expect("read dcc adapter"))
+            .expect("adapter json");
+    adapter["semantic_parts"][0]["object_name"] = Value::String("tampered".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+    let error = read_model_package(&package_dir).expect_err("tampered adapter should fail");
+    match error {
+        ExportError::InvalidPackage { message, .. } => {
+            assert!(message.contains("DCC adapter projection"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn dcc_adapter_file_targets_must_remain_canonical() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("dcc-file-targets");
+    let paths = write_model_package(&recipe, &artifact, &package_dir).expect("package");
+    let mut adapter: Value =
+        serde_json::from_slice(&fs::read(&paths.dcc_adapter).expect("read dcc adapter"))
+            .expect("adapter json");
+    adapter["files"]["asset_manifest"] = Value::String("alternate-manifest.json".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+
+    let error = read_model_package(&package_dir).expect_err("redirected adapter should fail");
+    match error {
+        ExportError::InvalidPackage { message, .. } => {
+            assert!(message.contains("canonical package sidecar paths"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn dcc_variant_controls_are_metadata_only() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("dcc-controls");
+    let options = DccAdapterOptions {
+        variant_controls: vec![DccVariantControl {
+            id: "span_length".to_owned(),
+            label: "Span Length".to_owned(),
+            value: "wide".to_owned(),
+            locked: true,
+        }],
+    };
+
+    let paths = write_model_package_with_dcc_options(&recipe, &artifact, &package_dir, &options)
+        .expect("package");
+    let package = read_model_package(&package_dir).expect("package should verify");
+
+    assert_eq!(
+        package.dcc_adapter.variant_controls,
+        options.variant_controls
+    );
+    assert_eq!(package.dcc_verification.variant_control_count, 1);
+    assert_eq!(package.recipe, recipe);
+
+    let mut adapter: Value =
+        serde_json::from_slice(&fs::read(&paths.dcc_adapter).expect("read dcc adapter"))
+            .expect("adapter json");
+    adapter["variant_controls"][0]["label"] = Value::String("Tampered Label".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+
+    let error = read_model_package(&package_dir).expect_err("tampered controls should fail");
+    match error {
+        ExportError::InvalidPackage { message, .. } => {
+            assert!(message.contains("DCC verification report"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn dcc_rebuild_script_has_valid_syntax_and_emits_projection_report() {
+    let (recipe, artifact) = compiled_fixture();
+    let package_dir = temp_dir("dcc-rebuild");
+    let out_dir = temp_dir("dcc-rebuild-out");
+    let paths = write_model_package(&recipe, &artifact, &package_dir).expect("package");
+    let python = python_command();
+    let original_adapter = fs::read(&paths.dcc_adapter).expect("read original dcc adapter");
+
+    let compile = Command::new(&python.0)
+        .args(&python.1)
+        .arg("-m")
+        .arg("py_compile")
+        .arg(&paths.dcc_rebuild)
+        .output()
+        .expect("run python py_compile");
+    assert!(
+        compile.status.success(),
+        "py_compile failed: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+
+    let output = Command::new(&python.0)
+        .args(&python.1)
+        .arg(&paths.dcc_rebuild)
+        .arg("--package-dir")
+        .arg(&package_dir)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("run dcc rebuild script");
+    assert!(
+        output.status.success(),
+        "script failed stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"semantic_parts\": 2"));
+    let report =
+        fs::read_to_string(out_dir.join("dcc_projection_report.json")).expect("projection report");
+    assert!(report.contains("\"dcc_scene_is_source_of_truth\": false"));
+    assert!(report.contains("\"external_scene_import_supported\": false"));
+
+    let mut adapter: Value = serde_json::from_slice(&original_adapter).expect("adapter json");
+    adapter["semantic_parts"][0]["object_name"] = Value::String("tampered".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+    let output = Command::new(&python.0)
+        .args(&python.1)
+        .arg(&paths.dcc_rebuild)
+        .arg("--package-dir")
+        .arg(&package_dir)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("run tampered dcc rebuild script");
+    assert!(
+        !output.status.success(),
+        "semantic tamper unexpectedly passed stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::write(&paths.dcc_adapter, &original_adapter).expect("restore dcc adapter");
+    let mut adapter: Value = serde_json::from_slice(&original_adapter).expect("adapter json");
+    adapter["collections"][0]["part_ids"][0] = Value::String("part-999".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+    let output = Command::new(&python.0)
+        .args(&python.1)
+        .arg(&paths.dcc_rebuild)
+        .arg("--package-dir")
+        .arg(&package_dir)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("run tampered dcc rebuild script");
+    assert!(
+        !output.status.success(),
+        "collection tamper unexpectedly passed stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::write(&paths.dcc_adapter, &original_adapter).expect("restore dcc adapter");
+    let mut adapter: Value = serde_json::from_slice(&original_adapter).expect("adapter json");
+    adapter["files"]["asset_manifest"] = Value::String("alternate-manifest.json".to_owned());
+    fs::write(
+        &paths.dcc_adapter,
+        serde_json::to_string_pretty(&adapter).expect("adapter encode"),
+    )
+    .expect("write tampered adapter");
+    let output = Command::new(&python.0)
+        .args(&python.1)
+        .arg(&paths.dcc_rebuild)
+        .arg("--package-dir")
+        .arg(&package_dir)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .expect("run tampered dcc rebuild script");
+    assert!(
+        !output.status.success(),
+        "tampered script unexpectedly passed stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -359,6 +643,23 @@ fn collect_files_inner(root: &Path, current: &Path, files: &mut BTreeMap<String,
             files.insert(relative, fs::read(path).expect("read file"));
         }
     }
+}
+
+fn strip_dcc_manifest_file_fields(manifest_path: &Path) {
+    let mut manifest: Value =
+        serde_json::from_slice(&fs::read(manifest_path).expect("read manifest"))
+            .expect("manifest json");
+    let files = manifest["files"]
+        .as_object_mut()
+        .expect("manifest files object");
+    files.remove("dcc_adapter");
+    files.remove("dcc_rebuild");
+    files.remove("dcc_verification");
+    fs::write(
+        manifest_path,
+        serde_json::to_string_pretty(&manifest).expect("manifest encode"),
+    )
+    .expect("write legacy manifest");
 }
 
 fn python_command() -> (String, Vec<String>) {

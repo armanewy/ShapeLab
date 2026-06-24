@@ -10,10 +10,18 @@ use thiserror::Error;
 use crate::{AssetArtifact, CompiledPart};
 
 mod blender;
+mod dcc;
 mod obj;
 mod package;
 
 pub use blender::blender_reconstruction_script;
+pub use dcc::{
+    DCC_ADAPTER_MANIFEST_FILE, DCC_ADAPTER_SCHEMA_VERSION, DCC_REBUILD_SCRIPT_FILE,
+    DCC_VERIFICATION_FILE, DccAdapterFiles, DccAdapterManifest, DccAdapterOptions,
+    DccAdapterVerificationReport, DccCollection, DccMetadataField, DccSemanticPart,
+    DccSourceOfTruth, DccVariantControl, dcc_adapter_manifest, dcc_adapter_verification_report,
+    dcc_rebuild_script,
+};
 pub use obj::{
     GroupedObjExport, GroupedObjObjectReport, GroupedObjReport, write_grouped_obj_export,
 };
@@ -21,7 +29,8 @@ pub use package::{
     AssetManifest, CanonicalPartMesh, ModelExportPackage, ModelExportPackageFiles,
     ModelExportPackagePaths, ModelExportValidationReport, ModelExportVerificationReport,
     PartManifest, PartRegionManifest, decode_part_meshbin, encode_part_meshbin, read_model_package,
-    read_part_meshbin, verify_model_package, write_model_package, write_part_meshbin,
+    read_part_meshbin, verify_model_package, write_model_package,
+    write_model_package_with_dcc_options, write_part_meshbin,
 };
 
 /// Schema version for the explicit model export package.

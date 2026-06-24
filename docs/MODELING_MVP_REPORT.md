@@ -37,7 +37,7 @@ The MVP uses the explicit asset recipe path only. It compiles authored polygon p
   - raw asset recipe load fallback for earlier asset JSON files
 - Export:
   - grouped OBJ with stable part object/group names
-  - canonical package with manifest, recipe, provenance, compile/model validation, Blender reconstruction script, and part meshbin payloads
+  - canonical package with manifest, recipe, provenance, compile/model validation, Blender reconstruction script, DCC output adapter sidecars, and part meshbin payloads
 
 ## Template Quality
 

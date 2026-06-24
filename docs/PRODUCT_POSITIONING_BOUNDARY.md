@@ -27,6 +27,8 @@ editability.
   is not eligible.
 - Optional LLM support is only a command adapter over existing typed Foundry
   commands, not text-to-geometry or model-specific core code.
+- DCC support is an output projection from canonical Shape Lab packages, not an
+  external scene source of truth.
 
 ## What Not To Promise
 
@@ -36,6 +38,7 @@ editability.
 - Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
 - UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
 - Natural-language geometry generation or direct recipe mutation by an LLM.
+- Editing a DCC scene and expecting Shape Lab to infer the semantic source.
 - General character production, rigged characters, or garment simulation.
 
 ## Approved Labels

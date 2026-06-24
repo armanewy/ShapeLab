@@ -11,6 +11,11 @@ use crate::{
     validation::{ValidationIssue, validate_model, validation_config_from_recipe},
 };
 
+use super::dcc::{
+    DCC_ADAPTER_MANIFEST_FILE, DCC_REBUILD_SCRIPT_FILE, DCC_VERIFICATION_FILE, DccAdapterManifest,
+    DccAdapterOptions, DccAdapterVerificationReport, dcc_adapter_manifest,
+    dcc_adapter_verification_report, validate_dcc_adapter, write_dcc_adapter_files,
+};
 use super::{
     ASSET_MANIFEST_FILE, BLENDER_RECONSTRUCT_FILE, ExportCounts, ExportError,
     MODEL_EXPORT_SCHEMA_VERSION, PARTS_DIR, PROVENANCE_FILE, RECIPE_FILE, VALIDATION_FILE,
@@ -55,6 +60,15 @@ pub struct ModelExportPackageFiles {
     pub validation: String,
     /// Blender reconstruction script.
     pub blender_reconstruct: String,
+    /// DCC output adapter manifest.
+    #[serde(default = "default_dcc_adapter_manifest_file")]
+    pub dcc_adapter: String,
+    /// DCC output adapter rebuild helper.
+    #[serde(default = "default_dcc_rebuild_script_file")]
+    pub dcc_rebuild: String,
+    /// DCC output adapter verification sidecar.
+    #[serde(default = "default_dcc_verification_file")]
+    pub dcc_verification: String,
 }
 
 impl Default for ModelExportPackageFiles {
@@ -64,6 +78,9 @@ impl Default for ModelExportPackageFiles {
             provenance: PROVENANCE_FILE.to_owned(),
             validation: VALIDATION_FILE.to_owned(),
             blender_reconstruct: BLENDER_RECONSTRUCT_FILE.to_owned(),
+            dcc_adapter: DCC_ADAPTER_MANIFEST_FILE.to_owned(),
+            dcc_rebuild: DCC_REBUILD_SCRIPT_FILE.to_owned(),
+            dcc_verification: DCC_VERIFICATION_FILE.to_owned(),
         }
     }
 }
@@ -159,6 +176,12 @@ pub struct ModelExportPackagePaths {
     pub validation: PathBuf,
     /// Blender reconstruction script.
     pub blender_reconstruct: PathBuf,
+    /// DCC output adapter manifest.
+    pub dcc_adapter: PathBuf,
+    /// DCC output adapter rebuild helper.
+    pub dcc_rebuild: PathBuf,
+    /// DCC output adapter verification sidecar.
+    pub dcc_verification: PathBuf,
     /// Part meshbin paths.
     pub parts: Vec<PathBuf>,
 }
@@ -174,6 +197,10 @@ pub struct ModelExportPackage {
     pub provenance: ProvenanceReport,
     /// Validation sidecar.
     pub validation: ModelExportValidationReport,
+    /// DCC output adapter manifest.
+    pub dcc_adapter: DccAdapterManifest,
+    /// DCC output adapter verification sidecar.
+    pub dcc_verification: DccAdapterVerificationReport,
     /// Decoded canonical part meshes.
     pub parts: Vec<CanonicalPartMesh>,
 }
@@ -340,6 +367,16 @@ pub fn write_model_package(
     artifact: &AssetArtifact,
     out_dir: impl AsRef<Path>,
 ) -> Result<ModelExportPackagePaths, ExportError> {
+    write_model_package_with_dcc_options(recipe, artifact, out_dir, &DccAdapterOptions::default())
+}
+
+/// Write an explicit model package directory with DCC adapter metadata options.
+pub fn write_model_package_with_dcc_options(
+    recipe: &AssetRecipe,
+    artifact: &AssetArtifact,
+    out_dir: impl AsRef<Path>,
+    dcc_options: &DccAdapterOptions,
+) -> Result<ModelExportPackagePaths, ExportError> {
     let out_dir = out_dir.as_ref();
     fs::create_dir_all(out_dir).map_err(|source| path_io(out_dir, source))?;
     let parts_dir = package_path(out_dir, PARTS_DIR);
@@ -408,6 +445,11 @@ pub fn write_model_package(
     write_json(&validation_path, &validation)?;
     write_text(&blender_path, blender_reconstruction_script())?;
     write_json(&manifest_path, &manifest)?;
+    let (_dcc_adapter, _dcc_verification) =
+        write_dcc_adapter_files(out_dir, &manifest, dcc_options)?;
+    let dcc_adapter_path = package_path(out_dir, DCC_ADAPTER_MANIFEST_FILE);
+    let dcc_rebuild_path = package_path(out_dir, DCC_REBUILD_SCRIPT_FILE);
+    let dcc_verification_path = package_path(out_dir, DCC_VERIFICATION_FILE);
 
     Ok(ModelExportPackagePaths {
         directory: out_dir.to_path_buf(),
@@ -416,6 +458,9 @@ pub fn write_model_package(
         provenance: provenance_path,
         validation: validation_path,
         blender_reconstruct: blender_path,
+        dcc_adapter: dcc_adapter_path,
+        dcc_rebuild: dcc_rebuild_path,
+        dcc_verification: dcc_verification_path,
         parts: part_paths,
     })
 }
@@ -426,6 +471,7 @@ pub fn read_model_package(
 ) -> Result<ModelExportPackage, ExportError> {
     let package_dir = package_dir.as_ref();
     let manifest_path = resolve_package_asset(package_dir, ASSET_MANIFEST_FILE)?;
+    let manifest_declares_dcc_sidecars = manifest_declares_dcc_sidecars(&manifest_path)?;
     let manifest: AssetManifest = read_json(&manifest_path)?;
     validate_manifest(&manifest, &manifest_path)?;
 
@@ -452,6 +498,31 @@ pub fn read_model_package(
             "validation.json does not match asset-manifest.json",
         ));
     }
+    let (dcc_adapter, dcc_verification) = if manifest_declares_dcc_sidecars {
+        let dcc_adapter_path = resolve_package_asset(package_dir, &manifest.files.dcc_adapter)?;
+        let dcc_rebuild_path = resolve_package_asset(package_dir, &manifest.files.dcc_rebuild)?;
+        let dcc_verification_path =
+            resolve_package_asset(package_dir, &manifest.files.dcc_verification)?;
+        let dcc_adapter: DccAdapterManifest = read_json(&dcc_adapter_path)?;
+        let dcc_verification: DccAdapterVerificationReport = read_json(&dcc_verification_path)?;
+        validate_dcc_adapter(
+            &manifest,
+            &dcc_adapter,
+            &dcc_verification,
+            &dcc_adapter_path,
+        )?;
+        if !dcc_rebuild_path.exists() {
+            return Err(invalid_package(
+                &dcc_rebuild_path,
+                "DCC rebuild script is missing",
+            ));
+        }
+        (dcc_adapter, dcc_verification)
+    } else {
+        let dcc_adapter = dcc_adapter_manifest(&manifest, &DccAdapterOptions::default());
+        let dcc_verification = dcc_adapter_verification_report(&dcc_adapter);
+        (dcc_adapter, dcc_verification)
+    };
 
     let mut parts = Vec::with_capacity(manifest.parts.len());
     let mut counts = ExportCounts::default();
@@ -490,6 +561,8 @@ pub fn read_model_package(
         recipe,
         provenance,
         validation,
+        dcc_adapter,
+        dcc_verification,
         parts,
     })
 }
@@ -714,6 +787,13 @@ fn validate_manifest(manifest: &AssetManifest, path: &Path) -> Result<(), Export
         BLENDER_RECONSTRUCT_FILE,
         path,
     )?;
+    validate_expected_file(&manifest.files.dcc_adapter, DCC_ADAPTER_MANIFEST_FILE, path)?;
+    validate_expected_file(&manifest.files.dcc_rebuild, DCC_REBUILD_SCRIPT_FILE, path)?;
+    validate_expected_file(
+        &manifest.files.dcc_verification,
+        DCC_VERIFICATION_FILE,
+        path,
+    )?;
 
     let mut previous_instance = None;
     for part in &manifest.parts {
@@ -737,6 +817,18 @@ fn validate_manifest(manifest: &AssetManifest, path: &Path) -> Result<(), Export
         previous_instance = Some(part.instance_id);
     }
     Ok(())
+}
+
+fn default_dcc_adapter_manifest_file() -> String {
+    DCC_ADAPTER_MANIFEST_FILE.to_owned()
+}
+
+fn default_dcc_rebuild_script_file() -> String {
+    DCC_REBUILD_SCRIPT_FILE.to_owned()
+}
+
+fn default_dcc_verification_file() -> String {
+    DCC_VERIFICATION_FILE.to_owned()
 }
 
 fn validate_expected_file(actual: &str, expected: &str, path: &Path) -> Result<(), ExportError> {
@@ -768,6 +860,16 @@ fn validate_part_manifest(
         ));
     }
     Ok(())
+}
+
+fn manifest_declares_dcc_sidecars(path: &Path) -> Result<bool, ExportError> {
+    let manifest_json: serde_json::Value = read_json(path)?;
+    let Some(files) = manifest_json.get("files") else {
+        return Ok(false);
+    };
+    Ok(files.get("dcc_adapter").is_some()
+        || files.get("dcc_rebuild").is_some()
+        || files.get("dcc_verification").is_some())
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, ExportError> {
