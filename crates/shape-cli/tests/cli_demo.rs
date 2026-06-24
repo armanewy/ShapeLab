@@ -97,7 +97,40 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
             .expect("file should be readiness JSON");
     assert_eq!(stdout_report, file_report);
 
-    assert_eq!(stdout_report["schema_version"].as_u64(), Some(1));
+    assert_eq!(stdout_report["schema_version"].as_u64(), Some(3));
+    assert_eq!(
+        stdout_report["visual_product_gate"]["verification_status"],
+        "not-run"
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["verification_command"],
+        "shape-cli release-readiness --verify-visual-gate"
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["native_state_verification_status"],
+        "requires-explicit-app-test"
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["native_state_verification_command"],
+        "cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored"
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["expected_built_in_profile_count"].as_u64(),
+        Some(10)
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["expected_primary_controls_per_profile"].as_u64(),
+        Some(7)
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["option_thumbnail_contract"],
+        "computed-cli-64px-whole-model-thumbnails-plus-native-state-test"
+    );
+    assert_eq!(
+        stdout_report["visual_product_gate"]["default_path_advanced_recipe_gate"],
+        "verified-by-native-state-release-test"
+    );
+    assert!(stdout_report["visual_product_gate"]["evidence"].is_null());
     assert_eq!(
         stdout_report["performance"]["preview_cache"]["bounded_lru_capacity"].as_u64(),
         Some(FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY as u64)
@@ -131,6 +164,63 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     assert_eq!(
         stdout_report["window_regression"]["desktop_window_pixel_tests"],
         "not-configured"
+    );
+}
+
+#[test]
+#[ignore = "explicit Wave 30 release gate; computes all built-in profile option thumbnails"]
+fn release_readiness_verifies_visual_product_gate_when_requested() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let output = Command::new(exe)
+        .args(["release-readiness", "--verify-visual-gate"])
+        .output()
+        .expect("run shape-cli release-readiness --verify-visual-gate");
+
+    assert!(
+        output.status.success(),
+        "release-readiness visual gate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
+    assert_eq!(report["schema_version"].as_u64(), Some(3));
+    assert_eq!(
+        report["visual_product_gate"]["verification_status"],
+        "verified"
+    );
+    assert_eq!(
+        report["visual_product_gate"]["native_state_verification_status"],
+        "requires-explicit-app-test"
+    );
+    let evidence = &report["visual_product_gate"]["evidence"];
+    assert_eq!(evidence["built_in_profile_count"].as_u64(), Some(10));
+    assert_eq!(evidence["profiles_checked"].as_u64(), Some(10));
+    assert_eq!(evidence["all_profiles_verified"], true);
+    assert_eq!(evidence["option_thumbnail_size_px"].as_u64(), Some(64));
+    assert!(
+        evidence["option_thumbnail_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0,
+        "visual gate should render option thumbnails"
+    );
+    assert_eq!(evidence["profiles"].as_array().unwrap().len(), 10);
+    assert!(
+        evidence["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|profile| {
+                profile["primary_control_count"] == 7
+                    && profile["option_control_count"].as_u64().unwrap_or_default() > 0
+                    && profile["option_thumbnail_count"]
+                        .as_u64()
+                        .unwrap_or_default()
+                        > 0
+                    && profile["per_option_rgba_complete"] == true
+                    && profile["per_option_camera_recorded"] == true
+                    && profile["every_option_control_has_visual_delta"] == true
+            })
     );
 }
 

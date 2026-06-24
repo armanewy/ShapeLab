@@ -534,6 +534,91 @@ fn option_cards_render_distinct_whole_model_thumbnails() {
 }
 
 #[test]
+#[ignore = "explicit Wave 30 release gate; renders option thumbnails for all built-in profiles"]
+fn release_gate_all_builtin_profiles_render_real_option_thumbnails() {
+    for fixture in shape_foundry_catalog::headless_fixture_catalogs() {
+        let state = compiled_fixture_state(&fixture);
+        assert_default_foundry_surface(&state);
+
+        let primary_controls = state
+            .controls
+            .iter()
+            .filter(|control| control.primary && control.visible)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            primary_controls.len(),
+            7,
+            "{} should expose seven novice-facing controls",
+            fixture.slug
+        );
+
+        let mut previewed_options = 0;
+        let mut controls_with_options = 0;
+        for control in primary_controls {
+            if control.options.is_empty() {
+                continue;
+            }
+            controls_with_options += 1;
+
+            for option in &control.options {
+                assert!(
+                    option.preview_id.is_some(),
+                    "{} {} option {} should carry a stable preview id",
+                    fixture.slug,
+                    control.id,
+                    option.label
+                );
+                assert_eq!(
+                    (option.width, option.height),
+                    (64, 64),
+                    "{} {} option {} should be a rendered whole-model thumbnail, not a placeholder",
+                    fixture.slug,
+                    control.id,
+                    option.label
+                );
+                assert_eq!(
+                    option.rgba8.len(),
+                    (option.width * option.height * 4) as usize,
+                    "{} {} option {} should carry complete RGBA bytes",
+                    fixture.slug,
+                    control.id,
+                    option.label
+                );
+                assert!(
+                    option.camera.is_some(),
+                    "{} {} option {} should record the preview camera",
+                    fixture.slug,
+                    control.id,
+                    option.label
+                );
+                previewed_options += 1;
+            }
+
+            assert!(
+                control
+                    .options
+                    .windows(2)
+                    .any(|pair| pair[0].rgba8 != pair[1].rgba8),
+                "{} {} should render visible whole-model differences across its option thumbnails",
+                fixture.slug,
+                control.id
+            );
+        }
+
+        assert!(
+            controls_with_options > 0,
+            "{} should expose at least one option-bearing default control",
+            fixture.slug
+        );
+        assert!(
+            previewed_options > 0,
+            "{} should expose at least one option thumbnail in the default product path",
+            fixture.slug
+        );
+    }
+}
+
+#[test]
 fn novice_can_create_reinforced_bridge_without_advanced_recipe() {
     let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);

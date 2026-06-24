@@ -36,11 +36,13 @@ use shape_decompiler::{
 };
 use shape_field::compile_document;
 use shape_foundry::{
-    CatalogContentRef, FoundryAssetDocument, FoundryCatalogError, FoundryCatalogResolver,
-    compile_foundry_document,
+    CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, CustomizerControl,
+    FeasibleControlDomain, FoundryAssetDocument, FoundryCatalogError, FoundryCatalogResolver,
+    FoundryCommand, apply_foundry_command, compile_foundry_document, effective_control_domain,
 };
 use shape_foundry_catalog::{
-    FoundryAuthorProfilePackage, author_profile_template, validate_author_profile_package,
+    FoundryAuthorProfilePackage, FoundryFixtureCatalog, author_profile_template,
+    headless_fixture_catalogs, validate_author_profile_package,
 };
 use shape_inverse::{
     external_character::{ExternalCharacterAnalysisConfig, ExternalCleanCharacterMeshInput},
@@ -86,7 +88,7 @@ const CONTACT_CARD_SIZE: u32 = 256;
 const CONTACT_LABEL_HEIGHT: u32 = 28;
 const CONTACT_PADDING: u32 = 12;
 const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;
-const RELEASE_READINESS_SCHEMA_VERSION: u32 = 1;
+const RELEASE_READINESS_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
@@ -292,6 +294,9 @@ struct ReleaseReadinessArgs {
     /// Optional JSON output file. The report is always printed to stdout.
     #[arg(long)]
     out: Option<PathBuf>,
+    /// Run the expensive Visual Foundry product gate and include computed evidence.
+    #[arg(long)]
+    verify_visual_gate: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -344,12 +349,49 @@ enum PackageSchema {
 struct ReleaseReadinessReport {
     schema_version: u32,
     milestone: &'static str,
+    visual_product_gate: ReleaseVisualProductGate,
     performance: ReleasePerformanceReadiness,
     rendering: ReleaseRenderingReadiness,
     persistence: ReleasePersistenceReadiness,
     packaging: ReleasePackagingReadiness,
     window_regression: ReleaseWindowRegressionReadiness,
     verification_commands: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseVisualProductGate {
+    verification_status: &'static str,
+    verification_command: &'static str,
+    native_state_verification_status: &'static str,
+    native_state_verification_command: &'static str,
+    expected_built_in_profile_count: usize,
+    expected_primary_controls_per_profile: usize,
+    option_thumbnail_contract: &'static str,
+    default_path_advanced_recipe_gate: &'static str,
+    deterministic_contact_sheets: &'static str,
+    evidence: Option<ReleaseVisualProductGateEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseVisualProductGateEvidence {
+    built_in_profile_count: usize,
+    profiles_checked: usize,
+    all_profiles_verified: bool,
+    option_thumbnail_size_px: u32,
+    option_thumbnail_count: usize,
+    option_controls_checked: usize,
+    profiles: Vec<ReleaseVisualProfileEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseVisualProfileEvidence {
+    slug: String,
+    primary_control_count: usize,
+    option_control_count: usize,
+    option_thumbnail_count: usize,
+    per_option_rgba_complete: bool,
+    per_option_camera_recorded: bool,
+    every_option_control_has_visual_delta: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1193,7 +1235,7 @@ fn run_import_triage_character(args: ImportTriageCharacterArgs) -> anyhow::Resul
 }
 
 fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
-    let report = release_readiness_report();
+    let report = release_readiness_report(args.verify_visual_gate)?;
     if let Some(path) = args.out.as_ref() {
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
@@ -1206,10 +1248,17 @@ fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn release_readiness_report() -> ReleaseReadinessReport {
-    ReleaseReadinessReport {
+fn release_readiness_report(verify_visual_gate: bool) -> anyhow::Result<ReleaseReadinessReport> {
+    let visual_product_gate = if verify_visual_gate {
+        verified_release_visual_product_gate()?
+    } else {
+        unverified_release_visual_product_gate()
+    };
+
+    Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
         milestone: "Wave 30 - Performance and Release Readiness",
+        visual_product_gate,
         performance: ReleasePerformanceReadiness {
             preview_cache: PreviewCacheReadiness {
                 backend: "deterministic-cpu-reference",
@@ -1247,14 +1296,260 @@ fn release_readiness_report() -> ReleaseReadinessReport {
         },
         verification_commands: vec![
             "cargo fmt --all --check",
+            "cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored",
             "cargo test -p shape-render --test foundry_preview",
             "cargo test -p shape-search --test foundry_candidates",
             "cargo test -p shape-cli release_readiness",
+            "cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored",
             "cargo clippy --workspace --all-targets -- -D warnings",
             "cargo test --workspace --no-fail-fast",
             "cargo build --release --workspace",
         ],
+    })
+}
+
+fn unverified_release_visual_product_gate() -> ReleaseVisualProductGate {
+    ReleaseVisualProductGate {
+        verification_status: "not-run",
+        verification_command: "shape-cli release-readiness --verify-visual-gate",
+        native_state_verification_status: "requires-explicit-app-test",
+        native_state_verification_command: "cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored",
+        expected_built_in_profile_count: 10,
+        expected_primary_controls_per_profile: 7,
+        option_thumbnail_contract: "computed-cli-64px-whole-model-thumbnails-plus-native-state-test",
+        default_path_advanced_recipe_gate: "verified-by-native-state-release-test",
+        deterministic_contact_sheets: "shape-cli foundry-visual-benchmark",
+        evidence: None,
     }
+}
+
+fn verified_release_visual_product_gate() -> anyhow::Result<ReleaseVisualProductGate> {
+    let fixtures = headless_fixture_catalogs();
+    let expected = unverified_release_visual_product_gate();
+    if fixtures.len() != expected.expected_built_in_profile_count {
+        bail!(
+            "expected {} built-in Foundry profiles, found {}",
+            expected.expected_built_in_profile_count,
+            fixtures.len()
+        );
+    }
+
+    let mut profiles = Vec::with_capacity(fixtures.len());
+    let mut option_thumbnail_count = 0;
+    let mut option_controls_checked = 0;
+    for fixture in &fixtures {
+        let evidence = release_visual_profile_evidence(fixture)?;
+        if evidence.primary_control_count != expected.expected_primary_controls_per_profile {
+            bail!(
+                "{} exposes {} primary controls; expected {}",
+                fixture.slug,
+                evidence.primary_control_count,
+                expected.expected_primary_controls_per_profile
+            );
+        }
+        if evidence.option_control_count == 0 {
+            bail!(
+                "{} exposes no option-bearing primary controls",
+                fixture.slug
+            );
+        }
+        if evidence.option_thumbnail_count == 0 {
+            bail!("{} exposes no rendered option thumbnails", fixture.slug);
+        }
+        if !evidence.per_option_rgba_complete {
+            bail!("{} has incomplete option thumbnail RGBA data", fixture.slug);
+        }
+        if !evidence.per_option_camera_recorded {
+            bail!(
+                "{} has an option thumbnail without a finite camera",
+                fixture.slug
+            );
+        }
+        if !evidence.every_option_control_has_visual_delta {
+            bail!(
+                "{} has an option-bearing control whose thumbnails do not visibly differ",
+                fixture.slug
+            );
+        }
+
+        option_thumbnail_count += evidence.option_thumbnail_count;
+        option_controls_checked += evidence.option_control_count;
+        profiles.push(evidence);
+    }
+
+    let profiles_checked = profiles.len();
+    Ok(ReleaseVisualProductGate {
+        verification_status: "verified",
+        verification_command: "shape-cli release-readiness --verify-visual-gate",
+        native_state_verification_status: expected.native_state_verification_status,
+        native_state_verification_command: expected.native_state_verification_command,
+        expected_built_in_profile_count: expected.expected_built_in_profile_count,
+        expected_primary_controls_per_profile: expected.expected_primary_controls_per_profile,
+        option_thumbnail_contract: expected.option_thumbnail_contract,
+        default_path_advanced_recipe_gate: expected.default_path_advanced_recipe_gate,
+        deterministic_contact_sheets: expected.deterministic_contact_sheets,
+        evidence: Some(ReleaseVisualProductGateEvidence {
+            built_in_profile_count: fixtures.len(),
+            profiles_checked,
+            all_profiles_verified: true,
+            option_thumbnail_size_px: 64,
+            option_thumbnail_count,
+            option_controls_checked,
+            profiles,
+        }),
+    })
+}
+
+fn release_visual_profile_evidence(
+    fixture: &FoundryFixtureCatalog,
+) -> anyhow::Result<ReleaseVisualProfileEvidence> {
+    let output = compile_foundry_document(&fixture.document, fixture).map_err(|error| {
+        anyhow::anyhow!("{} failed Foundry compilation: {error:#?}", fixture.slug)
+    })?;
+    let context = ControlEvaluationContext::new(&output.catalog.family.parameter_slots);
+    let primary_controls = output
+        .catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+
+    let mut option_control_count = 0;
+    let mut option_thumbnail_count = 0;
+    let mut per_option_rgba_complete = true;
+    let mut per_option_camera_recorded = true;
+    let mut every_option_control_has_visual_delta = true;
+
+    for control in &primary_controls {
+        let domain = effective_control_domain(control, context).unwrap_or_default();
+        let values = release_visual_gate_option_values(control, &domain);
+        if values.is_empty() {
+            continue;
+        }
+
+        option_control_count += 1;
+        let mut rendered = Vec::with_capacity(values.len());
+        for value in values {
+            let thumbnail =
+                release_visual_gate_thumbnail(fixture, &fixture.document, &control.id, value)?;
+            per_option_rgba_complete &= thumbnail.image.width == 64
+                && thumbnail.image.height == 64
+                && thumbnail.image.rgba8.len() == (64 * 64 * 4);
+            per_option_camera_recorded &= thumbnail.camera_recorded;
+            option_thumbnail_count += 1;
+            rendered.push(thumbnail.image.rgba8);
+        }
+
+        every_option_control_has_visual_delta &= rendered
+            .windows(2)
+            .any(|pair| pair[0].as_slice() != pair[1].as_slice());
+    }
+
+    Ok(ReleaseVisualProfileEvidence {
+        slug: fixture.slug.clone(),
+        primary_control_count: primary_controls.len(),
+        option_control_count,
+        option_thumbnail_count,
+        per_option_rgba_complete,
+        per_option_camera_recorded,
+        every_option_control_has_visual_delta,
+    })
+}
+
+fn release_visual_gate_option_values(
+    control: &CustomizerControl,
+    domain: &FeasibleControlDomain,
+) -> Vec<ControlValue> {
+    match &control.kind {
+        ControlKind::ChoiceGallery { options } => options
+            .iter()
+            .map(|option| ControlValue::Choice(option.value.clone()))
+            .collect(),
+        ControlKind::ProviderGallery { options, .. } => options
+            .iter()
+            .map(|option| ControlValue::Provider(option.provider_id.clone()))
+            .collect(),
+        ControlKind::ContinuousAxis { .. }
+        | ControlKind::IntegerStepper { .. }
+        | ControlKind::Toggle { .. } => domain.discrete_values.clone(),
+    }
+}
+
+struct ReleaseVisualThumbnail {
+    image: RenderedImage,
+    camera_recorded: bool,
+}
+
+fn release_visual_gate_thumbnail(
+    fixture: &FoundryFixtureCatalog,
+    document: &FoundryAssetDocument,
+    control_id: &str,
+    value: ControlValue,
+) -> anyhow::Result<ReleaseVisualThumbnail> {
+    let mut preview_document = document.clone();
+    apply_foundry_command(
+        &mut preview_document,
+        &FoundryCommand::SetControl {
+            control_id: control_id.to_owned(),
+            value,
+        },
+    )
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "{} control {} rejected option preview command: {error:#?}",
+            fixture.slug,
+            control_id
+        )
+    })?;
+    let output = compile_foundry_document(&preview_document, fixture).map_err(|error| {
+        anyhow::anyhow!(
+            "{} control {} option preview failed compilation: {error:#?}",
+            fixture.slug,
+            control_id
+        )
+    })?;
+    let mesh = mesh_from_foundry_output_for_release_gate(&output);
+    let camera = fit_camera_to_bounds(mesh.bounds);
+    let camera_recorded = orbit_camera_is_finite(&camera);
+    let settings = RenderSettings {
+        width: 64,
+        height: 64,
+        ..RenderSettings::default()
+    };
+    let image = render_mesh(&mesh, &camera, &settings).with_context(|| {
+        format!(
+            "{} control {} option preview should render",
+            fixture.slug, control_id
+        )
+    })?;
+    Ok(ReleaseVisualThumbnail {
+        image,
+        camera_recorded,
+    })
+}
+
+fn mesh_from_foundry_output_for_release_gate(
+    output: &shape_foundry::FoundryCompilationOutput,
+) -> TriangleMesh {
+    let mesh = &output.artifact.combined_preview.mesh;
+    TriangleMesh {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        indices: mesh.indices.clone(),
+        bounds: Aabb {
+            min: Vec3::from_array(mesh.bounds.min),
+            max: Vec3::from_array(mesh.bounds.max),
+        },
+    }
+}
+
+fn orbit_camera_is_finite(camera: &shape_render::OrbitCamera) -> bool {
+    camera.target.is_finite()
+        && camera.yaw_degrees.is_finite()
+        && camera.pitch_degrees.is_finite()
+        && camera.distance.is_finite()
+        && camera.vertical_fov_degrees.is_finite()
 }
 
 enum LoadedExternalCharacterInput {

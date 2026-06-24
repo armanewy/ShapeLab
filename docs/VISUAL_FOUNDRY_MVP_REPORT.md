@@ -79,10 +79,13 @@ Stylized Lamp:
 
 ## Remaining Product Gaps
 
-- Native option tiles currently reuse the current whole-model thumbnail; the
-  transient preview path shows sampled values, but persistent per-option cached
-  thumbnails should be added.
 - Native thumbnail textures are uploaded on every paint instead of cached by
   preview ID and build stamp.
-- Candidate preview generation is still all-or-nothing if one selected
-  candidate fails to compile or render.
+
+## Later Hardening
+
+- Wave 30 added native state-path option thumbnails and an explicit all-profile
+  release gate for 64x64 whole-model option cards. The older placeholder
+  behavior is no longer an acceptable default product path.
+- Candidate preview failures are isolated per card instead of invalidating every
+  candidate preview.

@@ -14,7 +14,8 @@ Each platform archive should include:
 - `packaging/THIRD_PARTY.md`
 - `packaging/licenses/`
 - generated demo contact sheets when useful for release review
-- a generated `release-readiness.json` from `shape-cli release-readiness`
+- a generated `release-readiness-verified.json` from
+  `shape-cli release-readiness --verify-visual-gate`
 
 The app is offline-first. Do not add updater, telemetry, cloud sync, or network-required startup behavior to packaging.
 
@@ -25,7 +26,7 @@ Build:
 ```powershell
 cargo build -p shape-app --release
 cargo build -p shape-cli --release
-cargo run -p shape-cli --release -- release-readiness --out target\release-readiness.json
+cargo run -p shape-cli --release -- release-readiness --verify-visual-gate --out target\release-readiness-verified.json
 ```
 
 Package `target\release\shape-app.exe` and optionally `target\release\shape-cli.exe` in a `.zip` archive with the common contents.
@@ -39,7 +40,7 @@ Build:
 ```bash
 cargo build -p shape-app --release
 cargo build -p shape-cli --release
-cargo run -p shape-cli --release -- release-readiness --out target/release-readiness.json
+cargo run -p shape-cli --release -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 ```
 
 For now, package the raw executable in a `.tar.gz` or `.zip` archive with the common contents. A future `.app` bundle should include a finalized icon, `Info.plist`, signing, and notarization steps after those have been tested on macOS.
@@ -55,7 +56,7 @@ Build:
 ```bash
 cargo build -p shape-app --release
 cargo build -p shape-cli --release
-cargo run -p shape-cli --release -- release-readiness --out target/release-readiness.json
+cargo run -p shape-cli --release -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 ```
 
 Package `target/release/shape-app` and optionally `target/release/shape-cli` in a `.tar.gz` archive with the common contents.

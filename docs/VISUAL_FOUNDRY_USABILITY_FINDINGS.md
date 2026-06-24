@@ -28,11 +28,15 @@ The original three MVP profiles pass the Wave 10 usability gate:
 
 ## Known Usability Weak Spots
 
-- Customizer option tiles should become true per-option whole-model renders,
-  not shared current-model thumbnails.
 - The New menu exposes only built-in family fixtures. Importing an arbitrary
   existing recipe into a Foundry document remains future work.
 - The native panels are functional but visually dense; candidate and control
   cards should become larger, more scannable rows after the contract stabilizes.
 - The current texture upload path is simple and correct, but should cache
   egui textures by preview/build ID for smoother interaction.
+
+## Later Resolutions
+
+- Wave 30 makes native customizer option cards a release gate: every built-in
+  profile must expose rendered 64x64 whole-model option thumbnails in the
+  reducer state path.

@@ -32,8 +32,9 @@ Aspirational or unsupported capability:
   unless a later strict gate proves exact known-base recovery.
 - Residual buffers, dense per-vertex displacements, target-derived bases, and
   literal target mesh payloads never count as strict semantic success.
-- Materials, UVs, rigging, animation, marketplace publishing, and LLM workflows
-  are outside the current modeling/reconstruction boundary.
+- Materials, UVs, rigging, animation, marketplace publishing, LLM geometry
+  generation, and direct LLM recipe mutation are outside the current
+  modeling/reconstruction boundary.
 
 ## Required Language
 
@@ -55,6 +56,12 @@ What can a novice user do today without Advanced Recipe?
   them.
 - Customize primary controls, lock traits, branch history, export one asset, or
   export a three-member pack.
+- See rendered whole-model option thumbnails in the native default path. Wave 30
+  treats placeholder option-card pixels as test-only panel fixtures, not as an
+  acceptable product path.
+- Bias future directions with local explicit preference signals from accepted or
+  rejected candidates, locks/resets, exports, and pack membership. This is a
+  bounded selection bias only, not semantic mutation or telemetry.
 
 What can a foundry author do today?
 
@@ -65,6 +72,20 @@ What can a foundry author do today?
   benchmark.
 - Create, validate, preview, and package a typed local Foundry Author profile
   through the `shape-cli foundry-*profile` commands.
+- Generate deterministic Foundry benchmark contact sheets and a Wave 30
+  `shape-cli release-readiness` report for release review.
+- Export canonical model packages with DCC output sidecars while keeping Shape
+  Lab as the source of truth.
+
+What integration surfaces exist today?
+
+- The optional LLM command adapter can list profiles/controls, set controls,
+  request bounded candidates, lock/reset, accept/reject, export, and summarize
+  state through typed Foundry commands only.
+- The DCC adapter emits output sidecars from canonical packages. Edited DCC
+  scene import remains unsupported.
+- Local preference learning records explicit local signals and contributes only
+  a bounded post-validation candidate-selection bonus.
 
 What asset classes compile cleanly from families?
 

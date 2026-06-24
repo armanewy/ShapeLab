@@ -3,10 +3,14 @@
 ## Immediate Hardening
 
 1. Cache native preview textures by preview ID and build stamp.
-2. Make customizer option cards render true per-option whole-model previews.
-3. Let candidate preview rendering continue when one selected candidate fails.
-4. Add a real From Existing Recipe import path for compatible Foundry sources.
-5. Add denser native card layout controls without exposing raw technical paths.
+2. Add a real From Existing Recipe import path for compatible Foundry sources.
+3. Add denser native card layout controls without exposing raw technical paths.
+
+Completed since the original Wave 10 note:
+
+- Customizer option cards render 64x64 whole-model thumbnails in the native
+  state path, with an explicit Wave 30 all-profile release gate.
+- Candidate preview rendering isolates per-card preview failures.
 
 ## Product Evaluation
 
@@ -26,6 +30,7 @@ Track:
 - invalid attempts
 - undo count
 - Advanced Recipe visits
+- option-thumbnail completeness
 
 ## Modeling Roadmap
 

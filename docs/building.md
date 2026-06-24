@@ -56,6 +56,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo build -p shape-app --release
 cargo run -p shape-cli -- --help
 cargo run -p shape-cli -- release-readiness --out target/release-readiness.json
+cargo run -p shape-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets -ProposalCount 12 -ResultCount 3 -MeshResolution 12
 ```
 
@@ -63,7 +64,9 @@ The release desktop binary is written under `target/release/` as `shape-app` on 
 
 `shape-cli release-readiness` writes the Wave 30 machine-readable status report
 for performance bounds, CPU/GPU rendering status, persistence support,
-packaging/signing state, and window-regression coverage.
+packaging/signing state, and window-regression coverage. Add
+`--verify-visual-gate` when preparing a release-readiness artifact that must
+include computed all-profile option-thumbnail evidence.
 
 ## Demo Assets
 
