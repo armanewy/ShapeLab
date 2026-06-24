@@ -1,13 +1,13 @@
 //! Native desktop host for the Foundry workflow state.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use egui::{ColorImage, TextureOptions};
+use egui::{ColorImage, RichText, TextureOptions};
 use shape_foundry::{
     CatalogContentRef, FoundryBuildStamp, FoundryCatalogError, FoundryCatalogResolver,
     FoundryCommand,
@@ -24,8 +24,15 @@ use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
     panels::{customize, directions, history, pack},
     run_foundry_job,
-    ui::theme::apply_visual_foundry_theme,
-    ui::widgets::{ActionSpec, ButtonTone, action_button},
+    ui::{
+        copy::WORKFLOW_STEPS,
+        theme::apply_visual_foundry_theme,
+        tokens::VisualFoundryTokens,
+        widgets::{
+            ActionSpec, ButtonTone, ProfileCardSpec, SectionHeaderSpec, StatusPillSpec, StatusTone,
+            action_button, profile_card, section_header, status_pill,
+        },
+    },
 };
 
 /// Native Foundry workflow surface.
@@ -34,6 +41,7 @@ pub(crate) struct FoundryDesktopApp {
     tab: FoundryTab,
     jobs: FoundryJobCoordinator,
     texture_cache: FoundryTextureCache,
+    recent_projects: Vec<PathBuf>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -49,7 +57,8 @@ enum FoundryTab {
 const HOME_SUBTITLE: &str =
     "Start with an asset template, then generate directions and customize the result.";
 const NEED_PROJECT_REASON: &str = "Choose a template or open a project first.";
-const NEED_SAVE_LOCATION_REASON: &str = "Use Save As before saving this project.";
+const NEED_SAVE_LOCATION_REASON: &str =
+    "Use Save Project first to choose where this project is saved.";
 const NEED_MODEL_REASON: &str = "Build the current model first.";
 const NEED_HISTORY_REASON: &str = "No earlier project step is available.";
 const NEED_DIRECTION_REASON: &str = "This direction is not ready to choose.";
@@ -63,6 +72,7 @@ impl Default for FoundryDesktopApp {
             tab: FoundryTab::Home,
             jobs: FoundryJobCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
+            recent_projects: Vec::new(),
         }
     }
 }
@@ -74,47 +84,52 @@ impl FoundryDesktopApp {
         apply_visual_foundry_theme(&ctx);
         self.poll_jobs(&ctx);
 
+        let tokens = VisualFoundryTokens::dark();
+        let colors = tokens.colors;
         let mut commands = Vec::new();
-        egui::Panel::top("foundry_toolbar").show_inside(ui, |ui| {
-            commands.extend(self.show_toolbar(ui));
-        });
+        egui::Panel::top("foundry_app_bar")
+            .default_size(tokens.sizing.top_bar_height)
+            .show_inside(ui, |ui| {
+                egui::Frame::new()
+                    .fill(colors.top_bar)
+                    .inner_margin(egui::Margin::symmetric(16, 8))
+                    .show(ui, |ui| {
+                        commands.extend(self.show_app_bar(ui));
+                    });
+            });
         egui::Panel::bottom("foundry_status")
-            .default_size(28.0)
+            .default_size(tokens.sizing.status_bar_height)
             .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Foundry");
-                    if self.state.read_only {
-                        ui.weak("Read-only recovery");
-                    }
-                    if self.state.dirty {
-                        ui.weak("Unsaved");
-                    }
-                    if let Some(status) = &self.state.status {
-                        ui.weak(status);
-                    }
-                });
+                egui::Frame::new()
+                    .fill(colors.top_bar)
+                    .inner_margin(egui::Margin::symmetric(16, 6))
+                    .show(ui, |ui| self.show_status_strip(ui));
             });
-        egui::Panel::left("foundry_sections")
-            .resizable(true)
-            .default_size(220.0)
+        egui::Panel::left("foundry_step_rail")
+            .resizable(false)
+            .default_size(tokens.sizing.left_rail_width)
             .show_inside(ui, |ui| {
-                ui.heading("Foundry");
-                ui.selectable_value(&mut self.tab, FoundryTab::Home, "Choose");
-                ui.selectable_value(&mut self.tab, FoundryTab::Directions, "Directions");
-                ui.selectable_value(&mut self.tab, FoundryTab::Customize, "Customize");
-                ui.selectable_value(&mut self.tab, FoundryTab::Pack, "Pack");
-                ui.selectable_value(&mut self.tab, FoundryTab::Export, "Export");
-                ui.separator();
-                ui.selectable_value(&mut self.tab, FoundryTab::History, "History");
+                egui::Frame::new()
+                    .fill(colors.left_rail)
+                    .inner_margin(egui::Margin::symmetric(14, 14))
+                    .show(ui, |ui| {
+                        commands.extend(self.show_step_rail(ui));
+                    });
             });
-        egui::CentralPanel::default().show_inside(ui, |ui| match self.tab {
-            FoundryTab::Home => self.show_home(ui),
-            FoundryTab::Directions => commands.extend(self.show_directions(ui)),
-            FoundryTab::Customize => commands.extend(self.show_customize(ui)),
-            FoundryTab::Pack => commands.extend(self.show_pack(ui)),
-            FoundryTab::History => commands.extend(self.show_history(ui)),
-            FoundryTab::Export => commands.extend(self.show_export(ui)),
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(colors.center_bg)
+                    .inner_margin(egui::Margin::symmetric(16, 14)),
+            )
+            .show_inside(ui, |ui| match self.tab {
+                FoundryTab::Home => self.show_home(ui),
+                FoundryTab::Directions => commands.extend(self.show_directions(ui)),
+                FoundryTab::Customize => commands.extend(self.show_customize(ui)),
+                FoundryTab::Pack => commands.extend(self.show_pack(ui)),
+                FoundryTab::History => commands.extend(self.show_history(ui)),
+                FoundryTab::Export => commands.extend(self.show_export(ui)),
+            });
 
         self.apply_commands(commands, &ctx);
         if !self.state.active_jobs.is_empty() {
@@ -123,103 +138,370 @@ impl FoundryDesktopApp {
         let _ = frame;
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_app_bar(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         ui.horizontal(|ui| {
             let has_document = self.state.document.is_some();
             let has_output = self.state.current_output.is_some();
-            ui.heading("Shape Lab");
-            if ui.button("Choose").clicked() {
-                self.tab = FoundryTab::Home;
-            }
-            if ui.button("Open project").clicked()
-                && let Some(path) = open_foundry_project_file()
-            {
-                commands.push(FoundryAppCommand::Load(path));
-            }
+            ui.label(
+                RichText::new(self.current_project_title())
+                    .size(16.0)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            let (save_label, save_tone) = self.save_state_pill();
+            let _ = status_pill(ui, StatusPillSpec::new(save_label, save_tone));
+
             let can_save = has_document && self.state.project_path.is_some();
             let save_reason = if has_document {
                 NEED_SAVE_LOCATION_REASON
             } else {
                 NEED_PROJECT_REASON
             };
-            if button_with_disabled_reason(ui, can_save, "Save", save_reason).clicked() {
-                commands.push(FoundryAppCommand::Save);
-            }
-            if button_with_disabled_reason(ui, has_document, "Save As", NEED_PROJECT_REASON)
-                .clicked()
-                && let Some(path) = save_foundry_project_file()
-            {
-                commands.push(FoundryAppCommand::SaveAs(path));
-            }
-            if button_with_disabled_reason(ui, has_document, "Build model", NEED_PROJECT_REASON)
-                .clicked()
-            {
-                commands.push(FoundryAppCommand::RequestBuild);
-            }
-            if button_with_disabled_reason(ui, has_output, "Preview model", NEED_MODEL_REASON)
-                .clicked()
-            {
-                commands.push(FoundryAppCommand::RequestPreview);
-            }
-            if button_with_disabled_reason(ui, has_output, "Export", NEED_MODEL_REASON).clicked() {
-                self.tab = FoundryTab::Export;
-            }
             let can_undo = self
                 .state
                 .project_file
                 .as_ref()
                 .is_some_and(|project| project.project.can_undo());
-            if button_with_disabled_reason(ui, can_undo, "Undo", NEED_HISTORY_REASON).clicked() {
-                commands.push(history::undo_command());
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if action_button(
+                    ui,
+                    &action_spec(has_output, "Export", ButtonTone::Primary, NEED_MODEL_REASON),
+                )
+                .clicked()
+                {
+                    self.tab = FoundryTab::Export;
+                }
+                if action_button(
+                    ui,
+                    &action_spec(can_save, "Save", ButtonTone::Secondary, save_reason),
+                )
+                .clicked()
+                {
+                    commands.push(FoundryAppCommand::Save);
+                }
+                if action_button(
+                    ui,
+                    &action_spec(can_undo, "Undo", ButtonTone::Quiet, NEED_HISTORY_REASON),
+                )
+                .clicked()
+                {
+                    commands.push(history::undo_command());
+                }
+            });
+        });
+        commands
+    }
+
+    fn show_step_rail(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Shape Lab").size(16.0).strong());
+        });
+        ui.add_space(18.0);
+        ui.label(
+            RichText::new("VISUAL FOUNDRY")
+                .color(colors.accent_hover)
+                .small(),
+        );
+        ui.add_space(8.0);
+        for step in WORKFLOW_STEPS {
+            let tab = tab_for_workflow_step(step.index);
+            let selected = self.tab == tab;
+            let label = format!("{}  {}", step.index, step.label);
+            let response = ui.selectable_label(selected, label);
+            if response.clicked() {
+                self.tab = tab;
             }
-            for action in directions::direction_mode_actions(None, 0, None) {
-                if button_with_disabled_reason(ui, has_document, action.label, NEED_PROJECT_REASON)
+            ui.indent(format!("step-detail-{}", step.index), |ui| {
+                ui.label(RichText::new(step.detail).color(colors.text_muted).small());
+            });
+            ui.add_space(6.0);
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+        ui.label(RichText::new("PROJECT").color(colors.accent_hover).small());
+        if action_button(ui, &ActionSpec::enabled("Open Project", ButtonTone::Quiet)).clicked()
+            && let Some(path) = open_foundry_project_file()
+        {
+            commands.push(FoundryAppCommand::Load(path));
+        }
+        let save_project_spec = action_spec(
+            self.state.document.is_some(),
+            "Save Project",
+            ButtonTone::Quiet,
+            NEED_PROJECT_REASON,
+        );
+        if action_button(ui, &save_project_spec).clicked() {
+            if self.state.project_path.is_some() {
+                commands.push(FoundryAppCommand::Save);
+            } else if let Some(path) = save_foundry_project_file() {
+                commands.push(FoundryAppCommand::SaveAs(path));
+            }
+        }
+        if action_button(
+            ui,
+            &action_spec(
+                self.state.document.is_some(),
+                "Save Project As",
+                ButtonTone::Quiet,
+                NEED_PROJECT_REASON,
+            ),
+        )
+        .clicked()
+            && let Some(path) = save_foundry_project_file()
+        {
+            commands.push(FoundryAppCommand::SaveAs(path));
+        }
+        if action_button(ui, &ActionSpec::enabled("New Project", ButtonTone::Quiet)).clicked() {
+            self.tab = FoundryTab::Home;
+        }
+        if action_button(
+            ui,
+            &ActionSpec::enabled("Project History", ButtonTone::Quiet),
+        )
+        .clicked()
+        {
+            self.tab = FoundryTab::History;
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("RECENT PROJECTS")
+                .color(colors.accent_hover)
+                .small(),
+        );
+        if self.recent_projects.is_empty() {
+            ui.label(RichText::new("No recent projects yet.").color(colors.text_muted));
+            ui.label(
+                RichText::new("Open a project to keep working here.")
+                    .color(colors.text_subtle)
+                    .small(),
+            );
+        } else {
+            for path in self.recent_projects.iter().take(4) {
+                let title = project_file_title(path);
+                let response = action_button(ui, &ActionSpec::enabled(&title, ButtonTone::Quiet));
+                if response.clicked() {
+                    commands.push(FoundryAppCommand::Load(path.clone()));
+                }
+                if self.state.project_path.as_ref() == Some(path) {
+                    ui.label(
+                        RichText::new("Current project")
+                            .color(colors.text_muted)
+                            .small(),
+                    );
+                }
+            }
+        }
+        commands
+    }
+
+    fn show_status_strip(&self, ui: &mut egui::Ui) {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(self.status_summary()).color(colors.text));
+            ui.separator();
+            ui.label(RichText::new(self.model_status()).color(colors.text_muted));
+            ui.separator();
+            ui.label(RichText::new(self.preview_status()).color(colors.text_muted));
+            ui.separator();
+            ui.label(
+                RichText::new(format!("Pack: {} assets", self.state.pack.members.len()))
+                    .color(colors.text_muted),
+            );
+            if self.state.read_only {
+                ui.separator();
+                ui.label(RichText::new("Read-only recovery").color(colors.warning));
+            }
+            if let Some(status) = &self.state.status {
+                ui.separator();
+                ui.label(RichText::new(product_safe_status(status)).color(colors.text_subtle));
+            }
+        });
+    }
+
+    fn current_project_title(&self) -> String {
+        if let Some(path) = &self.state.project_path {
+            return project_file_title(path);
+        }
+
+        self.state
+            .document
+            .as_ref()
+            .map(|document| asset_title_from_id(&document.document_id.0).to_owned())
+            .unwrap_or_else(|| "Choose what to make".to_owned())
+    }
+
+    fn save_state_pill(&self) -> (&'static str, StatusTone) {
+        if self.state.document.is_none() {
+            ("No project", StatusTone::Neutral)
+        } else if self.state.project_path.is_none() {
+            ("Not saved", StatusTone::Warning)
+        } else if self.state.dirty {
+            ("Unsaved", StatusTone::Warning)
+        } else {
+            ("Saved", StatusTone::Ready)
+        }
+    }
+
+    fn status_summary(&self) -> &'static str {
+        if !self.state.active_jobs.is_empty() {
+            "Working"
+        } else if self.state.dirty {
+            "Unsaved changes"
+        } else {
+            "Ready"
+        }
+    }
+
+    fn model_status(&self) -> &'static str {
+        if self.state.current_output.is_some() {
+            "Model ready"
+        } else if self.state.document.is_some() {
+            "Model needs build"
+        } else {
+            "Choose a template"
+        }
+    }
+
+    fn preview_status(&self) -> &'static str {
+        let rendering_preview = self
+            .state
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
+        if rendering_preview {
+            "Preview building"
+        } else if self.state.current_preview.is_some() {
+            "Preview ready"
+        } else if self.state.current_output.is_some() {
+            "Preview available"
+        } else {
+            "Preview waiting"
+        }
+    }
+
+    fn show_home(&mut self, ui: &mut egui::Ui) {
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Choose",
+                title: "Choose what to make",
+                subtitle: Some(HOME_SUBTITLE),
+            },
+        );
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if action_button(
+                ui,
+                &ActionSpec::enabled("Open Project", ButtonTone::Secondary),
+            )
+            .clicked()
+                && let Some(path) = open_foundry_project_file()
+            {
+                self.apply_commands(vec![FoundryAppCommand::Load(path)], ui.ctx());
+            }
+            ui.label(RichText::new("Pick a template to generate whole-model directions.").small());
+        });
+        ui.add_space(14.0);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.columns(2, |columns| {
+                for (index, (label, fixture)) in built_in_fixture_catalogs_with_labels()
+                    .into_iter()
+                    .enumerate()
+                {
+                    let column = &mut columns[index % 2];
+                    let response = profile_card(
+                        column,
+                        ProfileCardSpec {
+                            title: label,
+                            description: profile_description(&fixture.slug),
+                            action: ActionSpec::enabled("Start", ButtonTone::Primary),
+                        },
+                    );
+                    if response
+                        .action
+                        .as_ref()
+                        .is_some_and(egui::Response::clicked)
+                    {
+                        self.load_fixture(fixture, column.ctx());
+                    }
+                    column.add_space(8.0);
+                }
+            });
+        });
+    }
+
+    fn show_directions(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Directions",
+                title: "Explore directions",
+                subtitle: Some("Generate coherent whole-model options from the current asset."),
+            },
+        );
+        if self.state.document.is_none() {
+            ui.weak("Open a Foundry project to generate whole-model directions.");
+            return commands;
+        }
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            let has_document = self.state.document.is_some();
+            let has_output = self.state.current_output.is_some();
+            let mode_actions = directions::direction_mode_actions(None, 0, None);
+            if let Some(generate_action) = mode_actions.first()
+                && action_button(
+                    ui,
+                    &ActionSpec::enabled("Generate Directions", ButtonTone::Primary),
+                )
+                .clicked()
+            {
+                commands.push(generate_action.app_command());
+            }
+            if action_button(
+                ui,
+                &action_spec(
+                    has_document,
+                    "Build Asset",
+                    ButtonTone::Secondary,
+                    NEED_PROJECT_REASON,
+                ),
+            )
+            .clicked()
+            {
+                commands.push(FoundryAppCommand::RequestBuild);
+            }
+            if action_button(
+                ui,
+                &action_spec(
+                    has_output,
+                    "Refresh Preview",
+                    ButtonTone::Secondary,
+                    NEED_MODEL_REASON,
+                ),
+            )
+            .clicked()
+            {
+                commands.push(FoundryAppCommand::RequestPreview);
+            }
+            for action in mode_actions {
+                if action_button(ui, &ActionSpec::enabled(action.label, ButtonTone::Quiet))
                     .clicked()
                 {
                     commands.push(action.app_command());
                 }
             }
         });
-        commands
-    }
-
-    fn show_home(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Choose what to make");
-        ui.label(HOME_SUBTITLE);
         ui.add_space(12.0);
-        if ui.button("Open project").clicked()
-            && let Some(path) = open_foundry_project_file()
-        {
-            self.apply_commands(vec![FoundryAppCommand::Load(path)], ui.ctx());
-        }
-        ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (label, fixture) in built_in_fixture_catalogs_with_labels() {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.strong(label);
-                            ui.weak(profile_description(&fixture.slug));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Start").clicked() {
-                                self.load_fixture(fixture, ui.ctx());
-                            }
-                        });
-                    });
-                });
-            }
-        });
-    }
-
-    fn show_directions(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
-        let mut commands = Vec::new();
-        ui.heading("Directions");
-        if self.state.document.is_none() {
-            ui.weak("Open a Foundry project to generate whole-model directions.");
-            return commands;
-        }
         self.show_current_preview(ui);
         ui.label(format!(
             "{} candidate direction(s)",
@@ -291,7 +573,7 @@ impl FoundryDesktopApp {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(&control.label);
-                    ui.weak(&control.kind);
+                    ui.weak(product_control_summary(control));
                     ui.weak(format!("{} option(s)", control.options.len()));
                     if let Some(reason) = &control.locked_reason {
                         ui.weak(reason);
@@ -515,7 +797,7 @@ impl FoundryDesktopApp {
                 if rendering_preview {
                     ui.weak("Rendering preview...");
                 } else {
-                    ui.weak("Preview is available from the toolbar.");
+                    ui.weak("Preview is ready to refresh.");
                 }
             } else {
                 ui.weak("Build the current asset to render a preview.");
@@ -617,6 +899,7 @@ impl FoundryDesktopApp {
         match project.save_json(&path) {
             Ok(()) => {
                 self.state.mark_saved(path.clone());
+                self.remember_recent_project(path.clone());
                 self.state.status = Some(format!("Saved {}", path.display()));
             }
             Err(error) => self.state.status = Some(error.to_string()),
@@ -630,6 +913,7 @@ impl FoundryDesktopApp {
                     self.jobs.reset();
                     self.state.status = Some(format!("Loaded {}", path.display()));
                     self.tab = FoundryTab::Directions;
+                    self.remember_recent_project(path.clone());
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -652,6 +936,12 @@ impl FoundryDesktopApp {
             },
             Err(error) => self.state.status = Some(error.to_string()),
         }
+    }
+
+    fn remember_recent_project(&mut self, path: PathBuf) {
+        self.recent_projects.retain(|recent| recent != &path);
+        self.recent_projects.insert(0, path);
+        self.recent_projects.truncate(5);
     }
 }
 
@@ -773,6 +1063,73 @@ fn button_with_disabled_reason(
     action_button(ui, &spec)
 }
 
+fn action_spec<'a>(
+    enabled: bool,
+    label: &'a str,
+    tone: ButtonTone,
+    disabled_reason: &'a str,
+) -> ActionSpec<'a> {
+    if enabled {
+        ActionSpec::enabled(label, tone)
+    } else {
+        ActionSpec::disabled(label, tone, disabled_reason)
+    }
+}
+
+fn tab_for_workflow_step(index: usize) -> FoundryTab {
+    match index {
+        1 => FoundryTab::Home,
+        2 => FoundryTab::Directions,
+        3 => FoundryTab::Customize,
+        4 => FoundryTab::Pack,
+        5 => FoundryTab::Export,
+        _ => FoundryTab::Home,
+    }
+}
+
+fn project_file_title(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| {
+            stem.trim_end_matches(".shapelab-foundry")
+                .replace(['-', '_'], " ")
+        })
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| "Shape Lab Project".to_owned())
+}
+
+fn asset_title_from_id(document_id: &str) -> &'static str {
+    match document_id {
+        id if id.contains("roman-bridge") => "Roman Timber Bridge",
+        id if id.contains("sci-fi-crate") => "Sci-Fi Industrial Crate",
+        id if id.contains("stylized-lamp") => "Stylized Furniture Lamp",
+        id if id.contains("market-stall") => "Market Stall Kit",
+        id if id.contains("sci-fi-door") => "Sci-Fi Door Panel",
+        id if id.contains("storage-barrel") => "Coopered Storage Barrel",
+        id if id.contains("signpost") => "Wayfinding Signpost",
+        id if id.contains("workshop-chair") => "Workshop Chair",
+        id if id.contains("handcart") => "Market Handcart",
+        id if id.contains("stylized-tree") => "Storybook Tree",
+        _ => "Shape Lab Project",
+    }
+}
+
+fn product_safe_status(status: &str) -> String {
+    if status.starts_with("Saved ") {
+        "Project saved".to_owned()
+    } else if status.starts_with("Loaded ") {
+        "Project loaded".to_owned()
+    } else if status.starts_with("Exported ") && status.contains(" pack member") {
+        "Pack export complete".to_owned()
+    } else if status.starts_with("Exported ") {
+        "Export complete".to_owned()
+    } else if status.contains('\\') || status.contains('/') {
+        "Project path needs attention".to_owned()
+    } else {
+        status.to_owned()
+    }
+}
+
 fn open_foundry_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Shape Lab Foundry", &["json"])
@@ -848,20 +1205,47 @@ fn profile_description(slug: &str) -> &'static str {
 fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
     let mut strings = vec![
         "Shape Lab",
+        "Visual Foundry",
         "Choose",
         "Directions",
         "Customize",
         "Pack",
         "Export",
         "Choose what to make",
-        "Open project",
+        "Open Project",
+        "Save Project",
+        "Save Project As",
+        "New Project",
+        "Project History",
+        "Recent Projects",
+        "No recent projects yet.",
+        "Open a project to keep working here.",
         "Start",
-        "Build model",
-        "Preview model",
+        "Generate Directions",
+        "Build Asset",
+        "Refresh Preview",
         "Save",
-        "Save As",
         "Undo",
+        "No project",
+        "Not saved",
+        "Saved",
+        "Unsaved",
+        "Unsaved changes",
+        "Ready",
+        "Working",
+        "Model ready",
+        "Model needs build",
+        "Choose a template",
+        "Preview ready",
+        "Preview available",
+        "Preview waiting",
+        "Pack: 0 assets",
+        "Export complete",
+        "Pack export complete",
         HOME_SUBTITLE,
+        "Pick a template to generate whole-model directions.",
+        "Explore directions",
+        "Generate coherent whole-model options from the current asset.",
         NEED_PROJECT_REASON,
         NEED_SAVE_LOCATION_REASON,
         NEED_MODEL_REASON,
@@ -873,12 +1257,29 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Build the current asset before exporting.",
         "Batch export ready",
         "No family pack workspace is open.",
+        "Preview is ready to refresh.",
+        "Whole-model options",
+        "Primary control",
     ];
+    for step in WORKFLOW_STEPS {
+        strings.push(step.label);
+        strings.push(step.detail);
+    }
     for (label, fixture) in built_in_fixture_catalogs_with_labels() {
         strings.push(label);
         strings.push(profile_description(&fixture.slug));
     }
     strings
+}
+
+fn product_control_summary(
+    control: &crate::foundry::view_model::FoundryControlView,
+) -> &'static str {
+    if control.options.len() > 1 {
+        "Whole-model options"
+    } else {
+        "Primary control"
+    }
 }
 
 fn default_customize_controls(
@@ -1170,6 +1571,9 @@ mod tests {
             "operation",
             "compiler",
             "decompiler",
+            "Build model",
+            "Preview model",
+            "toolbar",
         ] {
             assert!(
                 !joined_lower.contains(&forbidden.to_ascii_lowercase()),
@@ -1189,7 +1593,12 @@ mod tests {
             "Customize",
             "Pack",
             "Export",
-            "Open project",
+            "Visual Foundry",
+            "Open Project",
+            "Save Project",
+            "Save Project As",
+            "Recent Projects",
+            "Generate Directions",
             "Start",
         ] {
             assert!(
@@ -1197,6 +1606,116 @@ mod tests {
                 "missing product string {required}"
             );
         }
+    }
+
+    #[test]
+    fn launch_save_state_does_not_claim_project_is_saved() {
+        let mut app = FoundryDesktopApp::default();
+        assert_eq!(app.save_state_pill(), ("No project", StatusTone::Neutral));
+
+        app.state =
+            FoundryAppState::new(shape_foundry_catalog::roman_bridge::fixture_catalog().document)
+                .expect("fixture state");
+        app.state.project_path = None;
+        app.state.dirty = false;
+        assert_eq!(app.save_state_pill(), ("Not saved", StatusTone::Warning));
+
+        app.state.project_path = Some(PathBuf::from("roman.shapelab-foundry.json"));
+        app.state.dirty = true;
+        assert_eq!(app.save_state_pill(), ("Unsaved", StatusTone::Warning));
+
+        app.state.dirty = false;
+        assert_eq!(app.save_state_pill(), ("Saved", StatusTone::Ready));
+    }
+
+    #[test]
+    fn recent_projects_are_real_load_targets_and_keep_newest_first() {
+        let mut app = FoundryDesktopApp::default();
+        let first = PathBuf::from("first.shapelab-foundry.json");
+        let second = PathBuf::from("second.shapelab-foundry.json");
+        let third = PathBuf::from("third.shapelab-foundry.json");
+
+        app.remember_recent_project(first.clone());
+        app.remember_recent_project(second.clone());
+        app.remember_recent_project(third.clone());
+        app.remember_recent_project(first.clone());
+
+        assert_eq!(app.recent_projects, vec![first, third, second]);
+    }
+
+    #[test]
+    fn default_customize_summaries_hide_internal_control_kinds() {
+        let ctx = egui::Context::default();
+        let mut app = FoundryDesktopApp::default();
+        app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
+
+        for _ in 0..200 {
+            app.poll_jobs(&ctx);
+            if !app.state.controls.is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let controls = default_customize_controls(&app.state.controls).collect::<Vec<_>>();
+        assert!(
+            controls
+                .iter()
+                .any(|control| control.kind.to_ascii_lowercase().contains("provider")),
+            "fixture should cover internal provider-style control kinds"
+        );
+        let visible = controls
+            .iter()
+            .map(|control| product_control_summary(control))
+            .collect::<Vec<_>>();
+        assert!(
+            crate::foundry::ui::copy::labels_are_product_safe(&visible),
+            "visible customize summaries contain implementation copy: {visible:?}"
+        );
+    }
+
+    #[test]
+    fn workflow_copy_maps_to_foundry_tabs_without_history_as_primary_step() {
+        let tabs = WORKFLOW_STEPS
+            .iter()
+            .map(|step| tab_for_workflow_step(step.index))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tabs,
+            vec![
+                FoundryTab::Home,
+                FoundryTab::Directions,
+                FoundryTab::Customize,
+                FoundryTab::Pack,
+                FoundryTab::Export,
+            ]
+        );
+        assert!(!tabs.contains(&FoundryTab::History));
+    }
+
+    #[test]
+    fn product_status_hides_raw_paths_from_status_strip() {
+        assert_eq!(
+            product_safe_status("Saved C:\\work\\roman.shapelab-foundry.json"),
+            "Project saved"
+        );
+        assert_eq!(
+            product_safe_status("Loaded C:\\work\\roman.shapelab-foundry.json"),
+            "Project loaded"
+        );
+        assert_eq!(
+            product_safe_status("Could not use C:\\work\\broken.json"),
+            "Project path needs attention"
+        );
+        assert_eq!(
+            product_safe_status("Exported default to C:\\exports\\bridge"),
+            "Export complete"
+        );
+        assert_eq!(
+            product_safe_status("Exported 3 pack member(s) with default to C:\\exports\\pack"),
+            "Pack export complete"
+        );
     }
 
     #[test]
