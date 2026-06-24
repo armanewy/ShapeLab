@@ -26,9 +26,14 @@ use crate::asset::scoring::{
     score_and_select_asset_candidates_with_policy,
 };
 
-const MIN_PROPOSALS: usize = 24;
-const MAX_PROPOSALS: usize = 72;
-const MAX_SURVIVORS: usize = 6;
+/// Minimum proposal programs a Foundry candidate request may ask the generator
+/// to attempt.
+pub const FOUNDRY_MIN_PROPOSAL_COUNT: usize = 24;
+/// Maximum proposal programs a Foundry candidate request may ask the generator
+/// to attempt.
+pub const FOUNDRY_MAX_PROPOSAL_COUNT: usize = 72;
+/// Maximum representative candidates returned to the native direction board.
+pub const FOUNDRY_MAX_RESULT_COUNT: usize = 6;
 const SILHOUETTE_MASK_SIDE: usize = 32;
 const SILHOUETTE_MASK_WORDS: usize = (SILHOUETTE_MASK_SIDE * SILHOUETTE_MASK_SIDE) / 64;
 const DEPTH_HISTOGRAM_BINS: usize = 8;
@@ -430,7 +435,7 @@ pub fn generate_foundry_candidate_plans(
     diagnostics.accepted_candidates = accepted_plans.len();
 
     let scoring_policy = AssetSelectionPolicy {
-        representative_count: request.result_count.min(MAX_SURVIVORS),
+        representative_count: request.result_count.min(FOUNDRY_MAX_RESULT_COUNT),
         duplicate_descriptor_distance: 0.005,
         ..AssetSelectionPolicy::default()
     };
@@ -464,7 +469,9 @@ pub fn generate_foundry_candidate_plans(
 }
 
 fn validate_request(request: &FoundryCandidateRequest) -> Result<(), FoundryCandidateError> {
-    if request.proposal_count < MIN_PROPOSALS || request.proposal_count > MAX_PROPOSALS {
+    if request.proposal_count < FOUNDRY_MIN_PROPOSAL_COUNT
+        || request.proposal_count > FOUNDRY_MAX_PROPOSAL_COUNT
+    {
         return Err(FoundryCandidateError::InvalidRequest(
             "proposal_count must be between 24 and 72",
         ));

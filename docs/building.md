@@ -55,10 +55,15 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build -p shape-app --release
 cargo run -p shape-cli -- --help
+cargo run -p shape-cli -- release-readiness --out target/release-readiness.json
 pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets -ProposalCount 12 -ResultCount 3 -MeshResolution 12
 ```
 
 The release desktop binary is written under `target/release/` as `shape-app` on Unix-like systems and `shape-app.exe` on Windows.
+
+`shape-cli release-readiness` writes the Wave 30 machine-readable status report
+for performance bounds, CPU/GPU rendering status, persistence support,
+packaging/signing state, and window-regression coverage.
 
 ## Demo Assets
 

@@ -23,6 +23,11 @@ Represent cables, handles, foliage, rails, profiles, and architectural strokes a
 
 Move field sampling, meshing support data, thumbnails, and viewport rendering toward `wgpu` once the interaction loop is stable. The CPU path should remain a deterministic reference implementation.
 
+Wave 30 keeps the CPU path as the required release reference and records the GPU
+viewport/render path as deferred in `shape-cli release-readiness`. Release checks
+must not require GPU-specific renderer code until that backend is implemented
+and tested.
+
 ## Preference Learning
 
 Persist user choices as pairwise comparisons and use them to bias future candidate generation toward accepted directions while still preserving novelty and exploration.

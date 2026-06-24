@@ -19,6 +19,9 @@ const OVERLAY_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
 const OVERLAY_HASH_PRIME: u64 = 1_099_511_628_211;
 const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
 
+/// Default bounded capacity for the in-memory Foundry preview cache.
+pub const FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY: usize = 64;
+
 /// Supported square foundry preview sizes.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FoundryPreviewResolution {
@@ -391,6 +394,9 @@ pub struct FoundryPreviewCacheStats {
     pub misses: u64,
     /// Entries evicted by LRU pressure.
     pub evictions: u64,
+    /// Duplicate cache misses coalesced into an already pending render in the
+    /// same batch.
+    pub coalesced_misses: u64,
 }
 
 /// Bounded in-memory LRU cache for whole-model foundry previews.
@@ -402,6 +408,7 @@ pub struct FoundryPreviewCache {
     hits: u64,
     misses: u64,
     evictions: u64,
+    coalesced_misses: u64,
 }
 
 impl FoundryPreviewCache {
@@ -415,6 +422,7 @@ impl FoundryPreviewCache {
             hits: 0,
             misses: 0,
             evictions: 0,
+            coalesced_misses: 0,
         }
     }
 
@@ -445,6 +453,7 @@ impl FoundryPreviewCache {
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
+            coalesced_misses: self.coalesced_misses,
         }
     }
 
@@ -486,7 +495,7 @@ impl FoundryPreviewCache {
         };
 
         let mut previews = vec![None; request.items.len()];
-        let mut render_jobs = Vec::new();
+        let mut render_jobs_by_key = BTreeMap::<FoundryPreviewCacheKey, RenderJob>::new();
         for (index, item) in request.items.iter().enumerate() {
             let key = FoundryPreviewCacheKey::new(
                 item.document_geometry_fingerprint.clone(),
@@ -496,6 +505,12 @@ impl FoundryPreviewCache {
                 &render_settings,
                 request.resolution,
             );
+            if let Some(job) = render_jobs_by_key.get_mut(&key) {
+                job.indices.push(index);
+                self.coalesced_misses = self.coalesced_misses.saturating_add(1);
+                continue;
+            }
+
             if let Some(image) = self.lookup(&key) {
                 previews[index] = Some(preview_from_image(
                     item,
@@ -505,31 +520,36 @@ impl FoundryPreviewCache {
                     &render_context,
                 ));
             } else {
-                render_jobs.push(RenderJob {
-                    index,
-                    preview_id: item.preview_id.clone(),
-                    key,
-                    mesh: item.mesh.clone(),
-                });
+                render_jobs_by_key.insert(
+                    key.clone(),
+                    RenderJob {
+                        indices: vec![index],
+                        preview_id: item.preview_id.clone(),
+                        key,
+                        mesh: item.mesh.clone(),
+                    },
+                );
             }
         }
 
         let rendered_jobs = render_missing_jobs(
-            render_jobs,
+            render_jobs_by_key.into_values().collect(),
             &camera,
             &render_settings,
             request.max_parallel_jobs,
         )?;
         for rendered in rendered_jobs {
             self.insert(rendered.key.clone(), rendered.image.clone());
-            let item = &request.items[rendered.index];
-            previews[rendered.index] = Some(preview_from_image(
-                item,
-                rendered.key,
-                rendered.image,
-                FoundryPreviewCacheStatus::Miss,
-                &render_context,
-            ));
+            for index in rendered.indices {
+                let item = &request.items[index];
+                previews[index] = Some(preview_from_image(
+                    item,
+                    rendered.key.clone(),
+                    rendered.image.clone(),
+                    FoundryPreviewCacheStatus::Miss,
+                    &render_context,
+                ));
+            }
         }
 
         Ok(FoundryPreviewBatchOutput {
@@ -587,7 +607,7 @@ impl FoundryPreviewCache {
 
 impl Default for FoundryPreviewCache {
     fn default() -> Self {
-        Self::new(64)
+        Self::new(FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY)
     }
 }
 
@@ -633,7 +653,7 @@ pub enum FoundryPreviewError {
 
 #[derive(Debug)]
 struct RenderJob {
-    index: usize,
+    indices: Vec<usize>,
     preview_id: String,
     key: FoundryPreviewCacheKey,
     mesh: TriangleMesh,
@@ -641,7 +661,7 @@ struct RenderJob {
 
 #[derive(Debug)]
 struct RenderJobOutput {
-    index: usize,
+    indices: Vec<usize>,
     key: FoundryPreviewCacheKey,
     image: RenderedImage,
 }
@@ -679,7 +699,7 @@ fn render_missing_jobs(
                         source,
                     })?;
                 rendered.push(RenderJobOutput {
-                    index: job.index,
+                    indices: job.indices.clone(),
                     key: job.key.clone(),
                     image,
                 });
@@ -688,7 +708,7 @@ fn render_missing_jobs(
         })?;
         outputs.append(&mut chunk_outputs);
     }
-    outputs.sort_by_key(|output| output.index);
+    outputs.sort_by_key(|output| output.indices[0]);
     Ok(outputs)
 }
 

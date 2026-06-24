@@ -13,6 +13,10 @@ use shape_inverse::{
     external_character::external_input_from_character_mesh_artifact,
     import_triage::{ImportTriageOutcome, ImportTriageReport},
 };
+use shape_render::foundry::FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY;
+use shape_search::foundry::{
+    FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
+};
 
 #[test]
 fn demo_generates_headless_artifacts() {
@@ -70,6 +74,64 @@ fn demo_generates_headless_artifacts() {
         .status()
         .expect("run shape-cli validate");
     assert!(validate_status.success());
+}
+
+#[test]
+fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_path = temp_dir.path().join("release-readiness.json");
+
+    let output = Command::new(exe)
+        .args(["release-readiness", "--out"])
+        .arg(&out_path)
+        .output()
+        .expect("run shape-cli release-readiness");
+
+    assert!(output.status.success());
+    assert!(out_path.exists());
+    let stdout_report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
+    let file_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(out_path).expect("read output report"))
+            .expect("file should be readiness JSON");
+    assert_eq!(stdout_report, file_report);
+
+    assert_eq!(stdout_report["schema_version"].as_u64(), Some(1));
+    assert_eq!(
+        stdout_report["performance"]["preview_cache"]["bounded_lru_capacity"].as_u64(),
+        Some(FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY as u64)
+    );
+    assert_eq!(
+        stdout_report["performance"]["preview_cache"]["duplicate_miss_coalescing"],
+        true
+    );
+    assert_eq!(
+        stdout_report["performance"]["candidate_generation"]["minimum_proposal_count"].as_u64(),
+        Some(FOUNDRY_MIN_PROPOSAL_COUNT as u64)
+    );
+    assert_eq!(
+        stdout_report["performance"]["candidate_generation"]["maximum_proposal_count"].as_u64(),
+        Some(FOUNDRY_MAX_PROPOSAL_COUNT as u64)
+    );
+    assert_eq!(
+        stdout_report["performance"]["candidate_generation"]["maximum_returned_candidates"]
+            .as_u64(),
+        Some(FOUNDRY_MAX_RESULT_COUNT as u64)
+    );
+    assert_eq!(
+        stdout_report["rendering"]["deterministic_cpu_reference"],
+        "required-and-tested"
+    );
+    assert_eq!(
+        stdout_report["rendering"]["gpu_required_for_release_checks"],
+        false
+    );
+    assert_eq!(stdout_report["packaging"]["code_signing"], "not-configured");
+    assert_eq!(
+        stdout_report["window_regression"]["desktop_window_pixel_tests"],
+        "not-configured"
+    );
 }
 
 #[test]

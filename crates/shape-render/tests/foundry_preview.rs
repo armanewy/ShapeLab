@@ -42,6 +42,41 @@ fn cache_hit_reuses_whole_model_preview() {
 }
 
 #[test]
+fn duplicate_batch_misses_render_once_and_preserve_output_slots() {
+    let mut cache = FoundryPreviewCache::new(4);
+    let first = candidate_request("candidate-a", "geom-shared", 1.0);
+    let second = candidate_request("candidate-b", "geom-shared", 1.0);
+
+    let output = render_foundry_previews(
+        &mut cache,
+        batch(
+            "coalesced-miss",
+            vec![first, second],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("duplicate batch misses should render");
+
+    assert_eq!(
+        preview_ids(&output.previews),
+        vec!["candidate-a", "candidate-b"]
+    );
+    assert_eq!(output.previews[0].key, output.previews[1].key);
+    assert_eq!(output.previews[0].image, output.previews[1].image);
+    assert!(
+        output
+            .previews
+            .iter()
+            .all(|preview| preview.cache_status == FoundryPreviewCacheStatus::Miss)
+    );
+    let stats = cache.stats();
+    assert_eq!(stats.len, 1);
+    assert_eq!(stats.misses, 1);
+    assert_eq!(stats.coalesced_misses, 1);
+    assert_eq!(stats.hits, 0);
+}
+
+#[test]
 fn eviction_uses_lru_order() {
     let mut cache = FoundryPreviewCache::new(2);
     let first = candidate_request("candidate-a", "geom-a", 1.0);

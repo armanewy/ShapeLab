@@ -54,6 +54,7 @@ use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
 use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
+use shape_render::foundry::FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY;
 use shape_render::{
     MeshVisualDescriptor, RenderSettings, RenderedImage, fit_camera_to_bounds,
     fit_camera_to_bounds_from_angles, render_mesh, visual_descriptor_for_mesh,
@@ -65,6 +66,9 @@ use shape_search::asset::scoring::{
 use shape_search::asset::{
     AssetCandidate as SemanticAssetCandidate, AssetCandidateMode, AssetCandidateRequest,
     generate_asset_candidates,
+};
+use shape_search::foundry::{
+    FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
@@ -82,6 +86,7 @@ const CONTACT_CARD_SIZE: u32 = 256;
 const CONTACT_LABEL_HEIGHT: u32 = 28;
 const CONTACT_PADDING: u32 = 12;
 const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;
+const RELEASE_READINESS_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
@@ -121,6 +126,8 @@ enum Command {
     ImportTriageCharacter(ImportTriageCharacterArgs),
     /// Render the cross-domain headless visual Foundry benchmark.
     FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
+    /// Print a machine-readable Wave 30 release readiness report.
+    ReleaseReadiness(ReleaseReadinessArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -281,6 +288,13 @@ struct ImportTriageCharacterArgs {
 }
 
 #[derive(Debug, clap::Args)]
+struct ReleaseReadinessArgs {
+    /// Optional JSON output file. The report is always printed to stdout.
+    #[arg(long)]
+    out: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
 struct DecompileArgs {
     /// Source OBJ mesh.
     source: PathBuf,
@@ -324,6 +338,69 @@ enum PackageSchema {
     Schema2,
     #[value(name = "3")]
     Schema3,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseReadinessReport {
+    schema_version: u32,
+    milestone: &'static str,
+    performance: ReleasePerformanceReadiness,
+    rendering: ReleaseRenderingReadiness,
+    persistence: ReleasePersistenceReadiness,
+    packaging: ReleasePackagingReadiness,
+    window_regression: ReleaseWindowRegressionReadiness,
+    verification_commands: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleasePerformanceReadiness {
+    preview_cache: PreviewCacheReadiness,
+    candidate_generation: CandidateGenerationReadiness,
+}
+
+#[derive(Debug, Serialize)]
+struct PreviewCacheReadiness {
+    backend: &'static str,
+    bounded_lru_capacity: usize,
+    duplicate_miss_coalescing: bool,
+    deterministic_cache_keys: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CandidateGenerationReadiness {
+    minimum_proposal_count: usize,
+    maximum_proposal_count: usize,
+    maximum_returned_candidates: usize,
+    rejects_unbounded_proposal_requests: bool,
+    caps_representative_selection: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseRenderingReadiness {
+    deterministic_cpu_reference: &'static str,
+    optional_gpu_viewport: &'static str,
+    gpu_required_for_release_checks: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleasePersistenceReadiness {
+    foundry_recovery_snapshots: &'static str,
+    asset_autosave_snapshots: &'static str,
+    automatic_timed_autosave_ui: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleasePackagingReadiness {
+    packaging_docs: &'static str,
+    installer_framework: &'static str,
+    code_signing: &'static str,
+    publishing: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseWindowRegressionReadiness {
+    headless_panel_and_reducer_tests: &'static str,
+    desktop_window_pixel_tests: &'static str,
 }
 
 impl From<CliMode> for ExplorationMode {
@@ -459,6 +536,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryVisualBenchmark(args) => {
             foundry_visual_benchmark::run_foundry_visual_benchmark(args)
         }
+        Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1112,6 +1190,71 @@ fn run_import_triage_character(args: ImportTriageCharacterArgs) -> anyhow::Resul
     )?;
     print_import_triage_report(&report);
     Ok(())
+}
+
+fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
+    let report = release_readiness_report();
+    if let Some(path) = args.out.as_ref() {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        write_json(path, &report)?;
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn release_readiness_report() -> ReleaseReadinessReport {
+    ReleaseReadinessReport {
+        schema_version: RELEASE_READINESS_SCHEMA_VERSION,
+        milestone: "Wave 30 - Performance and Release Readiness",
+        performance: ReleasePerformanceReadiness {
+            preview_cache: PreviewCacheReadiness {
+                backend: "deterministic-cpu-reference",
+                bounded_lru_capacity: FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY,
+                duplicate_miss_coalescing: true,
+                deterministic_cache_keys: true,
+            },
+            candidate_generation: CandidateGenerationReadiness {
+                minimum_proposal_count: FOUNDRY_MIN_PROPOSAL_COUNT,
+                maximum_proposal_count: FOUNDRY_MAX_PROPOSAL_COUNT,
+                maximum_returned_candidates: FOUNDRY_MAX_RESULT_COUNT,
+                rejects_unbounded_proposal_requests: true,
+                caps_representative_selection: true,
+            },
+        },
+        rendering: ReleaseRenderingReadiness {
+            deterministic_cpu_reference: "required-and-tested",
+            optional_gpu_viewport: "deferred-wgpu-path-not-enabled",
+            gpu_required_for_release_checks: false,
+        },
+        persistence: ReleasePersistenceReadiness {
+            foundry_recovery_snapshots: "supported-by-project-files",
+            asset_autosave_snapshots: "supported-by-project-files",
+            automatic_timed_autosave_ui: "not-configured",
+        },
+        packaging: ReleasePackagingReadiness {
+            packaging_docs: "packaging/README.md",
+            installer_framework: "manual-archive-only",
+            code_signing: "not-configured",
+            publishing: "not-configured",
+        },
+        window_regression: ReleaseWindowRegressionReadiness {
+            headless_panel_and_reducer_tests: "required",
+            desktop_window_pixel_tests: "not-configured",
+        },
+        verification_commands: vec![
+            "cargo fmt --all --check",
+            "cargo test -p shape-render --test foundry_preview",
+            "cargo test -p shape-search --test foundry_candidates",
+            "cargo test -p shape-cli release_readiness",
+            "cargo clippy --workspace --all-targets -- -D warnings",
+            "cargo test --workspace --no-fail-fast",
+            "cargo build --release --workspace",
+        ],
+    }
 }
 
 enum LoadedExternalCharacterInput {

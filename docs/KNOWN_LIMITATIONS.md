@@ -5,11 +5,17 @@
 - Topology is generated from the implicit field and is not stable between revisions.
 - There are no UVs, materials, rigging, or animation.
 - Candidate generation can propose semantic scalar edits, structural part choices, duplicated cuts, and grouped cut-operation edits, but it is still not a general-purpose modeler.
-- The viewport and thumbnails use a CPU renderer and are intentionally limited.
-- User selections do not yet train a persistent preference model.
+- The viewport and thumbnails use a deterministic CPU renderer and bounded
+  preview caches. A native GPU viewport/render backend is still future work.
+- User selections can feed the Wave 29 local-only Foundry preference profile,
+  but there is no cloud preference model, hidden telemetry, or semantic rewrite
+  learner.
 - Asset recipe JSON has targeted migrations for older authored relationship and cut metadata. Broad cross-version project migrations are still limited.
-- Autosave and crash recovery snapshots are not part of the MVP.
-- The desktop app does not yet have automated window-level visual regression tests.
+- Asset and Foundry project files support deterministic sibling recovery
+  snapshots, but automatic timed autosave UI and full crash-restore prompts are
+  still limited.
+- The desktop app has headless panel/reducer regression tests but does not yet
+  have automated OS-window pixel regression tests.
 - Packaging notes and icons exist, but installers, code signing, and publishing are not implemented.
 - Schema-3 bend inference is experimental and limited to a single uniform-curvature bend plus at most one affine-family stage before or after it.
 - Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains affine-only by default.

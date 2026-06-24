@@ -13,6 +13,7 @@ use shape_foundry_catalog::{
     FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, stylized_lamp,
 };
 use shape_search::foundry::{
+    FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
     FoundryCandidateMode, FoundryCandidateRejectionReason, FoundryCandidateRequest,
     generate_foundry_candidate_plans,
 };
@@ -47,6 +48,35 @@ fn same_seed_is_deterministic() {
 
     assert_eq!(first, second);
     assert!(!first.candidates.is_empty());
+}
+
+#[test]
+fn release_candidate_budget_rejects_unbounded_proposals_and_caps_results() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut too_few = request(7, FoundryCandidateMode::Explore);
+    too_few.proposal_count = FOUNDRY_MIN_PROPOSAL_COUNT - 1;
+    let error = generate_foundry_candidate_plans(&fixture.document, &fixture, &too_few)
+        .expect_err("proposal budget below release minimum should be rejected");
+    assert!(error.to_string().contains("between 24 and 72"));
+
+    let mut too_many = request(7, FoundryCandidateMode::Explore);
+    too_many.proposal_count = FOUNDRY_MAX_PROPOSAL_COUNT + 1;
+    let error = generate_foundry_candidate_plans(&fixture.document, &fixture, &too_many)
+        .expect_err("proposal budget above release maximum should be rejected");
+    assert!(error.to_string().contains("between 24 and 72"));
+
+    let mut oversized_results = request(7, FoundryCandidateMode::Explore);
+    oversized_results.proposal_count = FOUNDRY_MIN_PROPOSAL_COUNT;
+    oversized_results.result_count = FOUNDRY_MAX_RESULT_COUNT * 10;
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &oversized_results)
+        .expect("oversized result requests should be capped after validation");
+
+    assert_eq!(
+        output.diagnostics.requested_candidates,
+        FOUNDRY_MAX_RESULT_COUNT * 10
+    );
+    assert!(output.candidates.len() <= FOUNDRY_MAX_RESULT_COUNT);
+    assert!(output.scoring_report.representatives.len() <= FOUNDRY_MAX_RESULT_COUNT);
 }
 
 #[test]
