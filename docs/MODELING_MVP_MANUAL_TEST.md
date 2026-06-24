@@ -1,5 +1,9 @@
 # Asset Modeling Lab Manual Test
 
+Historical note: this checklist covered the removed Wave 6 native Asset
+Modeling Lab surface. The current product app launches directly into Visual
+Foundry.
+
 ## Launch
 
 1. Run `cargo run -p shape-app`.

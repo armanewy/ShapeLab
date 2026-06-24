@@ -12,12 +12,13 @@ reconstruction, not as a general mesh-to-procedural compiler.
 Demonstrated product capability:
 
 - A novice can use Visual Foundry to create, branch, customize, pack, and export
-  coherent variants from ten built-in authored profiles without opening
-  Advanced Recipe. The original full-benchmark profiles are Roman Timber Bridge,
-  Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26 adds seven
-  expansion profiles through the same Foundry catalog and compile path.
-- A technical user can use the explicit Modeling Workspace and authored asset
-  recipes for part-aware hard-surface assets.
+  coherent variants from ten built-in authored profiles with zero technical
+  surface exposure. The original full-benchmark profiles are Roman Timber
+  Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26 adds
+  seven expansion profiles through the same Foundry catalog and compile path.
+- A technical user can still exercise authored explicit asset recipes through
+  core crates and headless CLI/tests, but the explicit Modeling Workspace is no
+  longer a native product surface.
 - The semantic program IR can strictly verify compact modeling programs under
   the `shape-program` and `shape-program-verify` contract.
 - Synthetic hard-surface recovery and known-base character recovery can prove
@@ -48,14 +49,15 @@ correspondence-incomplete results.
 
 ## Capability Answers
 
-What can a novice user do today without Advanced Recipe?
+What can a novice user do today with zero technical surface exposure?
 
-- Open Asset Modeling Lab in Visual Foundry.
+- Open Shape Lab directly into Visual Foundry.
 - Pick one of the ten built-in foundry profiles.
 - Generate six Refine and six Explore directions where profile controls support
   them.
 - Customize primary controls, lock traits, branch history, export one asset, or
   export a three-member pack.
+- Complete the default workflow with zero technical surface exposure.
 - See rendered whole-model option thumbnails in the native default path. Wave 30
   treats placeholder option-card pixels as test-only panel fixtures, not as an
   acceptable product path.
@@ -91,8 +93,8 @@ What asset classes compile cleanly from families?
 
 - The built-in Visual Foundry profiles compile and export through their authored
   family bindings.
-- Explicit asset recipes for the Modeling Workspace compile through
-  `shape-modeling`, `shape-family-compile`, and `shape-compile`.
+- Explicit asset recipes compile through `shape-modeling`,
+  `shape-family-compile`, and `shape-compile` in core/headless paths.
 - Character grammar artifacts compile only inside the synthetic known-base
   benchmark path today, not as a general character product workflow.
 

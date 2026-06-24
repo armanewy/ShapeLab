@@ -84,7 +84,7 @@ The strongest product proof remains:
 - Create a tall stylized lamp with a different shade.
 - Open and customize one of the seven expansion profiles through the same
   whole-model controls.
-- Export a pack without using Advanced Recipe.
+- Export a pack with zero technical surface exposure.
 
 ## Decision Rule
 

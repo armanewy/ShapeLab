@@ -1,8 +1,8 @@
 # Release Candidate Manual Gate
 
 This checklist is the manual product gate for a release-readiness claim. It
-tests the default novice Visual Foundry path only: no Advanced Recipe visit
-should be required for any task below.
+tests the default novice Visual Foundry path only: no technical recipe surface
+should be exposed or required for any task below.
 
 Run the native app from the repository root:
 
@@ -29,7 +29,7 @@ Record start time before opening the first profile.
 - Create a coherent three-member pack.
 - Export the current asset or pack, reopen the saved project, and confirm the
   reopened result matches the accepted direction.
-- Complete the flow without using Advanced Recipe.
+- Complete the flow with zero technical surface exposure.
 
 ## Required Observations
 
@@ -43,7 +43,7 @@ For each run, record:
 - Invisible controls.
 - Invalid attempts.
 - Undo count.
-- Advanced Recipe visits.
+- Technical surface exposure, expected to remain zero.
 - Option-thumbnail completeness.
 - Perceived performance or stutter.
 - Export and reopen success.
@@ -72,7 +72,7 @@ Rejected alternate candidate: yes/no
 Three-member pack created: yes/no
 Export succeeded: yes/no
 Reopen succeeded: yes/no
-Advanced Recipe required: yes/no
+Technical surface exposed or required: yes/no
 
 Confusing labels:
 Dead controls:
@@ -89,8 +89,8 @@ Notes:
 - All four profile tasks produce valid visible models.
 - Direction generation returns six whole-model candidates where requested.
 - Lock and regenerate preserves the locked trait.
-- Candidate accept/reject, pack creation, export, and reopen complete without
-  Advanced Recipe.
+- Candidate accept/reject, pack creation, export, and reopen complete with zero
+  technical surface exposure.
 - Option thumbnails are visible for the default product path.
 - Any confusing labels, dead controls, invisible controls, invalid attempts,
   undo usage, or stutter are recorded for triage.

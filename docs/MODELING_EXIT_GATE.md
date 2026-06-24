@@ -24,7 +24,8 @@ The modeling era passes only when Shape Lab can prove semantic modeling programs
 
 ## Product Gate
 
-- Whole-model visual customization remains usable without Advanced Recipe for core tasks.
+- Whole-model visual customization remains usable with zero technical surface
+  exposure for core tasks.
 - Accepted candidates update visible controls rather than replacing the recipe opaquely.
 - Exported packages include strict verification reports where applicable.
 

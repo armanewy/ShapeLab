@@ -7,7 +7,10 @@ Checked-in recipe JSON fixtures:
 - `crates/shape-modeling-assets/assets/industrial_crate.asset.json`
 - `crates/shape-modeling-assets/assets/explicit_desk_lamp.asset.json`
 
-The Rust constructors in `shape-modeling-assets` are the source of truth used by tests, Asset Modeling Lab templates, and `shape-cli model-demo`; the JSON files are serialized benchmark recipes for inspection and external tooling.
+The Rust constructors in `shape-modeling-assets` are the source of truth used by
+tests and `shape-cli model-demo`; the JSON files are serialized benchmark
+recipes for inspection and external tooling. The former native Asset Modeling
+Lab templates were removed from the product app in Wave 31.
 
 ## Industrial Crate
 

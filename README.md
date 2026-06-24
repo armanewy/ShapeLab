@@ -2,10 +2,10 @@
 
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
-The current desktop app starts in **Asset Modeling Lab**. Its primary surface is
-Visual Foundry, a whole-model customizer for asset families; the explicit
-Modeling Workspace remains available inside Asset Modeling Lab, and the legacy
-implicit editor remains available from the mode switcher.
+The current desktop app launches directly into **Visual Foundry**, a whole-model
+customizer for authored semantic asset families. The old implicit editor,
+explicit modeling workspace, and nested mode switchers are no longer product
+surfaces.
 
 The product slice proves a category-independent loop:
 
@@ -29,19 +29,15 @@ Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPOR
 
 The native app opens a local `egui` desktop workspace with:
 
-- Visual Foundry as the primary novice-facing product surface
+- Visual Foundry as the product app and primary novice-facing surface
 - ten built-in Visual Foundry profiles: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
-- a direction board, customizer deck, pack workspace, Advanced Recipe tab, history tab, and export tab
+- a Choose screen, direction board, customizer deck, pack workspace, and export flow
 - whole-model candidate cards and whole-model customizer previews
 - reducer-backed locks, undo, save/open, current export, and pack export
-- Asset Modeling Lab template choices for Industrial Crate, Explicit Desk Lamp, and Stylized Stool in the Modeling Workspace
-- a rendered asset viewport with orbit, pan, zoom, fit, selected-part overlays, and wireframe display
-- a part tree, inspector, locks, validation, branch history, status bar, and candidate gallery
 - background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
-- branch-preserving `.shapelab-asset.json` save/open, grouped OBJ export, and canonical model-package export
-- a switchable legacy implicit editor for the older SDF shape-document workflow
+- branch-preserving `.shapelab-foundry.json` save/open, grouped OBJ export, and canonical model-package export
 
-Startup shows Asset Modeling Lab with Visual Foundry selected. The explicit Modeling Workspace and hidden legacy implicit mode are initialized only after the user switches to them.
+Startup shows the Visual Foundry "Choose what to make" home screen.
 
 ## Architecture
 
@@ -79,7 +75,9 @@ AssetRecipe
   -> shape-compile exports
 ```
 
-That lane is additive to the implicit editor and same-topology decompiler. Its benchmark assets live in `crates/shape-modeling-assets`.
+That lane remains available through core crates and headless CLI tests, not as a
+separate desktop product surface. Its benchmark assets live in
+`crates/shape-modeling-assets`.
 
 The next product layer is the asset-family foundry:
 
@@ -128,7 +126,7 @@ cargo run -p shape-cli -- model-demo --asset stylized-stool --out-dir target/mod
 
 Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `model-validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`. Package validation carries compile issues plus recipe-derived model validation issues.
 
-Render fixed-camera shaded and wireframe benchmark sheets for the Asset Modeling Lab search loop:
+Render fixed-camera shaded and wireframe benchmark sheets for the explicit asset search loop:
 
 ```bash
 cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
@@ -156,9 +154,9 @@ The decompiler requires identical ordered topology and writes canonical binary m
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Asset templates include a crate, desk lamp, and stool; legacy implicit presets include a lamp, submarine, alien plant, and sky shrine. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationship selectors, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine concepts. Visual Foundry profiles span props, furniture, environment pieces, and structures. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationship selectors, and revisions.
 
-The MVP is still representation-specific: Asset Modeling Lab works on explicit `AssetRecipe` graphs, while the legacy mode works on implicit shape graphs. Imported triangle meshes are supported only in the same-topology deformation decompiler path. Arbitrary imported meshes are not semantically editable unless they fit a known grammar and strict verification proves exact recovery.
+The MVP is still representation-specific: Visual Foundry works on authored semantic asset-family documents that compile to explicit `AssetRecipe` graphs. Triangle-mesh import handling exists only in headless/research strict reconstruction and same-topology deformation decompiler paths, not as Visual Foundry product editability. Arbitrary imported meshes are not semantically editable unless they fit a known grammar and strict verification proves exact recovery.
 
 Release readiness is archive-first only. The repository documents manual package contents, but installers, code signing, notarization, package-manager publishing, and app-store publishing are not implemented.
 

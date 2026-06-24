@@ -1,6 +1,11 @@
 # Part-Aware Modeling Architecture
 
-Shape Lab now has contracts for a second modeling lane alongside the existing implicit editor and the same-topology deformation decompiler. The new lane is explicit, polygon-based, part-aware, and DCC-independent. It does not rely on Blender for geometry generation.
+Shape Lab has contracts for an explicit modeling lane alongside strict
+reconstruction and same-topology deformation decompiler research paths. The
+lane is polygon-based, part-aware, and DCC-independent. It does not rely on
+Blender for geometry generation. Wave 31 removed the old native editor surfaces;
+this document now describes core/headless modeling architecture rather than a
+current product UI.
 
 ## Crates
 
@@ -52,7 +57,13 @@ Modeling operations are grouped into coarse phases: source configuration, local 
 
 Recipe validation also checks operation phase order on loaded or hand-authored recipes. This keeps external JSON from placing boundary treatments before the local-topology cuts that produce their target loops.
 
-Cut operations are also reflected directly in the Asset Modeling Lab inspector. This lets generated or duplicated cuts expose editable controls without permanently authoring a `ParameterDescriptor` for every operation field. Descriptor-free operation edits still flow through the recipe reducer, topology-lock checks, validation, history, and compile jobs. Plate and RoundedBox-backed controls derive their feasible position, size, rim, depth, and segment ranges from the host face and topology locks instead of using fixed global slider limits.
+Cut operations can be reflected as editable controls in tooling without
+permanently authoring a `ParameterDescriptor` for every operation field.
+Descriptor-free operation edits still flow through the recipe reducer,
+topology-lock checks, validation, history, and compile jobs. Plate and
+RoundedBox-backed controls derive their feasible position, size, rim, depth,
+and segment ranges from the host face and topology locks instead of using fixed
+global slider limits.
 
 Recipes can also author semantic cut groups in variation metadata. These groups name repeated operation sets such as mounting holes or ventilation slots, validate that every member is a supported cut on the declared definition, and allow candidate search to vary repeated dimensions or spacing as one semantic proposal rather than unrelated one-off edits. Duplicating a grouped cut preserves its source group by default, and group metadata validates both member count and role-to-cut-family consistency.
 

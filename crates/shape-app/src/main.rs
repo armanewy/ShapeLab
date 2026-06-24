@@ -1,16 +1,8 @@
 #![forbid(unsafe_code)]
 
-mod app;
-mod asset;
-mod commands;
-mod desktop;
 mod foundry;
-mod jobs;
-mod panels;
-mod state;
-mod viewport;
 
-use desktop::ShapeLabDesktopApp;
+use foundry::app::FoundryDesktopApp;
 
 fn main() -> eframe::Result<()> {
     let _ = env_logger::try_init();
@@ -23,6 +15,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Shape Lab",
         options,
-        Box::new(|_cc| Ok(Box::<ShapeLabDesktopApp>::default())),
+        Box::new(|_cc| Ok(Box::<FoundryDesktopApp>::default())),
     )
 }

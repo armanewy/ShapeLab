@@ -29,7 +29,7 @@ Every built-in profile must remain novice-sized:
 - Compiles through `shape-foundry` and `shape-family-compile`.
 - Produces a valid model artifact.
 - Has a typed Foundry Author package.
-- Does not require Advanced Recipe for ordinary customization.
+- Does not require technical surface exposure for ordinary customization.
 
 The expansion profiles are authored content. They are not imported meshes,
 LLM-generated geometry, marketplace assets, rigged characters, UV/material

@@ -8,8 +8,8 @@ cargo run -p shape-app --release
 
 ## Roman Timber Bridge
 
-1. Open Asset Modeling Lab, Visual Foundry.
-2. New -> From Asset Family -> Roman Timber Bridge.
+1. Launch Shape Lab.
+2. Choose Roman Timber Bridge from the Visual Foundry home screen.
 3. Wait for the current preview.
 4. Generate Explore directions.
 5. Choose a reinforced-looking direction.
@@ -23,7 +23,7 @@ cargo run -p shape-app --release
 
 ## Sci-Fi Industrial Crate
 
-1. New -> From Asset Family -> Sci-Fi Industrial Crate.
+1. Choose Sci-Fi Industrial Crate from the Visual Foundry home screen.
 2. Generate Explore directions.
 3. Choose a compact vented crate direction.
 4. Open Customize.
@@ -38,7 +38,7 @@ cargo run -p shape-app --release
 
 ## Stylized Furniture Lamp
 
-1. New -> From Asset Family -> Stylized Furniture Lamp.
+1. Choose Stylized Furniture Lamp from the Visual Foundry home screen.
 2. Generate Explore directions.
 3. Choose a tall reading lamp direction.
 4. Open Customize.
@@ -50,10 +50,10 @@ cargo run -p shape-app --release
 
 ## Wave 26 Expansion Profiles
 
-For each profile below, open New -> From Asset Family, wait for the preview,
-open Customize, change at least one continuous control, change one choice or
-toggle control, generate Explore directions, and confirm six whole-model cards
-appear without opening Advanced Recipe.
+For each profile below, choose it from the Visual Foundry home screen, wait for
+the preview, open Customize, change at least one continuous control, change one
+choice or toggle control, generate Explore directions, and confirm six
+whole-model cards appear without a technical recipe surface.
 
 - Market Stall Kit
 - Sci-Fi Door Panel

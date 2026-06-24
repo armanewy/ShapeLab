@@ -1,5 +1,11 @@
 # Visual Foundry MVP Report
 
+Historical note: this Wave 10 report describes the first Visual Foundry MVP as
+it existed inside the old Asset Modeling Lab shell. Wave 31 removed that wrapper,
+the legacy implicit mode, the explicit Modeling Workspace switcher, and the
+default Advanced Recipe product surface. Current product docs should describe
+Shape Lab as launching directly into Visual Foundry.
+
 Wave 10 delivers the whole-model visual family-foundry MVP inside Asset
 Modeling Lab. The novice-facing path is now:
 

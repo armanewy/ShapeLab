@@ -15,7 +15,7 @@ Role:
 - Generate whole-model directions.
 - Expose authored controls and provider choices.
 - Support locks, branches, packs, previews, and export.
-- Hide technical recipe IDs unless the user opens Advanced Recipe.
+- Hide technical recipe IDs from the default product surface.
 
 Current scope:
 

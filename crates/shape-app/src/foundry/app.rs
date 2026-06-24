@@ -34,19 +34,12 @@ pub(crate) struct FoundryDesktopApp {
     texture_cache: FoundryTextureCache,
 }
 
-/// Host-level action requested by the Foundry surface.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum FoundryDesktopAction {
-    /// Switch Asset Modeling Lab to its explicit recipe workspace.
-    OpenModelingWorkspace,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FoundryTab {
+    Home,
     Directions,
     Customize,
     Pack,
-    AdvancedRecipe,
     History,
     Export,
 }
@@ -55,7 +48,7 @@ impl Default for FoundryDesktopApp {
     fn default() -> Self {
         Self {
             state: FoundryAppState::default(),
-            tab: FoundryTab::Directions,
+            tab: FoundryTab::Home,
             jobs: FoundryJobCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
         }
@@ -64,20 +57,13 @@ impl Default for FoundryDesktopApp {
 
 impl FoundryDesktopApp {
     /// Draw the Foundry workflow surface.
-    pub(crate) fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &mut eframe::Frame,
-    ) -> Option<FoundryDesktopAction> {
+    pub(crate) fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_jobs(&ctx);
 
         let mut commands = Vec::new();
-        let mut host_action = None;
         egui::Panel::top("foundry_toolbar").show_inside(ui, |ui| {
-            let output = self.show_toolbar(ui);
-            commands.extend(output.commands);
-            host_action = output.host_action;
+            commands.extend(self.show_toolbar(ui));
         });
         egui::Panel::bottom("foundry_status")
             .default_size(28.0)
@@ -100,21 +86,19 @@ impl FoundryDesktopApp {
             .default_size(220.0)
             .show_inside(ui, |ui| {
                 ui.heading("Foundry");
+                ui.selectable_value(&mut self.tab, FoundryTab::Home, "Choose");
                 ui.selectable_value(&mut self.tab, FoundryTab::Directions, "Directions");
                 ui.selectable_value(&mut self.tab, FoundryTab::Customize, "Customize");
                 ui.selectable_value(&mut self.tab, FoundryTab::Pack, "Pack");
-                ui.selectable_value(&mut self.tab, FoundryTab::AdvancedRecipe, "Advanced Recipe");
-                ui.selectable_value(&mut self.tab, FoundryTab::History, "History");
                 ui.selectable_value(&mut self.tab, FoundryTab::Export, "Export");
+                ui.separator();
+                ui.selectable_value(&mut self.tab, FoundryTab::History, "History");
             });
         egui::CentralPanel::default().show_inside(ui, |ui| match self.tab {
+            FoundryTab::Home => self.show_home(ui),
             FoundryTab::Directions => commands.extend(self.show_directions(ui)),
             FoundryTab::Customize => commands.extend(self.show_customize(ui)),
             FoundryTab::Pack => commands.extend(self.show_pack(ui)),
-            FoundryTab::AdvancedRecipe => {
-                commands.push(FoundryAppCommand::SetAdvancedRecipeOpen(true));
-                commands.extend(self.show_advanced_recipe(ui));
-            }
             FoundryTab::History => commands.extend(self.show_history(ui)),
             FoundryTab::Export => commands.extend(self.show_export(ui)),
         });
@@ -124,36 +108,18 @@ impl FoundryDesktopApp {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         let _ = frame;
-        host_action
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui) -> FoundryToolbarOutput {
+    fn show_toolbar(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
-        let mut host_action = None;
         ui.horizontal(|ui| {
             let has_document = self.state.document.is_some();
             let has_output = self.state.current_output.is_some();
-            ui.menu_button("New", |ui| {
-                ui.label("From Asset Family");
-                for (label, fixture) in built_in_fixture_catalogs_with_labels() {
-                    if ui.button(label).clicked() {
-                        self.load_fixture(fixture, ui.ctx());
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui.button("From Existing Recipe").clicked() {
-                    host_action = Some(FoundryDesktopAction::OpenModelingWorkspace);
-                    ui.close();
-                }
-                if ui.button("Open Foundry Project").clicked()
-                    && let Some(path) = open_foundry_project_file()
-                {
-                    commands.push(FoundryAppCommand::Load(path));
-                    ui.close();
-                }
-            });
-            if ui.button("Open Foundry Project").clicked()
+            ui.heading("Shape Lab");
+            if ui.button("Choose").clicked() {
+                self.tab = FoundryTab::Home;
+            }
+            if ui.button("Open project").clicked()
                 && let Some(path) = open_foundry_project_file()
             {
                 commands.push(FoundryAppCommand::Load(path));
@@ -175,13 +141,13 @@ impl FoundryDesktopApp {
                 commands.push(FoundryAppCommand::SaveAs(path));
             }
             if ui
-                .add_enabled(has_document, egui::Button::new("Build"))
+                .add_enabled(has_document, egui::Button::new("Build model"))
                 .clicked()
             {
                 commands.push(FoundryAppCommand::RequestBuild);
             }
             if ui
-                .add_enabled(has_output, egui::Button::new("Preview"))
+                .add_enabled(has_output, egui::Button::new("Preview model"))
                 .clicked()
             {
                 commands.push(FoundryAppCommand::RequestPreview);
@@ -213,10 +179,38 @@ impl FoundryDesktopApp {
                 }
             }
         });
-        FoundryToolbarOutput {
-            commands,
-            host_action,
+        commands
+    }
+
+    fn show_home(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Choose what to make");
+        ui.label(
+            "Start with a semantic asset family, then generate directions and customize the result.",
+        );
+        ui.add_space(12.0);
+        if ui.button("Open project").clicked()
+            && let Some(path) = open_foundry_project_file()
+        {
+            self.apply_commands(vec![FoundryAppCommand::Load(path)], ui.ctx());
         }
+        ui.separator();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (label, fixture) in built_in_fixture_catalogs_with_labels() {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.strong(label);
+                            ui.weak(profile_description(&fixture.slug));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Start").clicked() {
+                                self.load_fixture(fixture, ui.ctx());
+                            }
+                        });
+                    });
+                });
+            }
+        });
     }
 
     fn show_directions(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
@@ -371,40 +365,6 @@ impl FoundryDesktopApp {
                     });
                 }
             });
-        }
-        commands
-    }
-
-    fn show_advanced_recipe(&self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
-        let commands = Vec::new();
-        ui.heading("Advanced Recipe");
-        if let Some(document) = &self.state.document {
-            ui.label(format!("Document: {}", document.document_id.0));
-            ui.weak(format!("Family: {}", document.family_content_ref.stable_id));
-            ui.weak(format!("Style: {}", document.style_content_ref.stable_id));
-            ui.separator();
-            ui.label("Control bindings");
-            for control in &self.state.controls {
-                ui.horizontal(|ui| {
-                    ui.label(&control.label);
-                    ui.weak(&control.id);
-                    if let Some(path) = &control.advanced_path {
-                        ui.weak(path);
-                    }
-                    if control.locked {
-                        ui.weak("locked");
-                    }
-                });
-            }
-            if let Some(snapshot) = &self.state.recipe_snapshot {
-                ui.separator();
-                ui.weak(format!(
-                    "Generated recipe fingerprint: {}",
-                    snapshot.recipe_fingerprint.0.to_hex()
-                ));
-            }
-        } else {
-            ui.weak("Open a Foundry project or create an asset family.");
         }
         commands
     }
@@ -649,6 +609,7 @@ impl FoundryDesktopApp {
                 Ok(effects) => {
                     self.jobs.reset();
                     self.state.status = Some(format!("Loaded {}", path.display()));
+                    self.tab = FoundryTab::Directions;
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -674,9 +635,10 @@ impl FoundryDesktopApp {
     }
 }
 
-struct FoundryToolbarOutput {
-    commands: Vec<FoundryAppCommand>,
-    host_action: Option<FoundryDesktopAction>,
+impl eframe::App for FoundryDesktopApp {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        FoundryDesktopApp::ui(self, ui, frame);
+    }
 }
 
 #[derive(Default)]
@@ -813,6 +775,65 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 
     let base_name = file_name.strip_suffix(".json").unwrap_or(file_name);
     path.with_file_name(format!("{base_name}{FOUNDRY_PROJECT_FILE_SUFFIX}"))
+}
+
+fn profile_description(slug: &str) -> &'static str {
+    match slug {
+        "roman-bridge" => {
+            "A reinforced timber bridge with supports, bracing, railings, and span controls."
+        }
+        "sci-fi-crate" => {
+            "A compact hard-surface prop with vents, handles, trims, and panel detail."
+        }
+        "stylized-lamp" => {
+            "A furniture-scale lamp with height, stem, base, shade, and softness controls."
+        }
+        "market-stall" => {
+            "A modular market stall with canopy, counter, display, and signage choices."
+        }
+        "sci-fi-door" => {
+            "A panelized industrial door with frame, vents, locks, and surface detail."
+        }
+        "storage-barrel" => {
+            "A coopered storage barrel with bands, proportions, lid, and wearable silhouette."
+        }
+        "signpost" => "A wayfinding post with arrows, boards, base, and directional variation.",
+        "workshop-chair" => {
+            "A practical workshop chair with seat, legs, back, braces, and style controls."
+        }
+        "handcart" => {
+            "A market handcart with bed, wheels, handles, rails, and cargo-ready proportions."
+        }
+        "stylized-tree" => {
+            "A storybook tree with trunk, canopy, branch, root, and stylized silhouette controls."
+        }
+        _ => "A built-in semantic asset family ready for visual direction generation.",
+    }
+}
+
+fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
+    let mut strings = vec![
+        "Shape Lab",
+        "Choose",
+        "Directions",
+        "Customize",
+        "Pack",
+        "Export",
+        "Choose what to make",
+        "Open project",
+        "Start",
+        "Build model",
+        "Preview model",
+        "Save",
+        "Save As",
+        "Undo",
+    ];
+    strings.extend(
+        built_in_fixture_catalogs_with_labels()
+            .into_iter()
+            .map(|(label, _)| label),
+    );
+    strings
 }
 
 fn default_customize_controls(
@@ -1058,6 +1079,75 @@ mod tests {
     }
 
     #[test]
+    fn product_app_launches_on_choose_home() {
+        let app = FoundryDesktopApp::default();
+
+        assert_eq!(app.tab, FoundryTab::Home);
+        assert!(app.state.document.is_none());
+    }
+
+    #[test]
+    fn product_home_lists_ten_profiles() {
+        let labels = built_in_fixture_catalogs_with_labels()
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels.len(), 10);
+        assert!(labels.contains(&"Roman Timber Bridge"));
+        assert!(labels.contains(&"Sci-Fi Industrial Crate"));
+        assert!(labels.contains(&"Stylized Furniture Lamp"));
+        assert!(labels.contains(&"Market Stall Kit"));
+        assert!(labels.contains(&"Sci-Fi Door Panel"));
+        assert!(labels.contains(&"Coopered Storage Barrel"));
+        assert!(labels.contains(&"Wayfinding Signpost"));
+        assert!(labels.contains(&"Workshop Chair"));
+        assert!(labels.contains(&"Market Handcart"));
+        assert!(labels.contains(&"Storybook Tree"));
+    }
+
+    #[test]
+    fn default_product_strings_hide_legacy_and_technical_surfaces() {
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n");
+
+        for forbidden in [
+            "Legacy",
+            "Implicit",
+            "Asset Modeling Lab",
+            "Modeling Workspace",
+            "Advanced Recipe",
+            "From Existing Recipe",
+        ] {
+            assert!(
+                !joined.contains(forbidden),
+                "default product strings unexpectedly contain {forbidden}: {joined}"
+            );
+        }
+    }
+
+    #[test]
+    fn product_shell_steps_are_novice_facing() {
+        let strings = product_visible_strings_for_default_shell();
+
+        for required in [
+            "Choose what to make",
+            "Choose",
+            "Directions",
+            "Customize",
+            "Pack",
+            "Export",
+            "Open project",
+            "Start",
+        ] {
+            assert!(
+                strings.contains(&required),
+                "missing product string {required}"
+            );
+        }
+    }
+
+    #[test]
     fn preview_texture_identity_tracks_preview_id_build_and_pixels() {
         let bridge = shape_foundry_catalog::roman_bridge::fixture_catalog();
         let crate_fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
@@ -1119,14 +1209,14 @@ mod tests {
     }
 
     #[test]
-    fn desktop_foundry_exposes_wave_ten_tabs_and_lamp_profile() {
+    fn desktop_foundry_exposes_product_steps_and_lamp_profile() {
         let tabs = [
+            FoundryTab::Home,
             FoundryTab::Directions,
             FoundryTab::Customize,
             FoundryTab::Pack,
-            FoundryTab::AdvancedRecipe,
-            FoundryTab::History,
             FoundryTab::Export,
+            FoundryTab::History,
         ];
         assert_eq!(tabs.len(), 6);
 
@@ -1157,6 +1247,22 @@ mod tests {
     }
 
     #[test]
+    fn loading_project_enters_workflow_step() {
+        let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+        let state = FoundryAppState::new(fixture.document).expect("fixture state");
+        let mut project_file = state.project_file.expect("project file");
+        let path = temp_foundry_project_path("load-enters-workflow");
+        project_file.save_as(&path).expect("project saves");
+        let mut app = FoundryDesktopApp::default();
+
+        app.load_project(path.clone(), &egui::Context::default());
+
+        assert_eq!(app.tab, FoundryTab::Directions);
+        assert!(app.state.document.is_some());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn default_customize_surface_hides_non_primary_and_hidden_controls() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
@@ -1181,5 +1287,16 @@ mod tests {
             default_customize_controls(&app.state.controls)
                 .all(|control| control.primary && control.visible)
         );
+    }
+
+    fn temp_foundry_project_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "shape-lab-{name}-{}-{nanos}{FOUNDRY_PROJECT_FILE_SUFFIX}",
+            std::process::id()
+        ))
     }
 }

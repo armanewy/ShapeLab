@@ -30,8 +30,8 @@ cheap visual-benchmark slug/fixture mapping test.
 ## Gate Verdict
 
 Pass for the headless milestone. Native UI integration may begin after this
-gate because the customizer profiles can be understood and exercised without
-opening Advanced Recipe.
+gate because the customizer profiles can be understood and exercised with zero
+technical surface exposure.
 
 ## Manual Run Evidence
 
@@ -74,7 +74,7 @@ coherent three-member pack export, and `verify_reopen: true` in
 - Async latency acceptability: Pass for the headless proof. The command records
   deterministic usability metrics and keeps preview compilation batched and
   bounded. Native UI integration should still run this work off the UI thread.
-- Advanced Recipe required: No. The benchmark operates entirely through
+- Technical recipe surface required: No. The benchmark operates entirely through
   authored foundry controls, provider choices, candidate search, and pack export.
 
 ## Determinism

@@ -3,11 +3,15 @@
 ## Immediate Hardening
 
 1. Cache native preview textures by preview ID and build stamp.
-2. Add a real From Existing Recipe import path for compatible Foundry sources.
+2. Refine the new direct Visual Foundry home and workflow shell with larger
+   visual cards.
 3. Add denser native card layout controls without exposing raw technical paths.
 
 Completed since the original Wave 10 note:
 
+- Wave 31 removes the old Asset Modeling Lab wrapper, legacy implicit mode,
+  explicit Modeling Workspace route, and default Advanced Recipe product
+  surface.
 - Customizer option cards render 64x64 whole-model thumbnails in the native
   state path, with an explicit Wave 30 all-profile release gate.
 - Candidate preview rendering isolates per-card preview failures.
@@ -29,7 +33,7 @@ Track:
 - candidate survival
 - invalid attempts
 - undo count
-- Advanced Recipe visits
+- technical surface exposure, expected to remain zero in the default product app
 - option-thumbnail completeness
 
 ## Modeling Roadmap

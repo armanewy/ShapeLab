@@ -18,18 +18,18 @@ The original three MVP profiles pass the Wave 10 usability gate:
 
 ## Native UI Findings
 
-- Visual Foundry is now part of Asset Modeling Lab rather than a separate
-  top-level desktop mode.
+- Wave 31 makes Visual Foundry the direct native product app instead of nesting
+  it inside Asset Modeling Lab or a top-level mode switcher.
 - Whole-model previews are visible in Directions and Customize.
 - The default Customize surface avoids raw scalar paths; technical paths are
-  confined to Advanced Recipe.
+  not shown in the default product shell.
 - Lock, reset, preview, apply, candidate choose/reject, undo, export, save, and
   pack export are all reducer-backed actions.
 
 ## Known Usability Weak Spots
 
-- The New menu exposes only built-in family fixtures. Importing an arbitrary
-  existing recipe into a Foundry document remains future work.
+- The Choose screen exposes only built-in family fixtures and `.shapelab-foundry`
+  project open. Arbitrary recipe import is not a product route.
 - The native panels are functional but visually dense; candidate and control
   cards should become larger, more scannable rows after the contract stabilizes.
 - The current texture upload path is simple and correct, but should cache

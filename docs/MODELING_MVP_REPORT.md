@@ -1,5 +1,10 @@
 # Asset Modeling Lab MVP Report
 
+Historical note: this Wave 6 report describes a removed native product surface.
+Wave 31 replaced the desktop shell with direct Visual Foundry startup and
+removed Asset Modeling Lab, the explicit Modeling Workspace route, and the
+legacy implicit mode from the product app.
+
 ## Summary
 
 Wave 6 adds a native application mode named **Asset Modeling Lab**. The desktop app now starts in this mode and keeps the legacy implicit editor available through the mode switcher.

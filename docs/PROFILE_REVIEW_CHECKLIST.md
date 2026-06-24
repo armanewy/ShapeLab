@@ -19,7 +19,7 @@ catalog or distributing it as a local package.
 - Control labels describe user intent, not scalar paths or implementation IDs.
 - Choice and provider controls have whole-model preview IDs.
 - Disabled or unavailable options have deterministic reasons.
-- A user can create a useful asset without opening Advanced Recipe.
+- A user can create a useful asset with zero technical surface exposure.
 - Preview cameras use stable IDs and produce nonempty images at their requested
   dimensions.
 

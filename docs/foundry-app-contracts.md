@@ -1,7 +1,9 @@
 # Foundry App Contracts
 
 The native Foundry application boundary is implemented as the whole-model
-Visual Foundry surface inside Asset Modeling Lab.
+Visual Foundry product app. Wave 31 removed the old Asset Modeling Lab wrapper,
+legacy implicit mode, explicit Modeling Workspace switcher, and default
+Advanced Recipe product surface.
 
 ## Modules
 
@@ -28,7 +30,7 @@ UI-only commands are limited to app concerns:
 - selection
 - requesting build or preview jobs
 - requesting project file save/load
-- opening or closing Advanced Recipe
+- recording whether developer-only technical rows are expanded
 - requesting app-hosted pack export with a destination directory
 
 This keeps automation, replay, persistence, and native UI on the same generic
@@ -62,8 +64,8 @@ The view models are whole-model first:
   provider options.
 - `FoundryPackView` represents the family-pack workspace.
 
-Technical paths are optional fields intended for tooltips or Advanced Recipe,
-not the primary novice-facing surface.
+Technical paths are optional fields for internal diagnostics and developer-only
+inspection, not the primary novice-facing surface.
 
 ## Non-Goals
 

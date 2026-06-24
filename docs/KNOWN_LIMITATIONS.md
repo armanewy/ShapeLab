@@ -1,6 +1,9 @@
 # Known Limitations
 
-- The legacy implicit shape-graph editor remains available, and Asset Modeling Lab now provides the primary explicit asset-editing workflow.
+- Shape Lab now launches directly into Visual Foundry. The legacy implicit
+  editor and explicit Modeling Workspace product surfaces were removed from the
+  native app in Wave 31; their underlying research and CLI-era crates remain
+  only where needed by tests, benchmarks, and strict reconstruction work.
 - Imported arbitrary meshes are not semantically editable.
 - Topology is generated from the implicit field and is not stable between revisions.
 - There are no UVs, materials, rigging, or animation.

@@ -58,9 +58,9 @@ placeholder pixel is only acceptable in isolated panel helper tests that do not
 have a compiled Foundry document.
 
 The release gate also requires all ten built-in profiles to open through the
-default novice surface with seven primary controls and without opening Advanced
-Recipe. Deterministic contact sheets and sample export artifacts are produced by
-`shape-cli foundry-visual-benchmark` for demo review.
+default novice surface with seven primary controls and zero technical surface
+exposure. Deterministic contact sheets and sample export artifacts are produced
+by `shape-cli foundry-visual-benchmark` for demo review.
 
 The all-profile thumbnail test is marked `#[ignore]` so it does not slow every
 workspace test run. It must be run explicitly before a release-readiness claim.

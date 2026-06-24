@@ -2,7 +2,10 @@
 
 ## Scope
 
-Wave 4 integrates the explicit polygon modeling lane for the two benchmark assets and keeps the implicit editor plus schema-2/schema-3 decompiler paths separate.
+Wave 4 integrates the explicit polygon modeling lane for the two benchmark
+assets and keeps it separate from the schema-2/schema-3 decompiler paths. Wave
+31 later removed the old native implicit editor product surface; this report is
+historical core modeling context.
 
 ## Benchmarks
 

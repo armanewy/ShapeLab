@@ -25,7 +25,7 @@ The local usability log supports these optional records:
 - invalid attempt
 - undo
 - export, used for time to first export
-- advanced recipe view opened
+- technical surface exposure, expected to remain zero in the default product app
 
 Each record stores `elapsed_ms`, measured from local session start. The log does
 not store wall-clock timestamps, model geometry, export directories, or absolute
@@ -41,7 +41,8 @@ The aggregate metrics are computed from the local log:
   candidates. The value is absent when no candidates were requested.
 - `accepted_change_count`: accepted candidates plus accepted control changes.
 - `invalid_state_attempts`: invalid state or command attempts.
-- `advanced_view_visits`: advanced recipe view openings.
+- `advanced_view_visits`: historical technical-surface openings; this should
+  remain zero in the default product app.
 - `total_session_time_ms`: the largest relative event timestamp.
 - `time_to_first_build_ms`: the first build-completed event timestamp, when one
   exists.
