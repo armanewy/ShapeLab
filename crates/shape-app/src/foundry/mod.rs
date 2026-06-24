@@ -10,6 +10,7 @@ pub(crate) mod commands;
 pub(crate) mod jobs;
 pub(crate) mod panels;
 pub(crate) mod state;
+pub(crate) mod ui;
 pub(crate) mod view_model;
 
 #[allow(unused_imports)]

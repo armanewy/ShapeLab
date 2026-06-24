@@ -24,6 +24,8 @@ use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
     panels::{customize, directions, history, pack},
     run_foundry_job,
+    ui::theme::apply_visual_foundry_theme,
+    ui::widgets::{ActionSpec, ButtonTone, action_button},
 };
 
 /// Native Foundry workflow surface.
@@ -44,6 +46,16 @@ enum FoundryTab {
     Export,
 }
 
+const HOME_SUBTITLE: &str =
+    "Start with an asset template, then generate directions and customize the result.";
+const NEED_PROJECT_REASON: &str = "Choose a template or open a project first.";
+const NEED_SAVE_LOCATION_REASON: &str = "Use Save As before saving this project.";
+const NEED_MODEL_REASON: &str = "Build the current model first.";
+const NEED_HISTORY_REASON: &str = "No earlier project step is available.";
+const NEED_DIRECTION_REASON: &str = "This direction is not ready to choose.";
+const NEED_RESET_REASON: &str = "This control is already at its starting value.";
+const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
+
 impl Default for FoundryDesktopApp {
     fn default() -> Self {
         Self {
@@ -59,6 +71,7 @@ impl FoundryDesktopApp {
     /// Draw the Foundry workflow surface.
     pub(crate) fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        apply_visual_foundry_theme(&ctx);
         self.poll_jobs(&ctx);
 
         let mut commands = Vec::new();
@@ -124,55 +137,44 @@ impl FoundryDesktopApp {
             {
                 commands.push(FoundryAppCommand::Load(path));
             }
-            if ui
-                .add_enabled(
-                    has_document && self.state.project_path.is_some(),
-                    egui::Button::new("Save"),
-                )
-                .clicked()
-            {
+            let can_save = has_document && self.state.project_path.is_some();
+            let save_reason = if has_document {
+                NEED_SAVE_LOCATION_REASON
+            } else {
+                NEED_PROJECT_REASON
+            };
+            if button_with_disabled_reason(ui, can_save, "Save", save_reason).clicked() {
                 commands.push(FoundryAppCommand::Save);
             }
-            if ui
-                .add_enabled(has_document, egui::Button::new("Save As"))
+            if button_with_disabled_reason(ui, has_document, "Save As", NEED_PROJECT_REASON)
                 .clicked()
                 && let Some(path) = save_foundry_project_file()
             {
                 commands.push(FoundryAppCommand::SaveAs(path));
             }
-            if ui
-                .add_enabled(has_document, egui::Button::new("Build model"))
+            if button_with_disabled_reason(ui, has_document, "Build model", NEED_PROJECT_REASON)
                 .clicked()
             {
                 commands.push(FoundryAppCommand::RequestBuild);
             }
-            if ui
-                .add_enabled(has_output, egui::Button::new("Preview model"))
+            if button_with_disabled_reason(ui, has_output, "Preview model", NEED_MODEL_REASON)
                 .clicked()
             {
                 commands.push(FoundryAppCommand::RequestPreview);
             }
-            if ui
-                .add_enabled(has_output, egui::Button::new("Export"))
-                .clicked()
-            {
+            if button_with_disabled_reason(ui, has_output, "Export", NEED_MODEL_REASON).clicked() {
                 self.tab = FoundryTab::Export;
             }
-            if ui
-                .add_enabled(
-                    self.state
-                        .project_file
-                        .as_ref()
-                        .is_some_and(|project| project.project.can_undo()),
-                    egui::Button::new("Undo"),
-                )
-                .clicked()
-            {
+            let can_undo = self
+                .state
+                .project_file
+                .as_ref()
+                .is_some_and(|project| project.project.can_undo());
+            if button_with_disabled_reason(ui, can_undo, "Undo", NEED_HISTORY_REASON).clicked() {
                 commands.push(history::undo_command());
             }
             for action in directions::direction_mode_actions(None, 0, None) {
-                if ui
-                    .add_enabled(has_document, egui::Button::new(action.label))
+                if button_with_disabled_reason(ui, has_document, action.label, NEED_PROJECT_REASON)
                     .clicked()
                 {
                     commands.push(action.app_command());
@@ -184,9 +186,7 @@ impl FoundryDesktopApp {
 
     fn show_home(&mut self, ui: &mut egui::Ui) {
         ui.heading("Choose what to make");
-        ui.label(
-            "Start with a semantic asset family, then generate directions and customize the result.",
-        );
+        ui.label(HOME_SUBTITLE);
         ui.add_space(12.0);
         if ui.button("Open project").clicked()
             && let Some(path) = open_foundry_project_file()
@@ -260,8 +260,11 @@ impl FoundryDesktopApp {
                         candidate.id.clone(),
                     )));
                 }
-                if ui
-                    .add_enabled(candidate.selectable, egui::Button::new("Choose"))
+                let choose_reason = candidate
+                    .preview_failure
+                    .as_deref()
+                    .unwrap_or(NEED_DIRECTION_REASON);
+                if button_with_disabled_reason(ui, candidate.selectable, "Choose", choose_reason)
                     .clicked()
                 {
                     commands.push(directions::accept_candidate_command(candidate.id.clone()));
@@ -279,7 +282,7 @@ impl FoundryDesktopApp {
         ui.heading("Customize");
         self.show_current_preview(ui);
         if self.state.controls.is_empty() {
-            ui.weak("No compiled customizer controls yet.");
+            ui.weak("This model has no quick controls yet.");
             return commands;
         }
         let current_build = self.state.current_build.as_ref();
@@ -303,12 +306,13 @@ impl FoundryDesktopApp {
                     {
                         commands.push(command);
                     }
-                    if ui
-                        .add_enabled(
-                            customize::control_can_reset(control),
-                            egui::Button::new("Reset"),
-                        )
-                        .clicked()
+                    if button_with_disabled_reason(
+                        ui,
+                        customize::control_can_reset(control),
+                        "Reset",
+                        NEED_RESET_REASON,
+                    )
+                    .clicked()
                     {
                         commands.extend(customize::reset_control_intents(control));
                     }
@@ -375,9 +379,13 @@ impl FoundryDesktopApp {
         ui.heading("History");
         ui.horizontal(|ui| {
             for action in &view.actions {
-                if ui
-                    .add_enabled(action.enabled, egui::Button::new(&action.label))
-                    .clicked()
+                if button_with_disabled_reason(
+                    ui,
+                    action.enabled,
+                    &action.label,
+                    NEED_HISTORY_REASON,
+                )
+                .clicked()
                     && let Some(command) = self.history_dispatch_command(action.dispatch.as_ref())
                 {
                     commands.push(command);
@@ -413,8 +421,7 @@ impl FoundryDesktopApp {
         ui.heading("Export");
         self.show_current_preview(ui);
         let can_export = self.state.current_output.is_some();
-        if ui
-            .add_enabled(can_export, egui::Button::new("Export Current Asset"))
+        if button_with_disabled_reason(ui, can_export, "Export Current Asset", NEED_MODEL_REASON)
             .clicked()
             && let Some(out_dir) = select_asset_export_dir()
         {
@@ -438,16 +445,29 @@ impl FoundryDesktopApp {
         ui.heading("Pack");
         ui.horizontal(|ui| {
             let add_enabled = self.state.document.is_some();
-            if ui
-                .add_enabled(add_enabled, egui::Button::new("Add Current Asset"))
-                .clicked()
+            if button_with_disabled_reason(
+                ui,
+                add_enabled,
+                "Add Current Asset",
+                NEED_PROJECT_REASON,
+            )
+            .clicked()
                 && let Some(command) = self.add_current_to_pack_command()
             {
                 commands.push(command);
             }
-            if ui
-                .add_enabled(view.export.enabled, egui::Button::new("Batch Export"))
-                .clicked()
+            let batch_export_reason = view
+                .export
+                .disabled_reason
+                .as_deref()
+                .unwrap_or(NEED_PACK_MEMBER_REASON);
+            if button_with_disabled_reason(
+                ui,
+                view.export.enabled,
+                "Batch Export",
+                batch_export_reason,
+            )
+            .clicked()
                 && let Some(out_dir) = select_pack_export_dir()
                 && let Some(command) = pack::batch_export_command(&self.state.pack, out_dir)
             {
@@ -461,7 +481,7 @@ impl FoundryDesktopApp {
         ui.label(format!("{} member(s)", view.members.len()));
         if view.export.enabled {
             ui.weak("Batch export ready");
-        } else if let Some(reason) = view.export.disabled_reason {
+        } else if let Some(reason) = &view.export.disabled_reason {
             ui.weak(reason);
         }
         commands
@@ -739,6 +759,20 @@ impl FoundryCatalogResolver for BuiltInFoundryCatalogResolver {
     }
 }
 
+fn button_with_disabled_reason(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    label: &str,
+    disabled_reason: &str,
+) -> egui::Response {
+    let spec = if enabled {
+        ActionSpec::enabled(label, ButtonTone::Secondary)
+    } else {
+        ActionSpec::disabled(label, ButtonTone::Secondary, disabled_reason)
+    };
+    action_button(ui, &spec)
+}
+
 fn open_foundry_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Shape Lab Foundry", &["json"])
@@ -807,7 +841,7 @@ fn profile_description(slug: &str) -> &'static str {
         "stylized-tree" => {
             "A storybook tree with trunk, canopy, branch, root, and stylized silhouette controls."
         }
-        _ => "A built-in semantic asset family ready for visual direction generation.",
+        _ => "A built-in asset template ready for visual direction generation.",
     }
 }
 
@@ -827,12 +861,23 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Save",
         "Save As",
         "Undo",
+        HOME_SUBTITLE,
+        NEED_PROJECT_REASON,
+        NEED_SAVE_LOCATION_REASON,
+        NEED_MODEL_REASON,
+        NEED_HISTORY_REASON,
+        NEED_DIRECTION_REASON,
+        NEED_RESET_REASON,
+        NEED_PACK_MEMBER_REASON,
+        "This model has no quick controls yet.",
+        "Build the current asset before exporting.",
+        "Batch export ready",
+        "No family pack workspace is open.",
     ];
-    strings.extend(
-        built_in_fixture_catalogs_with_labels()
-            .into_iter()
-            .map(|(label, _)| label),
-    );
+    for (label, fixture) in built_in_fixture_catalogs_with_labels() {
+        strings.push(label);
+        strings.push(profile_description(&fixture.slug));
+    }
     strings
 }
 
@@ -1110,6 +1155,7 @@ mod tests {
     fn default_product_strings_hide_legacy_and_technical_surfaces() {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
+        let joined_lower = joined.to_ascii_lowercase();
 
         for forbidden in [
             "Legacy",
@@ -1118,9 +1164,15 @@ mod tests {
             "Modeling Workspace",
             "Advanced Recipe",
             "From Existing Recipe",
+            "scalar",
+            "provider",
+            "semantic",
+            "operation",
+            "compiler",
+            "decompiler",
         ] {
             assert!(
-                !joined.contains(forbidden),
+                !joined_lower.contains(&forbidden.to_ascii_lowercase()),
                 "default product strings unexpectedly contain {forbidden}: {joined}"
             );
         }
