@@ -301,7 +301,7 @@ impl DirectionBoardIntent {
 }
 
 /// Search mode action and request data.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DirectionModeAction {
     /// Search mode.
     pub mode: FoundryCandidateMode,
@@ -486,6 +486,7 @@ pub(crate) fn candidate_request_for_mode(
         result_count: VISIBLE_DIRECTION_CANDIDATE_CARDS,
         mode,
         strategy_id,
+        preference_profile: None,
     }
 }
 

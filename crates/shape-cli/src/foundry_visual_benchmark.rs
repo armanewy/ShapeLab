@@ -662,6 +662,7 @@ fn render_candidate_mode(
         result_count: request.required_count.unwrap_or(REQUIRED_CANDIDATE_COUNT),
         mode: request.mode,
         strategy_id: None,
+        preference_profile: None,
     };
     let output = match generate_foundry_candidate_plans(
         &inputs.fixture.document,

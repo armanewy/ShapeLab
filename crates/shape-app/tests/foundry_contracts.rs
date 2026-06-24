@@ -105,6 +105,7 @@ fn foundry_candidate_job_mode_comes_from_request() {
         result_count: 6,
         mode: FoundryCandidateMode::Explore,
         strategy_id: Some("default".to_string()),
+        preference_profile: None,
     };
     let job = FoundryJobRequest::GenerateCandidates {
         job_id: 46,

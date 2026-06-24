@@ -27,6 +27,13 @@ Move field sampling, meshing support data, thumbnails, and viewport rendering to
 
 Persist user choices as pairwise comparisons and use them to bias future candidate generation toward accepted directions while still preserving novelty and exploration.
 
+Wave 29 adds the first local-only version of this backend. Foundry sessions can
+record explicit accept/reject, lock/reset, export, and pack-membership signals as
+visible control IDs. Candidate generation may consume a same-scope
+`FoundryPreferenceProfile`, but the profile contributes only a bounded
+post-validation selection bonus. It does not mutate semantic documents, store
+geometry or paths, or replace novelty/diversity gates.
+
 ## Optional DCC Adapter
 
 Add an export/import adapter for a DCC only after the core model remains useful without it. The adapter should project Shape Lab state outward rather than making external scene files the source of truth.

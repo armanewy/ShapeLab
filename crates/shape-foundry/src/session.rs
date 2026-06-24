@@ -2,14 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{FoundryCandidateSummary, FoundryDocumentId};
+use crate::{FoundryCandidateSummary, FoundryDocumentId, FoundryPreferenceLog};
 
 /// Foundry session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FoundrySessionId(pub String);
 
 /// Lightweight session state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FoundrySession {
     /// Stable session ID.
     pub id: FoundrySessionId,
@@ -20,6 +20,9 @@ pub struct FoundrySession {
     /// Optional local-only usability records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_usability: Option<FoundryUsabilityLog>,
+    /// Optional local-only preference records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_preferences: Option<FoundryPreferenceLog>,
 }
 
 /// Local-only foundry usability record log.

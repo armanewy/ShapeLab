@@ -5,7 +5,8 @@ use shape_foundry::{
     CATALOG_LOCK_KEY_CUSTOMIZER_PROFILE, CATALOG_LOCK_KEY_STYLE, CATALOG_LOCK_KEY_STYLE_IMPL,
     CandidateStrategy, CatalogContentRef, ClosedInterval, ControlKind, ControlTopologyBehavior,
     ControlValue, CustomizerControl, CustomizerProfile, DomainCertification, FeasibleControlDomain,
-    FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget, ProviderOption,
+    FoundryCandidateId, FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget,
+    FoundryPreferenceEvent, FoundryPreferenceLog, FoundryPreferenceScope, ProviderOption,
     WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
 use shape_foundry_catalog::{
@@ -24,6 +25,7 @@ fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
         result_count: 6,
         mode,
         strategy_id: None,
+        preference_profile: None,
     }
 }
 
@@ -64,6 +66,7 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
                 result_count: 6,
                 mode: FoundryCandidateMode::Explore,
                 strategy_id: None,
+                preference_profile: None,
             },
         )
         .unwrap_or_else(|error| panic!("{} candidates should generate: {error:#?}", fixture.slug));
@@ -336,6 +339,88 @@ fn six_diverse_survivors_are_returned() {
     );
 }
 
+#[test]
+fn local_preference_profile_biases_selection_without_replacing_validity_gates() {
+    let fixture = scifi_crate::fixture_catalog();
+    let base_request = request(37, FoundryCandidateMode::Explore);
+    let base = generate_foundry_candidate_plans(&fixture.document, &fixture, &base_request)
+        .expect("base candidates should generate");
+    let preferred = base
+        .candidates
+        .iter()
+        .rev()
+        .find(|candidate| !candidate.changed_controls.is_empty())
+        .expect("fixture should produce changed controls");
+    let preferred_controls = preferred.changed_controls.clone();
+    let mut profile = preference_profile_for_fixture(&fixture, &preferred_controls);
+    profile.selection_strength = 0.35;
+    profile.novelty_floor = 0.0;
+    let mut biased_request = base_request;
+    biased_request.preference_profile = Some(profile);
+
+    let biased = generate_foundry_candidate_plans(&fixture.document, &fixture, &biased_request)
+        .expect("biased candidates should generate");
+
+    assert!(biased.preference_report.requested);
+    assert!(biased.preference_report.applied);
+    assert!(biased.preference_report.scope_matched);
+    assert_eq!(biased.candidates.len(), base.candidates.len());
+    let mut biased_ids = biased
+        .candidates
+        .iter()
+        .map(|candidate| candidate.id.0.as_str())
+        .collect::<Vec<_>>();
+    biased_ids.sort();
+    let mut representative_ids = biased
+        .scoring_report
+        .representatives
+        .iter()
+        .map(|candidate| candidate.id.as_str())
+        .collect::<Vec<_>>();
+    representative_ids.sort();
+    assert_eq!(biased_ids, representative_ids);
+    assert_eq!(
+        biased.diagnostics.returned_candidates,
+        base.candidates.len()
+    );
+    assert!(
+        biased.candidates[0]
+            .changed_controls
+            .iter()
+            .any(|control| preferred_controls.contains(control)),
+        "first biased candidate should include one preferred control; preferred={preferred_controls:?} first={:?}",
+        biased.candidates[0].changed_controls
+    );
+    assert!(
+        biased.preference_report.selected_scores[0].score > 0.0,
+        "first selected candidate should carry positive preference score"
+    );
+}
+
+#[test]
+fn wrong_scope_preference_profile_is_ignored() {
+    let fixture = scifi_crate::fixture_catalog();
+    let base_request = request(41, FoundryCandidateMode::Explore);
+    let base = generate_foundry_candidate_plans(&fixture.document, &fixture, &base_request)
+        .expect("base candidates should generate");
+    let mut profile = preference_profile_for_fixture(&fixture, &["body_proportions".to_owned()]);
+    profile.scope = FoundryPreferenceScope::new("lamp", "lamp-profile");
+    let mut scoped_request = base_request;
+    scoped_request.preference_profile = Some(profile);
+
+    let scoped = generate_foundry_candidate_plans(&fixture.document, &fixture, &scoped_request)
+        .expect("scoped candidates should generate");
+
+    assert!(scoped.preference_report.requested);
+    assert!(!scoped.preference_report.applied);
+    assert!(!scoped.preference_report.scope_matched);
+    assert_eq!(
+        scoped.preference_report.ignored_reason.as_deref(),
+        Some("preference_scope_mismatch")
+    );
+    assert_eq!(scoped.candidates, base.candidates);
+}
+
 fn macro_axis_fixture() -> FoundryFixtureCatalog {
     let mut fixture = stylized_lamp::fixture_catalog();
     let mut profile = profile(&fixture);
@@ -379,6 +464,27 @@ fn macro_axis_fixture() -> FoundryFixtureCatalog {
         .insert("macro_axis".to_owned(), ControlValue::Scalar(0.75));
     replace_profile(&mut fixture, &profile);
     fixture
+}
+
+fn preference_profile_for_fixture(
+    fixture: &FoundryFixtureCatalog,
+    accepted_controls: &[String],
+) -> shape_foundry::FoundryPreferenceProfile {
+    let scope = FoundryPreferenceScope::new(
+        "crate",
+        fixture.document.customizer_profile_ref.stable_id.clone(),
+    );
+    let mut log = FoundryPreferenceLog::new();
+    log.record(FoundryPreferenceEvent::CandidateComparison {
+        scope: scope.clone(),
+        mode: Some("explore".to_owned()),
+        accepted_candidate_id: FoundryCandidateId("preferred".to_owned()),
+        accepted_controls: accepted_controls.to_vec(),
+        rejected_candidate_ids: Vec::new(),
+        rejected_controls: Vec::new(),
+        weight: 1.0,
+    });
+    log.profile_for_scope(scope)
 }
 
 fn provider_fixture() -> FoundryFixtureCatalog {

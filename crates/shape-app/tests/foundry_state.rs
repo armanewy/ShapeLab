@@ -11,8 +11,8 @@ use std::{
 };
 
 use foundry::{
-    FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
-    FoundryPackView, run_foundry_job,
+    FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryAppStateError, FoundryJobEvent,
+    FoundryJobRequest, FoundryPackView, run_foundry_job,
 };
 use serde::Serialize;
 use shape_asset::{
@@ -38,8 +38,9 @@ use shape_foundry::{
     ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
     DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION, FeasibleControlDomain,
     FoundryAssetDocument, FoundryCatalogError, FoundryCatalogLock, FoundryCatalogResolver,
-    FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, FoundryEdit, FoundryPackDocument,
-    FoundryPackExportProfile, FoundryProjectRevisionProgram, ProviderOverride, ResponseCurve,
+    FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, FoundryEdit, FoundryLock,
+    FoundryLockMode, FoundryLockTarget, FoundryPackDocument, FoundryPackExportProfile,
+    FoundryPreferenceEvent, FoundryProjectRevisionProgram, ProviderOverride, ResponseCurve,
     document_catalog_refs,
 };
 use shape_project::foundry::FoundryProjectFile;
@@ -103,6 +104,7 @@ fn candidate_job_mode_comes_from_explicit_candidate_request() {
         result_count: 4,
         mode: FoundryCandidateMode::Explore,
         strategy_id: Some("broad".to_owned()),
+        preference_profile: None,
     };
 
     let effects = state
@@ -126,6 +128,7 @@ fn direction_mode_command_preserves_requested_search_mode() {
                 result_count: 6,
                 mode: FoundryCandidateMode::Structure,
                 strategy_id: Some("macro".to_owned()),
+                preference_profile: None,
             },
         ))
         .expect("mode request should schedule");
@@ -204,6 +207,54 @@ fn accepting_candidate_schedules_its_replayable_foundry_edit() {
         }
         other => panic!("expected apply edit job, got {other:?}"),
     }
+}
+
+#[test]
+fn local_preferences_record_visible_lock_and_reset_actions() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "edge_softness".to_owned(),
+            value: ControlValue::Scalar(0.4),
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetLock {
+            lock: FoundryLock {
+                target: FoundryLockTarget::Control("body_proportions".to_owned()),
+                mode: FoundryLockMode::SearchProtected,
+                reason: Some("test".to_owned()),
+            },
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::ResetControl {
+            control_id: "edge_softness".to_owned(),
+        },
+    );
+
+    assert!(state.local_preferences.events.iter().any(|event| {
+        matches!(
+            event,
+            FoundryPreferenceEvent::ControlLocked { control_id, .. }
+                if control_id == "body_proportions"
+        )
+    }));
+    assert!(state.local_preferences.events.iter().any(|event| {
+        matches!(
+            event,
+            FoundryPreferenceEvent::ControlReset { control_id, .. }
+                if control_id == "edge_softness"
+        )
+    }));
 }
 
 #[test]
@@ -386,6 +437,7 @@ fn candidate_generation_job_renders_preview_images_for_cards() {
             result_count: 4,
             mode: FoundryCandidateMode::Refine,
             strategy_id: None,
+            preference_profile: None,
         },
     };
 
@@ -416,6 +468,7 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
         result_count: 4,
         mode: FoundryCandidateMode::Refine,
         strategy_id: None,
+        preference_profile: None,
     };
     let mut output =
         generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
@@ -613,6 +666,15 @@ fn novice_can_export_three_member_pack_without_advanced_recipe() {
 
     assert_eq!(state.pack.members.len(), 3);
     assert!(state.pack.can_export);
+    assert_eq!(
+        state
+            .local_preferences
+            .events
+            .iter()
+            .filter(|event| matches!(event, FoundryPreferenceEvent::PackMemberAdded { .. }))
+            .count(),
+        3
+    );
 
     let out_dir = temp_test_dir("foundry-wave22-pack");
     let _ = fs::remove_dir_all(&out_dir);
@@ -648,6 +710,7 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
             result_count: 4,
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,
+            preference_profile: None,
         })
         .expect("candidate generation should schedule");
     let event = run_fixture_job(start_job(effects), &fixture);
@@ -659,6 +722,14 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
 
     let rejected = state.candidates[0].id.clone();
     let accepted = state.candidates[1].id.clone();
+    state.read_only = true;
+    let blocked = state.handle_command(FoundryAppCommand::run(FoundryCommand::AcceptCandidate {
+        candidate_id: accepted.clone(),
+    }));
+    state.read_only = false;
+    assert!(matches!(blocked, Err(FoundryAppStateError::ReadOnly)));
+    assert!(state.local_preferences.events.is_empty());
+
     assert!(
         state
             .handle_command(FoundryAppCommand::run(FoundryCommand::RejectCandidate {
@@ -668,12 +739,14 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
             .is_empty()
     );
     assert!(!state.candidate_edits.contains_key(&rejected));
+    assert_eq!(state.local_preferences.events.len(), 1);
 
     let effects = state
         .handle_command(FoundryAppCommand::run(FoundryCommand::AcceptCandidate {
             candidate_id: accepted.clone(),
         }))
         .expect("accept should schedule candidate edit");
+    assert_eq!(state.local_preferences.events.len(), 2);
     let event = run_fixture_job(start_job(effects), &fixture);
     assert!(matches!(event, FoundryJobEvent::EditApplied { .. }));
     assert!(state.handle_job_event(event));
@@ -686,6 +759,27 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
             .as_ref()
             .is_some_and(|project| project.project.revisions.len() > 1)
     );
+
+    let effects = state
+        .request_candidates(FoundryCandidateRequest {
+            seed: 78,
+            proposal_count: 24,
+            result_count: 4,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+        })
+        .expect("preference-biased generation should schedule");
+    let job = start_job(effects);
+    let FoundryJobRequest::GenerateCandidates { request, .. } = &job else {
+        panic!("expected candidate generation request");
+    };
+    let profile = request
+        .preference_profile
+        .as_ref()
+        .expect("local preferences should attach a profile");
+    assert_eq!(profile.source_event_count, 2);
+    assert!(profile.local_only);
 }
 
 #[test]
@@ -923,11 +1017,19 @@ fn current_asset_export_command_writes_model_package() {
     let FoundryJobEvent::ExportFinished {
         out_dir: actual_dir,
         ..
-    } = event
+    } = event.clone()
     else {
         panic!("expected export success, got {event:?}");
     };
     assert_eq!(actual_dir, out_dir);
+    assert!(state.handle_job_event(event));
+    assert!(
+        state
+            .local_preferences
+            .events
+            .iter()
+            .any(|event| { matches!(event, FoundryPreferenceEvent::VariantExported { .. }) })
+    );
     assert!(out_dir.join("asset-manifest.json").is_file());
 
     let _ = fs::remove_dir_all(&out_dir);

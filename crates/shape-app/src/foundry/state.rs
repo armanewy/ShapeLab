@@ -12,7 +12,8 @@ use shape_foundry::{
     FoundryBuildStamp, FoundryCandidateId, FoundryCatalogError, FoundryCatalogLock,
     FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput, FoundryConformanceSummary,
     FoundryDocumentId, FoundryEdit, FoundryLock, FoundryLockMode, FoundryLockTarget,
-    FoundryPackDocument, FoundryPackExportProfile, FoundryProjectRevisionProgram,
+    FoundryPackDocument, FoundryPackExportProfile, FoundryPreferenceEvent, FoundryPreferenceLog,
+    FoundryPreferenceProfile, FoundryPreferenceScope, FoundryProjectRevisionProgram,
     FoundryValidationReport, GenerateCandidatesRequest, GeneratedRecipeSnapshot, ProviderOverride,
     SharedProviderPolicy, apply_foundry_command, compile_foundry_document, control_divergence,
     default_control_value, effective_control_domain, validate_foundry_document,
@@ -90,6 +91,8 @@ pub(crate) struct FoundryAppState {
     pub candidate_output: Option<Box<FoundryCandidateOutput>>,
     /// Replayable edits keyed by generated candidate ID.
     pub candidate_edits: BTreeMap<FoundryCandidateId, FoundryEdit>,
+    /// Local-only preference signals from explicit candidate choices.
+    pub local_preferences: FoundryPreferenceLog,
     /// Current rendered whole-model preview.
     pub current_preview: Option<FoundryPreviewImage>,
     /// Family-pack workspace view.
@@ -129,6 +132,7 @@ impl Default for FoundryAppState {
             candidates: Vec::new(),
             candidate_output: None,
             candidate_edits: BTreeMap::new(),
+            local_preferences: FoundryPreferenceLog::new(),
             current_preview: None,
             pack: FoundryPackView::default(),
             active_jobs: BTreeMap::new(),
@@ -316,6 +320,7 @@ impl FoundryAppState {
                     self.selected_pack_member = pack.selected_member.clone();
                 }
                 self.pack = pack;
+                self.record_current_pack_member_added();
                 true
             }
             FoundryJobEvent::PackExportFinished {
@@ -333,6 +338,7 @@ impl FoundryAppState {
             FoundryJobEvent::ExportFinished {
                 profile, out_dir, ..
             } => {
+                self.record_current_variant_exported();
                 self.status = Some(format!("Exported {profile} to {}", out_dir.display()));
                 true
             }
@@ -386,9 +392,12 @@ impl FoundryAppState {
     /// Request candidate generation with an explicit candidate request.
     pub(crate) fn request_candidates(
         &mut self,
-        request: FoundryCandidateRequest,
+        mut request: FoundryCandidateRequest,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
         let document = self.current_document()?.clone();
+        if request.preference_profile.is_none() {
+            request.preference_profile = self.preference_profile_for_current_scope();
+        }
         let job_id = self.allocate_job_id()?;
         Ok(self.schedule_job(FoundryJobRequest::GenerateCandidates {
             job_id,
@@ -463,10 +472,15 @@ impl FoundryAppState {
                 if let FoundryCommand::SetControl { control_id, .. } = &command {
                     self.active_control = Some(control_id.clone());
                 }
-                self.schedule_apply_edit(FoundryEdit {
+                let preference_event = self.preference_event_for_command(&command);
+                let effects = self.schedule_apply_edit(FoundryEdit {
                     label: foundry_command_label(&command).to_owned(),
                     commands: vec![command],
-                })
+                })?;
+                if let Some(event) = preference_event {
+                    self.local_preferences.record(event);
+                }
+                Ok(effects)
             }
         }
     }
@@ -498,11 +512,16 @@ impl FoundryAppState {
             .get(&candidate_id)
             .cloned()
             .ok_or_else(|| FoundryAppStateError::UnknownCandidate(candidate_id.clone()))?;
-        self.selected_candidate = Some(candidate_id);
-        self.schedule_apply_edit(edit)
+        let preference_event = self.candidate_acceptance_event(&candidate_id);
+        let effects = self.schedule_apply_edit(edit)?;
+        if let Some(event) = preference_event {
+            self.local_preferences.record(event);
+        }
+        Ok(effects)
     }
 
     fn reject_candidate(&mut self, candidate_id: &FoundryCandidateId) {
+        self.record_candidate_rejection(candidate_id);
         self.candidates
             .retain(|candidate| &candidate.id != candidate_id);
         self.candidate_edits.remove(candidate_id);
@@ -849,6 +868,186 @@ impl FoundryAppState {
         self.candidate_edits.clear();
     }
 
+    fn preference_scope(&self) -> Option<FoundryPreferenceScope> {
+        let output = self.current_output.as_ref()?;
+        let document = self.document.as_ref()?;
+        Some(FoundryPreferenceScope::new(
+            output.catalog.family.id.clone(),
+            document.customizer_profile_ref.stable_id.clone(),
+        ))
+    }
+
+    fn preference_profile_for_current_scope(&self) -> Option<FoundryPreferenceProfile> {
+        let scope = self.preference_scope()?;
+        let profile = self.local_preferences.profile_for_scope(scope);
+        (!profile.is_empty()).then_some(profile)
+    }
+
+    fn candidate_acceptance_event(
+        &self,
+        candidate_id: &FoundryCandidateId,
+    ) -> Option<FoundryPreferenceEvent> {
+        let scope = self.preference_scope()?;
+        let output = self.candidate_output.as_ref()?;
+        let accepted = output
+            .candidates
+            .iter()
+            .find(|candidate| candidate.id == *candidate_id)?;
+        let rejected_candidate_ids = output
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.id != *candidate_id)
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let rejected_controls = output
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.id != *candidate_id)
+            .flat_map(|candidate| candidate.changed_controls.iter().cloned())
+            .collect::<Vec<_>>();
+        Some(FoundryPreferenceEvent::CandidateComparison {
+            scope,
+            mode: None,
+            accepted_candidate_id: candidate_id.clone(),
+            accepted_controls: accepted.changed_controls.clone(),
+            rejected_candidate_ids,
+            rejected_controls,
+            weight: 1.0,
+        })
+    }
+
+    fn record_candidate_rejection(&mut self, candidate_id: &FoundryCandidateId) {
+        let Some(scope) = self.preference_scope() else {
+            return;
+        };
+        let Some(output) = &self.candidate_output else {
+            return;
+        };
+        let Some(rejected) = output
+            .candidates
+            .iter()
+            .find(|candidate| candidate.id == *candidate_id)
+        else {
+            return;
+        };
+        self.local_preferences
+            .record(FoundryPreferenceEvent::CandidateRejected {
+                scope,
+                candidate_id: candidate_id.clone(),
+                changed_controls: rejected.changed_controls.clone(),
+                weight: 1.0,
+            });
+    }
+
+    fn preference_event_for_command(
+        &self,
+        command: &FoundryCommand,
+    ) -> Option<FoundryPreferenceEvent> {
+        let scope = self.preference_scope()?;
+        match command {
+            FoundryCommand::ResetControl { control_id } => {
+                let control_id = self.visible_control_id(control_id)?;
+                Some(FoundryPreferenceEvent::ControlReset {
+                    scope,
+                    control_id,
+                    weight: 1.0,
+                })
+            }
+            FoundryCommand::SetLock { lock }
+                if matches!(
+                    lock.mode,
+                    FoundryLockMode::Locked | FoundryLockMode::SearchProtected
+                ) =>
+            {
+                let control_id = self.visible_control_id_for_lock_target(&lock.target)?;
+                Some(FoundryPreferenceEvent::ControlLocked {
+                    scope,
+                    control_id,
+                    weight: 1.0,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn record_current_variant_exported(&mut self) {
+        let Some(scope) = self.preference_scope() else {
+            return;
+        };
+        let Some(document) = self.document.as_ref() else {
+            return;
+        };
+        let changed_controls = self.visible_changed_controls_from_document(document);
+        self.local_preferences
+            .record(FoundryPreferenceEvent::VariantExported {
+                scope,
+                changed_controls,
+                weight: 1.0,
+            });
+    }
+
+    fn record_current_pack_member_added(&mut self) {
+        let Some(scope) = self.preference_scope() else {
+            return;
+        };
+        if self.selected_pack_member.is_none() {
+            return;
+        }
+        let Some(document) = self.document.as_ref() else {
+            return;
+        };
+        let changed_controls = self.visible_changed_controls_from_document(document);
+        self.local_preferences
+            .record(FoundryPreferenceEvent::PackMemberAdded {
+                scope,
+                changed_controls,
+                weight: 1.0,
+            });
+    }
+
+    fn visible_changed_controls_from_document(
+        &self,
+        document: &FoundryAssetDocument,
+    ) -> Vec<String> {
+        let mut controls = document
+            .control_state
+            .keys()
+            .filter_map(|control_id| self.visible_control_id(control_id))
+            .collect::<Vec<_>>();
+        controls.sort();
+        controls.dedup();
+        controls
+    }
+
+    fn visible_control_id_for_lock_target(&self, target: &FoundryLockTarget) -> Option<String> {
+        match target {
+            FoundryLockTarget::Control(control_id) => self.visible_control_id(control_id),
+            FoundryLockTarget::Provider(role) => self.visible_provider_control_id_for_role(role),
+            _ => None,
+        }
+    }
+
+    fn visible_control_id(&self, control_id: &str) -> Option<String> {
+        self.controls
+            .iter()
+            .find(|control| control.visible && control.id == control_id)
+            .map(|control| control.id.clone())
+    }
+
+    fn visible_provider_control_id_for_role(&self, role: &str) -> Option<String> {
+        self.controls
+            .iter()
+            .find(|control| {
+                control.visible
+                    && control.presentation == FoundryControlPresentation::ProviderGallery
+                    && control
+                        .options
+                        .iter()
+                        .any(|option| option.provider_role.as_deref() == Some(role))
+            })
+            .map(|control| control.id.clone())
+    }
+
     fn request_source_is_current(&self, request: &FoundryJobRequest) -> bool {
         match request {
             FoundryJobRequest::CompileCurrent { document, .. }
@@ -997,6 +1196,7 @@ fn candidate_request_from_command(request: GenerateCandidatesRequest) -> Foundry
         result_count,
         mode: FoundryCandidateMode::Refine,
         strategy_id: request.strategy_id,
+        preference_profile: None,
     }
 }
 

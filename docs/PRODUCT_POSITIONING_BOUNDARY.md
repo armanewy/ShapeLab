@@ -29,6 +29,8 @@ editability.
   commands, not text-to-geometry or model-specific core code.
 - DCC support is an output projection from canonical Shape Lab packages, not an
   external scene source of truth.
+- Preference learning is local, explicit, and limited to biasing future Foundry
+  candidate selection. It does not silently rewrite semantic intent.
 
 ## What Not To Promise
 
@@ -39,6 +41,8 @@ editability.
 - UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
 - Natural-language geometry generation or direct recipe mutation by an LLM.
 - Editing a DCC scene and expecting Shape Lab to infer the semantic source.
+- Cloud preference models, hidden telemetry, or preference-driven semantic
+  rewrites.
 - General character production, rigged characters, or garment simulation.
 
 ## Approved Labels

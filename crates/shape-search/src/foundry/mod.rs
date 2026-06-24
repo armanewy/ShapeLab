@@ -10,18 +10,20 @@ use shape_asset::{GeometrySource, ModelingOperationSpec};
 use shape_core::{Aabb, Scalar, Transform3};
 use shape_foundry::{
     ControlDeltaExplanation, ControlEvaluationContext, ControlKind, ControlTopologyBehavior,
-    ControlValue, CustomizerControl, CustomizerProfile, FeasibleControlDomain,
-    FoundryAssetDocument, FoundryCandidateId, FoundryCatalogResolver, FoundryCommand,
-    FoundryCompilationError, FoundryCompilationOutput, FoundryConformanceSummary, FoundryEdit,
-    FoundryLockMode, FoundryLockTarget, apply_foundry_command, canonicalize_control_value,
+    ControlValue, CustomizerControl, CustomizerProfile, FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION,
+    FeasibleControlDomain, FoundryAssetDocument, FoundryCandidateId, FoundryCatalogResolver,
+    FoundryCommand, FoundryCompilationError, FoundryCompilationOutput, FoundryConformanceSummary,
+    FoundryEdit, FoundryLockMode, FoundryLockTarget, FoundryPreferenceProfile,
+    FoundryPreferenceScope, apply_foundry_command, canonicalize_control_value,
     compile_foundry_document, default_control_value, effective_control_domain,
     explain_control_delta,
 };
 use thiserror::Error;
 
 use crate::asset::scoring::{
-    AssetCandidateInput, AssetDescriptor, AssetScoringReport, AssetSelectionPolicy,
-    FIXED_CAMERA_COUNT, score_and_select_asset_candidates_with_policy,
+    AssetCandidateInput, AssetDescriptor, AssetScoredCandidate, AssetScoringReport,
+    AssetSelectionPolicy, FIXED_CAMERA_COUNT, asset_descriptor_distance,
+    score_and_select_asset_candidates_with_policy,
 };
 
 const MIN_PROPOSALS: usize = 24;
@@ -82,7 +84,7 @@ pub enum FoundryCandidateMode {
 }
 
 /// Request for Foundry control-space candidate plans.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FoundryCandidateRequest {
     /// Deterministic generation seed.
     pub seed: u64,
@@ -94,6 +96,9 @@ pub struct FoundryCandidateRequest {
     pub mode: FoundryCandidateMode,
     /// Optional customizer strategy ID from the resolved profile.
     pub strategy_id: Option<String>,
+    /// Optional local preference profile used to bias candidate selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preference_profile: Option<FoundryPreferenceProfile>,
 }
 
 /// One accepted candidate plan.
@@ -128,6 +133,8 @@ pub struct FoundryCandidateOutput {
     pub diagnostics: FoundryCandidateGenerationDiagnostics,
     /// Scoring, hard-rejection, duplicate-collapse, and diversity report.
     pub scoring_report: AssetScoringReport,
+    /// Local preference-bias report.
+    pub preference_report: FoundryCandidatePreferenceReport,
 }
 
 /// Diagnostics for one accepted Foundry candidate.
@@ -198,6 +205,37 @@ pub struct FoundryCandidateGenerationDiagnostics {
     pub rejections: BTreeMap<FoundryCandidateRejectionReason, usize>,
 }
 
+/// Report for optional local preference biasing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FoundryCandidatePreferenceReport {
+    /// Whether a preference profile was supplied.
+    pub requested: bool,
+    /// Whether the supplied profile affected candidate selection.
+    pub applied: bool,
+    /// Whether the supplied profile matched the current family/profile scope.
+    pub scope_matched: bool,
+    /// Current family/profile scope used for matching.
+    pub scope: FoundryPreferenceScope,
+    /// Deterministic reason preference biasing was ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored_reason: Option<String>,
+    /// Scores for selected candidates in final order.
+    pub selected_scores: Vec<FoundryCandidatePreferenceScore>,
+}
+
+/// Preference score for one selected candidate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FoundryCandidatePreferenceScore {
+    /// Candidate ID.
+    pub candidate_id: FoundryCandidateId,
+    /// Bounded profile score in `[-1, 1]`.
+    pub score: f32,
+    /// Bounded contribution added during selection.
+    pub selection_bonus: f32,
+    /// Visible controls changed by the candidate.
+    pub changed_controls: Vec<String>,
+}
+
 /// Rejection reasons emitted during Foundry candidate generation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FoundryCandidateRejectionReason {
@@ -247,6 +285,12 @@ pub fn generate_foundry_candidate_plans(
 
     let parent_output = compile_foundry_document(document, resolver)
         .map_err(|error| FoundryCandidateError::ParentCompilationFailed(format!("{error:?}")))?;
+    let preference_scope = FoundryPreferenceScope::new(
+        parent_output.catalog.family.id.clone(),
+        document.customizer_profile_ref.stable_id.clone(),
+    );
+    let preference_profile =
+        request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
     let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     let strategy_controls = strategy_control_ids(
         &parent_output.catalog.customizer_profile,
@@ -392,10 +436,22 @@ pub fn generate_foundry_candidate_plans(
     };
     let scoring_report =
         score_and_select_asset_candidates_with_policy(&scoring_inputs, &scoring_policy);
-    let candidates = scoring_report
-        .representatives
+    let selected_ids = selected_candidate_ids(
+        &scoring_report,
+        &accepted_plans,
+        preference_profile,
+        &scoring_policy,
+    );
+    let preference_report = preference_report(
+        request.preference_profile.as_ref(),
+        preference_profile,
+        preference_scope,
+        &selected_ids,
+        &accepted_plans,
+    );
+    let candidates = selected_ids
         .iter()
-        .filter_map(|candidate| accepted_plans.remove(&candidate.id))
+        .filter_map(|candidate_id| accepted_plans.remove(candidate_id))
         .collect::<Vec<_>>();
     diagnostics.returned_candidates = candidates.len();
 
@@ -403,6 +459,7 @@ pub fn generate_foundry_candidate_plans(
         candidates,
         diagnostics,
         scoring_report,
+        preference_report,
     })
 }
 
@@ -418,6 +475,236 @@ fn validate_request(request: &FoundryCandidateRequest) -> Result<(), FoundryCand
         ));
     }
     Ok(())
+}
+
+fn request_preference_profile<'a>(
+    profile: Option<&'a FoundryPreferenceProfile>,
+    scope: &FoundryPreferenceScope,
+) -> Option<&'a FoundryPreferenceProfile> {
+    let profile = profile?;
+    if profile.schema_version != FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION
+        || !profile.local_only
+        || !profile.matches_scope(scope)
+        || profile.is_empty()
+    {
+        return None;
+    }
+    Some(profile)
+}
+
+fn selected_candidate_ids(
+    scoring_report: &AssetScoringReport,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+    preference_profile: Option<&FoundryPreferenceProfile>,
+    policy: &AssetSelectionPolicy,
+) -> Vec<String> {
+    let Some(profile) = preference_profile else {
+        return scoring_report
+            .representatives
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect();
+    };
+
+    let target_count = scoring_report.representatives.len();
+    let mut remaining = scoring_report
+        .representatives
+        .iter()
+        .filter(|candidate| accepted_plans.contains_key(&candidate.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    remaining.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut selected = Vec::<AssetScoredCandidate>::new();
+    while selected.len() < target_count && !remaining.is_empty() {
+        let Some(index) =
+            best_preference_candidate_index(&remaining, &selected, profile, policy, accepted_plans)
+        else {
+            break;
+        };
+        selected.push(remaining.remove(index));
+    }
+
+    if selected.is_empty() {
+        scoring_report
+            .representatives
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect()
+    } else {
+        selected.into_iter().map(|candidate| candidate.id).collect()
+    }
+}
+
+fn best_preference_candidate_index(
+    candidates: &[AssetScoredCandidate],
+    selected: &[AssetScoredCandidate],
+    profile: &FoundryPreferenceProfile,
+    policy: &AssetSelectionPolicy,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> Option<usize> {
+    let novelty_floor = profile.bounded_novelty_floor();
+    let has_novel_candidates = !selected.is_empty()
+        && candidates.iter().any(|candidate| {
+            minimum_distance_to_selected_candidate(candidate, selected, policy) >= novelty_floor
+        });
+    candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| {
+            !has_novel_candidates
+                || minimum_distance_to_selected_candidate(candidate, selected, policy)
+                    >= novelty_floor
+        })
+        .max_by(|(_, left), (_, right)| {
+            compare_preference_selection_candidate(
+                left,
+                right,
+                selected,
+                profile,
+                policy,
+                accepted_plans,
+            )
+        })
+        .map(|(index, _)| index)
+}
+
+fn compare_preference_selection_candidate(
+    left: &AssetScoredCandidate,
+    right: &AssetScoredCandidate,
+    selected: &[AssetScoredCandidate],
+    profile: &FoundryPreferenceProfile,
+    policy: &AssetSelectionPolicy,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> Ordering {
+    let left_value = preference_selection_value(left, selected, profile, policy, accepted_plans);
+    let right_value = preference_selection_value(right, selected, profile, policy, accepted_plans);
+    compare_scalar(left_value, right_value)
+        .then_with(|| {
+            compare_scalar(
+                preference_bonus(left, profile, accepted_plans),
+                preference_bonus(right, profile, accepted_plans),
+            )
+        })
+        .then_with(|| right.id.cmp(&left.id))
+}
+
+fn preference_selection_value(
+    candidate: &AssetScoredCandidate,
+    selected: &[AssetScoredCandidate],
+    profile: &FoundryPreferenceProfile,
+    policy: &AssetSelectionPolicy,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> f32 {
+    let diversity = if selected.is_empty() {
+        0.0
+    } else {
+        minimum_distance_to_selected_candidate(candidate, selected, policy)
+    };
+    diversity * policy.diversity_weight + preference_bonus(candidate, profile, accepted_plans)
+        - candidate.weighted_quality_penalty * policy.quality_penalty_weight
+}
+
+fn preference_bonus(
+    candidate: &AssetScoredCandidate,
+    profile: &FoundryPreferenceProfile,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> f32 {
+    accepted_plans.get(&candidate.id).map_or(0.0, |plan| {
+        profile.score_changed_controls(&plan.changed_controls)
+            * profile.bounded_selection_strength()
+    })
+}
+
+fn minimum_distance_to_selected_candidate(
+    candidate: &AssetScoredCandidate,
+    selected: &[AssetScoredCandidate],
+    policy: &AssetSelectionPolicy,
+) -> f32 {
+    selected
+        .iter()
+        .map(|representative| {
+            asset_descriptor_distance(
+                &candidate.descriptor,
+                &representative.descriptor,
+                &policy.descriptor_weights,
+            )
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+fn compare_scalar(left: f32, right: f32) -> Ordering {
+    left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+}
+
+fn preference_report(
+    requested_profile: Option<&FoundryPreferenceProfile>,
+    applied_profile: Option<&FoundryPreferenceProfile>,
+    scope: FoundryPreferenceScope,
+    selected_ids: &[String],
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> FoundryCandidatePreferenceReport {
+    let requested = requested_profile.is_some();
+    let scope_matched = requested_profile.is_some_and(|profile| profile.matches_scope(&scope));
+    let ignored_reason = if requested && applied_profile.is_none() {
+        Some(preference_ignored_reason(
+            requested_profile.expect("requested profile"),
+            &scope,
+        ))
+    } else {
+        None
+    };
+    let selected_scores = selected_ids
+        .iter()
+        .filter_map(|candidate_id| {
+            accepted_plans
+                .get(candidate_id)
+                .map(|plan| preference_score_row(applied_profile, plan))
+        })
+        .collect();
+    FoundryCandidatePreferenceReport {
+        requested,
+        applied: applied_profile.is_some(),
+        scope_matched,
+        scope,
+        ignored_reason,
+        selected_scores,
+    }
+}
+
+fn preference_ignored_reason(
+    profile: &FoundryPreferenceProfile,
+    scope: &FoundryPreferenceScope,
+) -> String {
+    if profile.schema_version != FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION {
+        return "unsupported_preference_schema".to_owned();
+    }
+    if !profile.local_only {
+        return "preference_profile_not_local".to_owned();
+    }
+    if !profile.matches_scope(scope) {
+        return "preference_scope_mismatch".to_owned();
+    }
+    if profile.is_empty() {
+        return "empty_preference_profile".to_owned();
+    }
+    "preference_profile_ignored".to_owned()
+}
+
+fn preference_score_row(
+    profile: Option<&FoundryPreferenceProfile>,
+    plan: &FoundryCandidatePlan,
+) -> FoundryCandidatePreferenceScore {
+    let score = profile.map_or(0.0, |profile| {
+        profile.score_changed_controls(&plan.changed_controls)
+    });
+    let selection_bonus =
+        profile.map_or(0.0, |profile| score * profile.bounded_selection_strength());
+    FoundryCandidatePreferenceScore {
+        candidate_id: plan.id.clone(),
+        score,
+        selection_bonus,
+        changed_controls: plan.changed_controls.clone(),
+    }
 }
 
 fn compile_error_rejection_reason(
