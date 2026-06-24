@@ -22,6 +22,9 @@ editability.
   Storybook Tree.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
+- Release-readiness reports can verify the direct Visual Foundry shell contract
+  with `--verify-product-ui-gate`, but manual screenshots remain required for
+  visual polish and usability claims.
 - Strict semantic reconstruction is a truth engine for covered grammars.
 - External import analysis is useful when it explains why exact recovery is or
   is not eligible.
@@ -85,6 +88,7 @@ The strongest product proof remains:
 - Open and customize one of the seven expansion profiles through the same
   whole-model controls.
 - Export a pack with zero technical surface exposure.
+- Complete the UI manual gate screenshots at 1280x800 and 1440x900.
 
 ## Decision Rule
 

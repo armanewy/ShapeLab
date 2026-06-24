@@ -73,7 +73,7 @@ pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Recent Projects",
 ];
 
-pub(crate) const FORBIDDEN_PRODUCT_TERMS: [&str; 20] = [
+pub(crate) const FORBIDDEN_PRODUCT_TERMS: [&str; 25] = [
     "Legacy Implicit Mode",
     "Asset Modeling Lab",
     "Modeling Workspace",
@@ -92,6 +92,11 @@ pub(crate) const FORBIDDEN_PRODUCT_TERMS: [&str; 20] = [
     "operation",
     "compiler",
     "decompiler",
+    "SDF",
+    "fragment remap",
+    "fragment",
+    "remap",
+    "role binding",
     "role provider",
     "conformance binding",
 ];

@@ -3730,6 +3730,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "shape-app",
  "shape-asset",
  "shape-character",
  "shape-compile",

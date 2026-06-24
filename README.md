@@ -25,7 +25,7 @@ cargo run -p shape-app --release
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
 
 The native app opens a local `egui` desktop workspace with:
 
@@ -110,11 +110,16 @@ pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets
 
 Each run writes project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON file.
 
-Generate a release-readiness report with computed Visual Foundry evidence:
+Generate release-readiness reports with computed Visual Foundry evidence:
 
 ```bash
 cargo run -p shape-cli -- release-readiness --verify-visual-gate
+cargo run -p shape-cli -- release-readiness --verify-product-ui-gate
 ```
+
+The visual gate computes catalog/render evidence. The product UI gate verifies
+the direct Visual Foundry shell contract and still requires the human screenshot
+checklist in [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md).
 
 Compile and export explicit benchmark assets:
 

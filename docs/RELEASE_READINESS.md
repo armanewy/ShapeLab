@@ -1,8 +1,10 @@
 # Release Readiness
 
-Wave 30 adds an explicit release-readiness contract for the native Shape Lab
-loop. The intent is to make performance and packaging status auditable without
-claiming unimplemented GPU, installer, signing, or app-store work.
+Wave 30 added an explicit release-readiness contract for the native Shape Lab
+loop. Wave 31.5 extends it with a headless product UI gate for the redesigned
+Visual Foundry shell. The intent is to make performance, UI surface, and
+packaging status auditable without claiming unimplemented GPU, installer,
+signing, or app-store work.
 
 ## Machine-Readable Report
 
@@ -11,6 +13,7 @@ Run the report from the repository root:
 ```bash
 cargo run -p shape-cli -- release-readiness --out target/release-readiness.json
 cargo run -p shape-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
+cargo run -p shape-cli -- release-readiness --verify-product-ui-gate --out target/release-readiness-product-ui.json
 ```
 
 The JSON report records:
@@ -21,6 +24,12 @@ The JSON report records:
   CLI evidence for ten profiles, seven primary controls per profile, and
   rendered whole-model option thumbnails. The native default-path gate remains
   the explicit ignored app-state release test listed in the report;
+- the Visual Foundry product UI gate. Without `--verify-product-ui-gate`, this
+  records the expected direct Visual Foundry shell contract. With
+  `--verify-product-ui-gate`, it verifies the default product-visible copy
+  inventory, direct nonblank startup, ten home profiles, the six-card direction
+  board, five direction modes, core profile compile/start evidence, pack/export
+  readiness representation, and disabled-state reasons;
 - the deterministic CPU preview path and bounded preview-cache capacity;
 - duplicate preview-cache miss coalescing for repeated keys in one batch;
 - Foundry candidate generation proposal bounds and returned-candidate caps;
@@ -69,6 +78,28 @@ The CLI report can compute catalog/render evidence with
 native app-state gate. A release-readiness claim requires both the CLI verified
 report and the ignored app-state test command.
 
+## Product UI Gate
+
+Wave 31.5 adds `shape-cli release-readiness --verify-product-ui-gate`. This is
+a fast headless gate over the native Visual Foundry product shell. It verifies:
+
+- `app_shell: direct_visual_foundry`;
+- no default Legacy, Implicit, Asset Modeling Lab, Modeling Workspace, Advanced
+  Recipe, scalar path, provider ID, role binding, fragment/remap, operation ID,
+  semantic ID, conformance binding, SDF, compiler, or decompiler copy;
+- ten product home profiles;
+- startup is not blank;
+- Advanced Recipe is not visible in the default path;
+- the direction board reserves six whole-model candidate cards and exposes
+  Refine, Explore, Silhouette, Structure, and Detail;
+- Roman Timber Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp
+  compile and expose one to seven primary controls;
+- Pack and Export readiness states and disabled reasons are represented.
+
+This gate does not inspect pixels and does not replace human UI review. Manual
+screenshots and observations are required by
+[`docs/FOUNDRY_UI_MANUAL_GATE.md`](FOUNDRY_UI_MANUAL_GATE.md).
+
 ## Release Boundary
 
 The release build remains archive-first. `packaging/README.md` describes manual
@@ -95,6 +126,7 @@ cargo fmt --all --check
 cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored
 cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored
 cargo run -p shape-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
+cargo run -p shape-cli -- release-readiness --verify-product-ui-gate --out target/release-readiness-product-ui.json
 cargo test -p shape-render --test foundry_preview
 cargo test -p shape-search --test foundry_candidates
 cargo test -p shape-cli release_readiness

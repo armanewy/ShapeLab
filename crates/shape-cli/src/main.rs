@@ -88,7 +88,7 @@ const CONTACT_CARD_SIZE: u32 = 256;
 const CONTACT_LABEL_HEIGHT: u32 = 28;
 const CONTACT_PADDING: u32 = 12;
 const MAX_PROPOSAL_COMPILE_THREADS: usize = 4;
-const RELEASE_READINESS_SCHEMA_VERSION: u32 = 3;
+const RELEASE_READINESS_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
@@ -297,6 +297,9 @@ struct ReleaseReadinessArgs {
     /// Run the expensive Visual Foundry product gate and include computed evidence.
     #[arg(long)]
     verify_visual_gate: bool,
+    /// Run the headless native product UI gate and include computed evidence.
+    #[arg(long)]
+    verify_product_ui_gate: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -350,6 +353,7 @@ struct ReleaseReadinessReport {
     schema_version: u32,
     milestone: &'static str,
     visual_product_gate: ReleaseVisualProductGate,
+    product_ui_gate: ReleaseProductUiGate,
     performance: ReleasePerformanceReadiness,
     rendering: ReleaseRenderingReadiness,
     persistence: ReleasePersistenceReadiness,
@@ -392,6 +396,54 @@ struct ReleaseVisualProfileEvidence {
     per_option_rgba_complete: bool,
     per_option_camera_recorded: bool,
     every_option_control_has_visual_delta: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseProductUiGate {
+    verification_status: &'static str,
+    verification_command: &'static str,
+    app_shell: &'static str,
+    legacy_surfaces_present: bool,
+    product_home_profiles: usize,
+    startup_blank: bool,
+    default_advanced_recipe_visible: bool,
+    default_raw_technical_terms_visible: bool,
+    directions_board_gate: &'static str,
+    customize_deck_gate: &'static str,
+    pack_gate: &'static str,
+    export_gate: &'static str,
+    disabled_states_have_reasons: bool,
+    manual_gate_required: bool,
+    evidence: Option<ReleaseProductUiGateEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseProductUiGateEvidence {
+    product_visible_string_count: usize,
+    rendered_action_label_count: usize,
+    rendered_action_labels_audited: bool,
+    forbidden_terms_found: Vec<ReleaseProductForbiddenTermFinding>,
+    core_profiles: Vec<ReleaseProductUiProfileEvidence>,
+    direction_modes: Vec<&'static str>,
+    direction_candidate_slots: usize,
+    automated_gate_passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseProductForbiddenTermFinding {
+    term: &'static str,
+    visible_string: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseProductUiProfileEvidence {
+    slug: String,
+    label: String,
+    compiled: bool,
+    reaches_main_shell: bool,
+    primary_control_count: usize,
+    option_control_count: usize,
+    triangle_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1235,7 +1287,7 @@ fn run_import_triage_character(args: ImportTriageCharacterArgs) -> anyhow::Resul
 }
 
 fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
-    let report = release_readiness_report(args.verify_visual_gate)?;
+    let report = release_readiness_report(args.verify_visual_gate, args.verify_product_ui_gate)?;
     if let Some(path) = args.out.as_ref() {
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
@@ -1248,17 +1300,26 @@ fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn release_readiness_report(verify_visual_gate: bool) -> anyhow::Result<ReleaseReadinessReport> {
+fn release_readiness_report(
+    verify_visual_gate: bool,
+    verify_product_ui_gate: bool,
+) -> anyhow::Result<ReleaseReadinessReport> {
     let visual_product_gate = if verify_visual_gate {
         verified_release_visual_product_gate()?
     } else {
         unverified_release_visual_product_gate()
     };
+    let product_ui_gate = if verify_product_ui_gate {
+        verified_release_product_ui_gate()?
+    } else {
+        unverified_release_product_ui_gate()
+    };
 
     Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
-        milestone: "Wave 30 - Performance and Release Readiness",
+        milestone: "Wave 31.5 - Visual Foundry Product UI Gate",
         visual_product_gate,
+        product_ui_gate,
         performance: ReleasePerformanceReadiness {
             preview_cache: PreviewCacheReadiness {
                 backend: "deterministic-cpu-reference",
@@ -1301,11 +1362,90 @@ fn release_readiness_report(verify_visual_gate: bool) -> anyhow::Result<ReleaseR
             "cargo test -p shape-search --test foundry_candidates",
             "cargo test -p shape-cli release_readiness",
             "cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored",
+            "cargo run -p shape-cli -- release-readiness --verify-product-ui-gate",
             "cargo clippy --workspace --all-targets -- -D warnings",
             "cargo test --workspace --no-fail-fast",
             "cargo build --release --workspace",
         ],
     })
+}
+
+fn unverified_release_product_ui_gate() -> ReleaseProductUiGate {
+    ReleaseProductUiGate {
+        verification_status: "not-run",
+        verification_command: "shape-cli release-readiness --verify-product-ui-gate",
+        app_shell: "direct_visual_foundry",
+        legacy_surfaces_present: false,
+        product_home_profiles: 10,
+        startup_blank: false,
+        default_advanced_recipe_visible: false,
+        default_raw_technical_terms_visible: false,
+        directions_board_gate: "not-run",
+        customize_deck_gate: "not-run",
+        pack_gate: "not-run",
+        export_gate: "not-run",
+        disabled_states_have_reasons: true,
+        manual_gate_required: true,
+        evidence: None,
+    }
+}
+
+fn verified_release_product_ui_gate() -> anyhow::Result<ReleaseProductUiGate> {
+    let report = shape_app::visual_foundry_product_ui_gate_report()
+        .map_err(|error| anyhow::anyhow!(error))?;
+    if !report.passed() {
+        bail!("Visual Foundry product UI gate failed: {report:#?}");
+    }
+
+    Ok(ReleaseProductUiGate {
+        verification_status: "verified",
+        verification_command: "shape-cli release-readiness --verify-product-ui-gate",
+        app_shell: report.app_shell,
+        legacy_surfaces_present: report.legacy_surfaces_present,
+        product_home_profiles: report.product_home_profiles,
+        startup_blank: report.startup_blank,
+        default_advanced_recipe_visible: report.default_advanced_recipe_visible,
+        default_raw_technical_terms_visible: report.default_raw_technical_terms_visible,
+        directions_board_gate: gate_label(report.directions_board_gate),
+        customize_deck_gate: gate_label(report.customize_deck_gate),
+        pack_gate: gate_label(report.pack_gate),
+        export_gate: gate_label(report.export_gate),
+        disabled_states_have_reasons: report.disabled_states_have_reasons,
+        manual_gate_required: report.manual_gate_required,
+        evidence: Some(ReleaseProductUiGateEvidence {
+            product_visible_string_count: report.product_visible_string_count,
+            rendered_action_label_count: report.rendered_action_label_count,
+            rendered_action_labels_audited: report.rendered_action_labels_audited,
+            forbidden_terms_found: report
+                .forbidden_terms_found
+                .into_iter()
+                .map(|finding| ReleaseProductForbiddenTermFinding {
+                    term: finding.term,
+                    visible_string: finding.visible_string,
+                })
+                .collect(),
+            core_profiles: report
+                .core_profiles
+                .into_iter()
+                .map(|profile| ReleaseProductUiProfileEvidence {
+                    slug: profile.slug,
+                    label: profile.label,
+                    compiled: profile.compiled,
+                    reaches_main_shell: profile.reaches_main_shell,
+                    primary_control_count: profile.primary_control_count,
+                    option_control_count: profile.option_control_count,
+                    triangle_count: profile.triangle_count,
+                })
+                .collect(),
+            direction_modes: report.direction_modes,
+            direction_candidate_slots: report.direction_candidate_slots,
+            automated_gate_passed: true,
+        }),
+    })
+}
+
+fn gate_label(passed: bool) -> &'static str {
+    if passed { "pass" } else { "fail" }
 }
 
 fn unverified_release_visual_product_gate() -> ReleaseVisualProductGate {

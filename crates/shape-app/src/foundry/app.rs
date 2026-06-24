@@ -67,6 +67,73 @@ const NEED_RESET_REASON: &str = "This control is already at its starting value."
 const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
+const ACTION_EXPORT: &str = "Export";
+const ACTION_SAVE: &str = "Save";
+const ACTION_UNDO: &str = "Undo";
+const ACTION_OPEN_PROJECT: &str = "Open Project";
+const ACTION_SAVE_PROJECT: &str = "Save Project";
+const ACTION_SAVE_PROJECT_AS: &str = "Save Project As";
+const ACTION_NEW_PROJECT: &str = "New Project";
+const ACTION_PROJECT_HISTORY: &str = "Project History";
+const ACTION_SAVE_AS: &str = "Save As";
+const ACTION_LOAD: &str = "Load";
+const ACTION_SWITCH_TO_REVISION: &str = "Switch to revision";
+const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
+const ACTION_START: &str = "Start";
+const ACTION_GENERATE_DIRECTIONS: &str = "Generate Directions";
+const ACTION_BUILD_ASSET: &str = "Build Asset";
+const ACTION_REFRESH_PREVIEW: &str = "Refresh Preview";
+const ACTION_SWITCH: &str = "Switch";
+const ACTION_BRANCH: &str = "Branch";
+const ACTION_EXPORT_CURRENT_ASSET: &str = "Export Current Asset";
+const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
+const ACTION_EXPORT_PACK: &str = "Export Pack";
+const ACTION_SELECT: &str = "Select";
+const ACTION_CHOOSE_DIRECTION: &str = "Choose Direction";
+const ACTION_REJECT: &str = "Reject";
+const ACTION_RESET: &str = "Reset";
+const ACTION_UNLOCK: &str = "Unlock";
+const ACTION_LOCK: &str = "Lock";
+const ACTION_FOCUS: &str = "Focus";
+const ACTION_TRY: &str = "Try";
+const ACTION_APPLY: &str = "Apply";
+const RENDERED_ACTION_LABELS: [&str; 35] = [
+    ACTION_EXPORT,
+    ACTION_SAVE,
+    ACTION_UNDO,
+    ACTION_OPEN_PROJECT,
+    ACTION_SAVE_PROJECT,
+    ACTION_SAVE_PROJECT_AS,
+    ACTION_NEW_PROJECT,
+    ACTION_PROJECT_HISTORY,
+    ACTION_SAVE_AS,
+    ACTION_LOAD,
+    ACTION_SWITCH_TO_REVISION,
+    ACTION_BRANCH_FROM_REVISION,
+    ACTION_START,
+    ACTION_GENERATE_DIRECTIONS,
+    ACTION_BUILD_ASSET,
+    ACTION_REFRESH_PREVIEW,
+    "Refine",
+    "Explore",
+    "Silhouette",
+    "Structure",
+    "Detail",
+    ACTION_SWITCH,
+    ACTION_BRANCH,
+    ACTION_EXPORT_CURRENT_ASSET,
+    ACTION_ADD_CURRENT_ASSET,
+    ACTION_EXPORT_PACK,
+    ACTION_SELECT,
+    ACTION_CHOOSE_DIRECTION,
+    ACTION_REJECT,
+    ACTION_RESET,
+    ACTION_UNLOCK,
+    ACTION_LOCK,
+    ACTION_FOCUS,
+    ACTION_TRY,
+    ACTION_APPLY,
+];
 
 impl Default for FoundryDesktopApp {
     fn default() -> Self {
@@ -170,7 +237,12 @@ impl FoundryDesktopApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if action_button(
                     ui,
-                    &action_spec(has_output, "Export", ButtonTone::Primary, NEED_MODEL_REASON),
+                    &action_spec(
+                        has_output,
+                        ACTION_EXPORT,
+                        ButtonTone::Primary,
+                        NEED_MODEL_REASON,
+                    ),
                 )
                 .clicked()
                 {
@@ -178,7 +250,7 @@ impl FoundryDesktopApp {
                 }
                 if action_button(
                     ui,
-                    &action_spec(can_save, "Save", ButtonTone::Secondary, save_reason),
+                    &action_spec(can_save, ACTION_SAVE, ButtonTone::Secondary, save_reason),
                 )
                 .clicked()
                 {
@@ -186,7 +258,12 @@ impl FoundryDesktopApp {
                 }
                 if action_button(
                     ui,
-                    &action_spec(can_undo, "Undo", ButtonTone::Quiet, NEED_HISTORY_REASON),
+                    &action_spec(
+                        can_undo,
+                        ACTION_UNDO,
+                        ButtonTone::Quiet,
+                        NEED_HISTORY_REASON,
+                    ),
                 )
                 .clicked()
                 {
@@ -228,14 +305,18 @@ impl FoundryDesktopApp {
         ui.separator();
         ui.add_space(10.0);
         ui.label(RichText::new("PROJECT").color(colors.accent_hover).small());
-        if action_button(ui, &ActionSpec::enabled("Open Project", ButtonTone::Quiet)).clicked()
+        if action_button(
+            ui,
+            &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Quiet),
+        )
+        .clicked()
             && let Some(path) = open_foundry_project_file()
         {
             commands.push(FoundryAppCommand::Load(path));
         }
         let save_project_spec = action_spec(
             self.state.document.is_some(),
-            "Save Project",
+            ACTION_SAVE_PROJECT,
             ButtonTone::Quiet,
             NEED_PROJECT_REASON,
         );
@@ -250,7 +331,7 @@ impl FoundryDesktopApp {
             ui,
             &action_spec(
                 self.state.document.is_some(),
-                "Save Project As",
+                ACTION_SAVE_PROJECT_AS,
                 ButtonTone::Quiet,
                 NEED_PROJECT_REASON,
             ),
@@ -260,12 +341,17 @@ impl FoundryDesktopApp {
         {
             commands.push(FoundryAppCommand::SaveAs(path));
         }
-        if action_button(ui, &ActionSpec::enabled("New Project", ButtonTone::Quiet)).clicked() {
+        if action_button(
+            ui,
+            &ActionSpec::enabled(ACTION_NEW_PROJECT, ButtonTone::Quiet),
+        )
+        .clicked()
+        {
             self.tab = FoundryTab::Home;
         }
         if action_button(
             ui,
-            &ActionSpec::enabled("Project History", ButtonTone::Quiet),
+            &ActionSpec::enabled(ACTION_PROJECT_HISTORY, ButtonTone::Quiet),
         )
         .clicked()
         {
@@ -404,7 +490,7 @@ impl FoundryDesktopApp {
         ui.horizontal(|ui| {
             if action_button(
                 ui,
-                &ActionSpec::enabled("Open Project", ButtonTone::Secondary),
+                &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
             )
             .clicked()
                 && let Some(path) = open_foundry_project_file()
@@ -426,7 +512,7 @@ impl FoundryDesktopApp {
                         ProfileCardSpec {
                             title: label,
                             description: profile_description(&fixture.slug),
-                            action: ActionSpec::enabled("Start", ButtonTone::Primary),
+                            action: ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
                         },
                     );
                     if response
@@ -481,7 +567,7 @@ impl FoundryDesktopApp {
             if let Some(generate_action) = generate_action
                 && action_button(
                     ui,
-                    &ActionSpec::enabled("Generate Directions", ButtonTone::Primary),
+                    &ActionSpec::enabled(ACTION_GENERATE_DIRECTIONS, ButtonTone::Primary),
                 )
                 .clicked()
             {
@@ -490,7 +576,7 @@ impl FoundryDesktopApp {
             if !has_output
                 && action_button(
                     ui,
-                    &ActionSpec::enabled("Build Asset", ButtonTone::Secondary),
+                    &ActionSpec::enabled(ACTION_BUILD_ASSET, ButtonTone::Secondary),
                 )
                 .clicked()
             {
@@ -500,7 +586,7 @@ impl FoundryDesktopApp {
                 ui,
                 &action_spec(
                     has_output,
-                    "Refresh Preview",
+                    ACTION_REFRESH_PREVIEW,
                     ButtonTone::Secondary,
                     NEED_MODEL_REASON,
                 ),
@@ -668,7 +754,7 @@ impl FoundryDesktopApp {
                         ui.weak("Current");
                     }
                     if let Some(intent) = &row.switch_intent
-                        && action_button(ui, &ActionSpec::enabled("Switch", ButtonTone::Quiet))
+                        && action_button(ui, &ActionSpec::enabled(ACTION_SWITCH, ButtonTone::Quiet))
                             .clicked()
                         && let Some(command) =
                             self.history_dispatch_command(intent.dispatch.as_ref())
@@ -676,7 +762,7 @@ impl FoundryDesktopApp {
                         commands.push(command);
                     }
                     if let Some(intent) = &row.branch_intent
-                        && action_button(ui, &ActionSpec::enabled("Branch", ButtonTone::Quiet))
+                        && action_button(ui, &ActionSpec::enabled(ACTION_BRANCH, ButtonTone::Quiet))
                             .clicked()
                         && let Some(command) =
                             self.history_dispatch_command(intent.dispatch.as_ref())
@@ -727,7 +813,7 @@ impl FoundryDesktopApp {
                 ui,
                 &action_spec(
                     can_export,
-                    "Export Current Asset",
+                    ACTION_EXPORT_CURRENT_ASSET,
                     ButtonTone::Primary,
                     NEED_MODEL_REASON,
                 ),
@@ -762,7 +848,7 @@ impl FoundryDesktopApp {
                 ui,
                 &action_spec(
                     add_enabled,
-                    "Add Current Asset",
+                    ACTION_ADD_CURRENT_ASSET,
                     ButtonTone::Primary,
                     NEED_PROJECT_REASON,
                 ),
@@ -782,7 +868,7 @@ impl FoundryDesktopApp {
                 ui,
                 &action_spec(
                     view.export.enabled,
-                    "Export Pack",
+                    ACTION_EXPORT_PACK,
                     ButtonTone::Secondary,
                     batch_export_reason.as_str(),
                 ),
@@ -1289,7 +1375,7 @@ fn profile_description(slug: &str) -> &'static str {
     }
 }
 
-fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
+pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
     let mut strings = vec![
         "Shape Lab",
         "Visual Foundry",
@@ -1399,6 +1485,7 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Whole-model options",
         "Primary control",
     ];
+    strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
         strings.push(step.label);
         strings.push(step.detail);
@@ -1408,6 +1495,10 @@ fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         strings.push(profile_description(&fixture.slug));
     }
     strings
+}
+
+pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static str] {
+    &RENDERED_ACTION_LABELS
 }
 
 fn product_control_summary(
@@ -1485,8 +1576,13 @@ fn direction_board_count_label(count: usize) -> String {
     }
 }
 
-fn direction_mode_actions_for_panel() -> Vec<directions::DirectionModeAction> {
+pub(crate) fn direction_mode_actions_for_panel() -> Vec<directions::DirectionModeAction> {
     directions::direction_mode_actions(None, 0, None)
+}
+
+pub(crate) fn default_app_launches_on_home() -> bool {
+    let app = FoundryDesktopApp::default();
+    app.tab == FoundryTab::Home && app.state.document.is_none()
 }
 
 fn show_direction_candidate_card(
@@ -1527,7 +1623,7 @@ fn show_direction_candidate_card(
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if action_button(ui, &ActionSpec::enabled("Select", ButtonTone::Quiet)).clicked() {
+            if action_button(ui, &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Quiet)).clicked() {
                 commands.push(FoundryAppCommand::SelectCandidate(Some(
                     candidate.id.clone(),
                 )));
@@ -1543,7 +1639,7 @@ fn show_direction_candidate_card(
                 ui,
                 &action_spec(
                     candidate.selectable,
-                    "Choose Direction",
+                    ACTION_CHOOSE_DIRECTION,
                     ButtonTone::Primary,
                     choose_reason.as_str(),
                 ),
@@ -1552,7 +1648,7 @@ fn show_direction_candidate_card(
             {
                 commands.push(directions::accept_candidate_command(candidate.id.clone()));
             }
-            if action_button(ui, &ActionSpec::enabled("Reject", ButtonTone::Quiet)).clicked() {
+            if action_button(ui, &ActionSpec::enabled(ACTION_REJECT, ButtonTone::Quiet)).clicked() {
                 commands.push(directions::reject_candidate_command(candidate.id.clone()));
             }
         });
@@ -1583,7 +1679,7 @@ fn show_customize_control_card(
                     ui,
                     &action_spec(
                         customize::control_can_reset(control),
-                        "Reset",
+                        ACTION_RESET,
                         ButtonTone::Quiet,
                         NEED_RESET_REASON,
                     ),
@@ -1592,13 +1688,19 @@ fn show_customize_control_card(
                 {
                     commands.extend(customize::reset_control_intents(control));
                 }
-                let lock_label = if control.locked { "Unlock" } else { "Lock" };
+                let lock_label = if control.locked {
+                    ACTION_UNLOCK
+                } else {
+                    ACTION_LOCK
+                };
                 if action_button(ui, &ActionSpec::enabled(lock_label, ButtonTone::Quiet)).clicked()
                     && let Some(command) = customize::control_lock_command(control, !control.locked)
                 {
                     commands.push(command);
                 }
-                if action_button(ui, &ActionSpec::enabled("Focus", ButtonTone::Quiet)).clicked() {
+                if action_button(ui, &ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Quiet))
+                    .clicked()
+                {
                     commands.push(customize::select_control_command(Some(control.id.clone())));
                 }
             });
@@ -1702,7 +1804,7 @@ fn show_customize_option_tile(
             ui,
             &action_spec(
                 disabled_reason.is_none(),
-                "Try",
+                ACTION_TRY,
                 ButtonTone::Quiet,
                 disabled_message.as_str(),
             ),
@@ -1718,7 +1820,7 @@ fn show_customize_option_tile(
             ui,
             &action_spec(
                 disabled_reason.is_none(),
-                "Apply",
+                ACTION_APPLY,
                 ButtonTone::Secondary,
                 disabled_message.as_str(),
             ),
@@ -2227,6 +2329,21 @@ mod tests {
             assert!(
                 strings.contains(&required),
                 "missing product string {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_action_labels_are_in_product_visible_inventory() {
+        let strings = product_visible_strings_for_default_shell();
+        for label in rendered_action_labels_for_default_shell() {
+            assert!(
+                strings.contains(label),
+                "missing rendered action label {label}"
+            );
+            assert!(
+                crate::foundry::ui::copy::first_forbidden_product_term(label).is_none(),
+                "rendered action label contains forbidden product copy: {label}"
             );
         }
     }

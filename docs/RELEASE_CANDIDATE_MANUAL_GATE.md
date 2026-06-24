@@ -4,6 +4,12 @@ This checklist is the manual product gate for a release-readiness claim. It
 tests the default novice Visual Foundry path only: no technical recipe surface
 should be exposed or required for any task below.
 
+Also complete the screenshot-oriented UI checklist in
+[`docs/FOUNDRY_UI_MANUAL_GATE.md`](FOUNDRY_UI_MANUAL_GATE.md). The automated
+`--verify-product-ui-gate` report proves the headless shell contract, but it
+does not prove visual polish, viewport dominance, or whether the next action is
+obvious to a human.
+
 Run the native app from the repository root:
 
 ```bash
@@ -30,6 +36,8 @@ Record start time before opening the first profile.
 - Export the current asset or pack, reopen the saved project, and confirm the
   reopened result matches the accepted direction.
 - Complete the flow with zero technical surface exposure.
+- Capture the required UI screenshots from the UI manual gate. Notes are
+  supplemental and cannot replace screenshots.
 
 ## Required Observations
 
@@ -73,6 +81,7 @@ Three-member pack created: yes/no
 Export succeeded: yes/no
 Reopen succeeded: yes/no
 Technical surface exposed or required: yes/no
+UI manual gate completed: yes/no
 
 Confusing labels:
 Dead controls:
@@ -92,5 +101,8 @@ Notes:
 - Candidate accept/reject, pack creation, export, and reopen complete with zero
   technical surface exposure.
 - Option thumbnails are visible for the default product path.
+- The UI manual gate has screenshot evidence for launch, profile selection,
+  direction board, customize, pack, export, disabled reasons, and 1280x800 /
+  1440x900 layouts.
 - Any confusing labels, dead controls, invisible controls, invalid attempts,
   undo usage, or stutter are recorded for triage.

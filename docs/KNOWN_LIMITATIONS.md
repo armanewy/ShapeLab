@@ -18,7 +18,9 @@
   snapshots, but automatic timed autosave UI and full crash-restore prompts are
   still limited.
 - The desktop app has headless panel/reducer regression tests but does not yet
-  have automated OS-window pixel regression tests.
+  have automated OS-window pixel regression tests. Wave 31.5 adds a headless
+  product UI gate for default copy, flow, and shell evidence, but screenshots
+  and human layout inspection remain manual.
 - Packaging notes and icons exist, but installers, code signing, and publishing are not implemented.
 - Schema-3 bend inference is experimental and limited to a single uniform-curvature bend plus at most one affine-family stage before or after it.
 - Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains affine-only by default.

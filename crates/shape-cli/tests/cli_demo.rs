@@ -97,7 +97,7 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
             .expect("file should be readiness JSON");
     assert_eq!(stdout_report, file_report);
 
-    assert_eq!(stdout_report["schema_version"].as_u64(), Some(3));
+    assert_eq!(stdout_report["schema_version"].as_u64(), Some(4));
     assert_eq!(
         stdout_report["visual_product_gate"]["verification_status"],
         "not-run"
@@ -131,6 +131,36 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
         "verified-by-native-state-release-test"
     );
     assert!(stdout_report["visual_product_gate"]["evidence"].is_null());
+    assert_eq!(
+        stdout_report["product_ui_gate"]["verification_status"],
+        "not-run"
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["verification_command"],
+        "shape-cli release-readiness --verify-product-ui-gate"
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["app_shell"],
+        "direct_visual_foundry"
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["legacy_surfaces_present"],
+        false
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["product_home_profiles"].as_u64(),
+        Some(10)
+    );
+    assert_eq!(stdout_report["product_ui_gate"]["startup_blank"], false);
+    assert_eq!(
+        stdout_report["product_ui_gate"]["default_advanced_recipe_visible"],
+        false
+    );
+    assert_eq!(
+        stdout_report["product_ui_gate"]["manual_gate_required"],
+        true
+    );
+    assert!(stdout_report["product_ui_gate"]["evidence"].is_null());
     assert_eq!(
         stdout_report["performance"]["preview_cache"]["bounded_lru_capacity"].as_u64(),
         Some(FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY as u64)
@@ -183,7 +213,7 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
     );
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
-    assert_eq!(report["schema_version"].as_u64(), Some(3));
+    assert_eq!(report["schema_version"].as_u64(), Some(4));
     assert_eq!(
         report["visual_product_gate"]["verification_status"],
         "verified"
@@ -220,6 +250,76 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
                     && profile["per_option_rgba_complete"] == true
                     && profile["per_option_camera_recorded"] == true
                     && profile["every_option_control_has_visual_delta"] == true
+            })
+    );
+}
+
+#[test]
+fn release_readiness_verifies_product_ui_gate_when_requested() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let output = Command::new(exe)
+        .args(["release-readiness", "--verify-product-ui-gate"])
+        .output()
+        .expect("run shape-cli release-readiness --verify-product-ui-gate");
+
+    assert!(
+        output.status.success(),
+        "release-readiness product UI gate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be readiness JSON");
+    assert_eq!(report["schema_version"].as_u64(), Some(4));
+    let gate = &report["product_ui_gate"];
+    assert_eq!(gate["verification_status"], "verified");
+    assert_eq!(gate["app_shell"], "direct_visual_foundry");
+    assert_eq!(gate["legacy_surfaces_present"], false);
+    assert_eq!(gate["product_home_profiles"].as_u64(), Some(10));
+    assert_eq!(gate["startup_blank"], false);
+    assert_eq!(gate["default_advanced_recipe_visible"], false);
+    assert_eq!(gate["default_raw_technical_terms_visible"], false);
+    assert_eq!(gate["directions_board_gate"], "pass");
+    assert_eq!(gate["customize_deck_gate"], "pass");
+    assert_eq!(gate["pack_gate"], "pass");
+    assert_eq!(gate["export_gate"], "pass");
+    assert_eq!(gate["disabled_states_have_reasons"], true);
+    assert_eq!(gate["manual_gate_required"], true);
+    let evidence = &gate["evidence"];
+    assert_eq!(evidence["automated_gate_passed"], true);
+    assert!(
+        evidence["rendered_action_label_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert_eq!(evidence["rendered_action_labels_audited"], true);
+    assert_eq!(
+        evidence["forbidden_terms_found"].as_array().unwrap().len(),
+        0
+    );
+    assert_eq!(evidence["direction_candidate_slots"].as_u64(), Some(6));
+    assert_eq!(
+        evidence["direction_modes"],
+        serde_json::json!(["Refine", "Explore", "Silhouette", "Structure", "Detail"])
+    );
+    assert_eq!(evidence["core_profiles"].as_array().unwrap().len(), 3);
+    assert!(
+        evidence["core_profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|profile| {
+                profile["compiled"] == true
+                    && profile["reaches_main_shell"] == true
+                    && profile["primary_control_count"]
+                        .as_u64()
+                        .unwrap_or_default()
+                        > 0
+                    && profile["primary_control_count"]
+                        .as_u64()
+                        .unwrap_or_default()
+                        <= 7
+                    && profile["triangle_count"].as_u64().unwrap_or_default() > 0
             })
     );
 }
