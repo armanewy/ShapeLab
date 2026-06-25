@@ -53,6 +53,7 @@ Run a benchmark report with:
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile fantasy-sword --out-dir target/hq-benchmark/fantasy-sword
+cargo run -p shape-cli -- hq-quality-benchmark --profile prepared-hero-template-v1 --out-dir target/hq-benchmark/prepared-hero-template-v1
 ```
 
 Use `--profile all --out-dir target/hq-benchmark` to baseline every built-in
@@ -78,3 +79,9 @@ automation bar. Wave 38 extends that bar to the promoted gear kits: Fantasy
 Sword, Round Shield, Hero Helmet, Pauldron Pair, and Chest Armor. They remain
 hidden from the default novice catalog until manual review is approved.
 Adversarial review remains required before Showcase claims.
+
+`prepared-hero-template-v1` is a contract-only prepared hero benchmark. Its
+expected automated report is Draft because it has no rendered clay mesh,
+contact sheet, direction candidates, or export/reopen evidence yet. It is
+included in `--profile all` to keep the unsupported evidence visible, not to
+claim novice-catalog readiness.

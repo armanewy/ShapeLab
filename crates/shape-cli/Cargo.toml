@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 shape-app = { path = "../shape-app" }
 shape-asset.workspace = true
+shape-character.workspace = true
 shape-core.workspace = true
 shape-compile.workspace = true
 shape-decompiler.workspace = true
@@ -34,5 +35,4 @@ shape-render.workspace = true
 shape-search.workspace = true
 
 [dev-dependencies]
-shape-character.workspace = true
 tempfile.workspace = true

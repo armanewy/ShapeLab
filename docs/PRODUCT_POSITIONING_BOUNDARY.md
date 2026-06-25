@@ -16,11 +16,14 @@ editability.
 ## What To Emphasize
 
 - Visual Foundry is the primary novice-facing product surface.
-- The ten current built-in kit-backed profiles are installed for preview and
-  QA: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp,
-  Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding
-  Signpost, Workshop Chair, Market Handcart, and Storybook Tree. Default novice
-  exposure remains gated by kit review approval.
+- The sixteen current kit-backed profiles are installed for preview and QA,
+  including the original Visual Foundry families, the HQ Roman bridge profile,
+  and promoted Wave 38 gear. Default novice exposure remains gated by kit
+  review approval.
+- `prepared-hero-template-v1` is a contract-only prepared hero benchmark. It
+  validates known-base template metadata but must remain hidden from default
+  novice exposure until it has whole-character clay previews, contact sheets,
+  candidate evidence, and export/reopen proof.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
 - Release-readiness reports can verify the direct Visual Foundry shell contract
@@ -93,8 +96,8 @@ The strongest product proof remains:
 - Create a reinforced Roman bridge.
 - Create a compact vented sci-fi crate family.
 - Create a tall stylized lamp with a different shade.
-- Open and customize one of the seven expansion profiles through the same
-  whole-model controls.
+- Open and customize one of the catalog profiles through the same whole-model
+  controls.
 - Export a pack with zero technical surface exposure.
 - Complete the UI manual gate screenshots at 1280x800 and 1440x900.
 - Preserve HQ quality evidence for any kit claimed as Usable or Showcase.

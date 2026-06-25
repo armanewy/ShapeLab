@@ -3827,6 +3827,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shape-asset",
+ "shape-character",
  "shape-compile",
  "shape-family",
  "shape-family-compile",

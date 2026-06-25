@@ -5,6 +5,7 @@ use anyhow::Context;
 use clap::ValueEnum;
 use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
+use shape_character::prepared::prepared_hero_template_v1;
 use shape_compile::export::{verify_model_package, write_model_package};
 use shape_compile::validation::{
     ModelValidationReport, ValidationLimits, validate_model,
@@ -32,6 +33,7 @@ const DEFAULT_TRIANGLE_BUDGET: u64 = 80_000;
 const DEFAULT_DIRECTION_COUNT: usize = 6;
 const DEFAULT_PROPOSAL_COUNT: usize = 72;
 const HQ_IMAGE_SIZE: u32 = 512;
+const PREPARED_HERO_TEMPLATE_PROFILE: &str = "prepared-hero-template-v1";
 
 #[derive(Debug, clap::Args)]
 pub struct HqQualityBenchmarkArgs {
@@ -273,9 +275,16 @@ pub struct HqQualityTierDecision {
 }
 
 pub fn run_hq_quality_benchmark(args: HqQualityBenchmarkArgs) -> anyhow::Result<()> {
-    let profiles = resolve_benchmark_profiles(&args.profile)?;
-    let multi_profile = profiles.len() > 1;
-    let mut reports = Vec::with_capacity(profiles.len());
+    let normalized_profile = normalize_profile_slug(&args.profile);
+    let include_prepared_hero =
+        normalized_profile == "all" || normalized_profile == PREPARED_HERO_TEMPLATE_PROFILE;
+    let profiles = if normalized_profile == PREPARED_HERO_TEMPLATE_PROFILE {
+        Vec::new()
+    } else {
+        resolve_benchmark_profiles(&args.profile)?
+    };
+    let multi_profile = profiles.len() + usize::from(include_prepared_hero) > 1;
+    let mut reports = Vec::with_capacity(profiles.len() + usize::from(include_prepared_hero));
     for (label, fixture) in profiles {
         let out_dir = if multi_profile {
             args.out_dir.join(&fixture.slug)
@@ -285,6 +294,15 @@ pub fn run_hq_quality_benchmark(args: HqQualityBenchmarkArgs) -> anyhow::Result<
         fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
         let report = benchmark_one_profile(&args, label, fixture, &out_dir)?;
         reports.push(report);
+    }
+    if include_prepared_hero {
+        let out_dir = if multi_profile {
+            args.out_dir.join(PREPARED_HERO_TEMPLATE_PROFILE)
+        } else {
+            args.out_dir.clone()
+        };
+        fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+        reports.push(benchmark_prepared_hero_template(&args, &out_dir)?);
     }
 
     if args.json {
@@ -310,10 +328,12 @@ pub fn run_hq_quality_benchmark(args: HqQualityBenchmarkArgs) -> anyhow::Result<
 
 #[must_use]
 pub fn benchmark_profile_slugs() -> Vec<String> {
-    built_in_fixture_catalogs_with_labels()
+    let mut slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
-        .collect()
+        .collect::<Vec<_>>();
+    slugs.push(PREPARED_HERO_TEMPLATE_PROFILE.to_owned());
+    slugs
 }
 
 #[must_use]
@@ -588,6 +608,252 @@ fn benchmark_one_profile(
     Ok(report)
 }
 
+fn benchmark_prepared_hero_template(
+    args: &HqQualityBenchmarkArgs,
+    out_dir: &Path,
+) -> anyhow::Result<HqQualityReport> {
+    let template = prepared_hero_template_v1();
+    let validation = template.validate();
+    let validation_ok = validation.is_ok();
+    let validation_error = validation.err().map(|error| error.to_string());
+
+    write_json(out_dir.join("prepared-template-contract.json"), &template)?;
+
+    let semantic_part_inventory = HqSemanticPartInventory {
+        part_count: template.semantic_regions.len() as u64,
+        parts: template
+            .semantic_regions
+            .iter()
+            .enumerate()
+            .map(|(index, region)| HqSemanticPartRow {
+                instance_id: index as u64 + 1,
+                definition_id: index as u64 + 1,
+                name: region.label.clone(),
+                source_recipe_instance: false,
+                generated_by: None,
+                triangle_count: 0,
+                region_count: 1,
+            })
+            .collect(),
+    };
+    let visible_control_difference_evidence = HqVisibleControlDifferenceEvidence {
+        primary_controls_checked: template.control_profile.controls.len(),
+        changed_control_count: 0,
+        controls: template
+            .control_profile
+            .controls
+            .iter()
+            .map(|control| HqControlDifferenceRow {
+                control_id: control.control_id.0.clone(),
+                label: control.label.clone(),
+                control_kind: "prepared_template".to_owned(),
+                current_value: "default".to_owned(),
+                sampled_value: None,
+                changed_geometry: false,
+                visual_delta_from_parent: 0,
+                failure: Some(
+                    "prepared hero template v1 has no rendered clay mesh output yet".to_owned(),
+                ),
+            })
+            .collect(),
+    };
+    let candidate_report = HqCandidateReport {
+        mode: "prepared-template".to_owned(),
+        seed: DEFAULT_QUALITY_SEED,
+        proposal_count: 0,
+        requested_count: DEFAULT_DIRECTION_COUNT,
+        returned_count: 0,
+        candidate_survival_count: 0,
+        six_direction_availability: false,
+        failure: Some(
+            "prepared hero template v1 needs authored whole-character preview generation"
+                .to_owned(),
+        ),
+    };
+    let export_reopen = HqExportReopenReport {
+        export_status: HqEvidenceStatus::Unsupported,
+        reopen_status: HqEvidenceStatus::Unsupported,
+        package_dir: None,
+        manifest: None,
+        checksums_match: None,
+        topology_matches_manifest: None,
+        finite_numeric_payloads: None,
+        not_run_reason: Some(
+            "prepared hero template v1 does not produce a mesh package yet".to_owned(),
+        ),
+    };
+    let mesh_validity_summary = HqMeshValiditySummary {
+        compile_valid: validation_ok,
+        model_valid: false,
+        issue_count: 1,
+        error_count: usize::from(!validation_ok),
+        warning_count: usize::from(validation_ok),
+        provenance_coverage: 0.0,
+        manifold_closed_part_fraction: 0.0,
+        accidental_intersection_count: 0,
+    };
+    let mesh_stats = HqMeshStatsFile {
+        profile_id: PREPARED_HERO_TEMPLATE_PROFILE.to_owned(),
+        part_count: semantic_part_inventory.part_count,
+        polygon_vertex_count: 0,
+        polygon_face_count: 0,
+        triangle_count: 0,
+        triangle_budget: Some(DEFAULT_TRIANGLE_BUDGET),
+        used_sdf_or_remeshing: false,
+        model_validation: mesh_validity_summary.clone(),
+    };
+    write_json(out_dir.join("mesh-stats.json"), &mesh_stats)?;
+    write_json(
+        out_dir.join("semantic-parts.json"),
+        &semantic_part_inventory,
+    )?;
+    write_json(out_dir.join("candidate-report.json"), &candidate_report)?;
+    write_json(
+        out_dir.join("controls-visibility-report.json"),
+        &visible_control_difference_evidence,
+    )?;
+    write_json(out_dir.join("export-reopen-report.json"), &export_reopen)?;
+
+    let mut unsupported_outputs = unsupported_outputs();
+    unsupported_outputs.extend([
+        HqUnsupportedOutput {
+            output: "prepared_hero_clay_mesh_preview".to_owned(),
+            reason: "prepared hero v1 validates a template contract but has no clay mesh renderer"
+                .to_owned(),
+        },
+        HqUnsupportedOutput {
+            output: "prepared_hero_contact_sheet".to_owned(),
+            reason: "contact sheets require rendered whole-character previews".to_owned(),
+        },
+        HqUnsupportedOutput {
+            output: "prepared_hero_export_package".to_owned(),
+            reason: "export/reopen requires generated mesh artifacts".to_owned(),
+        },
+        HqUnsupportedOutput {
+            output: "arbitrary_mesh_import".to_owned(),
+            reason: "prepared hero v1 only accepts known-base authored templates".to_owned(),
+        },
+        HqUnsupportedOutput {
+            output: "dota_ip_reconstruction".to_owned(),
+            reason:
+                "the template is a generic stylized hero base, not a third-party reconstruction"
+                    .to_owned(),
+        },
+        HqUnsupportedOutput {
+            output: "materials_uvs_rigging_animation".to_owned(),
+            reason: "materials, UVs, rigging, and animation remain out of current scope".to_owned(),
+        },
+    ]);
+
+    let gate_evidence = HqQualityGateEvidence {
+        compile_valid: validation_ok,
+        clay_preview_available: false,
+        contact_sheet_available: false,
+        front_view_available: false,
+        three_quarter_view_available: false,
+        side_view_available: false,
+        back_view_available: false,
+        wireframe_available: false,
+        silhouette_available: false,
+        visible_control_difference_evidence: false,
+        advanced_recipe_required: false,
+        export_verified: false,
+        reopen_verified: false,
+        candidate_survival_count: 0,
+        placeholder_thumbnails: false,
+        human_approved: args.human_approved,
+        adversarial_reviewed: args.adversarial_reviewed,
+    };
+    let tier = evaluate_quality_tier(args.quality_tier, &gate_evidence);
+    let mut blockers = tier.blockers;
+    for blocker in [
+        "prepared hero template v1 has no clay mesh renderer yet",
+        "prepared hero template v1 has no contact sheet evidence yet",
+        "prepared hero template v1 has no export/reopen mesh package yet",
+    ] {
+        if !blockers.iter().any(|existing| existing == blocker) {
+            blockers.push(blocker.to_owned());
+        }
+    }
+    if let Some(error) = validation_error {
+        blockers.push(format!("prepared hero template validation failed: {error}"));
+    }
+
+    let required_role_coverage = HqRequiredRoleCoverage {
+        required_role_count: template.provider_slots.len(),
+        covered_required_role_count: 0,
+        missing_required_roles: template
+            .provider_slots
+            .iter()
+            .map(|slot| slot.label.clone())
+            .collect(),
+        accepted: false,
+    };
+    let provider_attachment_validity = HqProviderAttachmentValidity {
+        provider_override_count: 0,
+        final_conformance_accepted: false,
+        required_attachment_issue_count: template.provider_slots.len(),
+    };
+    let report = HqQualityReport {
+        schema_version: HQ_QUALITY_REPORT_SCHEMA_VERSION,
+        generated_at: "deterministic-no-wall-clock".to_owned(),
+        deterministic_timestamp_policy:
+            "quality reports intentionally omit wall-clock timestamps for reproducibility"
+                .to_owned(),
+        profile_id: PREPARED_HERO_TEMPLATE_PROFILE.to_owned(),
+        profile_label: template.display_name,
+        kit_id: None,
+        style_id: None,
+        quality_tier_requested: args.quality_tier,
+        quality_tier_achieved: tier.achieved,
+        quality_tier_blockers: blockers,
+        clay_preview_available: false,
+        contact_sheet_available: false,
+        front_view_available: false,
+        three_quarter_view_available: false,
+        side_view_available: false,
+        back_view_available: false,
+        wireframe_available: false,
+        silhouette_available: false,
+        silhouette_readability_metric: None,
+        silhouette_manual_review_required: true,
+        mesh_validity_summary,
+        triangle_count: 0,
+        triangle_budget: Some(DEFAULT_TRIANGLE_BUDGET),
+        semantic_part_inventory,
+        required_role_coverage,
+        provider_attachment_validity,
+        candidate_survival_count: candidate_report.candidate_survival_count,
+        six_direction_availability: candidate_report.six_direction_availability,
+        primary_control_count: visible_control_difference_evidence.primary_controls_checked,
+        visible_control_difference_evidence,
+        advanced_recipe_required: false,
+        export_status: export_reopen.export_status,
+        reopen_status: export_reopen.reopen_status,
+        unsupported_outputs,
+        placeholder_thumbnail_detected: false,
+        human_review_required: true,
+        human_approval_status: if args.human_approved {
+            HqHumanApprovalStatus::Approved
+        } else {
+            HqHumanApprovalStatus::Pending
+        },
+        adversarial_review_status: if args.adversarial_reviewed {
+            HqHumanApprovalStatus::Approved
+        } else {
+            HqHumanApprovalStatus::Pending
+        },
+        manual_notes_path: args
+            .manual_notes
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        novice_catalog_exposure_allowed_by_default: false,
+    };
+    write_json(out_dir.join("quality-report.json"), &report)?;
+
+    Ok(report)
+}
+
 fn resolve_benchmark_profiles(
     profile: &str,
 ) -> anyhow::Result<Vec<(&'static str, FoundryFixtureCatalog)>> {
@@ -628,6 +894,9 @@ fn normalize_profile_slug(profile: &str) -> String {
         "hero_helmet" => "hero-helmet".to_owned(),
         "pauldron_pair" => "pauldron-pair".to_owned(),
         "chest_armor" => "chest-armor".to_owned(),
+        "prepared_hero_template_v1" | "prepared-hero-template" | "hero-template-v1" => {
+            PREPARED_HERO_TEMPLATE_PROFILE.to_owned()
+        }
         other => other.to_owned(),
     }
 }
@@ -1206,12 +1475,86 @@ mod tests {
     #[test]
     fn hq_quality_builtin_profile_list_is_enumerable() {
         let slugs = benchmark_profile_slugs();
-        assert_eq!(slugs.len(), 16);
+        assert_eq!(slugs.len(), 17);
         assert!(slugs.contains(&"roman-bridge".to_owned()));
         assert!(slugs.contains(&"roman-bridge-hq".to_owned()));
         assert!(slugs.contains(&"stylized-tree".to_owned()));
         assert!(slugs.contains(&"fantasy-sword".to_owned()));
         assert!(slugs.contains(&"chest-armor".to_owned()));
+        assert!(slugs.contains(&PREPARED_HERO_TEMPLATE_PROFILE.to_owned()));
+    }
+
+    #[test]
+    fn hq_quality_prepared_hero_template_profile_emits_honest_unsupported_report() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let args = HqQualityBenchmarkArgs {
+            profile: PREPARED_HERO_TEMPLATE_PROFILE.to_owned(),
+            out_dir: temp_dir.path().to_path_buf(),
+            quality_tier: HqQualityTier::Usable,
+            verify_export: true,
+            human_approved: false,
+            adversarial_reviewed: false,
+            manual_notes: None,
+            json: false,
+        };
+
+        run_hq_quality_benchmark(args).expect("prepared hero benchmark writes report");
+
+        let report_path = temp_dir.path().join("quality-report.json");
+        let report = serde_json::from_str::<HqQualityReport>(
+            &fs::read_to_string(&report_path).expect("quality report exists"),
+        )
+        .expect("quality report json");
+        assert_eq!(report.profile_id, PREPARED_HERO_TEMPLATE_PROFILE);
+        assert_eq!(report.quality_tier_requested, HqQualityTier::Usable);
+        assert_eq!(report.quality_tier_achieved, HqQualityTier::Draft);
+        assert!(!report.clay_preview_available);
+        assert!(!report.contact_sheet_available);
+        assert_eq!(report.export_status, HqEvidenceStatus::Unsupported);
+        assert_eq!(report.reopen_status, HqEvidenceStatus::Unsupported);
+        assert_eq!(report.triangle_count, 0);
+        assert_eq!(report.primary_control_count, 6);
+        assert!(report.mesh_validity_summary.compile_valid);
+        assert!(!report.mesh_validity_summary.model_valid);
+        assert!(!report.novice_catalog_exposure_allowed_by_default);
+        assert!(
+            report
+                .quality_tier_blockers
+                .iter()
+                .any(|blocker| { blocker.contains("no clay mesh renderer") })
+        );
+        for unsupported in [
+            "prepared_hero_clay_mesh_preview",
+            "prepared_hero_contact_sheet",
+            "prepared_hero_export_package",
+            "arbitrary_mesh_import",
+            "dota_ip_reconstruction",
+            "materials_uvs_rigging_animation",
+        ] {
+            assert!(
+                report
+                    .unsupported_outputs
+                    .iter()
+                    .any(|output| output.output == unsupported),
+                "missing unsupported output {unsupported}"
+            );
+        }
+        for name in [
+            "prepared-template-contract.json",
+            "mesh-stats.json",
+            "semantic-parts.json",
+            "candidate-report.json",
+            "controls-visibility-report.json",
+            "export-reopen-report.json",
+            "quality-report.json",
+        ] {
+            let path = temp_dir.path().join(name);
+            assert!(path.exists(), "prepared hero benchmark should write {name}");
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "prepared hero benchmark {name} is empty"
+            );
+        }
     }
 
     #[test]
