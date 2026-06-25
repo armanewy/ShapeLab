@@ -191,6 +191,9 @@ pub struct DraftStylePack {
     pub allowed_provider_tags: Vec<String>,
     /// Forbidden provider tags.
     pub forbidden_provider_tags: Vec<String>,
+    /// Additional style IDs this draft intentionally evaluates in its matrix.
+    #[serde(default)]
+    pub compatibility_style_ids: Vec<String>,
 }
 
 /// Draft novice control.
@@ -856,6 +859,7 @@ pub fn foundation_draft_template(
                 .to_owned(),
             allowed_provider_tags: vec!["foundation".to_owned()],
             forbidden_provider_tags: vec!["photoreal_material".to_owned()],
+            compatibility_style_ids: Vec::new(),
         },
         control_profile: DraftControlProfile {
             profile_id: format!("{family_id}_foundation_controls"),
@@ -1121,8 +1125,38 @@ fn validate_style_compatibility(
         }
     }
     let mut seen_pairs = BTreeMap::<(&str, &str), bool>::new();
+    let provider_pack_ids = draft
+        .provider_taxonomy
+        .provider_packs
+        .iter()
+        .map(|pack| pack.pack_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut style_ids = draft
+        .style_pack
+        .compatibility_style_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    style_ids.insert(draft.style_pack.style_id.as_str());
     for rule in &draft.compatibility_matrix.rules {
         let key = (rule.style_id.as_str(), rule.provider_pack_id.as_str());
+        if !style_ids.contains(rule.style_id.as_str()) {
+            report.push(
+                format!("compatibility_matrix.rules.{}", rule.style_id),
+                "compatibility_unknown_style",
+                "Compatibility rules must reference the draft style or an explicitly listed review style.",
+            );
+        }
+        if !provider_pack_ids.contains(rule.provider_pack_id.as_str()) {
+            report.push(
+                format!(
+                    "compatibility_matrix.rules.{}.{}",
+                    rule.style_id, rule.provider_pack_id
+                ),
+                "compatibility_unknown_provider_pack",
+                "Compatibility rules must reference declared provider packs.",
+            );
+        }
         if let Some(previous) = seen_pairs.insert(key, rule.compatible)
             && previous != rule.compatible
         {
@@ -2136,6 +2170,42 @@ mod tests {
             .push("missing_slot".to_owned());
         let report = validate_foundation_draft(&draft);
         assert!(issue_codes(&report).contains("control_unknown_provider_slot"));
+    }
+
+    #[test]
+    fn draft_validation_rejects_unknown_compatibility_references() {
+        let mut draft = foundation_draft_template("weapons", "sword");
+        draft
+            .compatibility_matrix
+            .rules
+            .push(DraftCompatibilityRule {
+                style_id: "unknown_style".to_owned(),
+                provider_pack_id: "unknown_provider_pack".to_owned(),
+                compatible: true,
+                reason: "Invalid row used for validation coverage.".to_owned(),
+            });
+        let report = validate_foundation_draft(&draft);
+        let codes = issue_codes(&report);
+        assert!(codes.contains("compatibility_unknown_style"));
+        assert!(codes.contains("compatibility_unknown_provider_pack"));
+
+        let mut explicit_review_style = foundation_draft_template("weapons", "sword");
+        explicit_review_style
+            .style_pack
+            .compatibility_style_ids
+            .push("review_style".to_owned());
+        explicit_review_style
+            .compatibility_matrix
+            .rules
+            .push(DraftCompatibilityRule {
+                style_id: "review_style".to_owned(),
+                provider_pack_id: explicit_review_style.provider_taxonomy.provider_packs[0]
+                    .pack_id
+                    .clone(),
+                compatible: true,
+                reason: "Explicitly listed review style is allowed.".to_owned(),
+            });
+        assert!(validate_foundation_draft(&explicit_review_style).is_valid());
     }
 
     #[test]

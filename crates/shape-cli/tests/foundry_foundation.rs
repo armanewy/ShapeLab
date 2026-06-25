@@ -5,8 +5,9 @@ use std::process::Command;
 
 use shape_foundry::{
     ControlProfileControlKind, ControlProfileTopologyBehavior, DraftControl, DraftRepairSuggestion,
-    FoundryFoundationDraft, FoundryKitPackage, foundation_adversarial_report,
-    foundation_draft_template, validate_foundation_draft,
+    FoundryFoundationDraft, FoundryKitPackage, WAVE37_WEAPON_ARMOR_FAMILY_IDS,
+    foundation_adversarial_report, foundation_draft_template, validate_foundation_draft,
+    weapon_armor_foundation_batch_summary, weapon_armor_foundation_draft_batch,
 };
 
 #[test]
@@ -208,4 +209,73 @@ fn foundry_foundation_cli_rejects_unknown_raw_geometry_fields() {
             .expect("run foundation validate")
             .success()
     );
+}
+
+#[test]
+fn foundry_foundation_cli_exports_wave37_weapon_armor_batch() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("wave37-foundations");
+
+    assert!(
+        Command::new(exe)
+            .args(["foundry-foundation", "batch", "--out-dir"])
+            .arg(&out_dir)
+            .status()
+            .expect("run foundation batch")
+            .success()
+    );
+
+    assert!(out_dir.join("foundation-batch-summary.json").is_file());
+    let summary: Vec<shape_foundry::FoundationBatchSummaryRow> =
+        serde_json::from_slice(&fs::read(out_dir.join("foundation-batch-summary.json")).unwrap())
+            .expect("parse batch summary");
+    assert_eq!(summary, weapon_armor_foundation_batch_summary());
+
+    for family_id in WAVE37_WEAPON_ARMOR_FAMILY_IDS {
+        let draft_path = out_dir
+            .join("drafts")
+            .join(format!("{family_id}.foundation-draft.json"));
+        let validation_path = out_dir
+            .join("validation")
+            .join(format!("{family_id}.validation.json"));
+        let report_path = out_dir
+            .join("adversarial")
+            .join(format!("{family_id}.adversarial-report.json"));
+        assert!(draft_path.is_file(), "{family_id} draft file should exist");
+        assert!(
+            validation_path.is_file(),
+            "{family_id} validation file should exist"
+        );
+        assert!(
+            report_path.is_file(),
+            "{family_id} adversarial report should exist"
+        );
+
+        assert!(
+            Command::new(exe)
+                .args(["foundry-foundation", "validate"])
+                .arg(&draft_path)
+                .status()
+                .expect("validate exported batch draft")
+                .success()
+        );
+
+        let exported_draft: FoundryFoundationDraft =
+            serde_json::from_slice(&fs::read(&draft_path).expect("read draft"))
+                .expect("parse exported draft");
+        let expected_draft = weapon_armor_foundation_draft_batch()
+            .into_iter()
+            .find(|draft| draft.family_blueprint.family_id == *family_id)
+            .expect("expected draft");
+        assert_eq!(exported_draft, expected_draft);
+
+        let exported_report: shape_foundry::DraftAdversarialReport =
+            serde_json::from_slice(&fs::read(&report_path).expect("read adversarial report"))
+                .expect("parse adversarial report");
+        assert_eq!(
+            exported_report,
+            foundation_adversarial_report(&exported_draft)
+        );
+    }
 }

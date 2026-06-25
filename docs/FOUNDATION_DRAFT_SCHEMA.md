@@ -50,6 +50,8 @@ Foundation draft validation detects:
 - duplicate visible slot ownership
 - missing provider slots
 - incoherent style/provider compatibility
+- compatibility rules referencing undeclared provider packs
+- compatibility rules referencing styles not listed in the draft style pack
 - empty candidate strategies
 - candidate strategies outside visible control space
 - candidate provider changes referencing unknown provider slots
@@ -72,3 +74,7 @@ Materialization does not produce geometry. It writes package metadata that an
 author can inspect and improve through the existing Foundry kit review path.
 The materializer validates the emitted kit package and reports mapped
 foundation errors instead of writing an invalid kit.
+
+`DraftStylePack.compatibility_style_ids` lists additional review style IDs that
+may appear in the compatibility matrix. Rules may reference either the draft's
+own `style_id` or one of those explicitly listed review style IDs.
