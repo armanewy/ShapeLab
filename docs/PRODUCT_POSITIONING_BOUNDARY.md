@@ -39,6 +39,11 @@ editability.
 - HQ adversarial reviews are required before stronger quality claims. They
   record missing evidence, manual art-review questions, and tier downgrades
   instead of pretending automation can judge taste.
+- `game-ready-static-prop --profile sci-fi-crate` creates the first static-prop
+  readiness package: frozen canonical model package, OBJ handoff, proxy LODs,
+  material-slot policy, collision proxy, and visual evidence. It must be
+  described as blocked until UV layout, direct GLB handoff, and manual
+  DCC/runtime review are complete.
 - Foundry kits package curated authored content with review evidence and
   visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.

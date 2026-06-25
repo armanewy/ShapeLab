@@ -136,6 +136,17 @@ parts, candidate survival, visible-control evidence, export/reopen status, and
 unsupported outputs. It separates release readiness from Showcase-quality asset
 approval.
 
+Generate the first static-prop game-readiness package for the Sci-Fi Crate:
+
+```bash
+cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/game-ready/sci-fi-crate-static-prop-v1
+```
+
+The package emits a frozen canonical model package, OBJ handoff, deterministic
+proxy LODs, material-slot assignments, collision proxy, visual evidence, and a
+validation report. The report intentionally blocks a full game-ready claim until
+UV layout, direct GLB handoff, and manual DCC/runtime review are complete.
+
 Inspect and package curated Foundry kit metadata:
 
 ```bash

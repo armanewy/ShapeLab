@@ -28,6 +28,10 @@
 - HQ adversarial review records evidence gaps and required manual art-review
   questions. It cannot automatically decide whether output looks toy-like,
   art-directed, or better than a curated Blender/Houdini kit.
+- The Sci-Fi Crate static-prop readiness package emits a real frozen model
+  package, grouped OBJ, proxy LOD OBJs, material-slot policy, collision proxy,
+  and visual evidence. It is still blocked for a full game-ready claim because
+  UV layout, direct GLB handoff, and manual DCC/runtime review are not complete.
 - `moba-hero-clay` remains clay mesh only. It does not claim Dota/IP
   reconstruction, UVs, materials, textures, rigging, animation, marketplace
   readiness, or arbitrary imported mesh editability.

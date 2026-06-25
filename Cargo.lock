@@ -3740,6 +3740,7 @@ dependencies = [
  "shape-field",
  "shape-foundry",
  "shape-foundry-catalog",
+ "shape-gamekit",
  "shape-inverse",
  "shape-mesh",
  "shape-modeling-assets",
@@ -3858,6 +3859,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shape-asset",
+ "tempfile",
 ]
 
 [[package]]

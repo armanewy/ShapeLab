@@ -77,6 +77,7 @@ use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candida
 mod foundry_foundation_cli;
 mod foundry_kit_cli;
 mod foundry_visual_benchmark;
+mod game_ready_static;
 mod hq_quality;
 
 const DEFAULT_PRESET: &str = "desk-lamp";
@@ -141,6 +142,8 @@ enum Command {
     HqQualityBenchmark(hq_quality::HqQualityBenchmarkArgs),
     /// Emit a deterministic adversarial review over an HQ benchmark evidence directory.
     HqAdversarialReview(hq_quality::HqAdversarialReviewArgs),
+    /// Emit the first static-prop game-readiness package with truthful blockers.
+    GameReadyStaticProp(game_ready_static::GameReadyStaticPropArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -649,6 +652,7 @@ fn main() -> anyhow::Result<()> {
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
         Command::HqAdversarialReview(args) => hq_quality::run_hq_adversarial_review(args),
+        Command::GameReadyStaticProp(args) => game_ready_static::run_game_ready_static_prop(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1335,7 +1339,7 @@ fn release_readiness_report(
 
     Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
-        milestone: "Wave 40 - MOBA Hero Foundry Clay MVP",
+        milestone: "Wave 42 - Sci-Fi Crate Static Prop Game-Readiness v1",
         visual_product_gate,
         product_ui_gate,
         performance: ReleasePerformanceReadiness {
@@ -1393,6 +1397,7 @@ fn release_readiness_report(
             "cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay",
             "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/roman-bridge-hq --out target/hq-benchmark/roman-bridge-hq/adversarial-review.json",
             "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/moba-hero-clay --out target/hq-benchmark/moba-hero-clay/adversarial-review.json",
+            "cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/game-ready/sci-fi-crate-static-prop-v1",
             "cargo clippy --workspace --all-targets -- -D warnings",
             "cargo test --workspace --no-fail-fast",
             "cargo build --release --workspace",
