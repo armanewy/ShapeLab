@@ -11,18 +11,19 @@ use shape_foundry::{
 use shape_foundry_catalog::{built_in_fixture_catalogs_with_labels, headless_fixture_catalogs};
 
 #[test]
-fn built_in_catalog_exposes_ten_labeled_profiles() {
+fn built_in_catalog_exposes_eleven_labeled_profiles() {
     let labeled = built_in_fixture_catalogs_with_labels();
-    assert_eq!(labeled.len(), 10);
-    assert_eq!(headless_fixture_catalogs().len(), 10);
+    assert_eq!(labeled.len(), 11);
+    assert_eq!(headless_fixture_catalogs().len(), 11);
 
     let labels = labeled
         .iter()
         .map(|(label, _)| *label)
         .collect::<BTreeSet<_>>();
-    assert_eq!(labels.len(), 10);
+    assert_eq!(labels.len(), 11);
     for expected in [
         "Roman Timber Bridge",
+        "Roman Timber Bridge HQ",
         "Sci-Fi Industrial Crate",
         "Stylized Furniture Lamp",
         "Market Stall Kit",
@@ -91,18 +92,27 @@ fn every_built_in_profile_resolves_compiles_and_stays_novice_sized() {
             .iter()
             .find(|control| control.id == "detail_density")
         {
-            let ControlKind::IntegerStepper { default } = &control.kind else {
-                panic!(
-                    "{} detail_density should be an integer control",
+            match &control.kind {
+                ControlKind::IntegerStepper { default } => {
+                    assert_eq!(
+                        fixture.document.control_state.get("detail_density"),
+                        Some(&ControlValue::Integer(*default)),
+                        "{} detail_density reset default should match the document default",
+                        fixture.slug
+                    );
+                }
+                ControlKind::ProviderGallery { options, .. } => {
+                    assert!(options.len() >= 3);
+                    assert!(matches!(
+                        fixture.document.control_state.get("detail_density"),
+                        Some(ControlValue::Provider(_))
+                    ));
+                }
+                other => panic!(
+                    "{} detail_density should be an integer or provider control, got {other:?}",
                     fixture.slug
-                );
-            };
-            assert_eq!(
-                fixture.document.control_state.get("detail_density"),
-                Some(&ControlValue::Integer(*default)),
-                "{} detail_density reset default should match the document default",
-                fixture.slug
-            );
+                ),
+            }
         }
     }
 }

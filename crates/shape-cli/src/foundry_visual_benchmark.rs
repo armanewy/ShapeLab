@@ -77,6 +77,8 @@ pub struct FoundryVisualBenchmarkArgs {
 enum FoundryVisualBenchmarkProfile {
     #[value(name = "roman-bridge")]
     RomanBridge,
+    #[value(name = "roman-bridge-hq", alias = "roman-bridge-hq-v1")]
+    RomanBridgeHq,
     #[value(name = "sci-fi-crate", alias = "scifi-crate")]
     ScifiCrate,
     #[value(name = "stylized-lamp")]
@@ -101,6 +103,7 @@ impl FoundryVisualBenchmarkProfile {
     fn slug(self) -> &'static str {
         match self {
             Self::RomanBridge => "roman-bridge",
+            Self::RomanBridgeHq => "roman-bridge-hq",
             Self::ScifiCrate => "sci-fi-crate",
             Self::StylizedLamp => "stylized-lamp",
             Self::MarketStall => "market-stall",
@@ -116,6 +119,7 @@ impl FoundryVisualBenchmarkProfile {
     fn fixture(self) -> FoundryFixtureCatalog {
         match self {
             Self::RomanBridge => roman_bridge::fixture_catalog(),
+            Self::RomanBridgeHq => roman_bridge::hq_fixture_catalog(),
             Self::ScifiCrate => scifi_crate::fixture_catalog(),
             Self::StylizedLamp => stylized_lamp::fixture_catalog(),
             Self::MarketStall => expanded_profiles::market_stall_fixture_catalog(),
@@ -2180,6 +2184,7 @@ mod tests {
     fn visual_benchmark_profiles_cover_canonical_slugs_and_aliases() {
         for slug in [
             "roman-bridge",
+            "roman-bridge-hq",
             "sci-fi-crate",
             "stylized-lamp",
             "market-stall",

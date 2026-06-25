@@ -109,6 +109,102 @@ fn roman_bridge_profile_declares_required_controls_and_strategies() {
 }
 
 #[test]
+fn roman_bridge_hq_profile_declares_required_controls_and_direction_strategies() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)
+        .expect("HQ roman bridge catalog should resolve");
+
+    assert_eq!(fixture.slug, "roman-bridge-hq");
+    let connector = catalog
+        .family
+        .part_roles
+        .iter()
+        .find(|role| role.id == "connector")
+        .expect("connector role");
+    assert!(connector.required);
+
+    let primary_controls = catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .filter(|control| control.primary)
+        .collect::<Vec<_>>();
+    assert_eq!(primary_controls.len(), 7);
+    assert_eq!(catalog.customizer_profile.maximum_primary_controls, 7);
+    assert!(primary_controls.iter().all(|control| control.visible));
+    assert_eq!(
+        primary_controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Span Length",
+            "Deck Width",
+            "Structural Heft",
+            "Support Style",
+            "Bracing Style",
+            "Railing Style",
+            "Detail Density"
+        ]
+    );
+
+    assert!(matches!(
+        primary_controls[3].kind,
+        ControlKind::ProviderGallery { .. }
+    ));
+    assert!(matches!(
+        primary_controls[4].kind,
+        ControlKind::ChoiceGallery { .. }
+    ));
+    assert!(matches!(
+        primary_controls[5].kind,
+        ControlKind::ProviderGallery { .. }
+    ));
+    assert!(matches!(
+        primary_controls[6].kind,
+        ControlKind::ProviderGallery { .. }
+    ));
+
+    for control in &primary_controls[3..] {
+        match &control.kind {
+            ControlKind::ChoiceGallery { options } => {
+                assert!(options.len() >= 3);
+                assert!(options.iter().all(|option| {
+                    option.preview.preview_id.starts_with(&control.id)
+                        && option.preview.artifact_fingerprint.is_none()
+                }));
+            }
+            ControlKind::ProviderGallery { options, .. } => {
+                assert!(options.len() >= 3);
+                assert!(options.iter().all(|option| {
+                    option.preview.preview_id.starts_with(&control.id)
+                        && option.preview.artifact_fingerprint.is_none()
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        catalog
+            .customizer_profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Reinforced",
+            "Light Crossing",
+            "Wide Deck",
+            "Compact Span",
+            "Stone-Pier Outpost",
+            "Detailed Timberwork",
+            "Minimal Clean Span"
+        ]
+    );
+}
+
+#[test]
 fn roman_bridge_compiles_with_connected_deck_and_support_conformance() {
     let fixture = roman_bridge::fixture_catalog();
     let output = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
@@ -215,10 +311,80 @@ fn roman_bridge_compiles_with_connected_deck_and_support_conformance() {
 }
 
 #[test]
+fn roman_bridge_hq_compiles_with_connector_details_and_valid_model() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let output = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
+        .expect("HQ roman bridge should compile");
+
+    assert!(output.final_conformance.is_accepted());
+    assert!(output.artifact.validation_report.is_valid());
+    let model_config = validation_config_from_recipe_with_limits(
+        &output.recipe,
+        &output.artifact,
+        ValidationLimits::default(),
+    );
+    let model_report = validate_model(&output.artifact, &model_config);
+    assert!(
+        model_report.is_valid(),
+        "HQ roman bridge model validation should pass: {:#?}",
+        model_report.issues
+    );
+
+    let attachment_ids = output
+        .final_conformance
+        .attachments
+        .iter()
+        .map(|row| row.rule_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(attachment_ids.contains(&"connector_to_deck"));
+    for row in &output.final_conformance.attachments {
+        assert_eq!(row.status, ConformanceStatus::Passed, "{row:#?}");
+        assert!(row.coverage.produced_pairs);
+        assert!(row.pairs.iter().all(|pair| pair.connected));
+        assert!(row.pairs.iter().all(|pair| pair.socket_compatible));
+    }
+
+    assert!(compiled_role_count(&output.recipe, &output.artifact, "connector") >= 6);
+    assert!(compiled_role_count(&output.recipe, &output.artifact, "support") >= 6);
+    assert!(output.artifact.statistics.triangle_count > 2_000);
+}
+
+#[test]
 fn every_primary_control_has_visible_endpoint_difference() {
     let fixture = roman_bridge::fixture_catalog();
     let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)
         .expect("roman bridge catalog should resolve");
+
+    for control in catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .filter(|control| control.primary)
+    {
+        let (low, high) = endpoint_values(control);
+        let low_output = compile_with_control(&fixture, &control.id, low);
+        let high_output = compile_with_control(&fixture, &control.id, high);
+
+        assert_ne!(
+            low_output.build_stamp.geometry_input_fingerprint,
+            high_output.build_stamp.geometry_input_fingerprint,
+            "{} should change geometry input",
+            control.id
+        );
+        assert_ne!(
+            camera_signature(&low_output.artifact),
+            camera_signature(&high_output.artifact),
+            "{} should be visible from the fixed camera",
+            control.id
+        );
+    }
+}
+
+#[test]
+fn every_hq_primary_control_has_visible_endpoint_difference() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)
+        .expect("HQ roman bridge catalog should resolve");
 
     for control in catalog
         .customizer_profile

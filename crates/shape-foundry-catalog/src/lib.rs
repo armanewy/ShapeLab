@@ -174,6 +174,7 @@ pub fn headless_fixture_catalogs() -> Vec<FoundryFixtureCatalog> {
 pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixtureCatalog)> {
     vec![
         ("Roman Timber Bridge", roman_bridge::fixture_catalog()),
+        ("Roman Timber Bridge HQ", roman_bridge::hq_fixture_catalog()),
         ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
         ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
         (

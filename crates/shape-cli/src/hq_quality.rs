@@ -1199,9 +1199,59 @@ mod tests {
     #[test]
     fn hq_quality_builtin_profile_list_is_enumerable() {
         let slugs = benchmark_profile_slugs();
-        assert_eq!(slugs.len(), 10);
+        assert_eq!(slugs.len(), 11);
         assert!(slugs.contains(&"roman-bridge".to_owned()));
+        assert!(slugs.contains(&"roman-bridge-hq".to_owned()));
         assert!(slugs.contains(&"stylized-tree".to_owned()));
+    }
+
+    #[test]
+    fn roman_bridge_hq_explore_candidates_survive_quality_validation() {
+        let fixture = shape_foundry_catalog::roman_bridge::hq_fixture_catalog();
+        let request = FoundryCandidateRequest {
+            seed: DEFAULT_QUALITY_SEED,
+            proposal_count: DEFAULT_PROPOSAL_COUNT,
+            result_count: DEFAULT_DIRECTION_COUNT,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+        };
+        let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &request)
+            .expect("HQ bridge candidates should generate");
+        assert_eq!(output.candidates.len(), DEFAULT_DIRECTION_COUNT);
+
+        let mut survived = 0_usize;
+        let mut failures = Vec::new();
+        for candidate in &output.candidates {
+            match compile_foundry_document(&candidate.document, &fixture) {
+                Ok(compiled) => {
+                    let model_validation = validate_compiled_output(&compiled);
+                    if compiled.artifact.validation_report.is_valid() && model_validation.is_valid()
+                    {
+                        survived += 1;
+                    } else {
+                        failures.push(format!(
+                            "{} controls={:?} artifact_valid={} model_issues={:?}",
+                            candidate.id.0,
+                            candidate.changed_controls,
+                            compiled.artifact.validation_report.is_valid(),
+                            model_validation.issues
+                        ));
+                    }
+                }
+                Err(error) => failures.push(format!(
+                    "{} controls={:?} compile_error={error:#?}",
+                    candidate.id.0, candidate.changed_controls
+                )),
+            }
+        }
+
+        assert_eq!(
+            survived,
+            DEFAULT_DIRECTION_COUNT,
+            "candidate failures:\n{}",
+            failures.join("\n")
+        );
     }
 
     #[test]

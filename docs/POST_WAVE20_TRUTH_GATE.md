@@ -12,10 +12,13 @@ reconstruction, not as a general mesh-to-procedural compiler.
 Demonstrated product capability:
 
 - A novice can use Visual Foundry to create, branch, customize, pack, and export
-  coherent variants from ten built-in authored profiles with zero technical
-  surface exposure. The original full-benchmark profiles are Roman Timber
-  Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26 adds
-  seven expansion profiles through the same Foundry catalog and compile path.
+  coherent variants from review-approved authored profiles with zero technical
+  surface exposure. Automated preview/developer gates currently exercise eleven
+  built-in authored profiles. The original full-benchmark profiles are Roman
+  Timber Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26
+  adds seven expansion profiles through the same Foundry catalog and compile
+  path, and Wave 34 adds the HQ Roman Timber Bridge vertical slice behind manual
+  review.
 - A technical user can still exercise authored explicit asset recipes through
   core crates and headless CLI/tests, but the explicit Modeling Workspace is no
   longer a native product surface.
@@ -52,7 +55,9 @@ correspondence-incomplete results.
 What can a novice user do today with zero technical surface exposure?
 
 - Open Shape Lab directly into Visual Foundry.
-- Pick one of the ten built-in foundry profiles.
+- Pick a review-approved foundry profile; the developer/preview catalog currently
+  exercises eleven built-in profiles while default novice exposure remains
+  manual-review gated.
 - Generate six Refine and six Explore directions where profile controls support
   them.
 - Customize primary controls, lock traits, branch history, export one asset, or

@@ -1,11 +1,13 @@
 # Foundry Content Expansion
 
-Wave 26 expands the built-in Visual Foundry catalog from three proof profiles to
-ten authored profiles.
+Wave 26 expanded the built-in Visual Foundry catalog from three proof profiles
+to ten authored profiles. Wave 34 adds the eleventh built-in profile:
+`roman-bridge-hq`.
 
 ## Built-In Profiles
 
 - Roman Timber Bridge
+- Roman Timber Bridge HQ
 - Sci-Fi Industrial Crate
 - Stylized Furniture Lamp
 - Market Stall Kit

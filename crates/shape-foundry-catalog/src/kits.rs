@@ -526,7 +526,7 @@ fn provider_slot_id(role_id: &str) -> String {
 
 fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
-        "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
+        "roman-bridge-hq" | "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
             FoundryKitQualityTier::Usable
         }
         _ => FoundryKitQualityTier::Prototype,
@@ -536,6 +536,7 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
 fn product_category_chips(slug: &str) -> Vec<String> {
     match slug {
         "roman-bridge" => vec!["Bridge", "Structure"],
+        "roman-bridge-hq" => vec!["Bridge", "HQ", "Structure"],
         "sci-fi-crate" => vec!["Prop", "Sci-Fi"],
         "stylized-lamp" => vec!["Furniture", "Lighting"],
         "market-stall" => vec!["Architecture", "Market"],
@@ -555,6 +556,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
 fn normalize_kit_slug(slug: &str) -> String {
     match slug {
         "storybook-tree" => "stylized-tree".to_owned(),
+        "roman-hq-bridge" | "roman-bridge-hq-v1" => "roman-bridge-hq".to_owned(),
         "scifi-crate" => "sci-fi-crate".to_owned(),
         other => other.to_owned(),
     }
@@ -569,7 +571,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 10);
+        assert_eq!(packages.len(), 11);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -611,6 +613,17 @@ mod tests {
             foundry_kit_visibility_decision(&package.kit, &package.review_manifest, false);
         assert!(!decision.visible);
         assert!(decision.reason.unwrap().contains("Manual review"));
+
+        let hq_bridge = built_in_foundry_kit_package("roman-bridge-hq").expect("hq bridge kit");
+        assert_eq!(hq_bridge.kit.quality_tier, FoundryKitQualityTier::Usable);
+        assert_eq!(
+            hq_bridge.kit.source_profile_slug.as_deref(),
+            Some("roman-bridge-hq")
+        );
+        let decision =
+            foundry_kit_visibility_decision(&hq_bridge.kit, &hq_bridge.review_manifest, false);
+        assert!(!decision.visible);
+        assert!(decision.reason.unwrap().contains("Manual review"));
     }
 
     #[test]
@@ -624,6 +637,12 @@ mod tests {
         assert_eq!(
             crate_kit.kit.source_profile_slug.as_deref(),
             Some("sci-fi-crate")
+        );
+        let hq_bridge =
+            built_in_foundry_kit_package("roman-bridge-hq-v1").expect("hq bridge alias");
+        assert_eq!(
+            hq_bridge.kit.source_profile_slug.as_deref(),
+            Some("roman-bridge-hq")
         );
     }
 }

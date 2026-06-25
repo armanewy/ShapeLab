@@ -19,15 +19,16 @@ use shape_family_compile::{
     ScalarTransform, scalar_parameter,
 };
 use shape_foundry::{
-    CandidateStrategy, ClosedInterval, ControlKind, ControlSlotBinding, ControlTopologyBehavior,
-    ControlValue, CustomizerControl, CustomizerProfile, DomainCertification, FeasibleControlDomain,
-    ProviderOption, ResponseCurve, WholeModelPreviewRef,
+    CandidateStrategy, ChoiceOption, ClosedInterval, ControlKind, ControlSlotBinding,
+    ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
+    DomainCertification, FeasibleControlDomain, ProviderOption, ResponseCurve,
+    WholeModelPreviewRef,
 };
 
 use crate::{
     FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog, build_fixture_catalog,
-    choice_control, choice_slot, family_implementation, family_schema, length_slot, ratio_slot,
-    role, style_implementation,
+    choice_slot, family_implementation, family_schema, length_slot, ratio_slot, role,
+    style_implementation,
 };
 
 const BRIDGE_FAMILY_ID: &str = "bridge";
@@ -36,16 +37,30 @@ const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
 const LOCAL_SOCKET: SocketId = SocketId(7);
 const FIRST_INSTANCE: u64 = 91;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum BridgeQuality {
+    Standard,
+    Hq,
+}
+
 /// Build the Roman bridge fixture catalog.
 #[must_use]
 pub fn fixture_catalog() -> FoundryFixtureCatalog {
-    let family = bridge_family_schema();
-    let style = roman_bridge_style_kit();
-    let family_impl = bridge_family_implementation();
-    let style_impl = style_implementation(
-        ROMAN_TIMBER_STYLE_ID,
-        BRIDGE_FAMILY_ID,
-        BTreeMap::from([
+    fixture_catalog_for(BridgeQuality::Standard)
+}
+
+/// Build the HQ Roman bridge fixture catalog.
+#[must_use]
+pub fn hq_fixture_catalog() -> FoundryFixtureCatalog {
+    fixture_catalog_for(BridgeQuality::Hq)
+}
+
+fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
+    let family = bridge_family_schema(quality);
+    let style = roman_bridge_style_kit(quality);
+    let family_impl = bridge_family_implementation(quality);
+    let default_role_providers = match quality {
+        BridgeQuality::Standard => BTreeMap::from([
             ("support".to_owned(), "tight_pile_bents".to_owned()),
             ("span".to_owned(), "hewn_span_beam".to_owned()),
             ("deck".to_owned(), "lashed_deck_plank".to_owned()),
@@ -53,91 +68,263 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("ramp".to_owned(), "bank_ramp_planks".to_owned()),
             ("rail".to_owned(), "guard_rail".to_owned()),
         ]),
-        vec![
-            support_fragment("pointed_round_pile", 0.13, 4, 1.1),
-            support_fragment("tight_pile_bents", 0.145, 6, 0.66),
-            support_fragment("marching_pile_bents", 0.16, 8, 0.48),
-            span_fragment(),
+        BridgeQuality::Hq => BTreeMap::from([
+            ("support".to_owned(), "stone_pier_blocks".to_owned()),
+            ("span".to_owned(), "hewn_span_beam".to_owned()),
+            ("deck".to_owned(), "segmented_deck_planks".to_owned()),
+            ("brace".to_owned(), "x_brace_beam".to_owned()),
+            ("ramp".to_owned(), "bank_ramp_planks".to_owned()),
+            ("rail".to_owned(), "guard_rail_courses".to_owned()),
+            ("connector".to_owned(), "bolted_joinery_detail".to_owned()),
+        ]),
+    };
+    let mut fragments = vec![
+        support_fragment("pointed_round_pile", 0.13, 4, 1.1),
+        support_fragment("tight_pile_bents", 0.145, 6, 0.66),
+        support_fragment("marching_pile_bents", 0.16, 8, 0.48),
+        span_fragment(),
+        deck_fragment(
+            "lashed_deck_plank",
+            [3.6, 1.05],
+            0.09,
+            0.018,
+            [0.0, 0.23, 0.0],
+            1,
+        ),
+        deck_fragment(
+            "capped_deck_edge",
+            [3.55, 1.18],
+            0.12,
+            0.028,
+            [0.0, 0.25, 0.0],
+            1,
+        ),
+        deck_fragment(
+            "notched_deck_edge",
+            [3.45, 0.94],
+            0.105,
+            0.012,
+            [0.0, 0.245, 0.0],
+            1,
+        ),
+        brace_fragment(
+            "straight_under_braces",
+            [1.45, 0.042, 0.048],
+            &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+        ),
+        brace_fragment(
+            "cross_brace_beam",
+            [1.5, 0.052, 0.052],
+            &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+        ),
+        brace_fragment(
+            "trussed_brace_beam",
+            [1.55, 0.066, 0.06],
+            &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+        ),
+        ramp_fragment(),
+        rail_fragment("curb_rail", [1.7, 0.042, 0.052], 0.34, 0.57, 1),
+        rail_fragment("guard_rail", [1.7, 0.04, 0.046], 0.62, 0.62, 2),
+        rail_fragment("watch_rail", [1.72, 0.052, 0.058], 0.76, 0.66, 3),
+    ];
+    if quality == BridgeQuality::Hq {
+        fragments.extend([
+            support_box_fragment(
+                "squared_post_supports",
+                GeometrySource::RoundedBox {
+                    half_extents: [0.16, 0.68, 0.16],
+                    radius: 0.012,
+                },
+                vec![bevel(1, 0.018), linear_array(2, 4, [1.04, 0.0, 0.0])],
+            ),
+            support_box_fragment(
+                "stone_pier_blocks",
+                GeometrySource::RoundedBox {
+                    half_extents: [0.24, 0.075, 0.24],
+                    radius: 0.01,
+                },
+                vec![
+                    bevel(1, 0.014),
+                    linear_array(2, 5, [0.0, 0.17, 0.0]),
+                    linear_array(3, 3, [1.35, 0.0, 0.0]),
+                ],
+            ),
+            support_box_fragment(
+                "trestle_frame_supports",
+                GeometrySource::RoundedBox {
+                    half_extents: [0.11, 0.62, 0.12],
+                    radius: 0.014,
+                },
+                vec![
+                    bevel(1, 0.016),
+                    linear_array(2, 2, [0.0, 0.0, 0.72]),
+                    linear_array(3, 5, [0.72, 0.0, 0.0]),
+                ],
+            ),
             deck_fragment(
-                "lashed_deck_plank",
-                [3.6, 1.05],
-                0.09,
+                "segmented_deck_planks",
+                [3.65, 1.08],
+                0.082,
+                0.014,
+                [0.0, 0.255, 0.0],
+                1,
+            ),
+            deck_fragment(
+                "wide_plank_deck",
+                [3.8, 1.34],
+                0.095,
                 0.018,
-                [0.0, 0.23, 0.0],
+                [0.0, 0.26, 0.0],
                 1,
             ),
-            deck_fragment(
-                "capped_deck_edge",
-                [3.55, 1.18],
-                0.12,
-                0.028,
-                [0.0, 0.25, 0.0],
-                1,
-            ),
-            deck_fragment(
-                "notched_deck_edge",
-                [3.45, 0.94],
-                0.105,
-                0.012,
-                [0.0, 0.245, 0.0],
-                2,
+            brace_fragment(
+                "minimal_under_ties",
+                [1.35, 0.035, 0.04],
+                &[FragmentOccurrence::at([0.0, -0.04, 0.0])],
             ),
             brace_fragment(
-                "straight_under_braces",
-                [1.45, 0.042, 0.048],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+                "x_brace_beam",
+                [1.5, 0.058, 0.05],
+                &[FragmentOccurrence::rotated(
+                    [0.0, 0.0, -0.06],
+                    [0.0, 18.0, 0.0],
+                )],
             ),
             brace_fragment(
-                "cross_brace_beam",
-                [1.5, 0.052, 0.052],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+                "k_brace_beam",
+                [1.25, 0.055, 0.05],
+                &[FragmentOccurrence::rotated(
+                    [-0.42, 0.0, -0.05],
+                    [0.0, 24.0, 0.0],
+                )],
             ),
-            brace_fragment(
-                "trussed_brace_beam",
-                [1.55, 0.066, 0.06],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+            rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.5, 0.56, 1),
+            rail_fragment("guard_rail_courses", [1.72, 0.042, 0.048], 0.86, 0.63, 3),
+            rail_fragment("lookout_rail_courses", [1.75, 0.048, 0.052], 1.02, 0.68, 4),
+            connector_fragment(
+                "clean_joinery_detail",
+                [0.05, 0.018, 0.035],
+                vec![bevel(1, 0.006), linear_array(2, 6, [0.62, 0.0, 0.0])],
             ),
-            ramp_fragment(),
-            rail_fragment("curb_rail", [1.7, 0.042, 0.052], 0.34, 0.57, 1),
-            rail_fragment("guard_rail", [1.7, 0.04, 0.046], 0.62, 0.62, 2),
-            rail_fragment("watch_rail", [1.72, 0.052, 0.058], 0.76, 0.66, 3),
-        ],
+            connector_fragment(
+                "bolted_joinery_detail",
+                [0.055, 0.02, 0.04],
+                vec![
+                    bevel(1, 0.007),
+                    linear_array(2, 7, [0.54, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.92]),
+                ],
+            ),
+            connector_fragment(
+                "dense_weathered_joinery",
+                [0.06, 0.022, 0.045],
+                vec![
+                    bevel(1, 0.008),
+                    linear_array(2, 9, [0.42, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.92]),
+                ],
+            ),
+        ]);
+    }
+    let style_impl = style_implementation(
+        ROMAN_TIMBER_STYLE_ID,
+        BRIDGE_FAMILY_ID,
+        default_role_providers,
+        fragments,
     );
-    let profile = customizer_profile();
+    let profile = customizer_profile(quality);
+    let (slug, document_id, control_state) = match quality {
+        BridgeQuality::Standard => (
+            "roman-bridge",
+            "roman-bridge-doc",
+            BTreeMap::from([
+                ("span_length".to_owned(), ControlValue::Scalar(3.6)),
+                ("deck_width".to_owned(), ControlValue::Scalar(1.08)),
+                ("structural_heft".to_owned(), ControlValue::Scalar(0.55)),
+                (
+                    "support_rhythm".to_owned(),
+                    ControlValue::Provider("tight_pile_bents".to_owned()),
+                ),
+                (
+                    "bracing_style".to_owned(),
+                    ControlValue::Choice("cross_brace_beam".to_owned()),
+                ),
+                (
+                    "railing".to_owned(),
+                    ControlValue::Provider("guard_rail".to_owned()),
+                ),
+                (
+                    "edge_finish".to_owned(),
+                    ControlValue::Provider("lashed_deck_plank".to_owned()),
+                ),
+            ]),
+        ),
+        BridgeQuality::Hq => (
+            "roman-bridge-hq",
+            "roman-bridge-hq-doc",
+            BTreeMap::from([
+                ("span_length".to_owned(), ControlValue::Scalar(3.8)),
+                ("deck_width".to_owned(), ControlValue::Scalar(1.14)),
+                ("structural_heft".to_owned(), ControlValue::Scalar(0.62)),
+                (
+                    "support_style".to_owned(),
+                    ControlValue::Provider("stone_pier_blocks".to_owned()),
+                ),
+                (
+                    "bracing_style".to_owned(),
+                    ControlValue::Choice("x_brace_beam".to_owned()),
+                ),
+                (
+                    "railing_style".to_owned(),
+                    ControlValue::Provider("guard_rail_courses".to_owned()),
+                ),
+                (
+                    "detail_density".to_owned(),
+                    ControlValue::Provider("bolted_joinery_detail".to_owned()),
+                ),
+            ]),
+        ),
+    };
 
     build_fixture_catalog(FixtureCatalogSpec {
-        slug: "roman-bridge",
-        document_id: "roman-bridge-doc",
+        slug,
+        document_id,
         family,
         style,
         family_implementation: family_impl,
         style_implementation: style_impl,
         customizer_profile: profile,
-        control_state: BTreeMap::from([
-            ("span_length".to_owned(), ControlValue::Scalar(3.6)),
-            ("deck_width".to_owned(), ControlValue::Scalar(1.08)),
-            ("structural_heft".to_owned(), ControlValue::Scalar(0.55)),
-            (
-                "support_rhythm".to_owned(),
-                ControlValue::Provider("tight_pile_bents".to_owned()),
-            ),
-            (
-                "bracing_style".to_owned(),
-                ControlValue::Choice("cross_brace_beam".to_owned()),
-            ),
-            (
-                "railing".to_owned(),
-                ControlValue::Provider("guard_rail".to_owned()),
-            ),
-            (
-                "edge_finish".to_owned(),
-                ControlValue::Provider("lashed_deck_plank".to_owned()),
-            ),
-        ]),
+        control_state,
     })
 }
 
-fn bridge_family_schema() -> shape_family::AssetFamilySchema {
+fn bridge_family_schema(quality: BridgeQuality) -> shape_family::AssetFamilySchema {
+    let bracing_choices = match quality {
+        BridgeQuality::Standard => vec![
+            "straight_under_braces".to_owned(),
+            "cross_brace_beam".to_owned(),
+            "trussed_brace_beam".to_owned(),
+        ],
+        BridgeQuality::Hq => vec![
+            "minimal_under_ties".to_owned(),
+            "x_brace_beam".to_owned(),
+            "k_brace_beam".to_owned(),
+            "trussed_brace_beam".to_owned(),
+        ],
+    };
+    let connector_role = match quality {
+        BridgeQuality::Standard => role("connector", RoleMultiplicity::Optional, false),
+        BridgeQuality::Hq => role("connector", RoleMultiplicity::Repeated, true),
+    };
+    let (span_min, span_max, span_default, deck_width_min, deck_width_max, deck_width_default) =
+        match quality {
+            BridgeQuality::Standard => (2.4, 5.2, 3.6, 0.78, 1.55, 1.08),
+            BridgeQuality::Hq => (2.8, 5.4, 3.8, 0.86, 1.58, 1.14),
+        };
+    let heft_default = match quality {
+        BridgeQuality::Standard => 0.55,
+        BridgeQuality::Hq => 0.62,
+    };
     let mut family = family_schema(FamilySchemaSpec {
         id: BRIDGE_FAMILY_ID,
         display_name: "Bridge",
@@ -149,7 +336,7 @@ fn bridge_family_schema() -> shape_family::AssetFamilySchema {
             role("brace", RoleMultiplicity::Repeated, true),
             role("ramp", RoleMultiplicity::Repeated, true),
             role("rail", RoleMultiplicity::Repeated, true),
-            role("connector", RoleMultiplicity::Optional, false),
+            connector_role,
         ],
         allowed_operations: vec![
             AllowedOperationKind::Primitive,
@@ -159,9 +346,33 @@ fn bridge_family_schema() -> shape_family::AssetFamilySchema {
             AllowedOperationKind::Lathe,
         ],
         parameter_slots: vec![
-            length_slot("span_length", "Span Length", "span", 2.4, 5.2, 0.1, 3.6),
-            length_slot("deck_length", "Deck Length", "deck", 2.4, 5.2, 0.1, 3.6),
-            length_slot("deck_width", "Deck Width", "deck", 0.78, 1.55, 0.05, 1.08),
+            length_slot(
+                "span_length",
+                "Span Length",
+                "span",
+                span_min,
+                span_max,
+                0.1,
+                span_default,
+            ),
+            length_slot(
+                "deck_length",
+                "Deck Length",
+                "deck",
+                span_min,
+                span_max,
+                0.1,
+                span_default,
+            ),
+            length_slot(
+                "deck_width",
+                "Deck Width",
+                "deck",
+                deck_width_min,
+                deck_width_max,
+                0.05,
+                deck_width_default,
+            ),
             ratio_slot(
                 "support_heft",
                 "Support Heft",
@@ -169,22 +380,45 @@ fn bridge_family_schema() -> shape_family::AssetFamilySchema {
                 0.0,
                 1.0,
                 0.05,
-                0.55,
+                heft_default,
             ),
-            ratio_slot("span_heft_y", "Span Depth", "span", 0.0, 1.0, 0.05, 0.55),
-            ratio_slot("span_heft_z", "Span Breadth", "span", 0.0, 1.0, 0.05, 0.55),
-            ratio_slot("brace_heft", "Brace Heft", "brace", 0.0, 1.0, 0.05, 0.55),
-            ratio_slot("deck_heft", "Deck Heft", "deck", 0.0, 1.0, 0.05, 0.55),
-            choice_slot(
-                "bracing_style",
-                "Bracing Style",
+            ratio_slot(
+                "span_heft_y",
+                "Span Depth",
+                "span",
+                0.0,
+                1.0,
+                0.05,
+                heft_default,
+            ),
+            ratio_slot(
+                "span_heft_z",
+                "Span Breadth",
+                "span",
+                0.0,
+                1.0,
+                0.05,
+                heft_default,
+            ),
+            ratio_slot(
+                "brace_heft",
+                "Brace Heft",
                 "brace",
-                vec![
-                    "straight_under_braces".to_owned(),
-                    "cross_brace_beam".to_owned(),
-                    "trussed_brace_beam".to_owned(),
-                ],
+                0.0,
+                1.0,
+                0.05,
+                heft_default,
             ),
+            ratio_slot(
+                "deck_heft",
+                "Deck Heft",
+                "deck",
+                0.0,
+                1.0,
+                0.05,
+                heft_default,
+            ),
+            choice_slot("bracing_style", "Bracing Style", "brace", bracing_choices),
         ],
         compatible_style_kits: vec![ROMAN_TIMBER_STYLE_ID.to_owned()],
         tags: vec!["roman".to_owned(), "bridge".to_owned(), "timber".to_owned()],
@@ -196,6 +430,17 @@ fn bridge_family_schema() -> shape_family::AssetFamilySchema {
         attachment_rule("ramp_to_deck", "ramp", "deck", "walkway"),
         attachment_rule("rail_to_deck", "rail", "deck", "rail_mount"),
     ];
+    if quality == BridgeQuality::Hq {
+        family.attachment_rules.push(AttachmentRule {
+            id: "connector_to_deck".to_owned(),
+            from_role: "connector".to_owned(),
+            to_role: "deck".to_owned(),
+            anchor_role: None,
+            compatibility_tags: vec!["deck_detail".to_owned()],
+            required: false,
+            execution_policy: FamilyRuleExecutionPolicy::Advisory,
+        });
+    }
     family
 }
 
@@ -211,7 +456,7 @@ fn attachment_rule(id: &str, from_role: &str, to_role: &str, tag: &str) -> Attac
     }
 }
 
-fn roman_bridge_style_kit() -> StyleKit {
+fn roman_bridge_style_kit(quality: BridgeQuality) -> StyleKit {
     let mut style = roman_timber_engineering_style_kit();
     let facet = style
         .family_facets
@@ -269,6 +514,94 @@ fn roman_bridge_style_kit() -> StyleKit {
         ),
         prototype("watch_rail", "Watch rail", "rail", &["timber", "tall_rail"]),
     ]);
+    if quality == BridgeQuality::Hq {
+        facet.part_prototypes.extend([
+            prototype(
+                "squared_post_supports",
+                "Squared post supports",
+                "support",
+                &["timber", "foundation", "squared"],
+            ),
+            prototype(
+                "stone_pier_blocks",
+                "Stone pier blocks",
+                "support",
+                &["stone", "foundation", "masonry"],
+            ),
+            prototype(
+                "trestle_frame_supports",
+                "Trestle frame supports",
+                "support",
+                &["timber", "foundation", "trestle"],
+            ),
+            prototype(
+                "segmented_deck_planks",
+                "Segmented deck planks",
+                "deck",
+                &["timber", "planked", "walkable"],
+            ),
+            prototype(
+                "wide_plank_deck",
+                "Wide plank deck",
+                "deck",
+                &["timber", "wide", "walkable"],
+            ),
+            prototype(
+                "minimal_under_ties",
+                "Minimal under ties",
+                "brace",
+                &["timber", "minimal", "reinforcement"],
+            ),
+            prototype(
+                "x_brace_beam",
+                "X brace beam",
+                "brace",
+                &["timber", "x_brace", "reinforcement"],
+            ),
+            prototype(
+                "k_brace_beam",
+                "K brace beam",
+                "brace",
+                &["timber", "k_brace", "reinforcement"],
+            ),
+            prototype(
+                "low_curb_rail",
+                "Low curb rail",
+                "rail",
+                &["timber", "low_rail"],
+            ),
+            prototype(
+                "guard_rail_courses",
+                "Guard rail courses",
+                "rail",
+                &["timber", "guard_rail"],
+            ),
+            prototype(
+                "lookout_rail_courses",
+                "Lookout rail courses",
+                "rail",
+                &["timber", "tall_rail"],
+            ),
+            prototype(
+                "clean_joinery_detail",
+                "Clean joinery detail",
+                "connector",
+                &["timber", "joinery", "clean"],
+            ),
+            prototype(
+                "bolted_joinery_detail",
+                "Bolted joinery detail",
+                "connector",
+                &["timber", "joinery", "bolted"],
+            ),
+            prototype(
+                "dense_weathered_joinery",
+                "Dense weathered joinery",
+                "connector",
+                &["timber", "joinery", "weathered"],
+            ),
+        ]);
+    }
     style
 }
 
@@ -287,106 +620,167 @@ fn prototype(id: &str, label: &str, role: &str, style_tags: &[&str]) -> PartProt
     }
 }
 
-fn bridge_family_implementation() -> shape_family_compile::FamilyImplementation {
-    let mut family_impl = family_implementation(
-        BRIDGE_FAMILY_ID,
-        "Roman bridge base",
-        vec![
+fn bridge_family_implementation(
+    quality: BridgeQuality,
+) -> shape_family_compile::FamilyImplementation {
+    let bracing_choices = match quality {
+        BridgeQuality::Standard => BTreeMap::from([
+            (
+                "straight_under_braces".to_owned(),
+                "straight_under_braces".to_owned(),
+            ),
+            ("cross_brace_beam".to_owned(), "cross_brace_beam".to_owned()),
+            (
+                "trussed_brace_beam".to_owned(),
+                "trussed_brace_beam".to_owned(),
+            ),
+        ]),
+        BridgeQuality::Hq => BTreeMap::from([
+            (
+                "minimal_under_ties".to_owned(),
+                "minimal_under_ties".to_owned(),
+            ),
+            ("x_brace_beam".to_owned(), "x_brace_beam".to_owned()),
+            ("k_brace_beam".to_owned(), "k_brace_beam".to_owned()),
+            (
+                "trussed_brace_beam".to_owned(),
+                "trussed_brace_beam".to_owned(),
+            ),
+        ]),
+    };
+    let mut parameter_bindings = vec![
+        ParameterBinding::Scalar {
+            slot: "span_length".to_owned(),
+            role: "span".to_owned(),
+            local_path: definition_scalar_path(
+                LOCAL_DEFINITION,
+                "geometry.rounded_box.half_extents.x",
+            ),
+            transform: ScalarTransform::ScaleOffset {
+                scale: 0.5,
+                offset: 0.0,
+            },
+        },
+        ParameterBinding::Scalar {
+            slot: "deck_length".to_owned(),
+            role: "deck".to_owned(),
+            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.x"),
+            transform: ScalarTransform::Direct,
+        },
+        ParameterBinding::Scalar {
+            slot: "deck_width".to_owned(),
+            role: "deck".to_owned(),
+            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.y"),
+            transform: ScalarTransform::Direct,
+        },
+    ];
+    match quality {
+        BridgeQuality::Standard => parameter_bindings.push(ParameterBinding::Scalar {
+            slot: "support_heft".to_owned(),
+            role: "support".to_owned(),
+            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
+            transform: ScalarTransform::Ratio {
+                minimum: 0.105,
+                maximum: 0.21,
+            },
+        }),
+        BridgeQuality::Hq => parameter_bindings.extend([
             ParameterBinding::Scalar {
-                slot: "span_length".to_owned(),
-                role: "span".to_owned(),
+                slot: "support_heft".to_owned(),
+                role: "support".to_owned(),
                 local_path: definition_scalar_path(
                     LOCAL_DEFINITION,
                     "geometry.rounded_box.half_extents.x",
                 ),
-                transform: ScalarTransform::ScaleOffset {
-                    scale: 0.5,
-                    offset: 0.0,
+                transform: ScalarTransform::Ratio {
+                    minimum: 0.09,
+                    maximum: 0.3,
                 },
-            },
-            ParameterBinding::Scalar {
-                slot: "deck_length".to_owned(),
-                role: "deck".to_owned(),
-                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.x"),
-                transform: ScalarTransform::Direct,
-            },
-            ParameterBinding::Scalar {
-                slot: "deck_width".to_owned(),
-                role: "deck".to_owned(),
-                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.y"),
-                transform: ScalarTransform::Direct,
             },
             ParameterBinding::Scalar {
                 slot: "support_heft".to_owned(),
                 role: "support".to_owned(),
-                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
-                transform: ScalarTransform::Ratio {
-                    minimum: 0.105,
-                    maximum: 0.21,
-                },
-            },
-            ParameterBinding::Scalar {
-                slot: "span_heft_y".to_owned(),
-                role: "span".to_owned(),
-                local_path: definition_scalar_path(
-                    LOCAL_DEFINITION,
-                    "geometry.rounded_box.half_extents.y",
-                ),
-                transform: ScalarTransform::Ratio {
-                    minimum: 0.075,
-                    maximum: 0.18,
-                },
-            },
-            ParameterBinding::Scalar {
-                slot: "span_heft_z".to_owned(),
-                role: "span".to_owned(),
                 local_path: definition_scalar_path(
                     LOCAL_DEFINITION,
                     "geometry.rounded_box.half_extents.z",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.1,
-                    maximum: 0.24,
+                    minimum: 0.09,
+                    maximum: 0.3,
                 },
             },
-            ParameterBinding::Scalar {
-                slot: "brace_heft".to_owned(),
-                role: "brace".to_owned(),
-                local_path: definition_scalar_path(
-                    LOCAL_DEFINITION,
-                    "geometry.rounded_box.half_extents.y",
-                ),
-                transform: ScalarTransform::Ratio {
-                    minimum: 0.035,
-                    maximum: 0.09,
-                },
+        ]),
+    }
+    parameter_bindings.extend([
+        ParameterBinding::Scalar {
+            slot: "span_heft_y".to_owned(),
+            role: "span".to_owned(),
+            local_path: definition_scalar_path(
+                LOCAL_DEFINITION,
+                "geometry.rounded_box.half_extents.y",
+            ),
+            transform: ScalarTransform::Ratio {
+                minimum: 0.075,
+                maximum: 0.18,
             },
-            ParameterBinding::Scalar {
-                slot: "deck_heft".to_owned(),
-                role: "deck".to_owned(),
-                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.thickness"),
-                transform: ScalarTransform::Ratio {
-                    minimum: 0.07,
-                    maximum: 0.16,
-                },
+        },
+        ParameterBinding::Scalar {
+            slot: "span_heft_z".to_owned(),
+            role: "span".to_owned(),
+            local_path: definition_scalar_path(
+                LOCAL_DEFINITION,
+                "geometry.rounded_box.half_extents.z",
+            ),
+            transform: ScalarTransform::Ratio {
+                minimum: 0.1,
+                maximum: 0.24,
             },
-            ParameterBinding::ChoiceToPrototype {
-                slot: "bracing_style".to_owned(),
-                role: "brace".to_owned(),
-                choices: BTreeMap::from([
-                    (
-                        "straight_under_braces".to_owned(),
-                        "straight_under_braces".to_owned(),
-                    ),
-                    ("cross_brace_beam".to_owned(), "cross_brace_beam".to_owned()),
-                    (
-                        "trussed_brace_beam".to_owned(),
-                        "trussed_brace_beam".to_owned(),
-                    ),
-                ]),
+        },
+        ParameterBinding::Scalar {
+            slot: "brace_heft".to_owned(),
+            role: "brace".to_owned(),
+            local_path: definition_scalar_path(
+                LOCAL_DEFINITION,
+                "geometry.rounded_box.half_extents.y",
+            ),
+            transform: ScalarTransform::Ratio {
+                minimum: 0.035,
+                maximum: 0.09,
             },
-        ],
-    );
+        },
+        ParameterBinding::Scalar {
+            slot: "deck_heft".to_owned(),
+            role: "deck".to_owned(),
+            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.thickness"),
+            transform: ScalarTransform::Ratio {
+                minimum: 0.07,
+                maximum: 0.16,
+            },
+        },
+        ParameterBinding::ChoiceToPrototype {
+            slot: "bracing_style".to_owned(),
+            role: "brace".to_owned(),
+            choices: bracing_choices,
+        },
+    ]);
+    let mut family_impl =
+        family_implementation(BRIDGE_FAMILY_ID, "Roman bridge base", parameter_bindings);
+    let support_offset = match quality {
+        BridgeQuality::Standard => [-1.65, -0.76, -0.01],
+        BridgeQuality::Hq => [-1.65, -1.08, -0.01],
+    };
+    let deck_offset = match quality {
+        BridgeQuality::Standard => [0.0, 0.25, 0.45],
+        BridgeQuality::Hq => [0.0, 0.38, 0.45],
+    };
+    let rail_offset = match quality {
+        BridgeQuality::Standard => [0.0, 0.37, -0.62],
+        BridgeQuality::Hq => [0.0, 0.5, -0.62],
+    };
+    let brace_offset = match quality {
+        BridgeQuality::Standard => [0.0, -0.32, 0.45],
+        BridgeQuality::Hq => [0.0, -0.58, -0.72],
+    };
     family_impl.attachment_bindings = vec![
         attachment_binding(
             "support_to_span",
@@ -395,7 +789,7 @@ fn bridge_family_implementation() -> shape_family_compile::FamilyImplementation 
             "support",
             "support_joint",
             FragmentAttachmentPairing::AllPairs,
-            [-1.65, -0.76, -0.01],
+            support_offset,
         ),
         attachment_binding(
             "deck_to_span",
@@ -404,7 +798,7 @@ fn bridge_family_implementation() -> shape_family_compile::FamilyImplementation 
             "deck",
             "deck_joint",
             FragmentAttachmentPairing::ByOccurrenceIndex,
-            [0.0, 0.25, 0.45],
+            deck_offset,
         ),
         attachment_binding(
             "brace_to_span",
@@ -413,7 +807,7 @@ fn bridge_family_implementation() -> shape_family_compile::FamilyImplementation 
             "brace",
             "brace_joint",
             FragmentAttachmentPairing::AllPairs,
-            [0.0, -0.32, 0.45],
+            brace_offset,
         ),
         attachment_binding(
             "ramp_to_deck",
@@ -431,9 +825,20 @@ fn bridge_family_implementation() -> shape_family_compile::FamilyImplementation 
             "rail",
             "rail_joint",
             FragmentAttachmentPairing::AllPairs,
-            [0.0, 0.37, -0.62],
+            rail_offset,
         ),
     ];
+    if quality == BridgeQuality::Hq {
+        family_impl.attachment_bindings.push(attachment_binding(
+            "connector_to_deck",
+            "deck",
+            "deck_joint",
+            "connector",
+            "connector_joint",
+            FragmentAttachmentPairing::AllPairs,
+            [-1.7, 0.34, -0.46],
+        ));
+    }
     family_impl
 }
 
@@ -461,126 +866,265 @@ fn attachment_binding(
     }
 }
 
-fn customizer_profile() -> CustomizerProfile {
+fn customizer_profile(quality: BridgeQuality) -> CustomizerProfile {
+    let (controls, candidate_strategies) = match quality {
+        BridgeQuality::Standard => (
+            vec![
+                continuous_multi_control(
+                    "span_length",
+                    "Span Length",
+                    3.6,
+                    2.4,
+                    5.2,
+                    &["span_length", "deck_length"],
+                ),
+                continuous_multi_control(
+                    "deck_width",
+                    "Deck Width",
+                    1.08,
+                    0.78,
+                    1.55,
+                    &["deck_width"],
+                ),
+                continuous_multi_control(
+                    "structural_heft",
+                    "Structural Heft",
+                    0.55,
+                    0.0,
+                    1.0,
+                    &[
+                        "support_heft",
+                        "span_heft_y",
+                        "span_heft_z",
+                        "brace_heft",
+                        "deck_heft",
+                    ],
+                ),
+                provider_gallery_control(
+                    "support_rhythm",
+                    "Support Rhythm",
+                    "support",
+                    &[
+                        ("pointed_round_pile", "Light Piles"),
+                        ("tight_pile_bents", "Balanced Bents"),
+                        ("marching_pile_bents", "Reinforced Bents"),
+                    ],
+                ),
+                choice_gallery_control(
+                    "bracing_style",
+                    "Bracing Style",
+                    "bracing_style",
+                    &[
+                        ("straight_under_braces", "Straight Under Braces"),
+                        ("cross_brace_beam", "X Brace"),
+                        ("trussed_brace_beam", "Truss Brace"),
+                    ],
+                ),
+                provider_gallery_control(
+                    "railing",
+                    "Railing",
+                    "rail",
+                    &[
+                        ("curb_rail", "Curb"),
+                        ("guard_rail", "Guard"),
+                        ("watch_rail", "Watch"),
+                    ],
+                ),
+                provider_gallery_control(
+                    "edge_finish",
+                    "Edge Finish",
+                    "deck",
+                    &[
+                        ("lashed_deck_plank", "Lashed"),
+                        ("capped_deck_edge", "Capped"),
+                        ("notched_deck_edge", "Notched"),
+                    ],
+                ),
+            ],
+            vec![
+                strategy(
+                    "light",
+                    "Light",
+                    &[
+                        "structural_heft",
+                        "support_rhythm",
+                        "bracing_style",
+                        "railing",
+                        "edge_finish",
+                    ],
+                ),
+                strategy(
+                    "balanced",
+                    "Balanced",
+                    &[
+                        "span_length",
+                        "deck_width",
+                        "structural_heft",
+                        "support_rhythm",
+                        "bracing_style",
+                        "railing",
+                        "edge_finish",
+                    ],
+                ),
+                strategy(
+                    "reinforced",
+                    "Reinforced",
+                    &[
+                        "structural_heft",
+                        "support_rhythm",
+                        "bracing_style",
+                        "railing",
+                        "edge_finish",
+                    ],
+                ),
+                strategy(
+                    "wide_crossing",
+                    "Wide Crossing",
+                    &["span_length", "deck_width", "support_rhythm", "railing"],
+                ),
+            ],
+        ),
+        BridgeQuality::Hq => (
+            vec![
+                continuous_multi_control(
+                    "span_length",
+                    "Span Length",
+                    3.8,
+                    2.8,
+                    5.4,
+                    &["span_length", "deck_length"],
+                ),
+                continuous_multi_control(
+                    "deck_width",
+                    "Deck Width",
+                    1.14,
+                    0.86,
+                    1.58,
+                    &["deck_width"],
+                ),
+                continuous_multi_control(
+                    "structural_heft",
+                    "Structural Heft",
+                    0.62,
+                    0.18,
+                    0.82,
+                    &[
+                        "support_heft",
+                        "span_heft_y",
+                        "span_heft_z",
+                        "brace_heft",
+                        "deck_heft",
+                    ],
+                ),
+                provider_gallery_control(
+                    "support_style",
+                    "Support Style",
+                    "support",
+                    &[
+                        ("squared_post_supports", "Squared Posts"),
+                        ("stone_pier_blocks", "Stone Piers"),
+                        ("trestle_frame_supports", "Trestle Frames"),
+                    ],
+                ),
+                choice_gallery_control(
+                    "bracing_style",
+                    "Bracing Style",
+                    "bracing_style",
+                    &[
+                        ("minimal_under_ties", "Minimal Ties"),
+                        ("x_brace_beam", "X Brace"),
+                        ("k_brace_beam", "K Brace"),
+                        ("trussed_brace_beam", "Truss Brace"),
+                    ],
+                ),
+                provider_gallery_control(
+                    "railing_style",
+                    "Railing Style",
+                    "rail",
+                    &[
+                        ("low_curb_rail", "Low Curb"),
+                        ("guard_rail_courses", "Guard Rails"),
+                        ("lookout_rail_courses", "Lookout Rails"),
+                    ],
+                ),
+                provider_gallery_control(
+                    "detail_density",
+                    "Detail Density",
+                    "connector",
+                    &[
+                        ("clean_joinery_detail", "Clean"),
+                        ("bolted_joinery_detail", "Bolted"),
+                        ("dense_weathered_joinery", "Dense"),
+                    ],
+                ),
+            ],
+            vec![
+                strategy(
+                    "reinforced",
+                    "Reinforced",
+                    &[
+                        "span_length",
+                        "structural_heft",
+                        "support_style",
+                        "bracing_style",
+                        "detail_density",
+                    ],
+                ),
+                strategy(
+                    "light_crossing",
+                    "Light Crossing",
+                    &[
+                        "span_length",
+                        "structural_heft",
+                        "support_style",
+                        "bracing_style",
+                    ],
+                ),
+                strategy(
+                    "wide_deck",
+                    "Wide Deck",
+                    &["deck_width", "railing_style", "detail_density"],
+                ),
+                strategy(
+                    "compact_span",
+                    "Compact Span",
+                    &[
+                        "span_length",
+                        "deck_width",
+                        "structural_heft",
+                        "bracing_style",
+                    ],
+                ),
+                strategy(
+                    "stone_pier_outpost",
+                    "Stone-Pier Outpost",
+                    &["support_style", "railing_style", "detail_density"],
+                ),
+                strategy(
+                    "detailed_timberwork",
+                    "Detailed Timberwork",
+                    &[
+                        "structural_heft",
+                        "bracing_style",
+                        "railing_style",
+                        "detail_density",
+                    ],
+                ),
+                strategy(
+                    "minimal_clean_span",
+                    "Minimal Clean Span",
+                    &["span_length", "bracing_style", "railing_style"],
+                ),
+            ],
+        ),
+    };
     CustomizerProfile {
         schema_version: shape_foundry::CUSTOMIZER_PROFILE_SCHEMA_VERSION,
         family_id: BRIDGE_FAMILY_ID.to_owned(),
         style_id: Some(ROMAN_TIMBER_STYLE_ID.to_owned()),
         sections: Vec::new(),
-        controls: vec![
-            continuous_multi_control(
-                "span_length",
-                "Span Length",
-                3.6,
-                2.4,
-                5.2,
-                &["span_length", "deck_length"],
-            ),
-            continuous_multi_control(
-                "deck_width",
-                "Deck Width",
-                1.08,
-                0.78,
-                1.55,
-                &["deck_width"],
-            ),
-            continuous_multi_control(
-                "structural_heft",
-                "Structural Heft",
-                0.55,
-                0.0,
-                1.0,
-                &[
-                    "support_heft",
-                    "span_heft_y",
-                    "span_heft_z",
-                    "brace_heft",
-                    "deck_heft",
-                ],
-            ),
-            provider_gallery_control(
-                "support_rhythm",
-                "Support Rhythm",
-                "support",
-                &[
-                    ("pointed_round_pile", "Light Piles"),
-                    ("tight_pile_bents", "Balanced Bents"),
-                    ("marching_pile_bents", "Reinforced Bents"),
-                ],
-            ),
-            choice_control(
-                "bracing_style",
-                "Bracing Style",
-                "bracing_style",
-                &[
-                    "straight_under_braces",
-                    "cross_brace_beam",
-                    "trussed_brace_beam",
-                ],
-            ),
-            provider_gallery_control(
-                "railing",
-                "Railing",
-                "rail",
-                &[
-                    ("curb_rail", "Curb"),
-                    ("guard_rail", "Guard"),
-                    ("watch_rail", "Watch"),
-                ],
-            ),
-            provider_gallery_control(
-                "edge_finish",
-                "Edge Finish",
-                "deck",
-                &[
-                    ("lashed_deck_plank", "Lashed"),
-                    ("capped_deck_edge", "Capped"),
-                    ("notched_deck_edge", "Notched"),
-                ],
-            ),
-        ],
-        candidate_strategies: vec![
-            strategy(
-                "light",
-                "Light",
-                &[
-                    "structural_heft",
-                    "support_rhythm",
-                    "bracing_style",
-                    "railing",
-                    "edge_finish",
-                ],
-            ),
-            strategy(
-                "balanced",
-                "Balanced",
-                &[
-                    "span_length",
-                    "deck_width",
-                    "structural_heft",
-                    "support_rhythm",
-                    "bracing_style",
-                    "railing",
-                    "edge_finish",
-                ],
-            ),
-            strategy(
-                "reinforced",
-                "Reinforced",
-                &[
-                    "structural_heft",
-                    "support_rhythm",
-                    "bracing_style",
-                    "railing",
-                    "edge_finish",
-                ],
-            ),
-            strategy(
-                "wide_crossing",
-                "Wide Crossing",
-                &["span_length", "deck_width", "support_rhythm", "railing"],
-            ),
-        ],
+        controls,
+        candidate_strategies,
         maximum_primary_controls: 7,
     }
 }
@@ -660,6 +1204,50 @@ fn provider_gallery_control(
     }
 }
 
+fn choice_gallery_control(
+    id: &str,
+    label: &str,
+    slot: &str,
+    values: &[(&str, &str)],
+) -> CustomizerControl {
+    CustomizerControl {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        section: None,
+        primary: true,
+        visible: true,
+        kind: ControlKind::ChoiceGallery {
+            options: values
+                .iter()
+                .map(|(value, label)| ChoiceOption {
+                    value: (*value).to_owned(),
+                    label: (*label).to_owned(),
+                    preview: WholeModelPreviewRef {
+                        preview_id: format!("{id}-{value}"),
+                        artifact_fingerprint: None,
+                    },
+                })
+                .collect(),
+        },
+        bindings: vec![ControlSlotBinding {
+            slot: slot.to_owned(),
+            slot_policy: ParameterExecutionPolicy::RequiredBinding,
+            response: ResponseCurve::Linear,
+        }],
+        domain: FeasibleControlDomain {
+            continuous_intervals: Vec::new(),
+            discrete_values: values
+                .iter()
+                .map(|(value, _)| ControlValue::Choice((*value).to_owned()))
+                .collect(),
+            unavailable_options: BTreeMap::new(),
+            certification: DomainCertification::DiscreteSamples,
+        },
+        topology_behavior: ControlTopologyBehavior::TopologyChanging,
+        divergence: shape_foundry::ControlDivergence::Synced,
+    }
+}
+
 fn strategy(id: &str, label: &str, controls: &[&str]) -> CandidateStrategy {
     CandidateStrategy {
         id: id.to_owned(),
@@ -682,6 +1270,13 @@ impl FragmentOccurrence {
         Self {
             translation,
             rotation_degrees: [0.0, 0.0, 0.0],
+        }
+    }
+
+    fn rotated(translation: [f32; 3], rotation_degrees: [f32; 3]) -> Self {
+        Self {
+            translation,
+            rotation_degrees,
         }
     }
 }
@@ -732,21 +1327,42 @@ fn deck_fragment(
     thickness: f32,
     bevel_radius: f32,
     translation: [f32; 3],
-    _courses: u32,
+    courses: u32,
 ) -> RecipeFragment {
+    let mut operations = vec![bevel(1, bevel_radius)];
+    if courses > 1 {
+        operations.push(linear_array(2, courses, [0.0, 0.0, size[1] * 1.12]));
+    }
     bridge_fragment(FragmentSpec {
         id,
         role: "deck",
         source: GeometrySource::Plate { size, thickness },
-        operations: vec![bevel(1, bevel_radius)],
+        operations,
         occurrences: vec![FragmentOccurrence::at(translation)],
         port_id: "deck_joint",
-        compatibility_tags: vec!["deck_mount", "walkway", "rail_mount"],
+        compatibility_tags: vec!["deck_mount", "walkway", "rail_mount", "deck_detail"],
         scalar_paths: vec![
             ("geometry.plate.size.x", 2.0, 5.8, 0.05),
             ("geometry.plate.size.y", 0.65, 1.7, 0.05),
             ("geometry.plate.thickness", 0.04, 0.22, 0.01),
         ],
+    })
+}
+
+fn support_box_fragment(
+    id: &str,
+    source: GeometrySource,
+    operations: Vec<ModelingOperationSpec>,
+) -> RecipeFragment {
+    bridge_fragment(FragmentSpec {
+        id,
+        role: "support",
+        source,
+        operations,
+        occurrences: vec![FragmentOccurrence::at([0.0, 0.0, 0.0])],
+        port_id: "support_joint",
+        compatibility_tags: vec!["load_path"],
+        scalar_paths: rounded_box_scalar_paths(),
     })
 }
 
@@ -767,6 +1383,26 @@ fn brace_fragment(
         port_id: "brace_joint",
         compatibility_tags: vec!["brace_mount"],
         scalar_paths: rounded_box_scalar_paths(),
+    })
+}
+
+fn connector_fragment(
+    id: &str,
+    half_extents: [f32; 3],
+    operations: Vec<ModelingOperationSpec>,
+) -> RecipeFragment {
+    bridge_fragment(FragmentSpec {
+        id,
+        role: "connector",
+        source: GeometrySource::RoundedBox {
+            half_extents,
+            radius: 0.008,
+        },
+        operations,
+        occurrences: vec![FragmentOccurrence::at([0.0, 0.0, 0.0])],
+        port_id: "connector_joint",
+        compatibility_tags: vec!["deck_detail"],
+        scalar_paths: connector_scalar_paths(),
     })
 }
 
@@ -917,7 +1553,13 @@ fn bridge_fragment(spec: FragmentSpec<'_>) -> RecipeFragment {
     recipe.next_ids.parameter = spec.scalar_paths.len() as u64 + 1;
     recipe.next_ids.operation = next_operation;
     recipe.next_ids.socket = LOCAL_SOCKET.0 + 1;
-    assert!(validate_asset_recipe(&recipe).is_valid());
+    let validation = validate_asset_recipe(&recipe);
+    assert!(
+        validation.is_valid(),
+        "{} fragment failed validation: {:#?}",
+        spec.id,
+        validation.issues
+    );
 
     RecipeFragment {
         schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
@@ -945,9 +1587,18 @@ fn bridge_fragment(spec: FragmentSpec<'_>) -> RecipeFragment {
 fn rounded_box_scalar_paths() -> Vec<(&'static str, f32, f32, f32)> {
     vec![
         ("geometry.rounded_box.half_extents.x", 0.05, 5.0, 0.05),
-        ("geometry.rounded_box.half_extents.y", 0.025, 0.5, 0.01),
+        ("geometry.rounded_box.half_extents.y", 0.025, 1.0, 0.01),
         ("geometry.rounded_box.half_extents.z", 0.025, 0.5, 0.01),
         ("geometry.rounded_box.radius", 0.0, 0.2, 0.01),
+    ]
+}
+
+fn connector_scalar_paths() -> Vec<(&'static str, f32, f32, f32)> {
+    vec![
+        ("geometry.rounded_box.half_extents.x", 0.01, 0.25, 0.005),
+        ("geometry.rounded_box.half_extents.y", 0.005, 0.1, 0.005),
+        ("geometry.rounded_box.half_extents.z", 0.01, 0.2, 0.005),
+        ("geometry.rounded_box.radius", 0.0, 0.05, 0.005),
     ]
 }
 

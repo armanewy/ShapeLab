@@ -51,6 +51,7 @@ Run a benchmark report with:
 
 ```bash
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 ```
 
 Use `--profile all --out-dir target/hq-benchmark` to baseline every built-in
@@ -66,3 +67,7 @@ deltas, not recipe fingerprints alone.
 Candidate survival means more than receiving six candidate records: each
 survivor must compile, pass model validation, and render a non-placeholder
 whole-model preview.
+
+`roman-bridge-hq` is the first built-in profile authored to satisfy the Usable
+automation bar. It remains hidden from the default novice catalog until manual
+review is approved. Adversarial review remains required before Showcase claims.

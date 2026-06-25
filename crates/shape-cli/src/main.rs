@@ -402,6 +402,7 @@ struct ReleaseVisualProfileEvidence {
     per_option_rgba_complete: bool,
     per_option_camera_recorded: bool,
     every_option_control_has_visual_delta: bool,
+    option_controls_without_visual_delta: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1327,7 +1328,7 @@ fn release_readiness_report(
 
     Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
-        milestone: "Wave 33 - Foundry Kit Visibility Gate",
+        milestone: "Wave 34 - HQ Roman Timber Bridge Vertical Slice",
         visual_product_gate,
         product_ui_gate,
         performance: ReleasePerformanceReadiness {
@@ -1373,7 +1374,9 @@ fn release_readiness_report(
             "cargo test -p shape-cli release_readiness",
             "cargo test -p shape-cli foundry_kit",
             "cargo run -p shape-cli -- foundry-kit inspect roman-bridge",
+            "cargo run -p shape-cli -- foundry-kit inspect roman-bridge-hq",
             "cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json",
+            "cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report target/hq-benchmark/roman-bridge-hq/quality-report.json --out target/foundry-kit/roman-hq-review.json",
             "cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored",
             "cargo run -p shape-cli -- release-readiness --verify-product-ui-gate",
             "cargo clippy --workspace --all-targets -- -D warnings",
@@ -1390,8 +1393,8 @@ fn unverified_release_product_ui_gate() -> ReleaseProductUiGate {
         app_shell: "direct_visual_foundry",
         legacy_surfaces_present: false,
         product_home_profiles: 0,
-        installed_kit_count: 10,
-        developer_preview_kit_count: 10,
+        installed_kit_count: 11,
+        developer_preview_kit_count: 11,
         startup_blank: false,
         default_advanced_recipe_visible: false,
         default_raw_technical_terms_visible: false,
@@ -1471,7 +1474,7 @@ fn unverified_release_visual_product_gate() -> ReleaseVisualProductGate {
         verification_command: "shape-cli release-readiness --verify-visual-gate",
         native_state_verification_status: "requires-explicit-app-test",
         native_state_verification_command: "cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored",
-        expected_built_in_profile_count: 10,
+        expected_built_in_profile_count: 11,
         expected_primary_controls_per_profile: 7,
         option_thumbnail_contract: "computed-cli-64px-whole-model-thumbnails-plus-native-state-test",
         default_path_advanced_recipe_gate: "verified-by-native-state-release-test",
@@ -1524,8 +1527,9 @@ fn verified_release_visual_product_gate() -> anyhow::Result<ReleaseVisualProduct
         }
         if !evidence.every_option_control_has_visual_delta {
             bail!(
-                "{} has an option-bearing control whose thumbnails do not visibly differ",
-                fixture.slug
+                "{} has option-bearing controls whose thumbnails do not visibly differ: {}",
+                fixture.slug,
+                evidence.option_controls_without_visual_delta.join(", ")
             );
         }
 
@@ -1577,6 +1581,7 @@ fn release_visual_profile_evidence(
     let mut per_option_rgba_complete = true;
     let mut per_option_camera_recorded = true;
     let mut every_option_control_has_visual_delta = true;
+    let mut option_controls_without_visual_delta = Vec::new();
 
     for control in &primary_controls {
         let domain = effective_control_domain(control, context).unwrap_or_default();
@@ -1598,9 +1603,13 @@ fn release_visual_profile_evidence(
             rendered.push(thumbnail.image.rgba8);
         }
 
-        every_option_control_has_visual_delta &= rendered
+        let control_has_visual_delta = rendered
             .windows(2)
             .any(|pair| pair[0].as_slice() != pair[1].as_slice());
+        every_option_control_has_visual_delta &= control_has_visual_delta;
+        if !control_has_visual_delta {
+            option_controls_without_visual_delta.push(control.id.clone());
+        }
     }
 
     Ok(ReleaseVisualProfileEvidence {
@@ -1611,6 +1620,7 @@ fn release_visual_profile_evidence(
         per_option_rgba_complete,
         per_option_camera_recorded,
         every_option_control_has_visual_delta,
+        option_controls_without_visual_delta,
     })
 }
 

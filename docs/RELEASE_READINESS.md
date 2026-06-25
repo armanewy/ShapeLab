@@ -24,13 +24,13 @@ The JSON report records:
 - the Visual Foundry product gate. Without `--verify-visual-gate`, this records
   the required command and marks CLI evidence as not run. With
   `--verify-visual-gate`, it compiles the built-in profiles and records computed
-  CLI evidence for ten profiles, seven primary controls per profile, and
+  CLI evidence for eleven profiles, seven primary controls per profile, and
   rendered whole-model option thumbnails. The native default-path gate remains
   the explicit ignored app-state release test listed in the report;
 - the Visual Foundry product UI gate. Without `--verify-product-ui-gate`, this
   records the expected direct Visual Foundry shell contract. With
   `--verify-product-ui-gate`, it verifies the default product-visible copy
-  inventory, direct nonblank startup, zero default-visible pending kits, ten
+  inventory, direct nonblank startup, zero default-visible pending kits, eleven
   installed preview-catalog kits, the six-card direction board, five direction
   modes, core profile compile/start evidence, pack/export readiness
   representation, and disabled-state reasons;
@@ -76,7 +76,7 @@ thumbnails with RGBA bytes and a camera for every built-in profile. A 1x1
 placeholder pixel is only acceptable in isolated panel helper tests that do not
 have a compiled Foundry document.
 
-The release gate also requires all ten built-in profiles to compile and render
+The release gate also requires all eleven built-in profiles to compile and render
 through the explicit preview/release evidence path with seven primary controls
 and zero technical surface exposure. Default novice catalog exposure is now
 controlled by Wave 33 kit review policy. Deterministic contact sheets and
@@ -99,7 +99,7 @@ a fast headless gate over the native Visual Foundry product shell. It verifies:
 - no default Legacy, Implicit, Asset Modeling Lab, Modeling Workspace, Advanced
   Recipe, scalar path, provider ID, role binding, fragment/remap, operation ID,
   semantic ID, conformance binding, SDF, compiler, or decompiler copy;
-- zero default-visible pending kits and ten installed preview-catalog kits;
+- zero default-visible pending kits and eleven installed preview-catalog kits;
 - startup is not blank;
 - Advanced Recipe is not visible in the default path;
 - the direction board reserves six whole-model candidate cards and exposes
@@ -129,6 +129,7 @@ Wave 32 adds:
 
 ```bash
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile all --out-dir target/hq-benchmark --verify-export
 ```
 
@@ -157,10 +158,13 @@ Wave 33 adds:
 
 ```bash
 cargo run -p shape-cli -- foundry-kit validate roman-bridge
+cargo run -p shape-cli -- foundry-kit validate roman-bridge-hq
 cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge-hq
 cargo run -p shape-cli -- foundry-kit contact-sheet roman-bridge --out-dir target/foundry-kit/roman-contact
 cargo run -p shape-cli -- foundry-kit package roman-bridge --out-dir target/foundry-kit/roman-package
 cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json
+cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report target/hq-benchmark/roman-bridge-hq/quality-report.json --out target/foundry-kit/roman-hq-review.json
 ```
 
 Kit validation checks versioned metadata, refs, compatibility, required role and
@@ -193,8 +197,11 @@ cargo test -p shape-cli release_readiness
 cargo test -p shape-cli hq_quality
 cargo test -p shape-cli foundry_kit
 cargo run -p shape-cli -- foundry-kit inspect roman-bridge
+cargo run -p shape-cli -- foundry-kit inspect roman-bridge-hq
 cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json
+cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report target/hq-benchmark/roman-bridge-hq/quality-report.json --out target/foundry-kit/roman-hq-review.json
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 cargo build --release --workspace

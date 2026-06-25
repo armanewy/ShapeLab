@@ -30,7 +30,7 @@ Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPOR
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- ten installed Visual Foundry kit-backed profiles available to preview/developer catalogs: Roman Timber Bridge, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
+- eleven installed Visual Foundry kit-backed profiles available to preview/developer catalogs: Roman Timber Bridge, Roman Timber Bridge HQ, Sci-Fi Industrial Crate, Stylized Furniture Lamp, Market Stall Kit, Sci-Fi Door Panel, Coopered Storage Barrel, Wayfinding Signpost, Workshop Chair, Market Handcart, and Storybook Tree
 - a Choose screen, direction board, customizer deck, pack workspace, and export flow
 - whole-model candidate cards and whole-model customizer previews
 - reducer-backed locks, undo, save/open, current export, and pack export
@@ -127,6 +127,7 @@ Generate HQ asset quality evidence for authored Visual Foundry content:
 
 ```bash
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile all --out-dir target/hq-benchmark --verify-export
 ```
 

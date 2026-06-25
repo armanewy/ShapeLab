@@ -2324,8 +2324,8 @@ mod tests {
     }
 
     #[test]
-    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_ten() {
-        assert_eq!(installed_product_kit_count(), 10);
+    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_eleven() {
+        assert_eq!(installed_product_kit_count(), 11);
         assert_eq!(default_product_home_profile_count(), 0);
 
         let profiles = product_home_profiles(true);
@@ -2334,8 +2334,9 @@ mod tests {
             .map(|profile| profile.label)
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 10);
+        assert_eq!(profiles.len(), 11);
         assert!(labels.contains(&"Roman Timber Bridge"));
+        assert!(labels.contains(&"Roman Timber Bridge HQ"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(labels.contains(&"Stylized Furniture Lamp"));
         assert!(labels.contains(&"Market Stall Kit"));
@@ -2508,12 +2509,13 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
 
-        for _ in 0..200 {
+        for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if app
                 .state
                 .controls
                 .iter()
+                .filter(|control| control.primary && control.visible)
                 .any(|control| control.options.len() > CONTROL_FILMSTRIP_LIMIT)
             {
                 break;
@@ -2782,9 +2784,11 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
 
-        for _ in 0..200 {
+        for _ in 0..3000 {
             app.poll_jobs(&ctx);
-            if !app.state.controls.is_empty() {
+            if default_customize_controls(&app.state.controls)
+                .any(|control| control.id == "body_proportions")
+            {
                 break;
             }
             thread::sleep(Duration::from_millis(10));

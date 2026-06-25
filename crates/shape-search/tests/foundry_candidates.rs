@@ -120,15 +120,26 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
             .iter()
             .flat_map(|candidate| candidate.changed_controls.iter().map(String::as_str))
             .collect::<BTreeSet<_>>();
-        let structural_controls = [
-            "body_variant",
-            "accent_style",
-            "detail_density",
-            "has_accessory",
-        ]
-        .into_iter()
-        .filter(|control| changed_controls.contains(control))
-        .count();
+        let structural_control_ids: &[&str] = match fixture.slug.as_str() {
+            "roman-bridge-hq" => &[
+                "support_style",
+                "bracing_style",
+                "railing_style",
+                "detail_density",
+                "structural_heft",
+            ],
+            _ => &[
+                "body_variant",
+                "accent_style",
+                "detail_density",
+                "has_accessory",
+            ],
+        };
+        let structural_controls = structural_control_ids
+            .iter()
+            .copied()
+            .filter(|control| changed_controls.contains(control))
+            .count();
         assert!(
             structural_controls >= 3,
             "{} candidates should cover at least three structural/detail/accessory controls: {changed_controls:?}",
