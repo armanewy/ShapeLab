@@ -9,14 +9,16 @@ use serde::{Deserialize, Serialize};
 use shape_asset::{GeometrySource, ModelingOperationSpec};
 use shape_core::{Aabb, Scalar, Transform3};
 use shape_foundry::{
-    ControlDeltaExplanation, ControlEvaluationContext, ControlKind, ControlTopologyBehavior,
-    ControlValue, CustomizerControl, CustomizerProfile, FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION,
-    FeasibleControlDomain, FoundryAssetDocument, FoundryCandidateId, FoundryCatalogResolver,
-    FoundryCommand, FoundryCompilationError, FoundryCompilationOutput, FoundryConformanceSummary,
-    FoundryEdit, FoundryLockMode, FoundryLockTarget, FoundryPreferenceProfile,
-    FoundryPreferenceScope, apply_foundry_command, canonicalize_control_value,
-    compile_foundry_document, default_control_value, effective_control_domain,
-    explain_control_delta,
+    CandidateExplanationQuality, CandidateLegibilityClass, CandidateVariationMetadata,
+    CandidateVisibleDeltaReport, ControlDeltaExplanation, ControlEvaluationContext, ControlKind,
+    ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
+    FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION, FeasibleControlDomain, FoundryAssetDocument,
+    FoundryCandidateId, FoundryCatalogResolver, FoundryCommand, FoundryCompilationError,
+    FoundryCompilationOutput, FoundryConformanceSummary, FoundryEdit, FoundryLockMode,
+    FoundryLockTarget, FoundryPreferenceProfile, FoundryPreferenceScope, MaterialSlotChange,
+    SemanticPartGroupChange, VariationChannel, VariationIntent, VariationScope,
+    apply_foundry_command, canonicalize_control_value, compile_foundry_document,
+    default_control_value, effective_control_domain, explain_control_delta,
 };
 use thiserror::Error;
 
@@ -104,6 +106,9 @@ pub struct FoundryCandidateRequest {
     /// Optional local preference profile used to bias candidate selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preference_profile: Option<FoundryPreferenceProfile>,
+    /// Product-safe variation intent.
+    #[serde(default)]
+    pub variation_intent: VariationIntent,
 }
 
 /// One accepted candidate plan.
@@ -127,6 +132,9 @@ pub struct FoundryCandidatePlan {
     pub recipe_fingerprint: String,
     /// Final conformance summary from Foundry compilation.
     pub conformance: FoundryConformanceSummary,
+    /// Product-safe variation metadata.
+    #[serde(default)]
+    pub variation_metadata: CandidateVariationMetadata,
 }
 
 /// Candidate generation output.
@@ -256,6 +264,16 @@ pub enum FoundryCandidateRejectionReason {
     ConformanceRejected,
     /// A descriptor could not be produced for scoring.
     DescriptorRejected,
+    /// Requested variation channel is not supported by the current kit.
+    UnsupportedChannel,
+    /// Proposal changed no user-facing visible surface.
+    HiddenOnlyChange,
+    /// Candidate was too subtle for a normal direction card.
+    TooSubtle,
+    /// Candidate looked like a duplicate after preview comparison.
+    DuplicateLooking,
+    /// Product explanation did not match visible evidence.
+    ExplanationMismatch,
 }
 
 /// Foundry candidate generation errors.
@@ -296,6 +314,16 @@ pub fn generate_foundry_candidate_plans(
     );
     let preference_profile =
         request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
+    let variation_intent = request.variation_intent.clone().normalized();
+    if let Some(reason) = unsupported_variation_reason(document, &variation_intent) {
+        return Ok(empty_candidate_output(
+            request,
+            preference_scope,
+            preference_profile,
+            FoundryCandidateRejectionReason::UnsupportedChannel,
+            reason,
+        ));
+    }
     let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     let strategy_controls = strategy_control_ids(
         &parent_output.catalog.customizer_profile,
@@ -308,6 +336,7 @@ pub fn generate_foundry_candidate_plans(
         &parent_output.catalog.customizer_profile,
         context,
         request.mode,
+        &variation_intent,
         strategy_controls.as_ref(),
         &mut locked_targets_skipped,
     );
@@ -329,7 +358,7 @@ pub fn generate_foundry_candidate_plans(
     let mut seen_programs = BTreeSet::new();
     let mut scoring_inputs = Vec::new();
     let mut accepted_plans = BTreeMap::<String, FoundryCandidatePlan>::new();
-    let target_accepted_plans = request.result_count.min(FOUNDRY_MAX_RESULT_COUNT).max(1);
+    let target_accepted_plans = request.result_count.clamp(1, FOUNDRY_MAX_RESULT_COUNT);
 
     for proposal_index in 0..request.proposal_count {
         diagnostics.attempted_proposals += 1;
@@ -342,7 +371,7 @@ pub fn generate_foundry_candidate_plans(
             context,
             selected,
             request.mode,
-            proposal_seed,
+            &variation_intent,
             proposal_index,
             &mut rng,
         );
@@ -415,18 +444,29 @@ pub fn generate_foundry_candidate_plans(
             continue;
         }
 
+        let variation_metadata = variation_metadata_for_proposal(
+            document,
+            &variation_intent,
+            &proposal,
+            Some(&scoring_input),
+        );
+        if let Some(reason) = variation_rejection_reason(&variation_metadata) {
+            increment_rejection(&mut diagnostics, reason);
+            continue;
+        }
         let plan = FoundryCandidatePlan {
             id: candidate_id,
             label: proposal.edit.label.clone(),
             edit: proposal.edit,
             document: candidate_document,
-            changed_controls: proposal.changed_controls,
+            changed_controls: proposal.changed_controls.clone(),
             diagnostics: FoundryCandidateDiagnostics {
-                changes: proposal.changes,
+                changes: proposal.changes.clone(),
             },
             descriptor: crate::asset::scoring::asset_descriptor(&scoring_input),
             recipe_fingerprint: scoring_input.recipe_fingerprint.clone(),
             conformance: compiled.conformance_summary,
+            variation_metadata,
         };
         scoring_inputs.push(scoring_input);
         accepted_plans.insert(plan.id.0.clone(), plan);
@@ -492,6 +532,16 @@ pub fn generate_foundry_candidate_draft_plans(
     );
     let preference_profile =
         request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
+    let variation_intent = request.variation_intent.clone().normalized();
+    if let Some(reason) = unsupported_variation_reason(document, &variation_intent) {
+        return Ok(empty_candidate_output(
+            request,
+            preference_scope,
+            preference_profile,
+            FoundryCandidateRejectionReason::UnsupportedChannel,
+            reason,
+        ));
+    }
     let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     let strategy_controls = strategy_control_ids(
         &parent_output.catalog.customizer_profile,
@@ -504,6 +554,7 @@ pub fn generate_foundry_candidate_draft_plans(
         &parent_output.catalog.customizer_profile,
         context,
         request.mode,
+        &variation_intent,
         strategy_controls.as_ref(),
         &mut locked_targets_skipped,
     );
@@ -529,7 +580,7 @@ pub fn generate_foundry_candidate_draft_plans(
         "parent",
         &parent_output,
     ));
-    let target_accepted_plans = request.result_count.min(FOUNDRY_MAX_RESULT_COUNT).max(1);
+    let target_accepted_plans = request.result_count.clamp(1, FOUNDRY_MAX_RESULT_COUNT);
 
     for proposal_index in 0..request.proposal_count {
         diagnostics.attempted_proposals += 1;
@@ -542,7 +593,7 @@ pub fn generate_foundry_candidate_draft_plans(
             context,
             selected,
             request.mode,
-            proposal_seed,
+            &variation_intent,
             proposal_index,
             &mut rng,
         );
@@ -579,14 +630,20 @@ pub fn generate_foundry_candidate_draft_plans(
         }
 
         let candidate_key = candidate_id.0.clone();
+        let variation_metadata =
+            variation_metadata_for_proposal(document, &variation_intent, &proposal, None);
+        if let Some(reason) = variation_rejection_reason(&variation_metadata) {
+            increment_rejection(&mut diagnostics, reason);
+            continue;
+        }
         let plan = FoundryCandidatePlan {
             id: candidate_id,
             label: proposal.edit.label.clone(),
             edit: proposal.edit,
             document: candidate_document,
-            changed_controls: proposal.changed_controls,
+            changed_controls: proposal.changed_controls.clone(),
             diagnostics: FoundryCandidateDiagnostics {
-                changes: proposal.changes,
+                changes: proposal.changes.clone(),
             },
             descriptor: parent_descriptor.clone(),
             recipe_fingerprint: format!("draft-{candidate_key}"),
@@ -596,6 +653,7 @@ pub fn generate_foundry_candidate_draft_plans(
                 advisory_issue_count: 0,
                 runtime_deferred_count: 0,
             },
+            variation_metadata,
         };
         selected_ids.push(candidate_key.clone());
         accepted_plans.insert(candidate_key, plan);
@@ -648,6 +706,476 @@ fn validate_request(request: &FoundryCandidateRequest) -> Result<(), FoundryCand
         ));
     }
     Ok(())
+}
+
+fn empty_candidate_output(
+    request: &FoundryCandidateRequest,
+    preference_scope: FoundryPreferenceScope,
+    preference_profile: Option<&FoundryPreferenceProfile>,
+    reason: FoundryCandidateRejectionReason,
+    detail: String,
+) -> FoundryCandidateOutput {
+    let mut rejections = BTreeMap::new();
+    rejections.insert(
+        reason,
+        request.result_count.clamp(1, FOUNDRY_MAX_RESULT_COUNT),
+    );
+    let diagnostics = FoundryCandidateGenerationDiagnostics {
+        requested_proposals: request.proposal_count,
+        requested_candidates: request.result_count,
+        attempted_proposals: 0,
+        scored_candidates: 0,
+        accepted_candidates: 0,
+        returned_candidates: 0,
+        available_control_count: 0,
+        locked_targets_skipped: 0,
+        rejections,
+    };
+    let mut preference_report = preference_report(
+        request.preference_profile.as_ref(),
+        preference_profile,
+        preference_scope,
+        &[],
+        &BTreeMap::new(),
+    );
+    preference_report.ignored_reason = Some(detail);
+    FoundryCandidateOutput {
+        candidates: Vec::new(),
+        diagnostics,
+        scoring_report: AssetScoringReport {
+            rejected_candidates: Vec::new(),
+            scored_candidates: Vec::new(),
+            unique_candidates: Vec::new(),
+            duplicate_groups: Vec::new(),
+            representatives: Vec::new(),
+        },
+        preference_report,
+    }
+}
+
+fn unsupported_variation_reason(
+    document: &FoundryAssetDocument,
+    intent: &VariationIntent,
+) -> Option<String> {
+    if intent.channels.iter().any(|channel| {
+        matches!(
+            channel,
+            VariationChannel::Surface
+                | VariationChannel::Wear
+                | VariationChannel::Rig
+                | VariationChannel::Motion
+                | VariationChannel::Gameplay
+                | VariationChannel::Custom { .. }
+        )
+    }) {
+        return Some("Surface options will appear after this kit has a surface pack.".to_owned());
+    }
+    if let VariationScope::SemanticPartGroup { group_id, .. } = &intent.scope
+        && !known_part_groups(document)
+            .iter()
+            .any(|group| group.group_id == *group_id)
+    {
+        return Some(
+            "Focus Part is available when this asset exposes editable part groups.".to_owned(),
+        );
+    }
+    if matches!(
+        intent.scope,
+        VariationScope::MaterialSlot { .. }
+            | VariationScope::RigRegion { .. }
+            | VariationScope::MotionSet { .. }
+            | VariationScope::Custom { .. }
+    ) {
+        return Some("This variation scope is reserved for future authored payloads.".to_owned());
+    }
+    None
+}
+
+fn variation_allows_control(
+    document: &FoundryAssetDocument,
+    intent: &VariationIntent,
+    control: &CustomizerControl,
+    class: ControlClass,
+) -> bool {
+    if intent.channels.iter().any(|channel| {
+        matches!(
+            channel,
+            VariationChannel::Surface
+                | VariationChannel::Wear
+                | VariationChannel::Rig
+                | VariationChannel::Motion
+                | VariationChannel::Gameplay
+                | VariationChannel::Custom { .. }
+        )
+    }) {
+        return false;
+    }
+    let channel_allows = intent.channels.iter().any(|channel| match channel {
+        VariationChannel::CompleteLook => true,
+        VariationChannel::Shape => class != ControlClass::Detail,
+        VariationChannel::Detail => class == ControlClass::Detail,
+        VariationChannel::Surface
+        | VariationChannel::Wear
+        | VariationChannel::Rig
+        | VariationChannel::Motion
+        | VariationChannel::Gameplay
+        | VariationChannel::Custom { .. } => false,
+    });
+    if !channel_allows {
+        return false;
+    }
+    if let VariationScope::SemanticPartGroup { group_id, .. } = &intent.scope {
+        return control_matches_part_group(document, control, group_id);
+    }
+    true
+}
+
+fn variation_metadata_for_proposal(
+    document: &FoundryAssetDocument,
+    intent: &VariationIntent,
+    proposal: &CandidateEditProposal,
+    scoring_input: Option<&AssetCandidateInput>,
+) -> CandidateVariationMetadata {
+    let changed_part_groups = changed_part_groups_for_proposal(document, proposal);
+    let changed_roles = changed_roles_from_commands(&proposal.edit.commands);
+    let changed_material_slots = changed_material_slots_for_intent(intent);
+    let visible_delta = candidate_visible_delta_report(intent, proposal, scoring_input);
+    let explanation_quality = CandidateExplanationQuality {
+        explanation_matches_changed_controls: !proposal.changed_controls.is_empty()
+            && proposal
+                .changes
+                .iter()
+                .all(|change| proposal.changed_controls.contains(&change.control_id)),
+        explanation_matches_visible_delta: visible_delta.legibility_class.selectable(),
+        human_summary_available: !intent.human_summary.trim().is_empty()
+            && !proposal.edit.label.trim().is_empty(),
+    };
+    CandidateVariationMetadata {
+        intent: intent.clone(),
+        changed_part_groups,
+        changed_material_slots,
+        changed_controls: proposal.changed_controls.clone(),
+        changed_roles,
+        respects_locks: true,
+        visible_delta,
+        explanation_quality,
+    }
+}
+
+fn variation_rejection_reason(
+    metadata: &CandidateVariationMetadata,
+) -> Option<FoundryCandidateRejectionReason> {
+    match metadata.visible_delta.legibility_class {
+        CandidateLegibilityClass::Strong
+        | CandidateLegibilityClass::Clear
+        | CandidateLegibilityClass::SubtleButExplainable
+        | CandidateLegibilityClass::DetailOnly => {
+            if !metadata
+                .explanation_quality
+                .explanation_matches_changed_controls
+                || !metadata
+                    .explanation_quality
+                    .explanation_matches_visible_delta
+            {
+                Some(FoundryCandidateRejectionReason::ExplanationMismatch)
+            } else {
+                None
+            }
+        }
+        CandidateLegibilityClass::TooSubtle => Some(FoundryCandidateRejectionReason::TooSubtle),
+        CandidateLegibilityClass::DuplicateLooking => {
+            Some(FoundryCandidateRejectionReason::DuplicateLooking)
+        }
+        CandidateLegibilityClass::Unsupported => {
+            Some(FoundryCandidateRejectionReason::UnsupportedChannel)
+        }
+    }
+}
+
+fn candidate_visible_delta_report(
+    intent: &VariationIntent,
+    proposal: &CandidateEditProposal,
+    scoring_input: Option<&AssetCandidateInput>,
+) -> CandidateVisibleDeltaReport {
+    let has_detail = proposal
+        .changes
+        .iter()
+        .any(|change| change.kind == FoundryCandidateChangeKind::Detail);
+    let has_structure = proposal.changes.iter().any(|change| {
+        matches!(
+            change.kind,
+            FoundryCandidateChangeKind::Provider
+                | FoundryCandidateChangeKind::RolePresence
+                | FoundryCandidateChangeKind::Repetition
+        )
+    });
+    let has_shape = proposal.changes.iter().any(|change| {
+        change.kind != FoundryCandidateChangeKind::Detail || change.topology_changing
+    });
+    let silhouette_delta = scoring_input
+        .map(|input| silhouette_spread(&input.silhouette_occupancy))
+        .unwrap_or(0.0);
+    let shape_delta = if has_shape { 0.45 } else { 0.0 };
+    let structure_delta = if has_structure { 0.5 } else { 0.0 };
+    let detail_delta = if has_detail { 0.18 } else { 0.0 };
+    let selected_part_delta = if intent.scope.is_focus_part() && has_shape {
+        0.45
+    } else {
+        0.0
+    };
+    let surface_delta = 0.0;
+    let (class, reasons) = classify_candidate_delta(
+        intent,
+        shape_delta,
+        silhouette_delta,
+        structure_delta,
+        surface_delta,
+        detail_delta,
+        selected_part_delta,
+    );
+    CandidateVisibleDeltaReport::new(
+        shape_delta,
+        silhouette_delta,
+        0.0,
+        structure_delta,
+        surface_delta,
+        0.0,
+        selected_part_delta,
+        class,
+        reasons,
+        false,
+    )
+}
+
+fn classify_candidate_delta(
+    intent: &VariationIntent,
+    shape_delta: f32,
+    silhouette_delta: f32,
+    structure_delta: f32,
+    surface_delta: f32,
+    detail_delta: f32,
+    selected_part_delta: f32,
+) -> (CandidateLegibilityClass, Vec<String>) {
+    let mut reasons = Vec::new();
+    let wants_shape = intent.includes_channel(&VariationChannel::Shape);
+    let wants_complete = intent.includes_channel(&VariationChannel::CompleteLook);
+    let wants_detail = intent.includes_channel(&VariationChannel::Detail);
+    let wants_surface = intent.includes_channel(&VariationChannel::Surface);
+
+    if wants_surface {
+        reasons.push("Surface options will appear after this kit has a surface pack.".to_owned());
+        return (CandidateLegibilityClass::Unsupported, reasons);
+    }
+    if intent.scope.is_focus_part() && selected_part_delta < 0.20 {
+        reasons.push("Focus Part needs a visible change on the selected part group.".to_owned());
+        return (CandidateLegibilityClass::TooSubtle, reasons);
+    }
+    if wants_shape && shape_delta <= 0.0 && silhouette_delta <= 0.0 && structure_delta <= 0.0 {
+        reasons.push(
+            "Shape directions need visible geometry, structure, or silhouette change.".to_owned(),
+        );
+        return (CandidateLegibilityClass::TooSubtle, reasons);
+    }
+    if wants_detail && detail_delta > 0.0 {
+        return (CandidateLegibilityClass::DetailOnly, reasons);
+    }
+    let combined = shape_delta.max(silhouette_delta).max(structure_delta);
+    if wants_complete && combined <= 0.0 && surface_delta <= 0.0 {
+        reasons.push("Complete Looks need a visible shape or surface difference.".to_owned());
+        return (CandidateLegibilityClass::TooSubtle, reasons);
+    }
+    if combined >= 0.45 {
+        (CandidateLegibilityClass::Clear, reasons)
+    } else if combined >= 0.20 {
+        (CandidateLegibilityClass::SubtleButExplainable, reasons)
+    } else {
+        reasons.push("Visible change is too small for a normal direction card.".to_owned());
+        (CandidateLegibilityClass::TooSubtle, reasons)
+    }
+}
+
+fn changed_part_groups_for_proposal(
+    document: &FoundryAssetDocument,
+    proposal: &CandidateEditProposal,
+) -> Vec<SemanticPartGroupChange> {
+    let mut groups = Vec::new();
+    for change in &proposal.changes {
+        for group in known_part_groups(document) {
+            if control_change_matches_group(change, &group.group_id)
+                && !groups
+                    .iter()
+                    .any(|existing: &SemanticPartGroupChange| existing.group_id == group.group_id)
+            {
+                groups.push(SemanticPartGroupChange {
+                    group_id: group.group_id,
+                    display_name: group.display_name,
+                    change_label: change_label_for_group(change.kind),
+                    visible: true,
+                });
+            }
+        }
+    }
+    groups
+}
+
+fn changed_material_slots_for_intent(intent: &VariationIntent) -> Vec<MaterialSlotChange> {
+    if intent
+        .channels
+        .iter()
+        .any(|channel| matches!(channel, VariationChannel::Surface | VariationChannel::Wear))
+    {
+        vec![MaterialSlotChange {
+            slot_id: "surface-pack".to_owned(),
+            display_name: "Surface Pack".to_owned(),
+            change_label: "Surface payload unavailable".to_owned(),
+            surface_payload_ready: false,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+fn changed_roles_from_commands(commands: &[FoundryCommand]) -> Vec<String> {
+    let mut roles = Vec::new();
+    for command in commands {
+        match command {
+            FoundryCommand::SelectProvider { role, .. }
+            | FoundryCommand::SetRolePresence { role, .. }
+                if !roles.contains(role) =>
+            {
+                roles.push(role.clone());
+            }
+            _ => {}
+        }
+    }
+    roles
+}
+
+#[derive(Debug, Clone)]
+struct KnownPartGroup {
+    group_id: String,
+    display_name: String,
+    keywords: &'static [&'static str],
+}
+
+fn known_part_groups(document: &FoundryAssetDocument) -> Vec<KnownPartGroup> {
+    let text = format!(
+        "{} {}",
+        document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
+    )
+    .to_ascii_lowercase();
+    if text.contains("crate") {
+        return vec![
+            part_group(
+                "body",
+                "Body",
+                &["body", "proportion", "size", "height", "width"],
+            ),
+            part_group("panels", "Panels", &["panel", "depth"]),
+            part_group("vents", "Vents", &["vent"]),
+            part_group("handles", "Handles", &["handle"]),
+            part_group("edge-trim", "Edge Trim", &["edge", "trim", "bevel"]),
+            part_group("fasteners", "Fasteners", &["bolt", "fastener"]),
+        ];
+    }
+    if text.contains("bridge") {
+        return vec![
+            part_group("deck", "Deck", &["deck", "span", "length"]),
+            part_group("supports", "Supports", &["support", "pier"]),
+            part_group("bracing", "Bracing", &["brace", "bracing"]),
+            part_group("railing", "Railing", &["rail"]),
+            part_group("ramps", "Ramps", &["ramp"]),
+            part_group("fasteners", "Fasteners", &["bolt", "connector", "fastener"]),
+        ];
+    }
+    if text.contains("lamp") {
+        return vec![
+            part_group("base", "Base", &["base"]),
+            part_group("stem", "Stem", &["stem", "height"]),
+            part_group("joints", "Joints", &["joint"]),
+            part_group("shade", "Shade", &["shade"]),
+            part_group("trim", "Trim", &["trim", "edge"]),
+        ];
+    }
+    Vec::new()
+}
+
+fn part_group(
+    group_id: &str,
+    display_name: &str,
+    keywords: &'static [&'static str],
+) -> KnownPartGroup {
+    KnownPartGroup {
+        group_id: group_id.to_owned(),
+        display_name: display_name.to_owned(),
+        keywords,
+    }
+}
+
+fn control_matches_part_group(
+    document: &FoundryAssetDocument,
+    control: &CustomizerControl,
+    group_id: &str,
+) -> bool {
+    known_part_groups(document)
+        .into_iter()
+        .find(|group| group.group_id == group_id)
+        .is_some_and(|group| {
+            let mut text = format!("{} {}", control.id, control.label).to_ascii_lowercase();
+            for binding in &control.bindings {
+                text.push(' ');
+                text.push_str(&binding.slot.to_ascii_lowercase());
+            }
+            group.keywords.iter().any(|keyword| text.contains(keyword))
+        })
+}
+
+fn control_change_matches_group(change: &FoundryCandidateControlChange, group_id: &str) -> bool {
+    let text = format!("{} {}", change.control_id, change.control_label).to_ascii_lowercase();
+    match group_id {
+        "body" => contains_any(&text, &["body", "proportion", "height", "width", "size"]),
+        "panels" => contains_any(&text, &["panel", "depth"]),
+        "vents" => text.contains("vent"),
+        "handles" => text.contains("handle"),
+        "edge-trim" => contains_any(&text, &["edge", "trim", "bevel"]),
+        "fasteners" => contains_any(&text, &["bolt", "fastener", "connector"]),
+        "deck" => contains_any(&text, &["deck", "span", "length"]),
+        "supports" => contains_any(&text, &["support", "pier"]),
+        "bracing" => contains_any(&text, &["brace", "bracing"]),
+        "railing" => text.contains("rail"),
+        "ramps" => text.contains("ramp"),
+        "base" => text.contains("base"),
+        "stem" => contains_any(&text, &["stem", "height"]),
+        "joints" => text.contains("joint"),
+        "shade" => text.contains("shade"),
+        "trim" => contains_any(&text, &["trim", "edge"]),
+        _ => false,
+    }
+}
+
+fn change_label_for_group(kind: FoundryCandidateChangeKind) -> String {
+    match kind {
+        FoundryCandidateChangeKind::Numeric => "Proportion adjusted",
+        FoundryCandidateChangeKind::Repetition => "Count adjusted",
+        FoundryCandidateChangeKind::RolePresence => "Part presence adjusted",
+        FoundryCandidateChangeKind::Choice => "Option changed",
+        FoundryCandidateChangeKind::Provider => "Structure changed",
+        FoundryCandidateChangeKind::Detail => "Detail adjusted",
+    }
+    .to_owned()
+}
+
+fn silhouette_spread(values: &[Scalar; FIXED_CAMERA_COUNT]) -> f32 {
+    let (minimum, maximum) = values
+        .iter()
+        .fold((Scalar::MAX, Scalar::MIN), |acc, value| {
+            (acc.0.min(*value), acc.1.max(*value))
+        });
+    if minimum.is_finite() && maximum.is_finite() {
+        (maximum - minimum).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
 }
 
 fn request_preference_profile<'a>(
@@ -962,6 +1490,7 @@ fn collect_control_opportunities(
     profile: &CustomizerProfile,
     context: ControlEvaluationContext<'_>,
     mode: FoundryCandidateMode,
+    variation_intent: &VariationIntent,
     strategy_controls: Option<&BTreeSet<String>>,
     locked_targets_skipped: &mut usize,
 ) -> Vec<ControlOpportunity> {
@@ -993,6 +1522,9 @@ fn collect_control_opportunities(
         }
         let class = classify_control(control, &kind);
         if !mode_allows_control(mode, class, control.topology_behavior, &kind) {
+            continue;
+        }
+        if !variation_allows_control(document, variation_intent, control, class) {
             continue;
         }
 
@@ -1234,7 +1766,7 @@ fn build_candidate_edit(
     context: ControlEvaluationContext<'_>,
     selected: Vec<&ControlOpportunity>,
     mode: FoundryCandidateMode,
-    seed: u64,
+    variation_intent: &VariationIntent,
     proposal_index: usize,
     rng: &mut ChaCha8Rng,
 ) -> Option<CandidateEditProposal> {
@@ -1277,32 +1809,69 @@ fn build_candidate_edit(
     if commands.is_empty() || commands.len() < required_command_count {
         return None;
     }
-    let labels = changes
-        .iter()
-        .map(|change| change.control_label.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let label = format!(
-        "{} candidate: {}",
-        mode_label(mode),
-        if labels.is_empty() {
-            "Foundry controls"
-        } else {
-            labels.as_str()
-        }
-    );
+    let label = candidate_intent_label(variation_intent, mode, proposal_index);
     Some(CandidateEditProposal {
-        edit: FoundryEdit {
-            label: format!("{label} #{proposal_index:04}"),
-            commands,
-        },
+        edit: FoundryEdit { label, commands },
         changed_controls,
         changes,
     })
-    .map(|mut proposal| {
-        proposal.edit.label.push_str(&format!(" ({seed:016x})"));
-        proposal
-    })
+}
+
+fn candidate_intent_label(
+    intent: &VariationIntent,
+    mode: FoundryCandidateMode,
+    proposal_index: usize,
+) -> String {
+    const COMPLETE_LOOK_LABELS: [&str; 6] = [
+        "Compact Vented",
+        "Reinforced Cargo",
+        "Minimal Industrial",
+        "Worn Field Crate",
+        "Heavy Utility",
+        "Clean Lab Crate",
+    ];
+    const SHAPE_LABELS: [&str; 6] = [
+        "Broader Silhouette",
+        "Compact Structure",
+        "Raised Profile",
+        "Balanced Frame",
+        "Heavy Utility",
+        "Clean Proportions",
+    ];
+    const DETAIL_LABELS: [&str; 6] = [
+        "Sharper Details",
+        "Cleaner Trim",
+        "Added Fasteners",
+        "Refined Edges",
+        "Panel Detail",
+        "Service Detail",
+    ];
+    const FOCUS_LABELS: [&str; 6] = [
+        "Focused Variant",
+        "Focused Structure",
+        "Focused Detail",
+        "Focused Profile",
+        "Focused Trim",
+        "Focused Utility",
+    ];
+
+    let labels = if intent.scope.is_focus_part() {
+        &FOCUS_LABELS
+    } else if intent.includes_channel(&VariationChannel::Shape)
+        || matches!(
+            mode,
+            FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
+        )
+    {
+        &SHAPE_LABELS
+    } else if intent.includes_channel(&VariationChannel::Detail)
+        || mode == FoundryCandidateMode::Detail
+    {
+        &DETAIL_LABELS
+    } else {
+        &COMPLETE_LOOK_LABELS
+    };
+    labels[proposal_index % labels.len()].to_owned()
 }
 
 fn mutate_control_value(
@@ -1547,16 +2116,6 @@ fn value_label(control: &CustomizerControl, value: &ControlValue) -> String {
         (_, ControlValue::Integer(value)) => value.to_string(),
         (_, ControlValue::Toggle(value)) => value.to_string(),
         (_, ControlValue::Choice(value) | ControlValue::Provider(value)) => value.clone(),
-    }
-}
-
-fn mode_label(mode: FoundryCandidateMode) -> &'static str {
-    match mode {
-        FoundryCandidateMode::Refine => "Refine",
-        FoundryCandidateMode::Explore => "Explore",
-        FoundryCandidateMode::Silhouette => "Silhouette",
-        FoundryCandidateMode::Structure => "Structure",
-        FoundryCandidateMode::Detail => "Detail",
     }
 }
 

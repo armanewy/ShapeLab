@@ -667,6 +667,7 @@ fn render_candidate_mode(
         mode: request.mode,
         strategy_id: None,
         preference_profile: None,
+        variation_intent: shape_foundry::VariationIntent::default(),
     };
     let output = match generate_foundry_candidate_plans(
         &inputs.fixture.document,

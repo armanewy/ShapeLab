@@ -1,6 +1,6 @@
 //! Whole-model direction board panel boundary.
 
-use shape_foundry::{FoundryCandidateId, FoundryCommand};
+use shape_foundry::{FoundryAssetDocument, FoundryCandidateId, FoundryCommand, VariationIntent};
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
     FoundryCandidateControlChange, FoundryCandidateMode, FoundryCandidateRejectionReason,
@@ -26,6 +26,11 @@ pub(crate) const DIRECTION_BOARD_MODES: [FoundryCandidateMode; 5] = [
     FoundryCandidateMode::Structure,
     FoundryCandidateMode::Detail,
 ];
+
+const SURFACE_UNAVAILABLE_REASON: &str =
+    "Surface options will appear after this kit has a surface pack.";
+const FOCUS_PART_UNAVAILABLE_REASON: &str =
+    "Focus Part is available when this asset exposes editable part groups.";
 
 /// Transient UI state needed to derive pure direction-board view data.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -321,6 +326,40 @@ impl DirectionModeAction {
     }
 }
 
+/// Human-facing variation scope/channel action.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DirectionVariationModeAction {
+    /// Product-facing label.
+    pub label: &'static str,
+    /// Whether this variation mode is active.
+    pub selected: bool,
+    /// Whether this mode can generate candidates today.
+    pub enabled: bool,
+    /// Plain-language unavailable reason for disabled modes.
+    pub unavailable_reason: Option<&'static str>,
+    /// Request data for enabled modes.
+    pub request: Option<FoundryCandidateRequest>,
+}
+
+impl DirectionVariationModeAction {
+    /// Convert an enabled variation action into the reducer command.
+    #[must_use]
+    pub(crate) fn app_command(&self) -> Option<FoundryAppCommand> {
+        self.request
+            .as_ref()
+            .map(|request| FoundryAppCommand::RequestCandidates(request.clone()))
+    }
+}
+
+/// Product-safe part group exposed to Focus Part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectionPartGroup {
+    /// Stable group ID.
+    pub group_id: String,
+    /// Product-facing label.
+    pub label: String,
+}
+
 /// A/B comparison state for the selected direction.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DirectionComparisonView {
@@ -473,6 +512,123 @@ pub(crate) fn direction_mode_actions(
         .collect()
 }
 
+/// Build product variation-mode actions for the direction board.
+#[must_use]
+pub(crate) fn direction_variation_mode_actions(
+    active_intent: &VariationIntent,
+    seed: u64,
+    strategy_id: Option<String>,
+    surface_supported: bool,
+    part_groups: &[DirectionPartGroup],
+) -> Vec<DirectionVariationModeAction> {
+    let active_intent = active_intent.clone().normalized();
+    let complete = VariationIntent::complete_look();
+    let shape = VariationIntent::whole_asset_shape();
+    let surface = VariationIntent::whole_asset_surface();
+    let focus_part = part_groups
+        .first()
+        .map(|group| VariationIntent::focus_part_shape(&group.group_id, &group.label));
+
+    vec![
+        DirectionVariationModeAction {
+            label: "Complete Looks",
+            selected: variation_intents_match(&active_intent, &complete),
+            enabled: true,
+            unavailable_reason: None,
+            request: Some(candidate_request_for_variation(
+                FoundryCandidateMode::Explore,
+                seed,
+                strategy_id.clone(),
+                complete,
+            )),
+        },
+        DirectionVariationModeAction {
+            label: "Shape",
+            selected: variation_intents_match(&active_intent, &shape),
+            enabled: true,
+            unavailable_reason: None,
+            request: Some(candidate_request_for_variation(
+                FoundryCandidateMode::Explore,
+                seed,
+                strategy_id.clone(),
+                shape,
+            )),
+        },
+        DirectionVariationModeAction {
+            label: "Surface",
+            selected: variation_intents_match(&active_intent, &surface),
+            enabled: surface_supported,
+            unavailable_reason: (!surface_supported).then_some(SURFACE_UNAVAILABLE_REASON),
+            request: surface_supported.then(|| {
+                candidate_request_for_variation(
+                    FoundryCandidateMode::Explore,
+                    seed,
+                    strategy_id.clone(),
+                    surface,
+                )
+            }),
+        },
+        DirectionVariationModeAction {
+            label: "Focus Part",
+            selected: active_intent.scope.is_focus_part(),
+            enabled: focus_part.is_some(),
+            unavailable_reason: focus_part
+                .is_none()
+                .then_some(FOCUS_PART_UNAVAILABLE_REASON),
+            request: focus_part.map(|intent| {
+                candidate_request_for_variation(
+                    FoundryCandidateMode::Refine,
+                    seed,
+                    strategy_id,
+                    intent,
+                )
+            }),
+        },
+    ]
+}
+
+/// Derive product-safe Focus Part groups for known starter assets.
+#[must_use]
+pub(crate) fn direction_part_groups_for_document(
+    document: &FoundryAssetDocument,
+) -> Vec<DirectionPartGroup> {
+    let text = format!(
+        "{} {}",
+        document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
+    )
+    .to_ascii_lowercase();
+    if text.contains("crate") {
+        return part_groups(&[
+            ("body", "Body"),
+            ("panels", "Panels"),
+            ("vents", "Vents"),
+            ("handles", "Handles"),
+            ("edge-trim", "Edge Trim"),
+            ("fasteners", "Fasteners"),
+        ]);
+    }
+    if text.contains("bridge") {
+        return part_groups(&[
+            ("deck", "Deck"),
+            ("supports", "Supports"),
+            ("bracing", "Bracing"),
+            ("railing", "Railing"),
+            ("ramps", "Ramps"),
+            ("fasteners", "Fasteners"),
+        ]);
+    }
+    if text.contains("lamp") {
+        return part_groups(&[
+            ("base", "Base"),
+            ("stem", "Stem"),
+            ("joints", "Joints"),
+            ("shade", "Shade"),
+            ("trim", "Trim"),
+        ]);
+    }
+    Vec::new()
+}
+
 /// Build a Foundry candidate request for one board mode.
 #[must_use]
 pub(crate) fn candidate_request_for_mode(
@@ -487,7 +643,39 @@ pub(crate) fn candidate_request_for_mode(
         mode,
         strategy_id,
         preference_profile: None,
+        variation_intent: VariationIntent::default(),
     }
+}
+
+fn candidate_request_for_variation(
+    mode: FoundryCandidateMode,
+    seed: u64,
+    strategy_id: Option<String>,
+    variation_intent: VariationIntent,
+) -> FoundryCandidateRequest {
+    FoundryCandidateRequest {
+        seed,
+        proposal_count: DEFAULT_DIRECTION_PROPOSALS,
+        result_count: VISIBLE_DIRECTION_CANDIDATE_CARDS,
+        mode,
+        strategy_id,
+        preference_profile: None,
+        variation_intent: variation_intent.normalized(),
+    }
+}
+
+fn variation_intents_match(left: &VariationIntent, right: &VariationIntent) -> bool {
+    left.scope == right.scope && left.channels == right.channels
+}
+
+fn part_groups(groups: &[(&str, &str)]) -> Vec<DirectionPartGroup> {
+    groups
+        .iter()
+        .map(|(group_id, label)| DirectionPartGroup {
+            group_id: (*group_id).to_owned(),
+            label: (*label).to_owned(),
+        })
+        .collect()
 }
 
 /// Human-facing label for a Foundry candidate mode.
@@ -773,6 +961,11 @@ fn rejection_label(reason: FoundryCandidateRejectionReason) -> &'static str {
         FoundryCandidateRejectionReason::CompileRejected => "build unavailable",
         FoundryCandidateRejectionReason::ConformanceRejected => "quality check failed",
         FoundryCandidateRejectionReason::DescriptorRejected => "visual match too weak",
+        FoundryCandidateRejectionReason::UnsupportedChannel => "mode unavailable",
+        FoundryCandidateRejectionReason::HiddenOnlyChange => "no visible change",
+        FoundryCandidateRejectionReason::TooSubtle => "too subtle",
+        FoundryCandidateRejectionReason::DuplicateLooking => "too similar",
+        FoundryCandidateRejectionReason::ExplanationMismatch => "explanation mismatch",
     }
 }
 

@@ -13,6 +13,7 @@ use super::jobs::FoundryJobRequest;
 /// Semantic edits are carried as [`FoundryCommand`] or [`FoundryEdit`] so the
 /// app does not create a second command language beside the generic Foundry API.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum FoundryAppCommand {
     /// Select a customizer control row.
     SelectControl(Option<String>),

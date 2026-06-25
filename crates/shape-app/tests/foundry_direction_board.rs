@@ -12,11 +12,13 @@ use foundry::panels::directions::{
     DirectionComparisonRole, DirectionImageScope, DirectionValidationState,
     VISIBLE_DIRECTION_CANDIDATE_CARDS, ab_flip_comparison, accept_candidate_command,
     candidate_request_for_mode, direction_board_view, direction_mode_actions,
-    hover_candidate_intent, no_isolated_part_option_cards, reject_candidate_command,
-    select_candidate_intent,
+    direction_variation_mode_actions, hover_candidate_intent, no_isolated_part_option_cards,
+    reject_candidate_command, select_candidate_intent,
 };
 use foundry::{FoundryAppCommand, FoundryCandidateCard};
-use shape_foundry::{FoundryCandidateId, FoundryCommand};
+use shape_foundry::{
+    CandidateLegibilityClass, FoundryCandidateId, FoundryCommand, VariationChannel, VariationIntent,
+};
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
     FoundryCandidateChangeKind, FoundryCandidateControlChange, FoundryCandidateMode,
@@ -127,6 +129,56 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
         FoundryAppCommand::RequestCandidates(request)
             if request.mode == FoundryCandidateMode::Explore
     ));
+}
+
+#[test]
+fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
+    let actions = direction_variation_mode_actions(
+        &VariationIntent::default(),
+        29,
+        Some("novice_crate".to_owned()),
+        false,
+        &[],
+    );
+
+    assert_eq!(
+        actions
+            .iter()
+            .map(|action| action.label)
+            .collect::<Vec<_>>(),
+        vec!["Complete Looks", "Shape", "Surface", "Focus Part"]
+    );
+    assert!(actions[0].selected);
+    assert!(actions[0].enabled);
+    assert_eq!(
+        actions[0]
+            .request
+            .as_ref()
+            .unwrap()
+            .variation_intent
+            .channels,
+        vec![VariationChannel::CompleteLook]
+    );
+    assert!(actions[1].enabled);
+    assert_eq!(
+        actions[1]
+            .request
+            .as_ref()
+            .unwrap()
+            .variation_intent
+            .channels,
+        vec![VariationChannel::Shape]
+    );
+    assert!(!actions[2].enabled);
+    assert_eq!(
+        actions[2].unavailable_reason,
+        Some("Surface options will appear after this kit has a surface pack.")
+    );
+    assert!(!actions[3].enabled);
+    assert_eq!(
+        actions[3].unavailable_reason,
+        Some("Focus Part is available when this asset exposes editable part groups.")
+    );
 }
 
 #[test]
@@ -477,6 +529,14 @@ fn candidate_card(
         validation_detail: None,
         selectable: true,
         selected: false,
+        variation_intent_label: "Complete Looks".to_owned(),
+        variation_scope_label: "Whole Asset".to_owned(),
+        variation_channel_labels: vec!["Complete Look".to_owned()],
+        visible_delta_label: "Clear change".to_owned(),
+        what_changed_summary: "Whole Asset: Clear change".to_owned(),
+        legibility_class: CandidateLegibilityClass::Clear,
+        focus_part_label: None,
+        surface_unavailable_reason: None,
     }
 }
 

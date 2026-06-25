@@ -23,6 +23,7 @@ pub mod preference;
 pub mod project;
 pub mod session;
 pub mod validation;
+pub mod variation;
 
 pub use author_studio::*;
 pub use candidate::*;
@@ -41,6 +42,7 @@ pub use preference::*;
 pub use project::*;
 pub use session::*;
 pub use validation::*;
+pub use variation::*;
 
 /// Current schema version for foundry asset source documents.
 pub const FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION: u32 = 1;

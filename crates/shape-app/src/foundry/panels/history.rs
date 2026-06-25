@@ -131,6 +131,7 @@ pub(crate) struct FoundryHistoryActionIntent {
 
 /// Dispatch payload emitted by a history action.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum FoundryHistoryActionDispatch {
     /// Emit a concrete app command.
     Command(FoundryAppCommand),
@@ -500,6 +501,52 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
                 FoundryLockTarget::Control(control) => vec![control.clone()],
                 _ => Vec::new(),
             },
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::SetVariationIntent { intent } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::ControlEdit,
+            label: format!("Set {}", intent.human_label),
+            detail: Some(intent.human_summary.clone()),
+            changed_controls: Vec::new(),
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::SetVariationScope { scope } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::ControlEdit,
+            label: format!("Set scope to {}", scope.display_label()),
+            detail: None,
+            changed_controls: Vec::new(),
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::SetVariationChannels { channels } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::ControlEdit,
+            label: "Set variation mode".to_owned(),
+            detail: Some(
+                channels
+                    .iter()
+                    .map(|channel| channel.display_label())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            changed_controls: Vec::new(),
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::ClearVariationFocus => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::ControlEdit,
+            label: "Cleared part focus".to_owned(),
+            detail: Some("Returned to whole-asset variation".to_owned()),
+            changed_controls: Vec::new(),
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::SetFocusPartGroup { group_id } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::ControlEdit,
+            label: "Set Focus Part".to_owned(),
+            detail: Some(friendly_history_label(group_id)),
+            changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
@@ -924,6 +971,18 @@ fn lock_target_label(target: &FoundryLockTarget) -> String {
         FoundryLockTarget::Provider(role) => format!("provider {role}"),
         FoundryLockTarget::Override(id) => format!("override {id}"),
         FoundryLockTarget::ExportProfile(profile) => format!("export profile {profile}"),
+        FoundryLockTarget::VariationScope(scope) => {
+            format!("variation scope {}", scope.display_label())
+        }
+        FoundryLockTarget::VariationChannel(channel) => {
+            format!("variation channel {}", channel.display_label())
+        }
+        FoundryLockTarget::FocusPartGroup(group_id) => {
+            format!("focus part {}", friendly_history_label(group_id))
+        }
+        FoundryLockTarget::MaterialSlot(slot_id) => {
+            format!("material slot {}", friendly_history_label(slot_id))
+        }
         FoundryLockTarget::Custom(target) => target.clone(),
     }
 }

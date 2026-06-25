@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use shape_foundry::{
-    ControlDivergence, ControlTopologyBehavior, ControlValue, FoundryCandidateId,
-    FoundryDocumentId, FoundryLock, FoundryPackDocument,
+    CandidateLegibilityClass, ControlDivergence, ControlTopologyBehavior, ControlValue,
+    FoundryCandidateId, FoundryDocumentId, FoundryLock, FoundryPackDocument,
 };
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
@@ -54,6 +54,22 @@ pub(crate) struct FoundryCandidateCard {
     pub selectable: bool,
     /// Whether this card is currently selected.
     pub selected: bool,
+    /// Product-facing variation intent label.
+    pub variation_intent_label: String,
+    /// Product-facing scope label.
+    pub variation_scope_label: String,
+    /// Product-facing channel labels.
+    pub variation_channel_labels: Vec<String>,
+    /// Product-facing visible delta label.
+    pub visible_delta_label: String,
+    /// Product-facing change summary.
+    pub what_changed_summary: String,
+    /// Product legibility class.
+    pub legibility_class: CandidateLegibilityClass,
+    /// Focus part label, when the card targets a semantic part group.
+    pub focus_part_label: Option<String>,
+    /// Plain-language reason surface mode is unavailable.
+    pub surface_unavailable_reason: Option<String>,
 }
 
 /// One customizer control row/card.

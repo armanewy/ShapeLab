@@ -10,8 +10,8 @@ use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
 use shape_foundry::{
-    CatalogContentRef, FoundryBuildStamp, FoundryCatalogError, FoundryCatalogResolver,
-    FoundryCommand,
+    CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
+    FoundryCatalogResolver, FoundryCommand, VariationIntent,
 };
 use shape_foundry_catalog::{
     FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, headless_fixture_catalogs,
@@ -623,11 +623,12 @@ impl FoundryDesktopApp {
         });
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            let mode_actions = direction_mode_actions_for_panel();
-            let generate_action = mode_actions
+            let variation_actions =
+                direction_variation_mode_actions_for_panel(self.state.document.as_ref());
+            let generate_action = variation_actions
                 .iter()
-                .find(|action| action.label == "Explore")
-                .or_else(|| mode_actions.first());
+                .find(|action| action.label == "Complete Looks" && action.enabled)
+                .or_else(|| variation_actions.iter().find(|action| action.enabled));
             if let Some(generate_action) = generate_action
                 && action_button(
                     ui,
@@ -643,8 +644,9 @@ impl FoundryDesktopApp {
                     ),
                 )
                 .clicked()
+                && let Some(command) = generate_action.app_command()
             {
-                commands.push(generate_action.app_command());
+                commands.push(command);
             }
             if !has_output
                 && action_button(
@@ -676,7 +678,50 @@ impl FoundryDesktopApp {
         ui.add_space(8.0);
         product_card(ui, false, |ui| {
             ui.label(
-                RichText::new("Direction focus")
+                RichText::new("Variation mode")
+                    .color(VisualFoundryTokens::dark().colors.text_muted)
+                    .small(),
+            );
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for variation_action in
+                    direction_variation_mode_actions_for_panel(self.state.document.as_ref())
+                {
+                    let spec = if variation_action.enabled {
+                        ActionSpec::enabled(variation_action.label, ButtonTone::Quiet)
+                    } else {
+                        ActionSpec::disabled(
+                            variation_action.label,
+                            ButtonTone::Quiet,
+                            variation_action
+                                .unavailable_reason
+                                .unwrap_or(NEED_DIRECTION_REASON),
+                        )
+                    };
+                    if action_button(ui, &spec).clicked()
+                        && let Some(command) = variation_action.app_command()
+                    {
+                        commands.push(command);
+                    }
+                }
+            });
+            for reason in direction_variation_mode_actions_for_panel(self.state.document.as_ref())
+                .into_iter()
+                .filter_map(|action| {
+                    (!action.enabled)
+                        .then_some(action.unavailable_reason)
+                        .flatten()
+                })
+            {
+                ui.label(
+                    RichText::new(reason)
+                        .color(VisualFoundryTokens::dark().colors.text_muted)
+                        .small(),
+                );
+            }
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Generation style")
                     .color(VisualFoundryTokens::dark().colors.text_muted)
                     .small(),
             );
@@ -1995,6 +2040,28 @@ pub(crate) fn direction_mode_actions_for_panel() -> Vec<directions::DirectionMod
     directions::direction_mode_actions(None, 0, None)
 }
 
+pub(crate) fn direction_variation_mode_actions_for_panel(
+    document: Option<&FoundryAssetDocument>,
+) -> Vec<directions::DirectionVariationModeAction> {
+    let Some(document) = document else {
+        return directions::direction_variation_mode_actions(
+            &VariationIntent::default(),
+            0,
+            None,
+            false,
+            &[],
+        );
+    };
+    let part_groups = directions::direction_part_groups_for_document(document);
+    directions::direction_variation_mode_actions(
+        &document.variation_state.intent,
+        document.seed,
+        None,
+        false,
+        &part_groups,
+    )
+}
+
 pub(crate) fn default_app_launches_on_home() -> bool {
     let app = FoundryDesktopApp::default();
     app.tab == FoundryTab::Home && app.state.document.is_none()
@@ -2343,7 +2410,7 @@ fn show_direction_candidate_card(
     product_card(ui, candidate.selected, |ui| {
         ui.set_min_height(218.0);
         let preview_id = candidate_preview_texture_id(candidate);
-        let preview_edge = ui.available_width().min(150.0).max(112.0);
+        let preview_edge = ui.available_width().clamp(112.0, 150.0);
         ui.vertical_centered(|ui| {
             show_rgba_preview(
                 ui,
@@ -2437,21 +2504,39 @@ fn candidate_display_title(candidate: &crate::foundry::view_model::FoundryCandid
 fn candidate_display_subtitle(
     candidate: &crate::foundry::view_model::FoundryCandidateCard,
 ) -> String {
-    let mode = candidate.mode.map_or("Direction", directions::mode_label);
-    let changes = candidate
-        .changed_controls
-        .len()
-        .max(candidate.changed_roles.len());
-    match changes {
-        0 => format!("{mode} direction"),
-        1 => format!("{mode} · 1 change"),
-        count => format!("{mode} · {count} changes"),
+    let intent = product_panel_message(&candidate.variation_intent_label, "Direction");
+    let delta = product_panel_message(&candidate.visible_delta_label, "Visible change");
+    if let Some(focus_part) = &candidate.focus_part_label {
+        return format!("{intent} · {focus_part} · {delta}");
+    }
+    let channels = candidate
+        .variation_channel_labels
+        .iter()
+        .map(|label| product_panel_message(label, "Variation"))
+        .collect::<Vec<_>>();
+    if channels.is_empty() {
+        format!("{intent} · {delta}")
+    } else {
+        format!("{intent} · {} · {delta}", channels.join(", "))
     }
 }
 
 fn candidate_display_detail(
     candidate: &crate::foundry::view_model::FoundryCandidateCard,
 ) -> Option<String> {
+    if let Some(reason) = &candidate.surface_unavailable_reason {
+        return Some(product_panel_message(
+            reason,
+            "This direction is unavailable for the current kit.",
+        ));
+    }
+    if !candidate.what_changed_summary.trim().is_empty() {
+        let summary =
+            product_panel_message(&candidate.what_changed_summary, "Visible shape adjusted.");
+        if !summary.trim().is_empty() {
+            return Some(summary);
+        }
+    }
     let labels = candidate
         .changed_controls
         .iter()

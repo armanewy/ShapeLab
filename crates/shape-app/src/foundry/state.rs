@@ -1268,6 +1268,7 @@ fn candidate_request_from_command(request: GenerateCandidatesRequest) -> Foundry
         mode: FoundryCandidateMode::Refine,
         strategy_id: request.strategy_id,
         preference_profile: None,
+        variation_intent: request.variation_intent.normalized(),
     }
 }
 
@@ -1687,6 +1688,11 @@ fn foundry_command_label(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetStyle { .. } => "Set style",
         FoundryCommand::SetLock { .. } => "Set lock",
         FoundryCommand::ClearLock { .. } => "Clear lock",
+        FoundryCommand::SetVariationIntent { .. } => "Set variation intent",
+        FoundryCommand::SetVariationScope { .. } => "Set variation scope",
+        FoundryCommand::SetVariationChannels { .. } => "Set variation channels",
+        FoundryCommand::ClearVariationFocus => "Clear variation focus",
+        FoundryCommand::SetFocusPartGroup { .. } => "Set focus part",
         FoundryCommand::GenerateCandidates(_) => "Generate candidates",
         FoundryCommand::AcceptCandidate { .. } => "Accept candidate",
         FoundryCommand::RejectCandidate { .. } => "Reject candidate",

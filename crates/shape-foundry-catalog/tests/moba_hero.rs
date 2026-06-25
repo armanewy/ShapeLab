@@ -269,6 +269,7 @@ fn candidate_request(strategy_id: &str, mode: FoundryCandidateMode) -> FoundryCa
         mode,
         strategy_id: Some(strategy_id.to_owned()),
         preference_profile: None,
+        variation_intent: shape_foundry::VariationIntent::default(),
     }
 }
 

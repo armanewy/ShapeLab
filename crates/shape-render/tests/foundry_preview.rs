@@ -1,10 +1,12 @@
 use glam::{Vec3, Vec4};
 use shape_core::Aabb;
+use shape_foundry::{CandidateLegibilityClass, VariationChannel, VariationScope};
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
     FoundryChangedRoleOverlay, FoundryPreviewBatchRequest, FoundryPreviewCache,
     FoundryPreviewCacheStatus, FoundryPreviewControlValue, FoundryPreviewError, FoundryPreviewKind,
-    FoundryPreviewRequest, FoundryPreviewResolution, render_foundry_previews,
+    FoundryPreviewRequest, FoundryPreviewResolution, FoundryPreviewVariationMetadata,
+    render_foundry_previews,
 };
 use shape_render::{OrbitCamera, RenderError, RenderSettings};
 
@@ -550,6 +552,60 @@ fn changed_role_metadata_is_not_cached_with_image() {
         vec!["turret-provider".to_owned(), "armor-toggle".to_owned()]
     );
     assert_ne!(miss.previews[0].image.rgba8, hit.previews[0].image.rgba8);
+}
+
+#[test]
+fn foundry_variation_metadata_is_preserved_without_changing_cache_key() {
+    let mut cache = FoundryPreviewCache::new(2);
+    let mut first = candidate_request("variation", "geom-variation", 1.0);
+    first.variation_metadata = FoundryPreviewVariationMetadata {
+        scope: VariationScope::WholeAsset,
+        channels: vec![VariationChannel::CompleteLook],
+        selected_part_group: None,
+        material_slot_id: None,
+        legibility_class: Some(CandidateLegibilityClass::Clear),
+    };
+
+    let mut second = first.clone();
+    second.variation_metadata = FoundryPreviewVariationMetadata {
+        scope: VariationScope::SemanticPartGroup {
+            group_id: "body".to_owned(),
+            display_name: "Body".to_owned(),
+        },
+        channels: vec![VariationChannel::Shape],
+        selected_part_group: Some("body".to_owned()),
+        material_slot_id: None,
+        legibility_class: Some(CandidateLegibilityClass::Strong),
+    };
+
+    let miss = render_foundry_previews(
+        &mut cache,
+        batch("variation", vec![first], FoundryPreviewResolution::Px64),
+    )
+    .expect("variation metadata miss render should succeed");
+    let hit = render_foundry_previews(
+        &mut cache,
+        batch("variation", vec![second], FoundryPreviewResolution::Px64),
+    )
+    .expect("variation metadata hit render should succeed");
+
+    assert_eq!(
+        miss.previews[0].cache_status,
+        FoundryPreviewCacheStatus::Miss
+    );
+    assert_eq!(hit.previews[0].cache_status, FoundryPreviewCacheStatus::Hit);
+    assert_eq!(miss.previews[0].key, hit.previews[0].key);
+    assert_eq!(
+        hit.previews[0]
+            .variation_metadata
+            .selected_part_group
+            .as_deref(),
+        Some("body")
+    );
+    assert_eq!(
+        hit.previews[0].variation_metadata.legibility_class,
+        Some(CandidateLegibilityClass::Strong)
+    );
 }
 
 fn batch(

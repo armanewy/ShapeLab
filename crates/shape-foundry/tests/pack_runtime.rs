@@ -709,6 +709,7 @@ impl PackFixture {
             ]),
             provider_overrides: BTreeMap::new(),
             foundry_locks: Vec::new(),
+            variation_state: shape_foundry::FoundryVariationState::default(),
             local_recipe_overrides: Vec::new(),
             seed: 42,
             catalog_lock: None,

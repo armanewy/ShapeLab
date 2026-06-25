@@ -414,6 +414,7 @@ fn catalog_from_author_entries(
         control_state: package.control_state.clone(),
         provider_overrides: BTreeMap::new(),
         foundry_locks: Vec::new(),
+        variation_state: shape_foundry::FoundryVariationState::default(),
         local_recipe_overrides: Vec::new(),
         seed: package.seed,
         catalog_lock: None,

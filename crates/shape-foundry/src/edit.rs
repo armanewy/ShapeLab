@@ -234,6 +234,41 @@ pub fn apply_foundry_command_with_style_context(
                 .retain(|existing| existing.target != *target);
             Ok(FoundryCommandApplicationReport::default())
         }
+        crate::FoundryCommand::SetVariationIntent { intent } => {
+            document.variation_state.intent = intent.clone().normalized();
+            Ok(FoundryCommandApplicationReport::default())
+        }
+        crate::FoundryCommand::SetVariationScope { scope } => {
+            ensure_unlocked_variation_scope(document, scope)?;
+            document.variation_state.intent.scope = scope.clone();
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+            Ok(FoundryCommandApplicationReport::default())
+        }
+        crate::FoundryCommand::SetVariationChannels { channels } => {
+            ensure_unlocked_variation_channels(document, channels)?;
+            document.variation_state.intent.channels = if channels.is_empty() {
+                vec![crate::VariationChannel::CompleteLook]
+            } else {
+                channels.clone()
+            };
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+            Ok(FoundryCommandApplicationReport::default())
+        }
+        crate::FoundryCommand::ClearVariationFocus => {
+            document.variation_state.intent.scope = crate::VariationScope::WholeAsset;
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+            Ok(FoundryCommandApplicationReport::default())
+        }
+        crate::FoundryCommand::SetFocusPartGroup { group_id } => {
+            let scope = crate::VariationScope::SemanticPartGroup {
+                group_id: group_id.clone(),
+                display_name: humanize_identifier(group_id),
+            };
+            ensure_unlocked_variation_scope(document, &scope)?;
+            document.variation_state.intent.scope = scope;
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+            Ok(FoundryCommandApplicationReport::default())
+        }
         crate::FoundryCommand::GenerateCandidates(_)
         | crate::FoundryCommand::AcceptCandidate { .. }
         | crate::FoundryCommand::RejectCandidate { .. }
@@ -361,6 +396,48 @@ fn ensure_unlocked_provider(
     Ok(())
 }
 
+fn ensure_unlocked_variation_scope(
+    document: &crate::FoundryAssetDocument,
+    scope: &crate::VariationScope,
+) -> Result<(), FoundryCommandApplicationError> {
+    if has_locked_target(
+        document,
+        &crate::FoundryLockTarget::VariationScope(scope.clone()),
+    ) {
+        return Err(FoundryCommandApplicationError::LockedTarget {
+            target: "variation scope".to_owned(),
+        });
+    }
+    if let Some(group_id) = scope.semantic_part_group_id()
+        && has_locked_target(
+            document,
+            &crate::FoundryLockTarget::FocusPartGroup(group_id.to_owned()),
+        )
+    {
+        return Err(FoundryCommandApplicationError::LockedTarget {
+            target: "focus part".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_unlocked_variation_channels(
+    document: &crate::FoundryAssetDocument,
+    channels: &[crate::VariationChannel],
+) -> Result<(), FoundryCommandApplicationError> {
+    for channel in channels {
+        if has_locked_target(
+            document,
+            &crate::FoundryLockTarget::VariationChannel(channel.clone()),
+        ) {
+            return Err(FoundryCommandApplicationError::LockedTarget {
+                target: "variation channel".to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn has_locked_target(
     document: &crate::FoundryAssetDocument,
     target: &crate::FoundryLockTarget,
@@ -448,6 +525,11 @@ fn command_kind(command: &crate::FoundryCommand) -> &'static str {
         crate::FoundryCommand::SetStyle { .. } => "set_style",
         crate::FoundryCommand::SetLock { .. } => "set_lock",
         crate::FoundryCommand::ClearLock { .. } => "clear_lock",
+        crate::FoundryCommand::SetVariationIntent { .. } => "set_variation_intent",
+        crate::FoundryCommand::SetVariationScope { .. } => "set_variation_scope",
+        crate::FoundryCommand::SetVariationChannels { .. } => "set_variation_channels",
+        crate::FoundryCommand::ClearVariationFocus => "clear_variation_focus",
+        crate::FoundryCommand::SetFocusPartGroup { .. } => "set_focus_part_group",
         crate::FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         crate::FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         crate::FoundryCommand::RejectCandidate { .. } => "reject_candidate",
@@ -455,5 +537,28 @@ fn command_kind(command: &crate::FoundryCommand) -> &'static str {
         crate::FoundryCommand::SwitchRevision { .. } => "switch_revision",
         crate::FoundryCommand::Export { .. } => "export",
         crate::FoundryCommand::AddCurrentToPack { .. } => "add_current_to_pack",
+    }
+}
+
+fn humanize_identifier(identifier: &str) -> String {
+    let words = identifier
+        .split(|character: char| character == '_' || character == '-' || character.is_whitespace())
+        .filter(|word| !word.trim().is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut output = first.to_uppercase().collect::<String>();
+                    output.push_str(&chars.as_str().to_ascii_lowercase());
+                    output
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    if words.is_empty() {
+        "Focused Part".to_owned()
+    } else {
+        words.join(" ")
     }
 }

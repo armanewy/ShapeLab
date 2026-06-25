@@ -7,6 +7,7 @@ use std::thread;
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use shape_core::Aabb;
+use shape_foundry::{CandidateLegibilityClass, VariationChannel, VariationScope};
 use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
@@ -266,6 +267,38 @@ pub struct FoundryChangedRoleOverlay {
     pub changed_controls: Vec<String>,
 }
 
+/// Product-safe variation metadata carried with a preview for future overlays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryPreviewVariationMetadata {
+    /// Scope represented by this preview.
+    #[serde(default)]
+    pub scope: VariationScope,
+    /// Channels represented by this preview.
+    #[serde(default)]
+    pub channels: Vec<VariationChannel>,
+    /// Selected part-group ID, when a Focus Part preview is requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_part_group: Option<String>,
+    /// Material slot ID, when a future surface preview is requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_slot_id: Option<String>,
+    /// Product legibility class assigned before/after preview comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legibility_class: Option<CandidateLegibilityClass>,
+}
+
+impl Default for FoundryPreviewVariationMetadata {
+    fn default() -> Self {
+        Self {
+            scope: VariationScope::WholeAsset,
+            channels: vec![VariationChannel::CompleteLook],
+            selected_part_group: None,
+            material_slot_id: None,
+            legibility_class: None,
+        }
+    }
+}
+
 /// One complete-model preview request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FoundryPreviewRequest {
@@ -283,6 +316,8 @@ pub struct FoundryPreviewRequest {
     pub provider_choices: BTreeMap<String, String>,
     /// Changed-role overlays to draw above this preview.
     pub changed_role_overlays: Vec<FoundryChangedRoleOverlay>,
+    /// Product-safe variation metadata for future overlays.
+    pub variation_metadata: FoundryPreviewVariationMetadata,
 }
 
 impl FoundryPreviewRequest {
@@ -302,6 +337,7 @@ impl FoundryPreviewRequest {
             sampled_control_state: BTreeMap::new(),
             provider_choices: BTreeMap::new(),
             changed_role_overlays: Vec::new(),
+            variation_metadata: FoundryPreviewVariationMetadata::default(),
         }
     }
 }
@@ -376,6 +412,8 @@ pub struct FoundryRenderedPreview {
     pub comparison_bounds: Aabb,
     /// Changed-role overlay metadata to paint over this preview.
     pub changed_role_overlays: Vec<FoundryChangedRoleOverlay>,
+    /// Product-safe variation metadata copied from the request.
+    pub variation_metadata: FoundryPreviewVariationMetadata,
 }
 
 /// Rendered output for a foundry preview comparison set.
@@ -744,6 +782,7 @@ fn preview_from_image(
         whole_model_bounds: item.mesh.bounds,
         comparison_bounds: context.comparison_bounds,
         changed_role_overlays: item.changed_role_overlays.clone(),
+        variation_metadata: item.variation_metadata.clone(),
     }
 }
 

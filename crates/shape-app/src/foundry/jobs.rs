@@ -6,16 +6,17 @@ use std::{collections::BTreeMap, fs};
 use shape_compile::export::write_model_package;
 use shape_core::Aabb;
 use shape_foundry::{
+    CandidateLegibilityClass, CandidateVariationMetadata, CandidateVisibleDeltaReport,
     ControlValue, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogResolver, FoundryCommand,
     FoundryCompilationOutput, FoundryEdit, FoundryPackCompilationOutput, FoundryPackDocument,
-    FoundryStyleChangeContext, SharedProviderPolicy, apply_foundry_command,
-    apply_foundry_command_with_style_context, compile_foundry_document, compile_foundry_pack,
-    resolve_foundry_catalog,
+    FoundryStyleChangeContext, SharedProviderPolicy, VariationIntent, VariationScope,
+    apply_foundry_command, apply_foundry_command_with_style_context, compile_foundry_document,
+    compile_foundry_pack, resolve_foundry_catalog,
 };
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
     FoundryPreviewBatchRequest, FoundryPreviewCache, FoundryPreviewKind, FoundryPreviewRequest,
-    FoundryPreviewResolution,
+    FoundryPreviewResolution, FoundryPreviewVariationMetadata,
 };
 use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
@@ -605,6 +606,8 @@ fn preview_request_for_output(
         .iter()
         .map(|report| (report.role.clone(), report.provider_id.clone()))
         .collect();
+    let intent = output.document.variation_state.intent.clone().normalized();
+    request.variation_metadata = preview_variation_metadata_from_intent(&intent, None);
     request
 }
 
@@ -659,18 +662,31 @@ pub(crate) fn candidate_cards_from_output(
         .enumerate()
         .map(|(slot, candidate)| {
             let changed_roles = changed_roles(&candidate.edit.commands);
+            let variation_metadata = &candidate.variation_metadata;
+            let visible_delta = &variation_metadata.visible_delta;
             let validation_label = if candidate.conformance.accepted {
-                "Accepted".to_owned()
+                visible_delta.label().to_owned()
             } else {
                 "Rejected".to_owned()
             };
-            let validation_detail = (!candidate.conformance.accepted).then(|| {
-                format!(
-                    "{} required failure(s), {} advisory issue(s)",
-                    candidate.conformance.required_failure_count,
-                    candidate.conformance.advisory_issue_count
-                )
-            });
+            let validation_detail = (!candidate.conformance.accepted)
+                .then(|| {
+                    format!(
+                        "{} required failure(s), {} advisory issue(s)",
+                        candidate.conformance.required_failure_count,
+                        candidate.conformance.advisory_issue_count
+                    )
+                })
+                .or_else(|| visible_delta_detail(visible_delta));
+            let mut rejections = BTreeMap::new();
+            let selectable =
+                candidate.conformance.accepted && visible_delta.legibility_class.selectable();
+            if !visible_delta.legibility_class.selectable() {
+                rejections.insert(
+                    rejection_reason_for_legibility(visible_delta.legibility_class),
+                    1,
+                );
+            }
             FoundryCandidateCard {
                 id: candidate.id.clone(),
                 slot,
@@ -687,11 +703,27 @@ pub(crate) fn candidate_cards_from_output(
                 changed_controls: candidate.changed_controls.clone(),
                 changed_roles,
                 explanations: candidate.diagnostics.changes.clone(),
-                rejections: BTreeMap::new(),
+                rejections,
                 validation_label,
                 validation_detail,
-                selectable: candidate.conformance.accepted,
+                selectable,
                 selected: selected.is_some_and(|selected| selected == &candidate.id),
+                variation_intent_label: variation_metadata.intent.human_label.clone(),
+                variation_scope_label: variation_metadata.intent.scope.display_label().to_owned(),
+                variation_channel_labels: variation_metadata
+                    .intent
+                    .channels
+                    .iter()
+                    .map(|channel| channel.display_label().to_owned())
+                    .collect(),
+                visible_delta_label: visible_delta.label().to_owned(),
+                what_changed_summary: what_changed_summary(
+                    variation_metadata,
+                    &candidate.diagnostics.changes,
+                ),
+                legibility_class: visible_delta.legibility_class,
+                focus_part_label: focus_part_label(&variation_metadata.intent.scope),
+                surface_unavailable_reason: surface_unavailable_reason(variation_metadata),
             }
         })
         .collect()
@@ -748,25 +780,36 @@ pub(crate) fn candidate_cards_from_output_with_previews(
             return Ok(cards);
         }
     };
-    let parent_request = preview_request_for_output(
+    let mut parent_request = preview_request_for_output(
         CANDIDATE_PARENT_PREVIEW_ID,
         FoundryPreviewKind::CandidateCard {
             candidate_id: "parent".to_owned(),
         },
         &parent_output,
     );
+    let parent_intent = output
+        .candidates
+        .first()
+        .map(|candidate| candidate.variation_metadata.intent.clone())
+        .unwrap_or_else(|| parent_output.document.variation_state.intent.clone());
+    parent_request.variation_metadata =
+        preview_variation_metadata_from_intent(&parent_intent, None);
     let mut requests = vec![parent_request.clone()];
     let mut candidate_requests = BTreeMap::new();
     for (index, candidate) in output.candidates.iter().enumerate() {
         match compile_foundry_document(&candidate.document, resolver) {
             Ok(candidate_output) => {
                 let preview_id = format!("candidate-{}", candidate.id.0);
-                let request = preview_request_for_output(
+                let mut request = preview_request_for_output(
                     preview_id.clone(),
                     FoundryPreviewKind::CandidateCard {
                         candidate_id: candidate.id.0.clone(),
                     },
                     &candidate_output,
+                );
+                request.variation_metadata = preview_variation_metadata_from_candidate(
+                    &candidate.variation_metadata,
+                    Some(candidate.variation_metadata.visible_delta.legibility_class),
                 );
                 candidate_requests.insert(preview_id, (index, request.clone()));
                 requests.push(request);
@@ -916,6 +959,7 @@ fn filter_legible_candidate_cards(
             kept.push(card);
             continue;
         };
+        let preview_class = preview_delta_class(parent_delta, mode);
         if !passes_legibility_threshold(parent_delta, threshold) {
             continue;
         }
@@ -934,7 +978,9 @@ fn filter_legible_candidate_cards(
         if duplicate {
             continue;
         }
-        card.validation_label = "Visually distinct".to_owned();
+        card.legibility_class = preview_class;
+        card.visible_delta_label = preview_class.display_label().to_owned();
+        card.validation_label = preview_class.display_label().to_owned();
         card.validation_detail = Some(format!(
             "Card-size visible change score {:.1}%.",
             parent_delta.score() * 100.0
@@ -1059,6 +1105,10 @@ fn apply_candidate_preview(
     card.height = preview.image.height;
     card.camera = Some(preview.camera.clone());
     card.preview_failure = None;
+    if let Some(class) = preview.variation_metadata.legibility_class {
+        card.legibility_class = class;
+        card.visible_delta_label = class.display_label().to_owned();
+    }
 }
 
 fn mark_candidate_preview_compile_failure(
@@ -1070,6 +1120,161 @@ fn mark_candidate_preview_compile_failure(
     card.validation_detail =
         Some("This direction cannot be chosen because its preview did not compile.".to_owned());
     card.selectable = false;
+    card.legibility_class = CandidateLegibilityClass::Unsupported;
+    card.visible_delta_label = CandidateLegibilityClass::Unsupported
+        .display_label()
+        .to_owned();
+}
+
+fn preview_variation_metadata_from_candidate(
+    metadata: &CandidateVariationMetadata,
+    legibility_class: Option<CandidateLegibilityClass>,
+) -> FoundryPreviewVariationMetadata {
+    preview_variation_metadata_from_intent(&metadata.intent, legibility_class)
+}
+
+fn preview_variation_metadata_from_intent(
+    intent: &VariationIntent,
+    legibility_class: Option<CandidateLegibilityClass>,
+) -> FoundryPreviewVariationMetadata {
+    let intent = intent.clone().normalized();
+    let selected_part_group = intent.scope.semantic_part_group_id().map(str::to_owned);
+    let material_slot_id = match &intent.scope {
+        VariationScope::MaterialSlot { slot_id, .. } => Some(slot_id.clone()),
+        _ => None,
+    };
+    FoundryPreviewVariationMetadata {
+        scope: intent.scope,
+        channels: intent.channels,
+        selected_part_group,
+        material_slot_id,
+        legibility_class,
+    }
+}
+
+fn what_changed_summary(
+    metadata: &CandidateVariationMetadata,
+    explanations: &[shape_search::foundry::FoundryCandidateControlChange],
+) -> String {
+    let mut parts = Vec::new();
+    for group in &metadata.changed_part_groups {
+        if group.visible {
+            parts.push(format!("{}: {}", group.display_name, group.change_label));
+        }
+    }
+    for slot in &metadata.changed_material_slots {
+        if slot.surface_payload_ready {
+            parts.push(format!("{}: {}", slot.display_name, slot.change_label));
+        }
+    }
+    for change in explanations {
+        if parts.len() >= 3 {
+            break;
+        }
+        if let Some(label) = safe_product_fragment(&change.control_label) {
+            parts.push(format!("{label} adjusted"));
+        }
+    }
+    if parts.is_empty() {
+        let scope = metadata.intent.scope.display_label();
+        let delta = metadata.visible_delta.label();
+        return format!("{scope}: {delta}");
+    }
+    parts.truncate(3);
+    parts.join(" · ")
+}
+
+fn focus_part_label(scope: &VariationScope) -> Option<String> {
+    match scope {
+        VariationScope::SemanticPartGroup { display_name, .. } => Some(display_name.clone()),
+        _ => None,
+    }
+}
+
+fn surface_unavailable_reason(metadata: &CandidateVariationMetadata) -> Option<String> {
+    let surface_unavailable = metadata
+        .changed_material_slots
+        .iter()
+        .any(|slot| !slot.surface_payload_ready)
+        || metadata
+            .visible_delta
+            .blocking_reasons
+            .iter()
+            .any(|reason| reason.contains("surface pack"));
+    surface_unavailable
+        .then(|| "Surface options will appear after this kit has a surface pack.".to_owned())
+}
+
+fn visible_delta_detail(report: &CandidateVisibleDeltaReport) -> Option<String> {
+    if !report.blocking_reasons.is_empty() {
+        return Some(report.blocking_reasons.join(" "));
+    }
+    report.manual_review_required.then(|| {
+        "This direction needs manual review before stronger visual-difference claims.".to_owned()
+    })
+}
+
+fn rejection_reason_for_legibility(
+    class: CandidateLegibilityClass,
+) -> FoundryCandidateRejectionReason {
+    match class {
+        CandidateLegibilityClass::TooSubtle => FoundryCandidateRejectionReason::TooSubtle,
+        CandidateLegibilityClass::DuplicateLooking => {
+            FoundryCandidateRejectionReason::DuplicateLooking
+        }
+        CandidateLegibilityClass::Unsupported => {
+            FoundryCandidateRejectionReason::UnsupportedChannel
+        }
+        CandidateLegibilityClass::Strong
+        | CandidateLegibilityClass::Clear
+        | CandidateLegibilityClass::SubtleButExplainable
+        | CandidateLegibilityClass::DetailOnly => {
+            FoundryCandidateRejectionReason::DescriptorRejected
+        }
+    }
+}
+
+fn preview_delta_class(
+    delta: PreviewLegibilityDelta,
+    mode: Option<FoundryCandidateMode>,
+) -> CandidateLegibilityClass {
+    if matches!(mode, Some(FoundryCandidateMode::Detail)) {
+        return CandidateLegibilityClass::DetailOnly;
+    }
+    let score = delta.score();
+    if score >= 0.05 || delta.changed_pixel_ratio >= 0.08 || delta.silhouette_delta >= 0.04 {
+        CandidateLegibilityClass::Strong
+    } else if score >= 0.018 || delta.changed_pixel_ratio >= 0.03 || delta.silhouette_delta >= 0.014
+    {
+        CandidateLegibilityClass::Clear
+    } else {
+        CandidateLegibilityClass::SubtleButExplainable
+    }
+}
+
+fn safe_product_fragment(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || crate::foundry::ui::copy::first_forbidden_product_term(trimmed).is_some()
+    {
+        return None;
+    }
+    let lowercase = trimmed.to_ascii_lowercase();
+    let raw_markers = [
+        "provider",
+        "scalar",
+        "semantic",
+        "operation",
+        "compiler",
+        "decompiler",
+        "fragment",
+        "remap",
+        "conformance",
+        "socket",
+        "port",
+        "recipe",
+    ];
+    (!raw_markers.iter().any(|marker| lowercase.contains(marker))).then(|| trimmed.to_owned())
 }
 
 fn candidate_subtitle(mode: Option<FoundryCandidateMode>, change_count: usize) -> String {

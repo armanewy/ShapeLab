@@ -900,6 +900,29 @@ fn apply_semantic_command(
                 .foundry_locks
                 .retain(|existing| existing.target != *target);
         }
+        FoundryCommand::SetVariationIntent { intent } => {
+            document.variation_state.intent = intent.clone().normalized();
+        }
+        FoundryCommand::SetVariationScope { scope } => {
+            document.variation_state.intent.scope = scope.clone();
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+        }
+        FoundryCommand::SetVariationChannels { channels } => {
+            document.variation_state.intent.channels = channels.clone();
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+        }
+        FoundryCommand::ClearVariationFocus => {
+            document.variation_state.intent.scope = shape_foundry::VariationScope::WholeAsset;
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+        }
+        FoundryCommand::SetFocusPartGroup { group_id } => {
+            document.variation_state.intent.scope =
+                shape_foundry::VariationScope::SemanticPartGroup {
+                    group_id: group_id.clone(),
+                    display_name: focus_part_display_name(group_id),
+                };
+            document.variation_state.intent = document.variation_state.intent.clone().normalized();
+        }
         FoundryCommand::SetRolePresence { role, enabled } => {
             document
                 .control_state
@@ -934,6 +957,25 @@ fn unsupported_command(
     }
 }
 
+fn focus_part_display_name(group_id: &str) -> String {
+    group_id
+        .split(['_', '-', '.'])
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut label = first.to_uppercase().collect::<String>();
+                    label.push_str(&chars.as_str().to_ascii_lowercase());
+                    label
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn command_name(command: &FoundryCommand) -> &'static str {
     match command {
         FoundryCommand::SetControl { .. } => "set_control",
@@ -943,6 +985,11 @@ fn command_name(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetStyle { .. } => "set_style",
         FoundryCommand::SetLock { .. } => "set_lock",
         FoundryCommand::ClearLock { .. } => "clear_lock",
+        FoundryCommand::SetVariationIntent { .. } => "set_variation_intent",
+        FoundryCommand::SetVariationScope { .. } => "set_variation_scope",
+        FoundryCommand::SetVariationChannels { .. } => "set_variation_channels",
+        FoundryCommand::ClearVariationFocus => "clear_variation_focus",
+        FoundryCommand::SetFocusPartGroup { .. } => "set_focus_part_group",
         FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         FoundryCommand::RejectCandidate { .. } => "reject_candidate",
