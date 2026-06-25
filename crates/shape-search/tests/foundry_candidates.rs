@@ -10,7 +10,7 @@ use shape_foundry::{
     WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
 use shape_foundry_catalog::{
-    FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, stylized_lamp,
+    FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, showcase_gear, stylized_lamp,
 };
 use shape_search::foundry::{
     FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
@@ -128,6 +128,9 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
                 "detail_density",
                 "structural_heft",
             ],
+            slug if showcase_gear::is_showcase_gear_slug(slug) => {
+                &["silhouette", "ornament", "detail_density", "has_accessory"]
+            }
             _ => &[
                 "body_variant",
                 "accent_style",

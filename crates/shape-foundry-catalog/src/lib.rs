@@ -41,6 +41,7 @@ pub mod expanded_profiles;
 pub mod kits;
 pub mod roman_bridge;
 pub mod scifi_crate;
+pub mod showcase_gear;
 pub mod stylized_lamp;
 
 pub use authoring::*;
@@ -202,6 +203,20 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
             "Storybook Tree",
             expanded_profiles::stylized_tree_fixture_catalog(),
         ),
+        (
+            "Fantasy Sword",
+            showcase_gear::fantasy_sword_fixture_catalog(),
+        ),
+        (
+            "Round Shield",
+            showcase_gear::round_shield_fixture_catalog(),
+        ),
+        ("Hero Helmet", showcase_gear::hero_helmet_fixture_catalog()),
+        (
+            "Pauldron Pair",
+            showcase_gear::pauldron_pair_fixture_catalog(),
+        ),
+        ("Chest Armor", showcase_gear::chest_armor_fixture_catalog()),
     ]
 }
 

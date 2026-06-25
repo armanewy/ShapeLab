@@ -64,11 +64,12 @@ mod tests {
     use shape_foundry::{
         materialize_foundation_draft_package, weapon_armor_foundation_draft_batch,
     };
+    use shape_foundry_catalog::showcase_gear::SHOWCASE_GEAR_SLUGS;
 
     #[test]
     fn built_in_kit_cards_expose_product_safe_badges() {
         let cards = built_in_kit_card_views();
-        assert_eq!(cards.len(), 11);
+        assert_eq!(cards.len(), 16);
         assert!(cards.iter().all(|card| !card.display_name.is_empty()));
         assert!(cards.iter().all(|card| !card.style_name.is_empty()));
         assert!(cards.iter().all(|card| !card.category_chips.is_empty()));
@@ -103,10 +104,6 @@ mod tests {
     #[test]
     fn wave37_foundation_drafts_do_not_appear_in_novice_kit_cards() {
         let cards = built_in_kit_card_views();
-        let card_names = cards
-            .iter()
-            .map(|card| card.display_name.as_str())
-            .collect::<Vec<_>>();
         let card_slugs = cards
             .iter()
             .filter_map(|card| card.source_profile_slug.as_deref())
@@ -114,16 +111,24 @@ mod tests {
         for draft in weapon_armor_foundation_draft_batch() {
             let materialized = materialize_foundation_draft_package(&draft)
                 .expect("foundation batch draft should materialize internally");
-            assert!(
-                !card_names.contains(&draft.family_blueprint.display_name.as_str()),
-                "{} must remain out of the novice kit catalog",
-                draft.family_blueprint.display_name
-            );
-            assert!(
-                !card_names.contains(&materialized.kit.display_name.as_str()),
-                "{} materialized display name must remain out of the novice kit catalog",
-                materialized.kit.display_name
-            );
+            for display_name in [
+                draft.family_blueprint.display_name.as_str(),
+                materialized.kit.display_name.as_str(),
+            ] {
+                let matching_cards = cards
+                    .iter()
+                    .filter(|card| card.display_name == display_name)
+                    .collect::<Vec<_>>();
+                assert!(
+                    matching_cards.iter().all(|card| {
+                        card.source_profile_slug
+                            .as_deref()
+                            .is_some_and(|slug| SHOWCASE_GEAR_SLUGS.contains(&slug))
+                            && card.quality_badge == "Usable"
+                    }),
+                    "{display_name} may appear only as a promoted Wave 38 gear kit, not as a foundation draft"
+                );
+            }
             assert!(
                 !card_slugs.contains(&materialized.kit.kit_id.as_str()),
                 "{} kit ID must not be used as a built-in novice card slug",

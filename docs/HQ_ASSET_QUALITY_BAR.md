@@ -52,6 +52,7 @@ Run a benchmark report with:
 ```bash
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile fantasy-sword --out-dir target/hq-benchmark/fantasy-sword
 ```
 
 Use `--profile all --out-dir target/hq-benchmark` to baseline every built-in
@@ -68,6 +69,12 @@ Candidate survival means more than receiving six candidate records: each
 survivor must compile, pass model validation, and render a non-placeholder
 whole-model preview.
 
-`roman-bridge-hq` is the first built-in profile authored to satisfy the Usable
-automation bar. It remains hidden from the default novice catalog until manual
-review is approved. Adversarial review remains required before Showcase claims.
+Promoted Wave 38 gear benchmarks verify export/reopen by default because their
+kit metadata targets the Usable tier. `--verify-export` remains accepted and is
+still required for older profiles when making Usable claims.
+
+`roman-bridge-hq` was the first built-in profile authored to satisfy the Usable
+automation bar. Wave 38 extends that bar to the promoted gear kits: Fantasy
+Sword, Round Shield, Hero Helmet, Pauldron Pair, and Chest Armor. They remain
+hidden from the default novice catalog until manual review is approved.
+Adversarial review remains required before Showcase claims.

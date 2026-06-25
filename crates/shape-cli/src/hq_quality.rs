@@ -474,7 +474,9 @@ fn benchmark_one_profile(
     let candidate_report = candidate_report(&fixture);
     let visible_control_difference_evidence =
         visible_control_difference_evidence(&fixture, &output)?;
-    let export_reopen = export_reopen_report(args.verify_export, &output, out_dir)?;
+    let verify_export = args.verify_export
+        || shape_foundry_catalog::showcase_gear::is_showcase_gear_slug(&fixture.slug);
+    let export_reopen = export_reopen_report(verify_export, &output, out_dir)?;
     let silhouette_metric = silhouette_readability_metric(&mesh);
     let unsupported_outputs = unsupported_outputs();
 
@@ -621,6 +623,11 @@ fn normalize_profile_slug(profile: &str) -> String {
         "scifi-crate" => "sci-fi-crate".to_owned(),
         "scifi-door" => "sci-fi-door".to_owned(),
         "storybook-tree" => "stylized-tree".to_owned(),
+        "fantasy_sword" => "fantasy-sword".to_owned(),
+        "round_shield" => "round-shield".to_owned(),
+        "hero_helmet" => "hero-helmet".to_owned(),
+        "pauldron_pair" => "pauldron-pair".to_owned(),
+        "chest_armor" => "chest-armor".to_owned(),
         other => other.to_owned(),
     }
 }
@@ -1199,15 +1206,131 @@ mod tests {
     #[test]
     fn hq_quality_builtin_profile_list_is_enumerable() {
         let slugs = benchmark_profile_slugs();
-        assert_eq!(slugs.len(), 11);
+        assert_eq!(slugs.len(), 16);
         assert!(slugs.contains(&"roman-bridge".to_owned()));
         assert!(slugs.contains(&"roman-bridge-hq".to_owned()));
         assert!(slugs.contains(&"stylized-tree".to_owned()));
+        assert!(slugs.contains(&"fantasy-sword".to_owned()));
+        assert!(slugs.contains(&"chest-armor".to_owned()));
     }
 
     #[test]
     fn roman_bridge_hq_explore_candidates_survive_quality_validation() {
         let fixture = shape_foundry_catalog::roman_bridge::hq_fixture_catalog();
+        assert_all_explore_candidates_survive("roman-bridge-hq", fixture);
+    }
+
+    #[test]
+    fn fantasy_sword_explore_candidates_survive_quality_validation() {
+        let fixture = shape_foundry_catalog::showcase_gear::fantasy_sword_fixture_catalog();
+        assert_all_explore_candidates_survive("fantasy-sword", fixture);
+    }
+
+    #[test]
+    fn showcase_gear_defaults_pass_model_validation() {
+        let mut failures = Vec::new();
+        for (slug, fixture) in showcase_gear_fixtures() {
+            let compiled = compile_foundry_document(&fixture.document, &fixture)
+                .unwrap_or_else(|error| panic!("{slug} should compile: {error:#?}"));
+            let model_validation = validate_compiled_output(&compiled);
+            if !model_validation.is_valid() {
+                failures.push(format!("{slug} issues={:#?}", model_validation.issues));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "showcase gear default validation failures:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn showcase_gear_hq_benchmarks_reach_usable_with_export_evidence() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        for (slug, fixture) in showcase_gear_fixtures() {
+            let out_dir = temp_dir.path().join(slug);
+            fs::create_dir_all(&out_dir).expect("create benchmark output dir");
+            let args = HqQualityBenchmarkArgs {
+                profile: slug.to_owned(),
+                out_dir: out_dir.clone(),
+                quality_tier: HqQualityTier::Usable,
+                verify_export: false,
+                human_approved: false,
+                adversarial_reviewed: false,
+                manual_notes: None,
+                json: false,
+            };
+            let report = benchmark_one_profile(&args, slug, fixture, &out_dir)
+                .unwrap_or_else(|error| panic!("{slug} HQ benchmark should pass: {error:#?}"));
+            assert_eq!(report.quality_tier_achieved, HqQualityTier::Usable);
+            assert!(report.quality_tier_blockers.is_empty());
+            assert_eq!(report.candidate_survival_count, DEFAULT_DIRECTION_COUNT);
+            assert!(report.six_direction_availability);
+            assert_eq!(report.export_status, HqEvidenceStatus::Verified);
+            assert_eq!(report.reopen_status, HqEvidenceStatus::Verified);
+            assert!(report.mesh_validity_summary.model_valid);
+            assert_eq!(
+                report
+                    .visible_control_difference_evidence
+                    .changed_control_count,
+                report.primary_control_count
+            );
+            assert!(!report.placeholder_thumbnail_detected);
+            for name in [
+                "contact-sheet.png",
+                "front.png",
+                "three-quarter.png",
+                "side.png",
+                "back.png",
+                "wireframe.png",
+                "silhouette.png",
+                "mesh-stats.json",
+                "semantic-parts.json",
+                "candidate-report.json",
+                "controls-visibility-report.json",
+                "export-reopen-report.json",
+                "quality-report.json",
+            ] {
+                let path = out_dir.join(name);
+                assert!(path.exists(), "{slug} HQ benchmark should write {name}");
+                assert!(
+                    path.metadata().expect("metadata").len() > 0,
+                    "{slug} HQ benchmark {name} is empty"
+                );
+            }
+        }
+    }
+
+    fn showcase_gear_fixtures() -> [(&'static str, shape_foundry_catalog::FoundryFixtureCatalog); 5]
+    {
+        [
+            (
+                "fantasy-sword",
+                shape_foundry_catalog::showcase_gear::fantasy_sword_fixture_catalog(),
+            ),
+            (
+                "round-shield",
+                shape_foundry_catalog::showcase_gear::round_shield_fixture_catalog(),
+            ),
+            (
+                "hero-helmet",
+                shape_foundry_catalog::showcase_gear::hero_helmet_fixture_catalog(),
+            ),
+            (
+                "pauldron-pair",
+                shape_foundry_catalog::showcase_gear::pauldron_pair_fixture_catalog(),
+            ),
+            (
+                "chest-armor",
+                shape_foundry_catalog::showcase_gear::chest_armor_fixture_catalog(),
+            ),
+        ]
+    }
+
+    fn assert_all_explore_candidates_survive(
+        slug: &str,
+        fixture: shape_foundry_catalog::FoundryFixtureCatalog,
+    ) {
         let request = FoundryCandidateRequest {
             seed: DEFAULT_QUALITY_SEED,
             proposal_count: DEFAULT_PROPOSAL_COUNT,
@@ -1217,7 +1340,7 @@ mod tests {
             preference_profile: None,
         };
         let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &request)
-            .expect("HQ bridge candidates should generate");
+            .unwrap_or_else(|error| panic!("{slug} candidates should generate: {error:#?}"));
         assert_eq!(output.candidates.len(), DEFAULT_DIRECTION_COUNT);
 
         let mut survived = 0_usize;
@@ -1249,7 +1372,7 @@ mod tests {
         assert_eq!(
             survived,
             DEFAULT_DIRECTION_COUNT,
-            "candidate failures:\n{}",
+            "{slug} candidate failures:\n{}",
             failures.join("\n")
         );
     }

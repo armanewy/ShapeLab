@@ -1,8 +1,9 @@
 # Foundry Content Expansion
 
 Wave 26 expanded the built-in Visual Foundry catalog from three proof profiles
-to ten authored profiles. Wave 34 adds the eleventh built-in profile:
-`roman-bridge-hq`.
+to ten authored profiles. Wave 34 added the eleventh built-in profile:
+`roman-bridge-hq`. Wave 38 promotes five authored gear kits, bringing the
+current built-in catalog to sixteen profiles.
 
 ## Built-In Profiles
 
@@ -17,10 +18,15 @@ to ten authored profiles. Wave 34 adds the eleventh built-in profile:
 - Workshop Chair
 - Market Handcart
 - Storybook Tree
+- Fantasy Sword
+- Round Shield
+- Hero Helmet
+- Pauldron Pair
+- Chest Armor
 
-The seven expansion profiles use the same catalog, customizer, candidate,
-preview, pack, authoring, and compile paths as the original profiles. They do
-not add a second content system.
+The expansion and showcase gear profiles use the same catalog, customizer,
+candidate, preview, pack, authoring, and compile paths as the original
+profiles. They do not add a second content system.
 
 ## Product Constraints
 

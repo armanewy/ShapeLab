@@ -116,7 +116,7 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     );
     assert_eq!(
         stdout_report["visual_product_gate"]["expected_built_in_profile_count"].as_u64(),
-        Some(11)
+        Some(16)
     );
     assert_eq!(
         stdout_report["visual_product_gate"]["expected_primary_controls_per_profile"].as_u64(),
@@ -153,11 +153,11 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     );
     assert_eq!(
         stdout_report["product_ui_gate"]["installed_kit_count"].as_u64(),
-        Some(11)
+        Some(16)
     );
     assert_eq!(
         stdout_report["product_ui_gate"]["developer_preview_kit_count"].as_u64(),
-        Some(11)
+        Some(16)
     );
     assert_eq!(stdout_report["product_ui_gate"]["startup_blank"], false);
     assert_eq!(
@@ -231,8 +231,8 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
         "requires-explicit-app-test"
     );
     let evidence = &report["visual_product_gate"]["evidence"];
-    assert_eq!(evidence["built_in_profile_count"].as_u64(), Some(11));
-    assert_eq!(evidence["profiles_checked"].as_u64(), Some(11));
+    assert_eq!(evidence["built_in_profile_count"].as_u64(), Some(16));
+    assert_eq!(evidence["profiles_checked"].as_u64(), Some(16));
     assert_eq!(evidence["all_profiles_verified"], true);
     assert_eq!(evidence["option_thumbnail_size_px"].as_u64(), Some(64));
     assert!(
@@ -242,7 +242,7 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
             > 0,
         "visual gate should render option thumbnails"
     );
-    assert_eq!(evidence["profiles"].as_array().unwrap().len(), 11);
+    assert_eq!(evidence["profiles"].as_array().unwrap().len(), 16);
     assert!(
         evidence["profiles"]
             .as_array()
@@ -283,8 +283,8 @@ fn release_readiness_verifies_product_ui_gate_when_requested() {
     assert_eq!(gate["app_shell"], "direct_visual_foundry");
     assert_eq!(gate["legacy_surfaces_present"], false);
     assert_eq!(gate["product_home_profiles"].as_u64(), Some(0));
-    assert_eq!(gate["installed_kit_count"].as_u64(), Some(11));
-    assert_eq!(gate["developer_preview_kit_count"].as_u64(), Some(11));
+    assert_eq!(gate["installed_kit_count"].as_u64(), Some(16));
+    assert_eq!(gate["developer_preview_kit_count"].as_u64(), Some(16));
     assert_eq!(gate["startup_blank"], false);
     assert_eq!(gate["default_advanced_recipe_visible"], false);
     assert_eq!(gate["default_raw_technical_terms_visible"], false);
@@ -1357,6 +1357,83 @@ fn hq_quality_benchmark_emits_honest_quality_report() {
             .unwrap()
             .contains("--verify-export")
     );
+}
+
+#[test]
+fn hq_quality_benchmark_promotes_fantasy_sword_to_usable_with_export_evidence() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("fantasy-sword-hq-quality");
+
+    let output = Command::new(exe)
+        .args([
+            "hq-quality-benchmark",
+            "--profile",
+            "fantasy-sword",
+            "--out-dir",
+        ])
+        .arg(&out_dir)
+        .arg("--json")
+        .output()
+        .expect("run shape-cli hq-quality-benchmark for fantasy sword");
+    assert!(
+        output.status.success(),
+        "fantasy sword HQ benchmark failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for name in [
+        "contact-sheet.png",
+        "front.png",
+        "three-quarter.png",
+        "side.png",
+        "back.png",
+        "wireframe.png",
+        "silhouette.png",
+        "mesh-stats.json",
+        "semantic-parts.json",
+        "candidate-report.json",
+        "controls-visibility-report.json",
+        "export-reopen-report.json",
+        "quality-report.json",
+    ] {
+        let path = out_dir.join(name);
+        assert!(path.exists(), "fantasy sword benchmark should write {name}");
+        assert!(
+            path.metadata().expect("metadata").len() > 0,
+            "fantasy sword benchmark {name} is empty"
+        );
+    }
+
+    let file_report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("quality-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(file_report["profile_id"], "fantasy-sword");
+    assert_eq!(file_report["quality_tier_requested"], "usable");
+    assert_eq!(file_report["quality_tier_achieved"], "usable");
+    assert_eq!(file_report["export_status"], "verified");
+    assert_eq!(file_report["reopen_status"], "verified");
+    assert_eq!(file_report["six_direction_availability"], true);
+    assert_eq!(file_report["candidate_survival_count"].as_u64(), Some(6));
+    assert_eq!(file_report["placeholder_thumbnail_detected"], false);
+    assert_eq!(
+        file_report["visible_control_difference_evidence"]["changed_control_count"],
+        file_report["primary_control_count"]
+    );
+    assert_eq!(
+        file_report["novice_catalog_exposure_allowed_by_default"],
+        false
+    );
+
+    let export_report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out_dir.join("export-reopen-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(export_report["export_status"], "verified");
+    assert_eq!(export_report["reopen_status"], "verified");
+    assert_eq!(export_report["checksums_match"], true);
+    assert_eq!(export_report["topology_matches_manifest"], true);
+    assert_eq!(export_report["finite_numeric_payloads"], true);
 }
 
 #[test]

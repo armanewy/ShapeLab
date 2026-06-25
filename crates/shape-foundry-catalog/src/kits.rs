@@ -19,7 +19,10 @@ use shape_foundry::{
     QualityGateProfile, STYLE_PACK_SCHEMA_VERSION, StylePack, StyleProviderCompatibility,
 };
 
-use crate::{FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels};
+use crate::{
+    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels,
+    showcase_gear::is_showcase_gear_slug,
+};
 
 /// Return every built-in Visual Foundry profile as a curated kit package.
 #[must_use]
@@ -529,6 +532,7 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
         "roman-bridge-hq" | "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
             FoundryKitQualityTier::Usable
         }
+        slug if is_showcase_gear_slug(slug) => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -546,6 +550,11 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         "workshop-chair" => vec!["Furniture", "Workshop"],
         "handcart" => vec!["Vehicle", "Market"],
         "stylized-tree" => vec!["Nature", "Stylized"],
+        "fantasy-sword" => vec!["Weapon", "Heroic"],
+        "round-shield" => vec!["Armor", "Shield"],
+        "hero-helmet" => vec!["Armor", "Helmet"],
+        "pauldron-pair" => vec!["Armor", "Shoulder"],
+        "chest-armor" => vec!["Armor", "Chest"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -558,6 +567,11 @@ fn normalize_kit_slug(slug: &str) -> String {
         "storybook-tree" => "stylized-tree".to_owned(),
         "roman-hq-bridge" | "roman-bridge-hq-v1" => "roman-bridge-hq".to_owned(),
         "scifi-crate" => "sci-fi-crate".to_owned(),
+        "fantasy_sword" => "fantasy-sword".to_owned(),
+        "round_shield" => "round-shield".to_owned(),
+        "hero_helmet" => "hero-helmet".to_owned(),
+        "pauldron_pair" => "pauldron-pair".to_owned(),
+        "chest_armor" => "chest-armor".to_owned(),
         other => other.to_owned(),
     }
 }
@@ -571,7 +585,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 11);
+        assert_eq!(packages.len(), 16);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -590,6 +604,19 @@ mod tests {
                     .count()
                     <= 7
             );
+        }
+    }
+
+    #[test]
+    fn showcase_gear_kits_are_usable_without_showcase_approval() {
+        for slug in crate::showcase_gear::SHOWCASE_GEAR_SLUGS {
+            let package = built_in_foundry_kit_package(slug).expect("showcase gear kit");
+            assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Usable);
+            assert_ne!(package.kit.quality_tier, FoundryKitQualityTier::Showcase);
+            assert!(!package.review_manifest.human_approval_marker);
+            assert!(package.review_manifest.benchmark_refs.iter().any(|path| {
+                path == &format!("target/hq-benchmark/{slug}/quality-report.json")
+            }));
         }
     }
 
