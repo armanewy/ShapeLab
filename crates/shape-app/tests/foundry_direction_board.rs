@@ -17,7 +17,9 @@ use foundry::panels::directions::{
 };
 use foundry::{FoundryAppCommand, FoundryCandidateCard};
 use shape_foundry::{
-    CandidateLegibilityClass, FoundryCandidateId, FoundryCommand, VariationChannel, VariationIntent,
+    CandidateLegibilityClass, FoundryCandidateId, FoundryCommand, FoundrySurfaceCapabilityView,
+    SURFACE_PACKAGE_UNAVAILABLE_REASON, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
+    VariationChannel, VariationIntent,
 };
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
@@ -119,6 +121,10 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
     assert_eq!(request.mode, FoundryCandidateMode::Detail);
     assert_eq!(request.seed, 23);
     assert_eq!(request.result_count, VISIBLE_DIRECTION_CANDIDATE_CARDS);
+    assert_eq!(
+        request.variation_intent.channels,
+        vec![VariationChannel::Detail]
+    );
 
     let explore_action = actions
         .iter()
@@ -137,7 +143,7 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
         &VariationIntent::default(),
         29,
         Some("novice_crate".to_owned()),
-        false,
+        None,
         &[],
     );
 
@@ -172,13 +178,36 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
     assert!(!actions[2].enabled);
     assert_eq!(
         actions[2].unavailable_reason,
-        Some("Surface options will appear after this kit has a surface pack.")
+        Some(SURFACE_PACKAGE_UNAVAILABLE_REASON)
     );
     assert!(!actions[3].enabled);
     assert_eq!(
         actions[3].unavailable_reason,
         Some("Focus Part is available when this asset exposes editable part groups.")
     );
+}
+
+#[test]
+fn surface_package_capability_does_not_enable_visual_surface_mode() {
+    let capability = FoundrySurfaceCapabilityView::sci_fi_crate_static_prop();
+    let actions = direction_variation_mode_actions(
+        &VariationIntent::default(),
+        31,
+        Some("novice_crate".to_owned()),
+        Some(&capability),
+        &[],
+    );
+    let surface = actions
+        .iter()
+        .find(|action| action.label == "Surface")
+        .expect("Surface action exists");
+
+    assert!(!surface.enabled);
+    assert_eq!(
+        surface.unavailable_reason,
+        Some(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON)
+    );
+    assert!(surface.request.is_none());
 }
 
 #[test]

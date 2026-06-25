@@ -10,6 +10,9 @@
   animation. The headless Sci-Fi Crate static-prop package is the narrow
   exception: Surface Lab v1 emits deterministic UV/material/texture evidence
   for that one profile only.
+- Surface is not a visual Directions mode yet. The Sci-Fi Crate package can
+  report surface package availability, but visual surface variation still needs
+  textured previews and material candidate support.
 - Candidate generation can propose semantic scalar edits, structural part choices, duplicated cuts, and grouped cut-operation edits, but it is still not a general-purpose modeler.
 - The viewport and thumbnails use a deterministic CPU renderer and bounded
   preview caches. A native GPU viewport/render backend is still future work.

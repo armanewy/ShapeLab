@@ -16,9 +16,10 @@ use shape_foundry::{
     FoundryCandidateId, FoundryCatalogResolver, FoundryCommand, FoundryCompilationError,
     FoundryCompilationOutput, FoundryConformanceSummary, FoundryEdit, FoundryLockMode,
     FoundryLockTarget, FoundryPreferenceProfile, FoundryPreferenceScope, MaterialSlotChange,
-    SemanticPartGroupChange, VariationChannel, VariationIntent, VariationScope,
-    apply_foundry_command, canonicalize_control_value, compile_foundry_document,
-    default_control_value, effective_control_domain, explain_control_delta,
+    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, SemanticPartGroupChange, VariationChannel,
+    VariationIntent, VariationScope, apply_foundry_command, canonicalize_control_value,
+    compile_foundry_document, default_control_value, effective_control_domain,
+    explain_control_delta,
 };
 use thiserror::Error;
 
@@ -768,7 +769,7 @@ fn unsupported_variation_reason(
                 | VariationChannel::Custom { .. }
         )
     }) {
-        return Some("Surface options will appear after this kit has a surface pack.".to_owned());
+        return Some(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned());
     }
     if let VariationScope::SemanticPartGroup { group_id, .. } = &intent.scope
         && !known_part_groups(document)
@@ -963,7 +964,7 @@ fn classify_candidate_delta(
     let wants_surface = intent.includes_channel(&VariationChannel::Surface);
 
     if wants_surface {
-        reasons.push("Surface options will appear after this kit has a surface pack.".to_owned());
+        reasons.push(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned());
         return (CandidateLegibilityClass::Unsupported, reasons);
     }
     if intent.scope.is_focus_part() && selected_part_delta < 0.20 {

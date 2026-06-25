@@ -1,6 +1,9 @@
 //! Whole-model direction board panel boundary.
 
-use shape_foundry::{FoundryAssetDocument, FoundryCandidateId, FoundryCommand, VariationIntent};
+use shape_foundry::{
+    FoundryAssetDocument, FoundryCandidateId, FoundryCommand, FoundrySurfaceCapabilityView,
+    SURFACE_PACKAGE_UNAVAILABLE_REASON, VariationIntent,
+};
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
     FoundryCandidateControlChange, FoundryCandidateMode, FoundryCandidateRejectionReason,
@@ -27,8 +30,6 @@ pub(crate) const DIRECTION_BOARD_MODES: [FoundryCandidateMode; 5] = [
     FoundryCandidateMode::Detail,
 ];
 
-const SURFACE_UNAVAILABLE_REASON: &str =
-    "Surface options will appear after this kit has a surface pack.";
 const FOCUS_PART_UNAVAILABLE_REASON: &str =
     "Focus Part is available when this asset exposes editable part groups.";
 
@@ -518,13 +519,19 @@ pub(crate) fn direction_variation_mode_actions(
     active_intent: &VariationIntent,
     seed: u64,
     strategy_id: Option<String>,
-    surface_supported: bool,
+    surface_capability: Option<&FoundrySurfaceCapabilityView>,
     part_groups: &[DirectionPartGroup],
 ) -> Vec<DirectionVariationModeAction> {
     let active_intent = active_intent.clone().normalized();
     let complete = VariationIntent::complete_look();
     let shape = VariationIntent::whole_asset_shape();
     let surface = VariationIntent::whole_asset_surface();
+    let surface_supported = surface_capability
+        .is_some_and(FoundrySurfaceCapabilityView::surface_candidate_mode_available);
+    let surface_unavailable_reason = surface_capability.map_or(
+        SURFACE_PACKAGE_UNAVAILABLE_REASON,
+        FoundrySurfaceCapabilityView::surface_mode_unavailable_reason,
+    );
     let focus_part = part_groups
         .first()
         .map(|group| VariationIntent::focus_part_shape(&group.group_id, &group.label));
@@ -558,7 +565,7 @@ pub(crate) fn direction_variation_mode_actions(
             label: "Surface",
             selected: variation_intents_match(&active_intent, &surface),
             enabled: surface_supported,
-            unavailable_reason: (!surface_supported).then_some(SURFACE_UNAVAILABLE_REASON),
+            unavailable_reason: (!surface_supported).then_some(surface_unavailable_reason),
             request: surface_supported.then(|| {
                 candidate_request_for_variation(
                     FoundryCandidateMode::Explore,
@@ -636,6 +643,11 @@ pub(crate) fn candidate_request_for_mode(
     seed: u64,
     strategy_id: Option<String>,
 ) -> FoundryCandidateRequest {
+    let variation_intent = if mode == FoundryCandidateMode::Detail {
+        VariationIntent::whole_asset_detail()
+    } else {
+        VariationIntent::default()
+    };
     FoundryCandidateRequest {
         seed,
         proposal_count: DEFAULT_DIRECTION_PROPOSALS,
@@ -643,7 +655,7 @@ pub(crate) fn candidate_request_for_mode(
         mode,
         strategy_id,
         preference_profile: None,
-        variation_intent: VariationIntent::default(),
+        variation_intent,
     }
 }
 

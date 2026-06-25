@@ -8,9 +8,11 @@ use shape_foundry::{
     DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION, FeasibleControlDomain,
     FoundryAssetDocument, FoundryCommand, FoundryDocumentId, FoundryPackDocument,
     FoundryPackExportProfile, GenerateCandidatesRequest, PackCoherencePolicy, ResponseCurve,
-    SharedProviderPolicy, VariationChannel, VariationIntent, VariationScope, WholeModelPreviewRef,
-    apply_foundry_command, validate_customizer_profile, validate_foundry_command,
-    validate_foundry_document, validate_foundry_pack,
+    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, SharedProviderPolicy, VariationChannel,
+    VariationIntent, VariationScope, WholeModelPreviewRef, apply_foundry_command,
+    built_in_surface_capability_for_profile, parse_foundry_surface_capability_sidecar_json,
+    validate_customizer_profile, validate_foundry_command, validate_foundry_document,
+    validate_foundry_pack,
 };
 
 #[test]
@@ -210,6 +212,114 @@ fn variation_focus_commands_replay_deterministically() {
         first.variation_state.intent.channels,
         vec![VariationChannel::Shape]
     );
+}
+
+#[test]
+fn sci_fi_crate_reports_surface_package_without_enabling_surface_candidates() {
+    let capability = built_in_surface_capability_for_profile("sci-fi-crate-profile");
+
+    assert!(capability.surface_package_available);
+    assert!(capability.surface_payload_ready);
+    assert!(capability.uv_ready);
+    assert_eq!(capability.material_slot_count, 6);
+    assert_eq!(
+        capability.texture_channels,
+        vec!["Base color", "Metallic roughness", "Normal", "Occlusion"]
+    );
+    assert!(!capability.visual_surface_variation_ready);
+    assert!(!capability.surface_candidate_mode_available());
+    assert!(!capability.focus_part_surface_ready);
+    assert_eq!(
+        capability.surface_mode_unavailable_reason(),
+        SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON
+    );
+}
+
+#[test]
+fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
+    let sidecar = r#"{
+        "schema_version": 1,
+        "profile_id": "sci-fi-crate",
+        "surface_payload_ready": true,
+        "uv_ready": true,
+        "material_slots": [
+            "painted_metal_body",
+            "dark_rubber_grips"
+        ],
+        "texture_channels": [
+            "base_color",
+            "metallic_roughness",
+            "normal",
+            "occlusion"
+        ],
+        "variation_channels_supported": {
+            "surface": true,
+            "wear": false
+        },
+        "focus_part_surface_ready": false,
+        "human_label": "Sci-Fi Crate Surface Payload",
+        "unavailable_reasons": [
+            "Wear variation is metadata-only in Surface Lab v1."
+        ]
+    }"#;
+
+    let capability =
+        parse_foundry_surface_capability_sidecar_json(sidecar).expect("sidecar should parse");
+
+    assert!(capability.surface_package_available);
+    assert!(capability.surface_payload_ready);
+    assert!(capability.uv_ready);
+    assert_eq!(capability.material_slot_count, 2);
+    assert_eq!(
+        capability.texture_channels,
+        vec!["Base color", "Metallic roughness", "Normal", "Occlusion"]
+    );
+    assert!(!capability.visual_surface_variation_ready);
+    assert!(!capability.focus_part_surface_ready);
+    assert!(
+        capability
+            .unavailable_reasons
+            .contains(&SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned())
+    );
+}
+
+#[test]
+fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
+    let malformed = r#"{
+        "schema_version": 1,
+        "profile_id": "sci-fi-crate",
+        "surface_payload_ready": true,
+        "uv_ready": false,
+        "material_slots": [],
+        "texture_channels": [],
+        "variation_channels_supported": ["surface"],
+        "focus_part_surface_ready": false,
+        "human_label": "Sci-Fi Crate Surface Payload",
+        "unavailable_reasons": []
+    }"#;
+    let error = parse_foundry_surface_capability_sidecar_json(malformed)
+        .expect_err("ready payload without evidence should fail");
+    assert!(
+        error
+            .diagnostic()
+            .contains("cannot mark payload ready without UV")
+    );
+
+    let absolute_path = r#"{
+        "schema_version": 1,
+        "profile_id": "sci-fi-crate",
+        "surface_payload_ready": false,
+        "uv_ready": false,
+        "material_slots": [],
+        "texture_channels": [],
+        "variation_channels_supported": ["surface"],
+        "focus_part_surface_ready": false,
+        "human_label": "C:\\Users\\artist\\surface-capabilities.json",
+        "unavailable_reasons": []
+    }"#;
+    let error = parse_foundry_surface_capability_sidecar_json(absolute_path)
+        .expect_err("absolute local path should fail");
+    assert!(error.diagnostic().contains("absolute local paths"));
 }
 
 #[test]

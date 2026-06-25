@@ -170,10 +170,10 @@ emits deterministic UV coordinates, material-slot coverage, generated texture
 PNG sidecars, UV layout evidence, swatch/contact sheets, and a surface-aware
 GLB with `TEXCOORD_0`.
 
-This does not make Visual Foundry generally textured, and it does not add a
-novice material editor. Full game-ready status remains blocked until manual
-DCC/runtime review, engine import proof, and engine-native package handoff are
-present.
+This does not make Visual Foundry generally textured, does not enable the
+Directions Surface mode, and does not add a novice material editor. Full
+game-ready status remains blocked until manual DCC/runtime review, engine
+import proof, and engine-native package handoff are present.
 
 ## Foundry Kit Package Boundary
 

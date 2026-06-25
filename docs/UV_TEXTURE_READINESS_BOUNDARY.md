@@ -15,6 +15,8 @@ Still not implemented:
 
 - general UV unwrap for all Shape Lab assets;
 - novice-facing material editing;
+- textured Visual Foundry candidate previews;
+- material/surface candidate generation;
 - part-specific surface editing;
 - wear/damage variation payloads;
 - engine-native Unity, Unreal, or Godot packages;

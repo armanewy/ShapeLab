@@ -11,7 +11,9 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
-    FoundryCatalogResolver, FoundryCommand, VariationIntent,
+    FoundryCatalogResolver, FoundryCommand, STATIC_PROP_FULL_READY_BLOCKED_NOTE,
+    STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL, STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION,
+    VariationIntent, built_in_surface_capability_for_profile,
 };
 use shape_foundry_catalog::{
     FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, headless_fixture_catalogs,
@@ -1901,7 +1903,9 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Current Asset",
         "Export options",
         "Pack members",
-        "Static prop package",
+        STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL,
+        STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION,
+        STATIC_PROP_FULL_READY_BLOCKED_NOTE,
         "Export this asset here, or export the prepared pack from Pack.",
         "Export the current asset as an individual result.",
         "Pack preview",
@@ -2048,16 +2052,18 @@ pub(crate) fn direction_variation_mode_actions_for_panel(
             &VariationIntent::default(),
             0,
             None,
-            false,
+            None,
             &[],
         );
     };
     let part_groups = directions::direction_part_groups_for_document(document);
+    let surface_capability =
+        built_in_surface_capability_for_profile(&document.customizer_profile_ref.stable_id);
     directions::direction_variation_mode_actions(
         &document.variation_state.intent,
         document.seed,
         None,
-        false,
+        Some(&surface_capability),
         &part_groups,
     )
 }
@@ -3087,25 +3093,21 @@ fn show_export_readiness_panel(
         ui.separator();
         ui.add_space(10.0);
         ui.label(
-            RichText::new("Static prop package")
+            RichText::new(STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL)
                 .color(colors.text)
                 .strong(),
         );
         ui.label(
-            RichText::new(
-                "Creates a frozen mesh, OBJ handoff, collision descriptor, evidence, and validation report.",
-            )
-            .color(colors.text_muted)
-            .small(),
+            RichText::new(STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION)
+                .color(colors.text_muted)
+                .small(),
         );
         ui.add_space(6.0);
-        for blocked in [
-            "UV layout is not implemented.",
-            "GLB handoff is not implemented.",
-            "Manual DCC/runtime review is still required.",
-        ] {
-            ui.label(RichText::new(blocked).color(colors.text_muted).small());
-        }
+        ui.label(
+            RichText::new(STATIC_PROP_FULL_READY_BLOCKED_NOTE)
+                .color(colors.text_muted)
+                .small(),
+        );
     });
     commands
 }
@@ -3620,6 +3622,29 @@ mod tests {
             assert!(
                 !joined_lower.contains(&forbidden.to_ascii_lowercase()),
                 "default product strings unexpectedly contain {forbidden}: {joined}"
+            );
+        }
+    }
+
+    #[test]
+    fn export_surface_copy_states_package_without_full_game_ready_claim() {
+        let strings = product_visible_strings_for_default_shell();
+
+        assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL));
+        assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION));
+        assert!(strings.contains(&STATIC_PROP_FULL_READY_BLOCKED_NOTE));
+
+        let joined = strings.join("\n").to_ascii_lowercase();
+        for overclaim in [
+            "game-ready textured asset",
+            "visual foundry previews are textured",
+            "unity package",
+            "unreal package",
+            "godot package",
+        ] {
+            assert!(
+                !joined.contains(overclaim),
+                "export copy should not overclaim {overclaim}: {joined}"
             );
         }
     }

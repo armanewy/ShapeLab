@@ -1,8 +1,9 @@
 # Surface Lab Static Prop v1
 
 Surface Lab v1 is a headless, static-prop-first surface package path. It does
-not add a Visual Foundry material editor, candidate-generation changes, runtime
-LLM behavior, rigging, skinning, animation, or engine-native packages.
+not add a Visual Foundry material editor, textured candidate previews,
+candidate-generation changes, runtime LLM behavior, rigging, skinning,
+animation, or engine-native packages.
 
 The first supported profile is `sci-fi-crate`. The CLI command:
 
@@ -29,3 +30,7 @@ base color, metallic-roughness, flat normal, and neutral occlusion.
 This is a real static-prop surface payload, not a full game-ready claim. Full
 game-ready status still requires manual DCC/runtime review, engine import
 proof, and any future engine-native package adapters.
+
+Surface Lab v1 also does not make Surface a visual direction mode. The Foundry
+Surface channel remains a future visual variation channel until textured
+previews and material candidate support exist.

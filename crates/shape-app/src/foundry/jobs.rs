@@ -9,9 +9,10 @@ use shape_foundry::{
     CandidateLegibilityClass, CandidateVariationMetadata, CandidateVisibleDeltaReport,
     ControlValue, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogResolver, FoundryCommand,
     FoundryCompilationOutput, FoundryEdit, FoundryPackCompilationOutput, FoundryPackDocument,
-    FoundryStyleChangeContext, SharedProviderPolicy, VariationIntent, VariationScope,
-    apply_foundry_command, apply_foundry_command_with_style_context, compile_foundry_document,
-    compile_foundry_pack, resolve_foundry_catalog,
+    FoundryStyleChangeContext, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, SharedProviderPolicy,
+    VariationIntent, VariationScope, apply_foundry_command,
+    apply_foundry_command_with_style_context, compile_foundry_document, compile_foundry_pack,
+    resolve_foundry_catalog,
 };
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
@@ -1200,9 +1201,11 @@ fn surface_unavailable_reason(metadata: &CandidateVariationMetadata) -> Option<S
             .visible_delta
             .blocking_reasons
             .iter()
-            .any(|reason| reason.contains("surface pack"));
-    surface_unavailable
-        .then(|| "Surface options will appear after this kit has a surface pack.".to_owned())
+            .any(|reason| {
+                reason == SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON
+                    || reason.to_ascii_lowercase().contains("surface")
+            });
+    surface_unavailable.then(|| SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned())
 }
 
 fn visible_delta_detail(report: &CandidateVisibleDeltaReport) -> Option<String> {

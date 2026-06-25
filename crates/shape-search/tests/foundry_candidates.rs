@@ -7,7 +7,8 @@ use shape_foundry::{
     ControlValue, CustomizerControl, CustomizerProfile, DomainCertification, FeasibleControlDomain,
     FoundryCandidateId, FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget,
     FoundryPreferenceEvent, FoundryPreferenceLog, FoundryPreferenceScope, ProviderOption,
-    VariationChannel, VariationIntent, WholeModelPreviewRef, catalog_content_fingerprint_from_json,
+    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, VariationChannel, VariationIntent,
+    WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
 use shape_foundry_catalog::{
     FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, showcase_gear, stylized_lamp,
@@ -20,6 +21,11 @@ use shape_search::foundry::{
 use std::collections::BTreeSet;
 
 fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
+    let variation_intent = if mode == FoundryCandidateMode::Detail {
+        VariationIntent::whole_asset_detail()
+    } else {
+        VariationIntent::default()
+    };
     FoundryCandidateRequest {
         seed,
         proposal_count: 72,
@@ -27,7 +33,7 @@ fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
         mode,
         strategy_id: None,
         preference_profile: None,
-        variation_intent: VariationIntent::default(),
+        variation_intent,
     }
 }
 
@@ -135,7 +141,7 @@ fn foundry_surface_variation_is_unavailable_without_surface_payloads() {
             .preference_report
             .ignored_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("surface pack"))
+            .is_some_and(|reason| reason == SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON)
     );
 }
 

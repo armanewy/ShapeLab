@@ -45,6 +45,9 @@ editability.
   sidecars with deterministic UV/material/texture evidence. It must be
   described as blocked until manual DCC/runtime review, engine import proof,
   and engine-native package handoff are complete.
+- Surface package availability is not the same as visual Surface variation.
+  The Directions Surface mode remains disabled until textured previews and
+  material candidate support exist.
 - Foundry kits package curated authored content with review evidence and
   visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.
