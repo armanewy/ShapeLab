@@ -20,7 +20,16 @@ The product slice proves a category-independent loop:
 
 ```bash
 cargo check --workspace
+cargo build -p shape-app --release
 cargo run -p shape-app --release
+```
+
+On Windows, launch the release executable directly when you want only the app
+window and no extra console window:
+
+```powershell
+$env:SHAPE_LAB_PREVIEW_CATALOG="1"
+Start-Process .\target\release\shape-app.exe
 ```
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
@@ -30,16 +39,33 @@ Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPOR
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- seventeen installed Visual Foundry kit-backed profiles available to preview/developer catalogs, including the original Visual Foundry families, Roman Timber Bridge HQ, promoted gear kits, and the hidden MOBA Hero Clay MVP
-- a Choose screen, direction board, customizer deck, pack workspace, and export flow
-- whole-model candidate cards and whole-model customizer previews
+- seventeen installed Visual Foundry kit-backed profiles available to preview/developer catalogs, including the original Visual Foundry families, Roman Timber Bridge HQ, promoted gear kits, and the Hero Character preview kit
+- an asset-family grouped Choose list, direction board, customizer deck, pack workspace, and export flow
+- whole-model candidate cards and DPI-aware whole-model customizer previews
 - reducer-backed locks, undo, save/open, current export, and pack export
 - background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
 - branch-preserving `.shapelab-foundry.json` save/open, grouped OBJ export, and canonical model-package export
 
-Startup shows the Visual Foundry "Choose what to make" home screen. Pending
-kits are hidden from the default novice catalog until review approval is
+Startup shows the Visual Foundry "Choose what to make" home screen. The Choose
+catalog is a grouped list by asset family, with one Start action per template.
+Pending kits are hidden from the default novice catalog until review approval is
 recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
+
+## Manual Dogfood Pass 1
+
+Use this pass to make one Sci-Fi Crate and export it through the product UI.
+
+1. Launch the release app with `SHAPE_LAB_PREVIEW_CATALOG=1`.
+2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
+3. Wait for the status strip to show the model and preview are ready.
+4. Open Directions, generate directions, and choose one coherent whole-model option.
+5. Adjust one or two Customize controls only if the controls are clear.
+6. Open Export and export the current asset to a local test directory.
+7. Confirm the export path contains the expected package files and grouped OBJ output.
+
+During this pass, the app should not expose raw provider IDs, semantic IDs,
+compiler/decompiler wording, scalar paths, or internal kit planning labels in the
+asset-user UI.
 
 ## Architecture
 
