@@ -6,7 +6,10 @@
   only where needed by tests, benchmarks, and strict reconstruction work.
 - Imported arbitrary meshes are not semantically editable.
 - Topology is generated from the implicit field and is not stable between revisions.
-- There are no UVs, materials, rigging, or animation.
+- General Visual Foundry assets do not have UVs, materials, rigging, or
+  animation. The headless Sci-Fi Crate static-prop package is the narrow
+  exception: Surface Lab v1 emits deterministic UV/material/texture evidence
+  for that one profile only.
 - Candidate generation can propose semantic scalar edits, structural part choices, duplicated cuts, and grouped cut-operation edits, but it is still not a general-purpose modeler.
 - The viewport and thumbnails use a deterministic CPU renderer and bounded
   preview caches. A native GPU viewport/render backend is still future work.
@@ -29,9 +32,11 @@
   questions. It cannot automatically decide whether output looks toy-like,
   art-directed, or better than a curated Blender/Houdini kit.
 - The Sci-Fi Crate static-prop readiness package emits a real frozen model
-  package, grouped OBJ, proxy LOD OBJs, material-slot policy, collision proxy,
-  and visual evidence. It is still blocked for a full game-ready claim because
-  UV layout, direct GLB handoff, and manual DCC/runtime review are not complete.
+  package, grouped OBJ, proxy LOD OBJs, collision proxy, visual evidence,
+  geometry-only GLB, and a Surface Lab v1 package with deterministic UVs,
+  material slots, procedural texture PNGs, and surface evidence. It is still
+  blocked for a full game-ready claim because manual DCC/runtime review,
+  engine import proof, and engine-native package handoff are not complete.
 - `moba-hero-clay` remains clay mesh only. It does not claim Dota/IP
   reconstruction, UVs, materials, textures, rigging, animation, marketplace
   readiness, or arbitrary imported mesh editability.

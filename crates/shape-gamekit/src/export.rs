@@ -11,6 +11,7 @@ use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 
+use crate::surface::{SurfaceArtifact, validate_surface_artifact_with_root};
 use crate::{CollisionProxy, GameAssetValidationIssue};
 
 /// Current schema version for static-prop game-ready package manifests.
@@ -42,6 +43,9 @@ pub struct StaticPropGameReadyPackage {
     pub material_slots: Vec<MaterialSlotAssignment>,
     /// UV readiness policy.
     pub uv_policy: UvPolicy,
+    /// Concrete surface artifact reference, when emitted.
+    #[serde(default)]
+    pub surface_artifact: Option<String>,
     /// Collision proxy evidence.
     pub collision: StaticPropCollision,
     /// DCC/runtime handoff evidence.
@@ -113,13 +117,14 @@ pub struct MaterialSlotAssignment {
 }
 
 /// Readiness status for a feature or handoff.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StaticPropFeatureStatus {
     /// The feature exists and passed automated validation.
     Ready,
     /// The feature is represented by policy only.
     PolicyOnly,
     /// The feature is not implemented in this package.
+    #[default]
     NotImplemented,
     /// Human review is required.
     ManualRequired,
@@ -162,6 +167,15 @@ pub struct StaticPropHandoff {
     pub glb_status: StaticPropFeatureStatus,
     /// Stable blocker code when GLB is unavailable.
     pub glb_blocker_code: Option<String>,
+    /// DCC/runtime import proof artifact, when available.
+    #[serde(default)]
+    pub engine_import_proof: Option<String>,
+    /// Engine/DCC import proof status.
+    #[serde(default)]
+    pub engine_import_status: StaticPropFeatureStatus,
+    /// Engine-native package status.
+    #[serde(default)]
+    pub engine_native_package_status: StaticPropFeatureStatus,
 }
 
 /// Visual evidence artifact references.
@@ -302,6 +316,7 @@ fn validate_static_prop_game_ready_package_inner(
     validate_lod_policy(&mut builder, &package.lod_policy);
     validate_material_slots(&mut builder, &package.material_slots);
     validate_uv_policy(&mut builder, &package.uv_policy);
+    validate_surface_artifact_ref(&mut builder, package);
     validate_collision(&mut builder, &package.collision);
     validate_handoff(&mut builder, &package.handoff);
     validate_visual_evidence(&mut builder, &package.visual_evidence);
@@ -543,6 +558,26 @@ fn validate_uv_policy(builder: &mut StaticPropReadinessReportBuilder, policy: &U
     }
 }
 
+fn validate_surface_artifact_ref(
+    builder: &mut StaticPropReadinessReportBuilder,
+    package: &StaticPropGameReadyPackage,
+) {
+    if package.uv_policy.status == StaticPropFeatureStatus::Ready {
+        let present = package
+            .surface_artifact
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+        builder.require(
+            "surface_artifact_recorded_for_ready_uvs",
+            present,
+            Some("surface_artifact"),
+            "missing_surface_artifact",
+            "Ready UV policy references a concrete surface artifact.",
+            "Ready UV policy must reference a concrete surface artifact.",
+        );
+    }
+}
+
 fn validate_artifact_paths(
     builder: &mut StaticPropReadinessReportBuilder,
     package: &StaticPropGameReadyPackage,
@@ -611,6 +646,35 @@ fn validate_artifact_paths(
             root,
             "handoff.glb_artifact",
             package.handoff.glb_artifact.as_deref().unwrap_or(""),
+            ExpectedArtifactPath::File,
+        );
+        if package.uv_policy.status == StaticPropFeatureStatus::Ready
+            || package.surface_artifact.is_some()
+        {
+            validate_surface_glb_artifact(
+                builder,
+                root,
+                package.handoff.glb_artifact.as_deref().unwrap_or(""),
+                package.surface_artifact.as_deref().unwrap_or(""),
+            );
+        }
+    }
+    if let Some(surface_artifact) = package.surface_artifact.as_deref() {
+        validate_path_exists(
+            builder,
+            root,
+            "surface_artifact",
+            surface_artifact,
+            ExpectedArtifactPath::File,
+        );
+        validate_surface_artifact_payload(builder, package, root, surface_artifact);
+    }
+    if package.handoff.engine_import_status == StaticPropFeatureStatus::Ready {
+        validate_path_exists(
+            builder,
+            root,
+            "handoff.engine_import_proof",
+            package.handoff.engine_import_proof.as_deref().unwrap_or(""),
             ExpectedArtifactPath::File,
         );
     }
@@ -685,6 +749,130 @@ fn validate_path_exists(
     );
     if exists && expected == ExpectedArtifactPath::File {
         validate_artifact_file_content(builder, subject, relative_path, &resolved);
+    }
+}
+
+fn validate_surface_artifact_payload(
+    builder: &mut StaticPropReadinessReportBuilder,
+    package: &StaticPropGameReadyPackage,
+    root: &Path,
+    relative_path: &str,
+) {
+    if relative_path.trim().is_empty() {
+        return;
+    }
+    let path = Path::new(relative_path);
+    if !is_portable_relative_path(path) {
+        return;
+    }
+    let resolved = root.join(path);
+    let Ok(bytes) = fs::read(&resolved) else {
+        builder.block(
+            Some("surface_artifact"),
+            "surface_artifact_unreadable",
+            "Surface artifact could not be read for validation.",
+        );
+        return;
+    };
+    let Ok(artifact) = serde_json::from_slice::<SurfaceArtifact>(&bytes) else {
+        builder.block(
+            Some("surface_artifact"),
+            "surface_artifact_json_invalid",
+            "Surface artifact must be valid Surface Lab artifact JSON.",
+        );
+        return;
+    };
+    builder.require(
+        "surface_artifact_profile_matches_package",
+        artifact.profile_id == package.profile_id,
+        Some("surface_artifact.profile_id"),
+        "surface_artifact_profile_mismatch",
+        "Surface artifact profile matches the static prop package.",
+        "Surface artifact profile must match the static prop package.",
+    );
+    builder.require(
+        "surface_artifact_recipe_hash_matches_package",
+        artifact.source_recipe_hash == package.source_recipe_hash,
+        Some("surface_artifact.source_recipe_hash"),
+        "surface_artifact_recipe_hash_mismatch",
+        "Surface artifact source recipe hash matches the static prop package.",
+        "Surface artifact source recipe hash must match the static prop package.",
+    );
+    builder.require(
+        "surface_artifact_fingerprint_matches_package",
+        artifact.source_artifact_fingerprint == package.artifact_fingerprint,
+        Some("surface_artifact.source_artifact_fingerprint"),
+        "surface_artifact_fingerprint_mismatch",
+        "Surface artifact fingerprint matches the static prop package.",
+        "Surface artifact fingerprint must match the static prop package.",
+    );
+    builder.require(
+        "surface_artifact_frozen_mesh_matches_package",
+        artifact.frozen_mesh_ref == package.frozen_mesh.canonical_model_package,
+        Some("surface_artifact.frozen_mesh_ref"),
+        "surface_artifact_frozen_mesh_mismatch",
+        "Surface artifact frozen mesh reference matches the static prop package.",
+        "Surface artifact frozen mesh reference must match the static prop package.",
+    );
+    let report = validate_surface_artifact_with_root(&artifact, root);
+    if report.is_ready() {
+        builder.pass(
+            "surface_artifact_payload_ready",
+            "Surface artifact JSON and referenced payloads passed validation.",
+        );
+    } else {
+        for issue in report.blockers {
+            builder.block(
+                issue
+                    .subject
+                    .map(|subject| format!("surface_artifact.{subject}"))
+                    .or_else(|| Some("surface_artifact".to_owned())),
+                issue.code,
+                issue.message,
+            );
+        }
+    }
+}
+
+fn validate_surface_glb_artifact(
+    builder: &mut StaticPropReadinessReportBuilder,
+    root: &Path,
+    relative_path: &str,
+    expected_surface_artifact_ref: &str,
+) {
+    if relative_path.trim().is_empty() {
+        return;
+    }
+    let path = Path::new(relative_path);
+    if !is_portable_relative_path(path) {
+        return;
+    }
+    let resolved = root.join(path);
+    let Ok(bytes) = fs::read(&resolved) else {
+        builder.block(
+            Some("handoff.glb_artifact"),
+            "surface_glb_unreadable",
+            "Surface GLB could not be read for validation.",
+        );
+        return;
+    };
+    let report = crate::gltf::validate_static_prop_surface_glb_with_artifact_ref(
+        &bytes,
+        expected_surface_artifact_ref,
+    );
+    if report.valid {
+        builder.pass(
+            "surface_glb_payload_ready",
+            "Surface GLB includes validated TEXCOORD_0 payload metadata.",
+        );
+    } else {
+        for code in report.issue_codes {
+            builder.block(
+                Some("handoff.glb_artifact"),
+                code,
+                "Surface GLB must include a valid TEXCOORD_0 handoff.",
+            );
+        }
     }
 }
 
@@ -868,6 +1056,37 @@ fn validate_handoff(builder: &mut StaticPropReadinessReportBuilder, handoff: &St
         );
     } else {
         builder.pass("glb_handoff_ready", "GLB handoff artifact is present.");
+    }
+    if handoff.engine_import_status != StaticPropFeatureStatus::Ready {
+        builder.block(
+            Some("handoff.engine_import_status"),
+            "engine_import_proof_missing",
+            "DCC/runtime engine import proof is missing.",
+        );
+    } else if handoff
+        .engine_import_proof
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        builder.block(
+            Some("handoff.engine_import_proof"),
+            "engine_import_proof_missing",
+            "Engine import proof is marked ready but no proof artifact is referenced.",
+        );
+    } else {
+        builder.pass(
+            "engine_import_proof_ready",
+            "DCC/runtime import proof is present.",
+        );
+    }
+    if handoff.engine_native_package_status != StaticPropFeatureStatus::Ready {
+        builder.block(
+            Some("handoff.engine_native_package_status"),
+            "engine_native_package_not_implemented",
+            "Unity, Unreal, Godot, or other engine-native packages are not implemented.",
+        );
     }
 }
 
