@@ -27,13 +27,14 @@ use crate::foundry::{
     kit_view::built_in_kit_card_views,
     panels::{customize, directions, history, pack},
     run_foundry_job,
+    state::DEFAULT_PREVIEW_PIXELS,
     ui::{
         copy::WORKFLOW_STEPS,
         theme::apply_visual_foundry_theme,
         tokens::VisualFoundryTokens,
         widgets::{
-            ActionSpec, ButtonTone, ProfileCardSpec, SectionHeaderSpec, StatusPillSpec, StatusTone,
-            action_button, profile_card, section_header, status_pill,
+            ActionSpec, ButtonTone, SectionHeaderSpec, StatusPillSpec, StatusTone, action_button,
+            section_header, status_pill,
         },
     },
 };
@@ -70,6 +71,7 @@ const NEED_RESET_REASON: &str = "This control is already at its starting value."
 const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
+const MAX_CURRENT_PREVIEW_PIXELS: u32 = 1024;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const ACTION_EXPORT: &str = "Export";
 const ACTION_SAVE: &str = "Save";
@@ -515,33 +517,20 @@ impl FoundryDesktopApp {
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.columns(2, |columns| {
-                for (index, profile) in profiles.into_iter().enumerate() {
-                    let column = &mut columns[index % 2];
-                    let description = format!(
-                        "{}. {}",
-                        profile.style_name,
-                        profile_description(&profile.fixture.slug)
-                    );
-                    let response = profile_card(
-                        column,
-                        ProfileCardSpec {
-                            title: profile.label,
-                            description: &description,
-                            badge: Some(&profile.quality_badge),
-                            action: ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
-                        },
-                    );
-                    if response
-                        .action
+            for group in product_home_profile_groups(profiles) {
+                show_home_profile_group_header(ui, &group);
+                ui.add_space(6.0);
+                for profile in &group.profiles {
+                    if show_home_profile_row(ui, profile)
                         .as_ref()
                         .is_some_and(egui::Response::clicked)
                     {
-                        self.load_fixture(profile.fixture, column.ctx());
+                        self.load_fixture(profile.fixture.clone(), ui.ctx());
                     }
-                    column.add_space(8.0);
+                    ui.add_space(6.0);
                 }
-            });
+                ui.add_space(10.0);
+            }
         });
     }
 
@@ -610,7 +599,11 @@ impl FoundryDesktopApp {
             )
             .clicked()
             {
-                commands.push(FoundryAppCommand::RequestPreview);
+                let preview_pixels = current_preview_pixels_for_context(ui.ctx());
+                commands.push(FoundryAppCommand::RequestPreview {
+                    width: preview_pixels,
+                    height: preview_pixels,
+                });
             }
         });
         ui.add_space(8.0);
@@ -967,7 +960,8 @@ impl FoundryDesktopApp {
             .active_jobs
             .values()
             .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
-        ui.horizontal(|ui| {
+        let draw_edge = max_edge.min(ui.available_width().max(1.0));
+        ui.vertical_centered(|ui| {
             if let Some(preview) = &preview {
                 let preview_id = format!("current-{}", preview.preview_id);
                 show_rgba_preview(
@@ -979,10 +973,9 @@ impl FoundryDesktopApp {
                         rgba8: &preview.rgba8,
                         width: preview.width,
                         height: preview.height,
-                        max_edge,
+                        max_edge: draw_edge,
                     },
                 );
-                ui.weak("Whole-model preview");
             } else if has_output {
                 if rendering_preview {
                     ui.weak("Rendering preview...");
@@ -1071,7 +1064,8 @@ impl FoundryDesktopApp {
         }
 
         if schedule_preview {
-            match self.state.request_preview(128, 128) {
+            let preview_pixels = current_preview_pixels_for_context(ctx);
+            match self.state.request_preview(preview_pixels, preview_pixels) {
                 Ok(effects) => self.apply_effects(effects, ctx),
                 Err(error) => self.state.status = Some(error.to_string()),
             }
@@ -1394,18 +1388,28 @@ fn profile_description(slug: &str) -> &'static str {
     }
 }
 
+#[derive(Clone)]
 struct ProductHomeProfile {
-    label: &'static str,
+    label: String,
     fixture: FoundryFixtureCatalog,
+    family_id: String,
+    family_name: String,
     quality_badge: String,
     style_name: String,
+    category_chips: Vec<String>,
+}
+
+struct ProductHomeProfileGroup {
+    family_id: String,
+    family_name: String,
+    profiles: Vec<ProductHomeProfile>,
 }
 
 fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProfile> {
     let cards = built_in_kit_card_views();
     built_in_fixture_catalogs_with_labels()
         .into_iter()
-        .filter_map(|(label, fixture)| {
+        .filter_map(|(_label, fixture)| {
             let card = cards
                 .iter()
                 .find(|card| card.source_profile_slug.as_deref() == Some(fixture.slug.as_str()))?;
@@ -1413,13 +1417,53 @@ fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProf
                 return None;
             }
             Some(ProductHomeProfile {
-                label,
+                label: card.display_name.clone(),
                 fixture,
+                family_id: card.family_id.clone(),
+                family_name: card.family_name.clone(),
                 quality_badge: card.quality_badge.clone(),
                 style_name: card.style_name.clone(),
+                category_chips: card.category_chips.clone(),
             })
         })
         .collect()
+}
+
+fn product_home_profile_groups(profiles: Vec<ProductHomeProfile>) -> Vec<ProductHomeProfileGroup> {
+    let mut groups = BTreeMap::<String, (String, Vec<ProductHomeProfile>)>::new();
+    for profile in profiles {
+        groups
+            .entry(profile.family_id.clone())
+            .or_insert_with(|| (profile.family_name.clone(), Vec::new()))
+            .1
+            .push(profile);
+    }
+    let mut groups = groups
+        .into_iter()
+        .map(
+            |(family_id, (family_name, profiles))| ProductHomeProfileGroup {
+                family_id,
+                family_name,
+                profiles,
+            },
+        )
+        .collect::<Vec<_>>();
+    groups.sort_by(|left, right| {
+        left.family_name
+            .cmp(&right.family_name)
+            .then_with(|| left.family_id.cmp(&right.family_id))
+    });
+    groups
+}
+
+fn current_preview_pixels_for_context(ctx: &egui::Context) -> u32 {
+    current_preview_pixels_for_scale(ctx.pixels_per_point())
+}
+
+fn current_preview_pixels_for_scale(pixels_per_point: f32) -> u32 {
+    let scale = pixels_per_point.max(1.0);
+    ((DEFAULT_PREVIEW_PIXELS as f32 * scale).ceil() as u32)
+        .clamp(DEFAULT_PREVIEW_PIXELS, MAX_CURRENT_PREVIEW_PIXELS)
 }
 
 pub(crate) fn default_product_home_profile_count() -> usize {
@@ -1651,6 +1695,93 @@ pub(crate) fn default_app_launches_on_home() -> bool {
     app.tab == FoundryTab::Home && app.state.document.is_none()
 }
 
+fn show_home_profile_group_header(ui: &mut egui::Ui, group: &ProductHomeProfileGroup) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(&group.family_name)
+                .color(colors.text)
+                .strong(),
+        );
+        ui.label(
+            RichText::new(home_profile_group_count_label(group.profiles.len()))
+                .color(colors.text_subtle)
+                .small(),
+        );
+    });
+}
+
+fn home_profile_group_count_label(count: usize) -> String {
+    match count {
+        1 => "1 template".to_owned(),
+        count => format!("{count} templates"),
+    }
+}
+
+fn show_home_profile_row(
+    ui: &mut egui::Ui,
+    profile: &ProductHomeProfile,
+) -> Option<egui::Response> {
+    let mut action = None;
+    product_card(ui, false, |ui| {
+        let content_width = ui.available_width().max(220.0);
+        if content_width < 520.0 {
+            show_home_profile_summary(ui, profile, content_width);
+            ui.add_space(8.0);
+            action = Some(action_button(
+                ui,
+                &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
+            ));
+        } else {
+            ui.horizontal(|ui| {
+                let text_width = (content_width - 132.0).max(220.0);
+                show_home_profile_summary(ui, profile, text_width);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    action = Some(action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
+                    ));
+                });
+            });
+        }
+    });
+    action
+}
+
+fn show_home_profile_summary(ui: &mut egui::Ui, profile: &ProductHomeProfile, width: f32) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        ui.horizontal_wrapped(|ui| {
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
+            );
+            for chip in &profile.category_chips {
+                let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(profile.label.as_str())
+                .color(colors.text)
+                .strong(),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!(
+                    "{}. {}",
+                    profile.style_name,
+                    profile_description(&profile.fixture.slug)
+                ))
+                .color(colors.text_muted)
+                .small(),
+            )
+            .wrap(),
+        );
+    });
+}
+
 fn show_direction_candidate_card(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -1669,7 +1800,7 @@ fn show_direction_candidate_card(
                 rgba8: &candidate.rgba8,
                 width: candidate.width,
                 height: candidate.height,
-                max_edge: 150.0,
+                max_edge: 128.0,
             },
         );
         ui.add_space(6.0);
@@ -2237,10 +2368,19 @@ fn show_rgba_preview(
         preview.width,
         preview.height,
     );
-    let scale =
-        (preview.max_edge / preview.width as f32).min(preview.max_edge / preview.height as f32);
-    let size = egui::vec2(preview.width as f32 * scale, preview.height as f32 * scale);
-    ui.image((texture.id(), size));
+    if let Some(size) = scaled_preview_size(preview.width, preview.height, preview.max_edge) {
+        ui.image((texture.id(), size));
+    }
+}
+
+fn scaled_preview_size(width: u32, height: u32, max_edge: f32) -> Option<egui::Vec2> {
+    if width == 0 || height == 0 || max_edge <= 0.0 {
+        return None;
+    }
+    let scale = (max_edge / width as f32)
+        .min(max_edge / height as f32)
+        .min(1.0);
+    Some(egui::vec2(width as f32 * scale, height as f32 * scale))
 }
 
 #[cfg(test)]
@@ -2331,7 +2471,7 @@ mod tests {
         let profiles = product_home_profiles(true);
         let labels = profiles
             .iter()
-            .map(|profile| profile.label)
+            .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(profiles.len(), 17);
@@ -2351,7 +2491,121 @@ mod tests {
         assert!(labels.contains(&"Hero Helmet"));
         assert!(labels.contains(&"Pauldron Pair"));
         assert!(labels.contains(&"Chest Armor"));
-        assert!(labels.contains(&"Hero Foundry, Clay MVP"));
+        assert!(labels.contains(&"Hero Character"));
+        assert!(!labels.iter().any(|label| label.contains("MVP")));
+    }
+
+    #[test]
+    fn product_home_profiles_group_by_asset_family() {
+        let profiles = product_home_profiles(true);
+        let groups = product_home_profile_groups(profiles.clone());
+        let family_names = groups
+            .iter()
+            .map(|group| group.family_name.as_str())
+            .collect::<Vec<_>>();
+        let mut sorted_family_names = family_names.clone();
+        sorted_family_names.sort_unstable();
+
+        assert_eq!(family_names, sorted_family_names);
+        assert!(family_names.contains(&"Bridge"));
+        assert!(family_names.contains(&"Crate"));
+        assert!(family_names.contains(&"Lamp"));
+        assert!(family_names.contains(&"Hero Character"));
+        assert!(!family_names.iter().any(|name| name.contains("MVP")));
+        assert!(
+            groups
+                .iter()
+                .all(|group| !group.family_id.is_empty() && !group.family_name.is_empty())
+        );
+
+        let expected_labels = profiles
+            .iter()
+            .map(|profile| profile.label.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual_labels = groups
+            .iter()
+            .flat_map(|group| group.profiles.iter().map(|profile| profile.label.as_str()))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual_labels, expected_labels);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.profiles.len())
+                .sum::<usize>(),
+            profiles.len()
+        );
+
+        let bridge = groups
+            .iter()
+            .find(|group| group.family_name == "Bridge")
+            .expect("bridge family group");
+        let bridge_labels = bridge
+            .profiles
+            .iter()
+            .map(|profile| profile.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(bridge.profiles.len(), 2);
+        assert!(bridge_labels.contains(&"Roman Timber Bridge"));
+        assert!(bridge_labels.contains(&"Roman Timber Bridge HQ"));
+    }
+
+    #[test]
+    fn product_home_grouping_uses_stable_family_ids() {
+        let profiles = product_home_profiles(true);
+        let bridge = profiles
+            .iter()
+            .find(|profile| profile.label == "Roman Timber Bridge")
+            .expect("bridge profile")
+            .clone();
+        let mut crate_profile = profiles
+            .iter()
+            .find(|profile| profile.label == "Sci-Fi Industrial Crate")
+            .expect("crate profile")
+            .clone();
+        crate_profile.family_name = bridge.family_name.clone();
+
+        let groups = product_home_profile_groups(vec![bridge.clone(), crate_profile.clone()]);
+        assert_eq!(groups.len(), 2);
+        assert!(
+            groups
+                .iter()
+                .any(|group| group.family_id == bridge.family_id)
+        );
+        assert!(
+            groups
+                .iter()
+                .any(|group| group.family_id == crate_profile.family_id)
+        );
+    }
+
+    #[test]
+    fn preview_draw_size_does_not_upscale_low_resolution_images() {
+        assert_eq!(
+            scaled_preview_size(128, 128, 420.0).expect("valid preview"),
+            egui::vec2(128.0, 128.0)
+        );
+        assert_eq!(
+            scaled_preview_size(512, 256, 256.0).expect("valid preview"),
+            egui::vec2(256.0, 128.0)
+        );
+        assert!(scaled_preview_size(0, 128, 256.0).is_none());
+    }
+
+    #[test]
+    fn current_preview_pixels_are_dpi_aware_and_capped() {
+        assert_eq!(
+            current_preview_pixels_for_scale(1.0),
+            DEFAULT_PREVIEW_PIXELS
+        );
+        assert_eq!(current_preview_pixels_for_scale(1.5), 768);
+        assert_eq!(
+            current_preview_pixels_for_scale(0.5),
+            DEFAULT_PREVIEW_PIXELS
+        );
+        assert_eq!(
+            current_preview_pixels_for_scale(4.0),
+            MAX_CURRENT_PREVIEW_PIXELS
+        );
     }
 
     #[test]

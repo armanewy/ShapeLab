@@ -35,7 +35,7 @@ use super::view_model::{
 };
 
 const FIRST_JOB_ID: u64 = 1;
-const DEFAULT_PREVIEW_PIXELS: u32 = 128;
+pub(crate) const DEFAULT_PREVIEW_PIXELS: u32 = 512;
 
 /// Last rendered current-document preview.
 #[derive(Debug, Clone, PartialEq)]
@@ -230,8 +230,8 @@ impl FoundryAppState {
                 self.preview_control_value(control_id, value)
             }
             FoundryAppCommand::RequestBuild => self.request_build(),
-            FoundryAppCommand::RequestPreview => {
-                self.request_preview(DEFAULT_PREVIEW_PIXELS, DEFAULT_PREVIEW_PIXELS)
+            FoundryAppCommand::RequestPreview { width, height } => {
+                self.request_preview(width, height)
             }
             FoundryAppCommand::Save => self.save(),
             FoundryAppCommand::SaveAs(path) => self.save_as(path),

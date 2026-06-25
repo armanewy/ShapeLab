@@ -26,7 +26,7 @@ use shape_search::foundry::{
 use super::view_model::{FoundryCandidateCard, FoundryPackView};
 
 const CURRENT_PREVIEW_ID: &str = "current";
-const CANDIDATE_PREVIEW_PIXELS: u32 = 96;
+const CANDIDATE_PREVIEW_PIXELS: u32 = 128;
 
 /// Deterministic background work requested by the Foundry app state.
 #[derive(Debug, Clone, PartialEq)]

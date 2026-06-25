@@ -43,7 +43,12 @@ pub(crate) enum FoundryAppCommand {
     /// Request an exact rebuild for the current document.
     RequestBuild,
     /// Request fresh whole-model preview images for current state.
-    RequestPreview,
+    RequestPreview {
+        /// Requested image width.
+        width: u32,
+        /// Requested image height.
+        height: u32,
+    },
     /// Persist the current project to its existing path.
     Save,
     /// Persist the current project to a new path.

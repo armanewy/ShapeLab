@@ -10,6 +10,10 @@ pub(crate) struct FoundryKitCardView {
     pub source_profile_slug: Option<String>,
     /// Kit display name.
     pub display_name: String,
+    /// Stable asset-family ID.
+    pub family_id: String,
+    /// Asset-family display name.
+    pub family_name: String,
     /// Quality tier badge.
     pub quality_badge: String,
     /// Style display name.
@@ -34,12 +38,23 @@ pub(crate) fn built_in_kit_card_views() -> Vec<FoundryKitCardView> {
         .map(|(_, package)| {
             let visibility =
                 foundry_kit_visibility_decision(&package.kit, &package.review_manifest, false);
+            let source_profile_slug = package.kit.source_profile_slug;
+            let display_name =
+                product_kit_display_name(source_profile_slug.as_deref(), &package.kit.display_name);
+            let category_chips =
+                product_category_chips(source_profile_slug.as_deref(), package.kit.category_chips);
+            let family_id = package.family_blueprint.family_id.clone();
             FoundryKitCardView {
-                source_profile_slug: package.kit.source_profile_slug,
-                display_name: package.kit.display_name,
+                source_profile_slug,
+                display_name,
+                family_id: family_id.clone(),
+                family_name: product_family_display_name(
+                    &family_id,
+                    &package.family_blueprint.display_name,
+                ),
                 quality_badge: package.kit.quality_tier.label().to_owned(),
                 style_name: package.style_pack.display_name,
-                category_chips: package.kit.category_chips,
+                category_chips,
                 verified_badge: if visibility.visible {
                     "Verified".to_owned()
                 } else {
@@ -55,6 +70,30 @@ pub(crate) fn built_in_kit_card_views() -> Vec<FoundryKitCardView> {
             }
         })
         .collect()
+}
+
+fn product_kit_display_name(source_profile_slug: Option<&str>, display_name: &str) -> String {
+    match source_profile_slug {
+        Some("moba-hero-clay") => "Hero Character".to_owned(),
+        _ => display_name.to_owned(),
+    }
+}
+
+fn product_family_display_name(family_id: &str, display_name: &str) -> String {
+    match family_id {
+        "moba_hero_clay" => "Hero Character".to_owned(),
+        _ => display_name.to_owned(),
+    }
+}
+
+fn product_category_chips(
+    source_profile_slug: Option<&str>,
+    category_chips: Vec<String>,
+) -> Vec<String> {
+    match source_profile_slug {
+        Some("moba-hero-clay") => vec!["Hero".to_owned(), "Character".to_owned()],
+        _ => category_chips,
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +115,7 @@ mod tests {
         assert!(
             cards
                 .iter()
-                .any(|card| card.display_name == "Hero Foundry, Clay MVP")
+                .any(|card| card.display_name == "Hero Character")
         );
         assert!(cards.iter().any(|card| card.quality_badge == "Usable"));
         assert!(cards.iter().any(|card| card.quality_badge == "Prototype"));
@@ -85,6 +124,8 @@ mod tests {
             let labels = [
                 card.source_profile_slug.as_deref().unwrap_or(""),
                 card.display_name.as_str(),
+                card.family_id.as_str(),
+                card.family_name.as_str(),
                 card.quality_badge.as_str(),
                 card.style_name.as_str(),
                 card.verified_badge.as_str(),
@@ -96,9 +137,17 @@ mod tests {
                     None,
                     "kit card label exposes internal product term: {label}"
                 );
+                assert!(
+                    !label.to_ascii_lowercase().contains("mvp"),
+                    "kit card label exposes planning copy: {label}"
+                );
             }
             for chip in &card.category_chips {
                 assert_eq!(first_forbidden_product_term(chip), None);
+                assert!(
+                    !chip.to_ascii_lowercase().contains("mvp"),
+                    "kit category chip exposes planning copy: {chip}"
+                );
             }
             if let Some(reason) = &card.hidden_reason {
                 assert_eq!(first_forbidden_product_term(reason), None);
