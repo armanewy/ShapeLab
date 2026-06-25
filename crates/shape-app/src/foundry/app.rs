@@ -33,8 +33,8 @@ use crate::foundry::{
         theme::apply_visual_foundry_theme,
         tokens::VisualFoundryTokens,
         widgets::{
-            ActionSpec, ButtonTone, SectionHeaderSpec, StatusPillSpec, StatusTone, action_button,
-            section_header, status_pill,
+            ActionSpec, BannerTone, ButtonTone, SectionHeaderSpec, StatusBannerSpec,
+            StatusPillSpec, StatusTone, action_button, section_header, status_banner, status_pill,
         },
     },
 };
@@ -47,6 +47,7 @@ pub(crate) struct FoundryDesktopApp {
     texture_cache: FoundryTextureCache,
     recent_projects: Vec<PathBuf>,
     developer_preview_catalog: bool,
+    requested_start_window_mode: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -76,17 +77,20 @@ const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const ACTION_EXPORT: &str = "Export";
 const ACTION_SAVE: &str = "Save";
 const ACTION_UNDO: &str = "Undo";
+const ACTION_PROJECT_MENU: &str = "Project";
 const ACTION_OPEN_PROJECT: &str = "Open Project";
 const ACTION_SAVE_PROJECT: &str = "Save Project";
 const ACTION_SAVE_PROJECT_AS: &str = "Save Project As";
-const ACTION_NEW_ASSET: &str = "New Asset";
-const ACTION_PROJECT_HISTORY: &str = "Project History";
+const ACTION_START_ANOTHER_ASSET: &str = "Start Another Asset";
+const ACTION_PROJECT_HISTORY: &str = "History";
 const ACTION_SAVE_AS: &str = "Save As";
 const ACTION_LOAD: &str = "Load";
 const ACTION_SWITCH_TO_REVISION: &str = "Switch to revision";
 const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
-const ACTION_GENERATE_DIRECTIONS: &str = "Generate Directions";
+const ACTION_GENERATE_DIRECTIONS: &str = "Generate 6 Directions";
+const ACTION_GENERATING_DIRECTIONS: &str = "Generating...";
+const ACTION_CHOOSE_TEMPLATE: &str = "Choose Template";
 const ACTION_BUILD_ASSET: &str = "Build Asset";
 const ACTION_REFRESH_PREVIEW: &str = "Refresh Preview";
 const ACTION_SWITCH: &str = "Switch";
@@ -94,23 +98,24 @@ const ACTION_BRANCH: &str = "Branch";
 const ACTION_EXPORT_CURRENT_ASSET: &str = "Export Current Asset";
 const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
-const ACTION_SELECT: &str = "Select";
-const ACTION_CHOOSE_DIRECTION: &str = "Choose Direction";
+const ACTION_SELECT: &str = "Preview Direction";
+const ACTION_CHOOSE_DIRECTION: &str = "Use This Direction";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
 const ACTION_LOCK: &str = "Lock";
 const ACTION_FOCUS: &str = "Focus";
-const ACTION_TRY: &str = "Try";
-const ACTION_APPLY: &str = "Apply";
-const RENDERED_ACTION_LABELS: [&str; 35] = [
+const ACTION_TRY: &str = "Preview";
+const ACTION_APPLY: &str = "Use Option";
+const RENDERED_ACTION_LABELS: [&str; 38] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
+    ACTION_PROJECT_MENU,
     ACTION_OPEN_PROJECT,
     ACTION_SAVE_PROJECT,
     ACTION_SAVE_PROJECT_AS,
-    ACTION_NEW_ASSET,
+    ACTION_START_ANOTHER_ASSET,
     ACTION_PROJECT_HISTORY,
     ACTION_SAVE_AS,
     ACTION_LOAD,
@@ -118,6 +123,8 @@ const RENDERED_ACTION_LABELS: [&str; 35] = [
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
     ACTION_GENERATE_DIRECTIONS,
+    ACTION_GENERATING_DIRECTIONS,
+    ACTION_CHOOSE_TEMPLATE,
     ACTION_BUILD_ASSET,
     ACTION_REFRESH_PREVIEW,
     "Refine",
@@ -150,6 +157,7 @@ impl Default for FoundryDesktopApp {
             texture_cache: FoundryTextureCache::default(),
             recent_projects: Vec::new(),
             developer_preview_catalog: developer_preview_catalog_enabled(),
+            requested_start_window_mode: false,
         }
     }
 }
@@ -158,6 +166,12 @@ impl FoundryDesktopApp {
     /// Draw the Foundry workflow surface.
     pub(crate) fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.requested_start_window_mode {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            self.requested_start_window_mode = true;
+        }
         apply_visual_foundry_theme(&ctx);
         self.poll_jobs(&ctx);
 
@@ -228,6 +242,8 @@ impl FoundryDesktopApp {
             ui.add_space(8.0);
             let (save_label, save_tone) = self.save_state_pill();
             let _ = status_pill(ui, StatusPillSpec::new(save_label, save_tone));
+            ui.add_space(8.0);
+            commands.extend(self.show_project_menu(ui));
 
             let can_save = has_document && self.state.project_path.is_some();
             let save_reason = if has_document {
@@ -281,8 +297,79 @@ impl FoundryDesktopApp {
         commands
     }
 
-    fn show_step_rail(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+    fn show_project_menu(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
+        let has_document = self.state.document.is_some();
+        ui.menu_button(ACTION_PROJECT_MENU, |ui| {
+            ui.set_min_width(230.0);
+            if ui.button(ACTION_OPEN_PROJECT).clicked()
+                && let Some(path) = open_foundry_project_file()
+            {
+                commands.push(FoundryAppCommand::Load(path));
+                ui.close();
+            }
+
+            let save_response =
+                ui.add_enabled(has_document, egui::Button::new(ACTION_SAVE_PROJECT));
+            let save_response = if has_document {
+                save_response
+            } else {
+                save_response.on_disabled_hover_text(NEED_PROJECT_REASON)
+            };
+            if save_response.clicked() {
+                if self.state.project_path.is_some() {
+                    commands.push(FoundryAppCommand::Save);
+                } else if let Some(path) = save_foundry_project_file() {
+                    commands.push(FoundryAppCommand::SaveAs(path));
+                }
+                ui.close();
+            }
+
+            let save_as_response =
+                ui.add_enabled(has_document, egui::Button::new(ACTION_SAVE_PROJECT_AS));
+            let save_as_response = if has_document {
+                save_as_response
+            } else {
+                save_as_response.on_disabled_hover_text(NEED_PROJECT_REASON)
+            };
+            if save_as_response.clicked()
+                && let Some(path) = save_foundry_project_file()
+            {
+                commands.push(FoundryAppCommand::SaveAs(path));
+                ui.close();
+            }
+
+            ui.separator();
+            if ui.button(ACTION_START_ANOTHER_ASSET).clicked() {
+                self.tab = FoundryTab::Home;
+                ui.close();
+            }
+            if ui.button(ACTION_PROJECT_HISTORY).clicked() {
+                self.tab = FoundryTab::History;
+                ui.close();
+            }
+
+            if !self.recent_projects.is_empty() {
+                ui.separator();
+                ui.label(
+                    RichText::new("Recent Projects")
+                        .color(VisualFoundryTokens::dark().colors.text_muted)
+                        .small(),
+                );
+                for path in self.recent_projects.iter().take(6) {
+                    let title = project_file_title(path);
+                    if ui.button(title).clicked() {
+                        commands.push(FoundryAppCommand::Load(path.clone()));
+                        ui.close();
+                    }
+                }
+            }
+        });
+        commands
+    }
+
+    fn show_step_rail(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
+        let commands = Vec::new();
         let colors = VisualFoundryTokens::dark().colors;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Shape Lab").size(16.0).strong());
@@ -306,95 +393,6 @@ impl FoundryDesktopApp {
                 ui.label(RichText::new(step.detail).color(colors.text_muted).small());
             });
             ui.add_space(6.0);
-        }
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        ui.label(RichText::new("PROJECT").color(colors.accent_hover).small());
-        if action_button(
-            ui,
-            &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
-        )
-        .clicked()
-            && let Some(path) = open_foundry_project_file()
-        {
-            commands.push(FoundryAppCommand::Load(path));
-        }
-        let save_project_spec = action_spec(
-            self.state.document.is_some(),
-            ACTION_SAVE_PROJECT,
-            ButtonTone::Secondary,
-            NEED_PROJECT_REASON,
-        );
-        if action_button(ui, &save_project_spec).clicked() {
-            if self.state.project_path.is_some() {
-                commands.push(FoundryAppCommand::Save);
-            } else if let Some(path) = save_foundry_project_file() {
-                commands.push(FoundryAppCommand::SaveAs(path));
-            }
-        }
-        if action_button(
-            ui,
-            &action_spec(
-                self.state.document.is_some(),
-                ACTION_SAVE_PROJECT_AS,
-                ButtonTone::Secondary,
-                NEED_PROJECT_REASON,
-            ),
-        )
-        .clicked()
-            && let Some(path) = save_foundry_project_file()
-        {
-            commands.push(FoundryAppCommand::SaveAs(path));
-        }
-        if action_button(
-            ui,
-            &ActionSpec::enabled(ACTION_NEW_ASSET, ButtonTone::Secondary),
-        )
-        .clicked()
-        {
-            self.tab = FoundryTab::Home;
-        }
-        if action_button(
-            ui,
-            &ActionSpec::enabled(ACTION_PROJECT_HISTORY, ButtonTone::Secondary),
-        )
-        .clicked()
-        {
-            self.tab = FoundryTab::History;
-        }
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        ui.label(
-            RichText::new("RECENT PROJECTS")
-                .color(colors.accent_hover)
-                .small(),
-        );
-        if self.recent_projects.is_empty() {
-            ui.label(RichText::new("No recent projects yet.").color(colors.text_muted));
-            ui.label(
-                RichText::new("Saved projects will appear here.")
-                    .color(colors.text_subtle)
-                    .small(),
-            );
-        } else {
-            for path in self.recent_projects.iter().take(4) {
-                let title = project_file_title(path);
-                let response = action_button(ui, &ActionSpec::enabled(&title, ButtonTone::Quiet));
-                if response.clicked() {
-                    commands.push(FoundryAppCommand::Load(path.clone()));
-                }
-                if self.state.project_path.as_ref() == Some(path) {
-                    ui.label(
-                        RichText::new("Current project")
-                            .color(colors.text_muted)
-                            .small(),
-                    );
-                }
-            }
         }
         commands
     }
@@ -437,7 +435,7 @@ impl FoundryDesktopApp {
 
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
         if self.state.document.is_none() {
-            ("No project", StatusTone::Neutral)
+            ("Choose a template to start", StatusTone::Neutral)
         } else if self.state.project_path.is_none() {
             ("Not saved", StatusTone::Warning)
         } else if self.state.dirty {
@@ -484,6 +482,13 @@ impl FoundryDesktopApp {
         }
     }
 
+    fn directions_are_generating(&self) -> bool {
+        self.state
+            .active_jobs
+            .values()
+            .any(|request| matches!(request, FoundryJobRequest::GenerateCandidates { .. }))
+    }
+
     fn show_home(&mut self, ui: &mut egui::Ui) {
         section_header(
             ui,
@@ -508,22 +513,42 @@ impl FoundryDesktopApp {
             );
             return;
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for group in product_home_profile_groups(profiles) {
-                show_home_profile_group_header(ui, &group);
+        let mut selected_fixture = None;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                show_template_filter_bar(ui);
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("Featured")
+                        .color(VisualFoundryTokens::dark().colors.text)
+                        .size(16.0)
+                        .strong(),
+                );
                 ui.add_space(6.0);
-                for profile in &group.profiles {
-                    if show_home_profile_row(ui, profile)
-                        .as_ref()
-                        .is_some_and(egui::Response::clicked)
-                    {
-                        self.load_fixture(profile.fixture.clone(), ui.ctx());
-                    }
-                    ui.add_space(6.0);
+                let featured = profiles.iter().take(3).cloned().collect::<Vec<_>>();
+                if let Some(fixture) = show_home_profile_grid(ui, &featured) {
+                    selected_fixture = Some(fixture);
                 }
-                ui.add_space(10.0);
-            }
-        });
+                let remaining = profiles.iter().skip(3).cloned().collect::<Vec<_>>();
+                if !remaining.is_empty() {
+                    ui.add_space(14.0);
+                    ui.label(
+                        RichText::new("All templates")
+                            .color(VisualFoundryTokens::dark().colors.text)
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.add_space(6.0);
+                    if let Some(fixture) = show_home_profile_grid(ui, &remaining) {
+                        selected_fixture = Some(fixture);
+                    }
+                }
+            });
+        if let Some(fixture) = selected_fixture {
+            self.load_fixture(fixture, ui.ctx());
+        }
     }
 
     fn show_directions(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
@@ -537,26 +562,67 @@ impl FoundryDesktopApp {
             },
         );
         if self.state.document.is_none() {
-            product_empty_state(
+            commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
                 "Pick a template or open a project to generate directions.",
-            );
+            ));
             return commands;
         }
         ui.add_space(12.0);
 
+        let generating = self.directions_are_generating();
+        let has_output = self.state.current_output.is_some();
+        let wide_layout = ui.available_width() >= 1120.0;
+        if wide_layout {
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(312.0);
+                    commands.extend(self.show_direction_control_panel(ui, generating, has_output));
+                });
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    commands.extend(self.show_direction_board_panel(ui, generating));
+                });
+            });
+        } else {
+            commands.extend(self.show_direction_control_panel(ui, generating, has_output));
+            ui.add_space(14.0);
+            commands.extend(self.show_direction_board_panel(ui, generating));
+        }
+        commands
+    }
+
+    fn show_direction_control_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        generating: bool,
+        has_output: bool,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
         product_card(ui, false, |ui| {
+            let colors = VisualFoundryTokens::dark().colors;
             ui.label(
-                RichText::new("CURRENT DIRECTION")
-                    .color(VisualFoundryTokens::dark().colors.accent_hover)
+                RichText::new("CURRENT ASSET")
+                    .color(colors.accent_hover)
                     .small(),
             );
-            self.show_current_preview_sized(ui, 340.0);
+            self.show_current_preview_sized(ui, 260.0);
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(self.current_project_title())
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new("Generate visual directions from this model.")
+                    .color(colors.text_muted)
+                    .small(),
+            );
         });
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            let has_output = self.state.current_output.is_some();
             let mode_actions = direction_mode_actions_for_panel();
             let generate_action = mode_actions
                 .iter()
@@ -565,7 +631,16 @@ impl FoundryDesktopApp {
             if let Some(generate_action) = generate_action
                 && action_button(
                     ui,
-                    &ActionSpec::enabled(ACTION_GENERATE_DIRECTIONS, ButtonTone::Primary),
+                    &action_spec(
+                        !generating,
+                        if generating {
+                            ACTION_GENERATING_DIRECTIONS
+                        } else {
+                            ACTION_GENERATE_DIRECTIONS
+                        },
+                        ButtonTone::Primary,
+                        "Directions are being generated.",
+                    ),
                 )
                 .clicked()
             {
@@ -599,58 +674,133 @@ impl FoundryDesktopApp {
             }
         });
         ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
+        product_card(ui, false, |ui| {
             ui.label(
                 RichText::new("Direction focus")
                     .color(VisualFoundryTokens::dark().colors.text_muted)
                     .small(),
             );
-            for mode_action in direction_mode_actions_for_panel() {
-                if action_button(
-                    ui,
-                    &ActionSpec::enabled(mode_action.label, ButtonTone::Quiet),
-                )
-                .clicked()
-                {
-                    commands.push(mode_action.app_command());
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for mode_action in direction_mode_actions_for_panel() {
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(mode_action.label, ButtonTone::Quiet),
+                    )
+                    .clicked()
+                    {
+                        commands.push(mode_action.app_command());
+                    }
                 }
-            }
+            });
         });
-        ui.add_space(14.0);
-        let direction_count_label = direction_board_count_label(self.state.candidates.len());
+        if generating {
+            ui.add_space(8.0);
+            status_banner(
+                ui,
+                StatusBannerSpec {
+                    title: "Generating 6 directions",
+                    message: &format!(
+                        "Generating 6 directions from {}...",
+                        self.current_project_title()
+                    ),
+                    tone: BannerTone::Info,
+                },
+            );
+        }
+        commands
+    }
+
+    fn show_direction_board_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        generating: bool,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let direction_count_label = if generating && self.state.candidates.is_empty() {
+            "Preparing six whole-model options.".to_owned()
+        } else {
+            direction_board_count_label(self.state.candidates.len())
+        };
         section_header(
             ui,
             SectionHeaderSpec {
                 eyebrow: "Explore Directions",
-                title: "Whole-model candidates",
+                title: "Direction options",
                 subtitle: Some(direction_count_label.as_str()),
             },
         );
         ui.add_space(8.0);
+        if generating {
+            show_direction_skeleton_grid(ui);
+            return commands;
+        }
         if self.state.candidates.is_empty() {
             product_empty_state(
                 ui,
                 "No directions yet",
-                "Generate directions to compare six coherent whole-model options.",
+                "Generate 6 directions to compare coherent whole-model options.",
             );
             return commands;
         }
 
         let current_build = self.state.current_build.as_ref();
         let texture_cache = &mut self.texture_cache;
-        for row in self.state.candidates.chunks(3) {
-            ui.columns(3, |columns| {
-                for (column, candidate) in columns.iter_mut().zip(row) {
-                    commands.extend(show_direction_candidate_card(
-                        column,
-                        texture_cache,
-                        current_build,
-                        candidate,
-                    ));
-                }
-            });
-            ui.add_space(8.0);
-        }
+        commands.extend(show_direction_candidate_grid(
+            ui,
+            texture_cache,
+            current_build,
+            &self.state.candidates,
+        ));
+        commands
+    }
+
+    fn show_choose_asset_empty_state(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &str,
+        message: &str,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 260.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                product_card(ui, false, |ui| {
+                    let colors = VisualFoundryTokens::dark().colors;
+                    ui.set_min_height(220.0);
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.add_space(32.0);
+                        ui.label(RichText::new(title).color(colors.text).size(18.0).strong());
+                        ui.add(
+                            egui::Label::new(RichText::new(message).color(colors.text_muted))
+                                .wrap(),
+                        );
+                        ui.add_space(14.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(((ui.available_width() - 260.0) * 0.5).max(0.0));
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_CHOOSE_TEMPLATE, ButtonTone::Primary),
+                            )
+                            .clicked()
+                            {
+                                self.tab = FoundryTab::Home;
+                            }
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                                && let Some(path) = open_foundry_project_file()
+                            {
+                                commands.push(FoundryAppCommand::Load(path));
+                            }
+                        });
+                    });
+                });
+            },
+        );
         commands
     }
 
@@ -665,51 +815,106 @@ impl FoundryDesktopApp {
             },
         );
         if self.state.document.is_none() {
-            product_empty_state(
+            commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
                 "Pick a template or open a project before customizing.",
-            );
+            ));
             return commands;
         }
         ui.add_space(10.0);
-        ui.columns(2, |columns| {
-            product_card(&mut columns[0], false, |ui| {
-                ui.label(
-                    RichText::new("WHOLE-MODEL PREVIEW")
-                        .color(VisualFoundryTokens::dark().colors.accent_hover)
-                        .small(),
-                );
-                self.show_current_preview_sized(ui, 320.0);
-            });
-
-            let controls = display_customize_controls(&self.state.controls);
-            if controls.is_empty() {
-                product_empty_state(
-                    &mut columns[1],
-                    "No quick controls yet",
-                    "This asset has no quick controls yet.",
-                );
-                return;
-            }
-
-            columns[1].label(
-                RichText::new(format!("{} primary controls", controls.len()))
-                    .color(VisualFoundryTokens::dark().colors.text_muted),
+        let controls = display_customize_controls(&self.state.controls)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        if controls.is_empty() {
+            product_empty_state(
+                ui,
+                "No quick controls yet",
+                "This asset has no quick controls yet.",
             );
-            columns[1].add_space(8.0);
-            let current_build = self.state.current_build.as_ref();
-            let texture_cache = &mut self.texture_cache;
-            for control in controls {
-                commands.extend(show_customize_control_card(
-                    &mut columns[1],
-                    texture_cache,
-                    current_build,
-                    control,
-                ));
-                columns[1].add_space(8.0);
-            }
+            return commands;
+        }
+
+        let wide_layout = ui.available_width() >= 980.0;
+        if wide_layout {
+            let available_width = ui.available_width();
+            ui.horizontal_top(|ui| {
+                let preview_width = (available_width * 0.58).clamp(420.0, 760.0);
+                ui.vertical(|ui| {
+                    ui.set_width(preview_width);
+                    self.show_customize_preview_panel(ui, 520.0);
+                });
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    commands.extend(self.show_customize_control_deck(ui, &controls));
+                });
+            });
+        } else {
+            self.show_customize_preview_panel(ui, 360.0);
+            ui.add_space(12.0);
+            commands.extend(self.show_customize_control_deck(ui, &controls));
+        }
+        commands
+    }
+
+    fn show_customize_preview_panel(&mut self, ui: &mut egui::Ui, preview_edge: f32) {
+        product_card(ui, false, |ui| {
+            let colors = VisualFoundryTokens::dark().colors;
+            ui.label(
+                RichText::new("WHOLE-MODEL PREVIEW")
+                    .color(colors.accent_hover)
+                    .small(),
+            );
+            self.show_current_preview_sized(ui, preview_edge);
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(self.current_project_title())
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new("Last changes are previewed here before export.")
+                    .color(colors.text_muted)
+                    .small(),
+            );
         });
+    }
+
+    fn show_customize_control_deck(
+        &mut self,
+        ui: &mut egui::Ui,
+        controls: &[crate::foundry::view_model::FoundryControlView],
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.label(
+            RichText::new("Make it yours")
+                .color(colors.text)
+                .size(18.0)
+                .strong(),
+        );
+        ui.label(
+            RichText::new(format!("{} primary controls", controls.len())).color(colors.text_muted),
+        );
+        ui.add_space(8.0);
+        let current_build = self.state.current_build.clone();
+        let texture_cache = &mut self.texture_cache;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for control in controls {
+                    commands.extend(show_customize_control_card(
+                        ui,
+                        texture_cache,
+                        current_build.as_ref(),
+                        control,
+                    ));
+                    ui.add_space(8.0);
+                }
+            });
         commands
     }
 
@@ -751,7 +956,16 @@ impl FoundryDesktopApp {
         for row in view.rows {
             product_card(ui, row.selected, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(product_panel_message(&row.label, "Project step"));
+                    ui.vertical(|ui| {
+                        ui.label(product_panel_message(&row.summary.label, "Project step"));
+                        if let Some(detail) = &row.summary.detail {
+                            ui.label(
+                                RichText::new(product_panel_message(detail, "Project updated."))
+                                    .color(VisualFoundryTokens::dark().colors.text_muted)
+                                    .small(),
+                            );
+                        }
+                    });
                     if row.selected {
                         ui.weak("Current");
                     }
@@ -789,46 +1003,52 @@ impl FoundryDesktopApp {
             },
         );
         ui.add_space(10.0);
-        product_card(ui, false, |ui| {
-            ui.label(
-                RichText::new("CURRENT ASSET")
-                    .color(VisualFoundryTokens::dark().colors.accent_hover)
-                    .small(),
-            );
-            self.show_current_preview_sized(ui, 320.0);
-        });
-        ui.add_space(12.0);
-        let can_export = self.state.current_output.is_some();
-        product_card(ui, can_export, |ui| {
-            let colors = VisualFoundryTokens::dark().colors;
-            ui.label(RichText::new(export_readiness_label(can_export)).color(colors.text));
-            ui.label(
-                RichText::new(export_readiness_detail(
-                    can_export,
-                    self.state.pack.can_export,
-                ))
-                .color(colors.text_muted)
-                .small(),
-            );
-            ui.add_space(8.0);
-            if action_button(
+        if self.state.document.is_none() {
+            commands.extend(self.show_choose_asset_empty_state(
                 ui,
-                &action_spec(
+                "Choose an asset first",
+                "Pick a template or open a project before exporting.",
+            ));
+            return commands;
+        }
+        let can_export = self.state.current_output.is_some();
+        let pack_view = self.state.pack.clone();
+        let pack_panel = pack::pack_panel_view(&pack_view);
+        let wide_layout = ui.available_width() >= 980.0;
+        if wide_layout {
+            ui.columns(2, |columns| {
+                product_card(&mut columns[0], false, |ui| {
+                    ui.label(
+                        RichText::new("CURRENT ASSET")
+                            .color(VisualFoundryTokens::dark().colors.accent_hover)
+                            .small(),
+                    );
+                    self.show_current_preview_sized(ui, 420.0);
+                });
+                commands.extend(show_export_readiness_panel(
+                    &mut columns[1],
                     can_export,
-                    ACTION_EXPORT_CURRENT_ASSET,
-                    ButtonTone::Primary,
-                    NEED_MODEL_REASON,
-                ),
-            )
-            .clicked()
-                && let Some(out_dir) = select_asset_export_dir()
-            {
-                commands.push(FoundryAppCommand::run(FoundryCommand::Export {
-                    profile: "default".to_owned(),
-                    out_dir: Some(out_dir.to_string_lossy().to_string()),
-                }));
-            }
-        });
+                    &pack_view,
+                    &pack_panel,
+                ));
+            });
+        } else {
+            product_card(ui, false, |ui| {
+                ui.label(
+                    RichText::new("CURRENT ASSET")
+                        .color(VisualFoundryTokens::dark().colors.accent_hover)
+                        .small(),
+                );
+                self.show_current_preview_sized(ui, 320.0);
+            });
+            ui.add_space(12.0);
+            commands.extend(show_export_readiness_panel(
+                ui,
+                can_export,
+                &pack_view,
+                &pack_panel,
+            ));
+        }
         commands
     }
 
@@ -883,12 +1103,56 @@ impl FoundryDesktopApp {
             }
         });
         ui.add_space(12.0);
-        if !view.active {
-            product_empty_state(
+        if self.state.document.is_none() && view.members.is_empty() {
+            commands.extend(self.show_choose_asset_empty_state(
                 ui,
-                "Pack is empty",
-                "Add the current asset to start a pack.",
-            );
+                "Choose an asset first",
+                "Pick a template or open a project before building a pack.",
+            ));
+            return commands;
+        }
+        if !view.active {
+            ui.columns(2, |columns| {
+                product_card(&mut columns[0], false, |ui| {
+                    let colors = VisualFoundryTokens::dark().colors;
+                    ui.label(
+                        RichText::new("CURRENT ASSET")
+                            .color(colors.accent_hover)
+                            .small(),
+                    );
+                    self.show_current_preview_sized(ui, 280.0);
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(self.current_project_title())
+                            .color(colors.text)
+                            .strong(),
+                    );
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_ADD_CURRENT_ASSET, ButtonTone::Primary),
+                    )
+                    .clicked()
+                        && let Some(command) = self.add_current_to_pack_command()
+                    {
+                        commands.push(command);
+                    }
+                });
+                product_card(&mut columns[1], false, |ui| {
+                    let colors = VisualFoundryTokens::dark().colors;
+                    ui.label(RichText::new("Add assets to export").color(colors.text));
+                    ui.label(
+                        RichText::new("0 assets in pack")
+                            .color(colors.text_muted)
+                            .small(),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(NEED_PACK_MEMBER_REASON)
+                            .color(colors.warning)
+                            .small(),
+                    );
+                });
+            });
             return commands;
         }
         ui.columns(2, |columns| {
@@ -1035,6 +1299,7 @@ impl FoundryDesktopApp {
     fn poll_jobs(&mut self, ctx: &egui::Context) {
         let mut affected = false;
         let mut schedule_preview = false;
+        let mut schedule_candidate_previews = None;
 
         loop {
             let event = match self.jobs.try_recv() {
@@ -1049,15 +1314,30 @@ impl FoundryDesktopApp {
                 event,
                 FoundryJobEvent::CompileFinished { .. } | FoundryJobEvent::EditApplied { .. }
             );
+            let candidate_preview_request = match &event {
+                FoundryJobEvent::CandidatesGenerated {
+                    request, output, ..
+                } => Some((request.clone(), output.as_ref().clone())),
+                _ => None,
+            };
             if self.state.handle_job_event(event) {
                 affected = true;
                 schedule_preview |= should_preview;
+                if let Some(request) = candidate_preview_request {
+                    schedule_candidate_previews = Some(request);
+                }
             }
         }
 
         if schedule_preview {
             let preview_pixels = current_preview_pixels_for_context(ctx);
             match self.state.request_preview(preview_pixels, preview_pixels) {
+                Ok(effects) => self.apply_effects(effects, ctx),
+                Err(error) => self.state.status = Some(error.to_string()),
+            }
+        }
+        if let Some((request, output)) = schedule_candidate_previews {
+            match self.state.request_candidate_previews(request, output) {
                 Ok(effects) => self.apply_effects(effects, ctx),
                 Err(error) => self.state.status = Some(error.to_string()),
             }
@@ -1191,6 +1471,7 @@ fn request_uses_preview_cache(request: &FoundryJobRequest) -> bool {
         FoundryJobRequest::RenderPreview { .. }
             | FoundryJobRequest::PreviewControlValue { .. }
             | FoundryJobRequest::GenerateCandidates { .. }
+            | FoundryJobRequest::RenderCandidatePreviews { .. }
     )
 }
 
@@ -1496,23 +1777,23 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Pack",
         "Export",
         "Choose what to make",
+        "Project",
         "Open Project",
         "Save Project",
         "Save Project As",
-        "New Asset",
-        "Project History",
+        "Start Another Asset",
+        "History",
         "Recent Projects",
-        "No recent projects yet.",
-        "Saved projects will appear here.",
         "Start",
-        "Generate Directions",
+        "Generate 6 Directions",
+        "Generating...",
+        "Choose Template",
         "Build Asset",
         "Refresh Preview",
-        "Current Direction",
-        "Whole-model candidates",
+        "Current Asset",
+        "Direction options",
         "No directions yet",
-        "Generate six coherent whole-model options.",
-        "Generate directions to compare six coherent whole-model options.",
+        "Generate 6 directions to compare coherent whole-model options.",
         "Direction focus",
         "Refine",
         "Explore",
@@ -1521,7 +1802,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Detail",
         "Save",
         "Undo",
-        "No project",
+        "Choose a template to start",
         "Not saved",
         "Saved",
         "Unsaved",
@@ -1542,9 +1823,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Needs a model first",
         HOME_SUBTITLE,
         "Choose a template below to start a new project.",
+        "Search assets...",
+        "Featured",
+        "All templates",
         "Explore directions",
         "Generate coherent whole-model options from the current asset.",
-        "Current Direction",
+        "Current Asset",
+        "Direction options",
+        "Generating 6 directions",
+        "Generate visual directions from this model.",
         "Pick a template or open a project to generate directions.",
         "Preview could not be rendered for this direction.",
         "Preview this direction before choosing it.",
@@ -1557,15 +1844,19 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Choose an asset first",
         "Pick a template or open a project before customizing.",
         "Whole-model preview",
+        "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
-        "Try",
+        "Preview",
         "More options",
         "This option is not available right now.",
         "This control is locked.",
         "Export ready",
         "Send the current asset or prepared pack to disk.",
         "Current Asset",
+        "Export options",
+        "Pack members",
+        "Static prop package",
         "Export this asset here, or export the prepared pack from Pack.",
         "Export the current asset as an individual result.",
         "Pack preview",
@@ -1598,6 +1889,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No reviewed templates yet",
         "Open a saved project, or enable the preview catalog for internal kit testing.",
         "Choose a template below to start a new project.",
+        "Pick a template or open a project before exporting.",
+        "Pick a template or open a project before building a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -1645,11 +1938,23 @@ fn product_card<R>(
 }
 
 fn product_empty_state(ui: &mut egui::Ui, title: &str, message: &str) {
-    product_card(ui, false, |ui| {
-        let colors = VisualFoundryTokens::dark().colors;
-        ui.label(RichText::new(title).color(colors.text).strong());
-        ui.label(RichText::new(message).color(colors.text_muted).small());
-    });
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 190.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            product_card(ui, false, |ui| {
+                let colors = VisualFoundryTokens::dark().colors;
+                ui.set_min_height(150.0);
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(28.0);
+                    ui.label(RichText::new(title).color(colors.text).size(17.0).strong());
+                    ui.add(
+                        egui::Label::new(RichText::new(message).color(colors.text_muted)).wrap(),
+                    );
+                });
+            });
+        },
+    );
 }
 
 fn product_panel_message(message: &str, fallback: &str) -> String {
@@ -1718,6 +2023,187 @@ fn home_profile_group_count_label(count: usize) -> String {
     }
 }
 
+fn show_template_filter_bar(ui: &mut egui::Ui) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.horizontal_wrapped(|ui| {
+        product_card(ui, false, |ui| {
+            ui.set_min_width(220.0);
+            ui.label(RichText::new("Search assets...").color(colors.text_muted));
+        });
+        ui.add_space(8.0);
+        for chip in [
+            "All",
+            "Props",
+            "Architecture",
+            "Gear",
+            "Furniture",
+            "Environment",
+        ] {
+            let tone = if chip == "All" {
+                ButtonTone::Primary
+            } else {
+                ButtonTone::Quiet
+            };
+            let _ = action_button(ui, &ActionSpec::enabled(chip, tone));
+        }
+    });
+}
+
+fn show_home_profile_grid(
+    ui: &mut egui::Ui,
+    profiles: &[ProductHomeProfile],
+) -> Option<FoundryFixtureCatalog> {
+    let mut selected_fixture = None;
+    let columns = home_profile_grid_columns(ui.available_width());
+    for row in profiles.chunks(columns) {
+        ui.columns(columns, |column_uis| {
+            for (column, profile) in column_uis.iter_mut().zip(row) {
+                if show_home_profile_card(column, profile)
+                    .as_ref()
+                    .is_some_and(egui::Response::clicked)
+                {
+                    selected_fixture = Some(profile.fixture.clone());
+                }
+            }
+        });
+        ui.add_space(8.0);
+    }
+    selected_fixture
+}
+
+fn home_profile_grid_columns(width: f32) -> usize {
+    if width >= 1080.0 {
+        3
+    } else if width >= 700.0 {
+        2
+    } else {
+        1
+    }
+}
+
+fn show_home_profile_card(
+    ui: &mut egui::Ui,
+    profile: &ProductHomeProfile,
+) -> Option<egui::Response> {
+    let mut action = None;
+    product_card(ui, false, |ui| {
+        ui.set_min_height(214.0);
+        show_home_profile_thumbnail(ui, profile);
+        ui.add_space(8.0);
+        show_home_profile_summary(ui, profile, ui.available_width().max(220.0));
+        ui.add_space(10.0);
+        action = Some(action_button(
+            ui,
+            &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
+        ));
+    });
+    action
+}
+
+fn show_home_profile_thumbnail(ui: &mut egui::Ui, profile: &ProductHomeProfile) {
+    let colors = VisualFoundryTokens::dark().colors;
+    let width = ui.available_width().max(180.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 96.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(6), colors.panel_subtle);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(1.0, colors.stroke_strong),
+        egui::StrokeKind::Inside,
+    );
+
+    let object_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.center().y + 5.0),
+        egui::vec2((width * 0.36).clamp(96.0, 160.0), 42.0),
+    );
+    let family = profile.family_name.to_ascii_lowercase();
+    let accent = if family.contains("armor") || family.contains("hero") {
+        colors.warning
+    } else if family.contains("tree") || family.contains("market") {
+        colors.success
+    } else {
+        colors.accent_hover
+    };
+
+    if family.contains("bridge") {
+        let deck = egui::Rect::from_center_size(rect.center(), egui::vec2(width * 0.54, 12.0));
+        ui.painter().rect_filled(
+            deck,
+            egui::CornerRadius::same(3),
+            accent.gamma_multiply(0.55),
+        );
+        for index in 0..5 {
+            let x = deck.left() + 16.0 + index as f32 * (deck.width() - 32.0) / 4.0;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, deck.bottom()),
+                    egui::pos2(x + 10.0, deck.bottom() + 26.0),
+                ],
+                egui::Stroke::new(2.0, colors.stroke_strong),
+            );
+        }
+    } else if family.contains("lamp") || family.contains("sign") {
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.center().x, rect.top() + 22.0),
+                egui::pos2(rect.center().x, rect.bottom() - 18.0),
+            ],
+            egui::Stroke::new(4.0, accent),
+        );
+        ui.painter().circle_filled(
+            egui::pos2(rect.center().x, rect.top() + 30.0),
+            18.0,
+            accent.gamma_multiply(0.45),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.center().x - 28.0, rect.bottom() - 18.0),
+                egui::pos2(rect.center().x + 28.0, rect.bottom() - 18.0),
+            ],
+            egui::Stroke::new(3.0, colors.stroke_strong),
+        );
+    } else if family.contains("armor") || family.contains("shield") || family.contains("helmet") {
+        ui.painter()
+            .circle_filled(rect.center(), 28.0, accent.gamma_multiply(0.45));
+        ui.painter().circle_stroke(
+            rect.center(),
+            28.0,
+            egui::Stroke::new(2.0, colors.stroke_strong),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.center().x - 22.0, rect.center().y),
+                egui::pos2(rect.center().x + 22.0, rect.center().y),
+            ],
+            egui::Stroke::new(2.0, accent),
+        );
+    } else {
+        ui.painter().rect_filled(
+            object_rect,
+            egui::CornerRadius::same(5),
+            accent.gamma_multiply(0.4),
+        );
+        ui.painter().rect_stroke(
+            object_rect,
+            egui::CornerRadius::same(5),
+            egui::Stroke::new(2.0, accent),
+            egui::StrokeKind::Inside,
+        );
+        let slot_width = object_rect.width() / 5.0;
+        for index in 1..5 {
+            let x = object_rect.left() + index as f32 * slot_width;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, object_rect.top() + 6.0),
+                    egui::pos2(x, object_rect.bottom() - 6.0),
+                ],
+                egui::Stroke::new(1.0, colors.stroke_strong),
+            );
+        }
+    }
+}
+
 fn show_home_profile_row(
     ui: &mut egui::Ui,
     profile: &ProductHomeProfile,
@@ -1782,6 +2268,71 @@ fn show_home_profile_summary(ui: &mut egui::Ui, profile: &ProductHomeProfile, wi
     });
 }
 
+fn show_direction_candidate_grid(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let columns = direction_grid_columns(ui.available_width());
+    for row in candidates.chunks(columns) {
+        ui.columns(columns, |column_uis| {
+            for (column, candidate) in column_uis.iter_mut().zip(row) {
+                commands.extend(show_direction_candidate_card(
+                    column,
+                    texture_cache,
+                    current_build,
+                    candidate,
+                ));
+            }
+        });
+        ui.add_space(8.0);
+    }
+    commands
+}
+
+fn direction_grid_columns(width: f32) -> usize {
+    if width >= 840.0 {
+        3
+    } else if width >= 560.0 {
+        2
+    } else {
+        1
+    }
+}
+
+fn show_direction_skeleton_grid(ui: &mut egui::Ui) {
+    let columns = direction_grid_columns(ui.available_width());
+    let slots = (1..=6).collect::<Vec<_>>();
+    for row in slots.chunks(columns) {
+        ui.columns(columns, |columns| {
+            for (slot, column) in row.iter().zip(columns.iter_mut()) {
+                product_card(column, false, |ui| {
+                    let colors = VisualFoundryTokens::dark().colors;
+                    ui.set_min_height(190.0);
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(24.0);
+                        ui.spinner();
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(format!("Direction {}", slot))
+                                .color(colors.text)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new("Preparing whole-model option.")
+                                .color(colors.text_muted)
+                                .small(),
+                        );
+                    });
+                });
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
 fn show_direction_candidate_card(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -1790,22 +2341,40 @@ fn show_direction_candidate_card(
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     product_card(ui, candidate.selected, |ui| {
+        ui.set_min_height(218.0);
         let preview_id = candidate_preview_texture_id(candidate);
-        show_rgba_preview(
-            ui,
-            texture_cache,
-            FoundryPreviewDraw {
-                preview_id: &preview_id,
-                build: current_build,
-                rgba8: &candidate.rgba8,
-                width: candidate.width,
-                height: candidate.height,
-                max_edge: 128.0,
-            },
+        let preview_edge = ui.available_width().min(150.0).max(112.0);
+        ui.vertical_centered(|ui| {
+            show_rgba_preview(
+                ui,
+                texture_cache,
+                FoundryPreviewDraw {
+                    preview_id: &preview_id,
+                    build: current_build,
+                    rgba8: &candidate.rgba8,
+                    width: candidate.width,
+                    height: candidate.height,
+                    max_edge: preview_edge,
+                },
+            );
+        });
+        ui.add_space(8.0);
+        ui.label(RichText::new(candidate_display_title(candidate)).strong());
+        ui.label(
+            RichText::new(candidate_display_subtitle(candidate))
+                .color(VisualFoundryTokens::dark().colors.text_muted)
+                .small(),
         );
-        ui.add_space(6.0);
-        ui.label(RichText::new(&candidate.title).strong());
-        ui.label(RichText::new(&candidate.subtitle).small());
+        if let Some(detail) = candidate_display_detail(candidate) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(detail)
+                        .color(VisualFoundryTokens::dark().colors.text_muted)
+                        .small(),
+                )
+                .wrap(),
+            );
+        }
         if candidate.selected {
             ui.weak("Current direction");
         }
@@ -1819,7 +2388,7 @@ fn show_direction_candidate_card(
             );
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if action_button(ui, &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Quiet)).clicked() {
                 commands.push(FoundryAppCommand::SelectCandidate(Some(
                     candidate.id.clone(),
@@ -1851,6 +2420,140 @@ fn show_direction_candidate_card(
         });
     });
     commands
+}
+
+fn candidate_display_title(candidate: &crate::foundry::view_model::FoundryCandidateCard) -> String {
+    let title = candidate.title.trim();
+    if !candidate_title_looks_raw(title) && !candidate_title_looks_trait_derived(title) {
+        let safe_title = product_panel_message(title, "");
+        if !safe_title.trim().is_empty() {
+            return safe_title;
+        }
+    }
+
+    DIRECTION_INTENT_TITLES[candidate.slot % DIRECTION_INTENT_TITLES.len()].to_owned()
+}
+
+fn candidate_display_subtitle(
+    candidate: &crate::foundry::view_model::FoundryCandidateCard,
+) -> String {
+    let mode = candidate.mode.map_or("Direction", directions::mode_label);
+    let changes = candidate
+        .changed_controls
+        .len()
+        .max(candidate.changed_roles.len());
+    match changes {
+        0 => format!("{mode} direction"),
+        1 => format!("{mode} · 1 change"),
+        count => format!("{mode} · {count} changes"),
+    }
+}
+
+fn candidate_display_detail(
+    candidate: &crate::foundry::view_model::FoundryCandidateCard,
+) -> Option<String> {
+    let labels = candidate
+        .changed_controls
+        .iter()
+        .chain(candidate.changed_roles.iter())
+        .filter_map(|label| candidate_change_phrase(label))
+        .take(3)
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        return None;
+    }
+    Some(labels.join(" · "))
+}
+
+const DIRECTION_INTENT_TITLES: [&str; 6] = [
+    "Compact Vented",
+    "Reinforced Cargo",
+    "Minimal Industrial",
+    "Side-Rail Utility",
+    "Deep Panel Build",
+    "Clean Service Variant",
+];
+
+fn candidate_title_looks_raw(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    title.contains('#')
+        || title.contains('(')
+        || title.contains(')')
+        || lower.contains("candidate")
+        || lower.contains("preview_id")
+}
+
+fn candidate_title_looks_trait_derived(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    lower.ends_with(" direction")
+        || lower.contains("edge softness")
+        || lower.contains("detail density")
+        || lower.contains("panel depth")
+        || lower.contains("structural heft")
+        || lower.contains("handle style")
+}
+
+fn candidate_change_phrase(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let phrase = if lower.contains("edge") && lower.contains("soft") {
+        "softer edges"
+    } else if lower.contains("structural") || lower.contains("heft") {
+        "heavier frame"
+    } else if lower.contains("handle") {
+        "handle variation"
+    } else if lower.contains("detail") {
+        "more surface detail"
+    } else if lower.contains("panel") || lower.contains("depth") {
+        "deeper panels"
+    } else if lower.contains("vent") {
+        "more vents"
+    } else if lower.contains("silhouette") {
+        "cleaner silhouette"
+    } else {
+        return product_title_fragment(raw).map(|label| {
+            let mut words = label.to_ascii_lowercase();
+            words.push_str(" adjusted");
+            words
+        });
+    };
+    Some(phrase.to_owned())
+}
+
+fn product_title_fragment(raw: &str) -> Option<String> {
+    let words = raw
+        .split(|character: char| {
+            character == '_'
+                || character == '-'
+                || character == '.'
+                || character == '/'
+                || character == ':'
+                || character == '#'
+                || character == '('
+                || character == ')'
+                || character.is_whitespace()
+        })
+        .filter(|word| !word.trim().is_empty())
+        .filter(|word| !looks_like_generated_token(word))
+        .take(3)
+        .map(title_case_word)
+        .collect::<Vec<_>>();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+fn looks_like_generated_token(word: &str) -> bool {
+    word.len() >= 8 && word.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn title_case_word(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => {
+            let mut output = first.to_uppercase().collect::<String>();
+            output.push_str(&chars.as_str().to_ascii_lowercase());
+            output
+        }
+        None => String::new(),
+    }
 }
 
 fn show_customize_control_card(
@@ -1910,18 +2613,19 @@ fn show_customize_control_card(
             );
         }
         ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            for option in control.options.iter().take(CONTROL_FILMSTRIP_LIMIT) {
-                commands.extend(show_customize_option_tile(
-                    ui,
-                    texture_cache,
-                    current_build,
-                    control,
-                    option,
-                    true,
-                ));
-            }
-        });
+        let visible_options = control
+            .options
+            .iter()
+            .take(CONTROL_FILMSTRIP_LIMIT)
+            .collect::<Vec<_>>();
+        commands.extend(show_customize_option_grid(
+            ui,
+            texture_cache,
+            current_build,
+            control,
+            &visible_options,
+            true,
+        ));
         let remaining_options = control
             .options
             .iter()
@@ -1934,21 +2638,59 @@ fn show_customize_control_card(
                     .color(colors.text_muted)
                     .small(),
             );
-            ui.horizontal_wrapped(|ui| {
-                for option in remaining_options {
-                    commands.extend(show_customize_option_tile(
-                        ui,
-                        texture_cache,
-                        current_build,
-                        control,
-                        option,
-                        false,
-                    ));
-                }
-            });
+            commands.extend(show_customize_option_grid(
+                ui,
+                texture_cache,
+                current_build,
+                control,
+                &remaining_options,
+                false,
+            ));
         }
     });
     commands
+}
+
+fn show_customize_option_grid(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    control: &crate::foundry::view_model::FoundryControlView,
+    options: &[&crate::foundry::view_model::FoundryOptionCard],
+    show_preview: bool,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    if options.is_empty() {
+        return commands;
+    }
+
+    let columns = customize_option_grid_columns(ui.available_width());
+    for row in options.chunks(columns) {
+        ui.columns(columns, |column_uis| {
+            for (column, option) in column_uis.iter_mut().zip(row) {
+                commands.extend(show_customize_option_tile(
+                    column,
+                    texture_cache,
+                    current_build,
+                    control,
+                    option,
+                    show_preview,
+                ));
+            }
+        });
+        ui.add_space(6.0);
+    }
+    commands
+}
+
+fn customize_option_grid_columns(width: f32) -> usize {
+    if width >= 760.0 {
+        3
+    } else if width >= 460.0 {
+        2
+    } else {
+        1
+    }
 }
 
 fn show_customize_option_tile(
@@ -1962,7 +2704,9 @@ fn show_customize_option_tile(
     let mut commands = Vec::new();
     product_card(ui, option.selected, |ui| {
         let colors = VisualFoundryTokens::dark().colors;
-        ui.set_min_width(if show_preview { 124.0 } else { 108.0 });
+        let tile_width = ui.available_width().clamp(156.0, 260.0);
+        ui.set_width(tile_width);
+        ui.set_min_height(if show_preview { 150.0 } else { 104.0 });
         if show_preview {
             let preview_id = option_preview_texture_id(option);
             show_rgba_preview(
@@ -1978,7 +2722,7 @@ fn show_customize_option_tile(
                 },
             );
         }
-        ui.label(&option.label);
+        ui.add(egui::Label::new(RichText::new(&option.label).color(colors.text).strong()).wrap());
         if option.selected {
             ui.weak("Current");
         }
@@ -1997,35 +2741,38 @@ fn show_customize_option_tile(
                 .small(),
             );
         }
-        if action_button(
-            ui,
-            &action_spec(
-                disabled_reason.is_none(),
-                ACTION_TRY,
-                ButtonTone::Quiet,
-                disabled_message.as_str(),
-            ),
-        )
-        .clicked()
-        {
-            commands.extend(customize::preview_control_value_intents(
-                control,
-                option.value.clone(),
-            ));
-        }
-        if action_button(
-            ui,
-            &action_spec(
-                disabled_reason.is_none(),
-                ACTION_APPLY,
-                ButtonTone::Secondary,
-                disabled_message.as_str(),
-            ),
-        )
-        .clicked()
-        {
-            commands.extend(customize::choose_option_intents(control, option));
-        }
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            if action_button(
+                ui,
+                &action_spec(
+                    disabled_reason.is_none(),
+                    ACTION_TRY,
+                    ButtonTone::Quiet,
+                    disabled_message.as_str(),
+                ),
+            )
+            .clicked()
+            {
+                commands.extend(customize::preview_control_value_intents(
+                    control,
+                    option.value.clone(),
+                ));
+            }
+            if action_button(
+                ui,
+                &action_spec(
+                    disabled_reason.is_none(),
+                    ACTION_APPLY,
+                    ButtonTone::Secondary,
+                    disabled_message.as_str(),
+                ),
+            )
+            .clicked()
+            {
+                commands.extend(customize::choose_option_intents(control, option));
+            }
+        });
     });
     commands
 }
@@ -2164,6 +2911,134 @@ fn pack_thumbnail_placeholder(ui: &mut egui::Ui, cell: &pack::PackContactSheetCe
 
 fn pack_thumbnail_marker(cell: &pack::PackContactSheetCell) -> &'static str {
     if cell.selected { "Current" } else { "Preview" }
+}
+
+fn show_export_readiness_panel(
+    ui: &mut egui::Ui,
+    can_export_current: bool,
+    pack_view: &crate::foundry::view_model::FoundryPackView,
+    pack_panel: &pack::PackPanelView,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    product_card(ui, can_export_current || pack_panel.export.enabled, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.label(RichText::new(export_readiness_label(can_export_current)).color(colors.text));
+        ui.label(
+            RichText::new(export_readiness_detail(
+                can_export_current,
+                pack_panel.export.enabled,
+            ))
+            .color(colors.text_muted)
+            .small(),
+        );
+        ui.add_space(10.0);
+        export_checklist_row(ui, "Model built", can_export_current, NEED_MODEL_REASON);
+        export_checklist_row(
+            ui,
+            "Preview ready",
+            can_export_current,
+            "Build the current model first.",
+        );
+        export_checklist_row(
+            ui,
+            "Pack members",
+            !pack_panel.members.is_empty(),
+            NEED_PACK_MEMBER_REASON,
+        );
+        ui.add_space(12.0);
+        ui.label(RichText::new("Export options").color(colors.text).strong());
+        ui.add_space(6.0);
+        if action_button(
+            ui,
+            &action_spec(
+                can_export_current,
+                ACTION_EXPORT_CURRENT_ASSET,
+                ButtonTone::Primary,
+                NEED_MODEL_REASON,
+            ),
+        )
+        .clicked()
+            && let Some(out_dir) = select_asset_export_dir()
+        {
+            commands.push(FoundryAppCommand::run(FoundryCommand::Export {
+                profile: "default".to_owned(),
+                out_dir: Some(out_dir.to_string_lossy().to_string()),
+            }));
+        }
+        if !can_export_current {
+            ui.label(
+                RichText::new(NEED_MODEL_REASON)
+                    .color(colors.warning)
+                    .small(),
+            );
+        }
+        ui.add_space(6.0);
+        if action_button(
+            ui,
+            &action_spec(
+                pack_panel.export.enabled,
+                ACTION_EXPORT_PACK,
+                ButtonTone::Secondary,
+                NEED_PACK_MEMBER_REASON,
+            ),
+        )
+        .clicked()
+            && let Some(out_dir) = select_pack_export_dir()
+            && let Some(command) = pack::batch_export_command(pack_view, out_dir)
+        {
+            commands.push(command);
+        }
+        if !pack_panel.export.enabled {
+            let reason = if pack_panel.members.is_empty() {
+                NEED_PACK_MEMBER_REASON.to_owned()
+            } else if let Some(reason) = &pack_panel.export.disabled_reason {
+                product_panel_message(reason, "Resolve pack warnings before export.")
+            } else {
+                "Resolve pack warnings before export.".to_owned()
+            };
+            ui.label(RichText::new(reason).color(colors.warning).small());
+        }
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("Static prop package")
+                .color(colors.text)
+                .strong(),
+        );
+        ui.label(
+            RichText::new(
+                "Creates a frozen mesh, OBJ handoff, collision descriptor, evidence, and validation report.",
+            )
+            .color(colors.text_muted)
+            .small(),
+        );
+        ui.add_space(6.0);
+        for blocked in [
+            "UV layout is not implemented.",
+            "GLB handoff is not implemented.",
+            "Manual DCC/runtime review is still required.",
+        ] {
+            ui.label(RichText::new(blocked).color(colors.text_muted).small());
+        }
+    });
+    commands
+}
+
+fn export_checklist_row(ui: &mut egui::Ui, label: &str, ready: bool, reason: &str) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.horizontal_wrapped(|ui| {
+        let status = if ready { "Ready" } else { "Blocked" };
+        ui.label(RichText::new(status).color(if ready {
+            colors.success
+        } else {
+            colors.warning
+        }));
+        ui.label(RichText::new(label).color(colors.text));
+        if !ready {
+            ui.label(RichText::new(reason).color(colors.text_muted).small());
+        }
+    });
 }
 
 fn pack_readiness_label(view: &pack::PackPanelView) -> &'static str {
@@ -2356,7 +3231,23 @@ fn show_rgba_preview(
     let height_usize = preview.height as usize;
     let expected_len = width_usize.saturating_mul(height_usize).saturating_mul(4);
     if preview.width == 0 || preview.height == 0 || preview.rgba8.len() != expected_len {
-        ui.allocate_space(egui::vec2(preview.max_edge, preview.max_edge));
+        let size = egui::vec2(preview.max_edge, preview.max_edge);
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.painter().rect_filled(rect, 6.0, colors.panel_elevated);
+        ui.painter().rect_stroke(
+            rect,
+            6.0,
+            egui::Stroke::new(1.0, colors.stroke),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Preview pending",
+            egui::FontId::proportional(12.0),
+            colors.text_muted,
+        );
         return;
     }
 
@@ -2660,12 +3551,14 @@ mod tests {
             "Pack",
             "Export",
             "Visual Foundry",
+            "Project",
             "Open Project",
             "Save Project",
             "Save Project As",
-            "Recent Projects",
-            "New Asset",
-            "Generate Directions",
+            "Start Another Asset",
+            "History",
+            "Generate 6 Directions",
+            "Choose Template",
             "Start",
         ] {
             assert!(
@@ -2709,7 +3602,10 @@ mod tests {
     #[test]
     fn launch_save_state_does_not_claim_project_is_saved() {
         let mut app = FoundryDesktopApp::default();
-        assert_eq!(app.save_state_pill(), ("No project", StatusTone::Neutral));
+        assert_eq!(
+            app.save_state_pill(),
+            ("Choose a template to start", StatusTone::Neutral)
+        );
 
         app.state =
             FoundryAppState::new(shape_foundry_catalog::roman_bridge::fixture_catalog().document)

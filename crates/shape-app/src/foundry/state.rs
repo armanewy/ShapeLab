@@ -302,6 +302,14 @@ impl FoundryAppState {
                 self.apply_candidates_generated(request, *output, cards);
                 true
             }
+            FoundryJobEvent::CandidatePreviewsRendered {
+                cards,
+                rejected_count,
+                ..
+            } => {
+                self.apply_candidate_previews(cards, rejected_count);
+                true
+            }
             FoundryJobEvent::EditApplied { edit, output, .. } => {
                 self.apply_edit_output(*edit, *output);
                 self.stale_obsolete_active_jobs_except(job_id);
@@ -404,6 +412,24 @@ impl FoundryAppState {
             document: Box::new(document),
             request,
         }))
+    }
+
+    /// Request candidate preview rendering and visual-legibility filtering.
+    pub(crate) fn request_candidate_previews(
+        &mut self,
+        request: FoundryCandidateRequest,
+        output: FoundryCandidateOutput,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let document = self.current_document()?.clone();
+        let job_id = self.allocate_job_id()?;
+        Ok(
+            self.schedule_job(FoundryJobRequest::RenderCandidatePreviews {
+                job_id,
+                document: Box::new(document),
+                request,
+                output: Box::new(output),
+            }),
+        )
     }
 
     /// Request a non-persistent preview for a sampled control value.
@@ -756,6 +782,47 @@ impl FoundryAppState {
         self.candidate_output = Some(Box::new(output));
     }
 
+    fn apply_candidate_previews(
+        &mut self,
+        cards: Vec<FoundryCandidateCard>,
+        rejected_count: usize,
+    ) {
+        let selected = self.selected_candidate.clone();
+        let visible_candidate_ids = cards
+            .iter()
+            .map(|card| card.id.clone())
+            .collect::<BTreeSet<_>>();
+        self.candidates = cards
+            .into_iter()
+            .map(|mut card| {
+                card.selected = selected
+                    .as_ref()
+                    .is_some_and(|selected| selected == &card.id);
+                card
+            })
+            .collect();
+        self.candidate_edits
+            .retain(|candidate_id, _| visible_candidate_ids.contains(candidate_id));
+        if self
+            .selected_candidate
+            .as_ref()
+            .is_some_and(|selected| !visible_candidate_ids.contains(selected))
+        {
+            self.selected_candidate = None;
+        }
+        if rejected_count > 0 {
+            self.status = Some(format!(
+                "Generated {} visually distinct direction(s). Rejected {rejected_count} subtle candidate(s) that looked too similar.",
+                self.candidates.len()
+            ));
+        } else if !self.candidates.is_empty() {
+            self.status = Some(format!(
+                "Generated {} visually distinct direction(s).",
+                self.candidates.len()
+            ));
+        }
+    }
+
     fn schedule_job(&mut self, request: FoundryJobRequest) -> Vec<FoundryAppEffect> {
         self.stale_active_jobs_in_slot(request.slot());
         let job_id = request.job_id();
@@ -1052,6 +1119,7 @@ impl FoundryAppState {
         match request {
             FoundryJobRequest::CompileCurrent { document, .. }
             | FoundryJobRequest::GenerateCandidates { document, .. }
+            | FoundryJobRequest::RenderCandidatePreviews { document, .. }
             | FoundryJobRequest::PreviewControlValue { document, .. }
             | FoundryJobRequest::ApplyEdit { document, .. } => self
                 .document
@@ -1158,6 +1226,9 @@ fn job_event_matches_request(event: &FoundryJobEvent, request: &FoundryJobReques
             FoundryJobEvent::CandidatesGenerated { .. },
             FoundryJobRequest::GenerateCandidates { .. },
         ) | (
+            FoundryJobEvent::CandidatePreviewsRendered { .. },
+            FoundryJobRequest::RenderCandidatePreviews { .. },
+        ) | (
             FoundryJobEvent::EditApplied { .. },
             FoundryJobRequest::ApplyEdit { .. }
         ) | (
@@ -1192,7 +1263,7 @@ fn candidate_request_from_command(request: GenerateCandidatesRequest) -> Foundry
     let result_count = request.count.max(1) as usize;
     FoundryCandidateRequest {
         seed: request.seed,
-        proposal_count: (result_count * 8).clamp(24, 72),
+        proposal_count: (result_count * 2).clamp(8, 72),
         result_count,
         mode: FoundryCandidateMode::Refine,
         strategy_id: request.strategy_id,

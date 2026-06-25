@@ -36,17 +36,17 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 5] = [
 ];
 
 pub(crate) const PRIMARY_ACTION_LABELS: [&str; 13] = [
-    "Generate Directions",
+    "Generate 6 Directions",
     "Refine",
     "Explore",
-    "Choose Direction",
+    "Use This Direction",
     "Customize",
     "Add Current",
     "Export Pack",
     "Export",
     "Save",
     "Open Project",
-    "New Asset",
+    "Start Another Asset",
     "Lock All",
     "Reset All",
 ];
@@ -68,8 +68,8 @@ pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Directions",
     "Explore Directions",
     "Customize",
-    "Pack Preview",
-    "Export Ready",
+    "Pack preview",
+    "Export ready",
     "Recent Projects",
 ];
 

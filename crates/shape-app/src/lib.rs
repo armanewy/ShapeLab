@@ -14,8 +14,10 @@ pub fn run_native_app() -> eframe::Result<()> {
     let _ = env_logger::try_init();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_min_inner_size([1180.0, 720.0])
+            .with_decorations(true)
+            .with_fullscreen(false)
+            .with_maximized(true),
         ..Default::default()
     };
     eframe::run_native(

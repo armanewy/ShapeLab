@@ -31,6 +31,12 @@ pub enum FoundryPreviewResolution {
     Px96,
     /// 128x128 preview.
     Px128,
+    /// 256x256 preview.
+    Px256,
+    /// 512x512 preview.
+    Px512,
+    /// 1024x1024 preview.
+    Px1024,
 }
 
 impl FoundryPreviewResolution {
@@ -41,6 +47,9 @@ impl FoundryPreviewResolution {
             Self::Px64 => 64,
             Self::Px96 => 96,
             Self::Px128 => 128,
+            Self::Px256 => 256,
+            Self::Px512 => 512,
+            Self::Px1024 => 1024,
         }
     }
 
@@ -51,6 +60,9 @@ impl FoundryPreviewResolution {
             64 => Some(Self::Px64),
             96 => Some(Self::Px96),
             128 => Some(Self::Px128),
+            256 => Some(Self::Px256),
+            512 => Some(Self::Px512),
+            1024 => Some(Self::Px1024),
             _ => None,
         }
     }

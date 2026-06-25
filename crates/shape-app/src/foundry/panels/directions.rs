@@ -12,7 +12,7 @@ use crate::foundry::{FoundryAppCommand, FoundryCandidateCard};
 /// The direction board always reserves six candidate direction slots.
 pub(crate) const VISIBLE_DIRECTION_CANDIDATE_CARDS: usize = 6;
 /// Candidate proposal count used by the lightweight mode request helpers.
-pub(crate) const DEFAULT_DIRECTION_PROPOSALS: usize = 24;
+pub(crate) const DEFAULT_DIRECTION_PROPOSALS: usize = 12;
 /// Button copy for accepting a direction.
 pub(crate) const CHOOSE_THIS_DIRECTION_LABEL: &str = "Choose This Direction";
 /// Button copy for rejecting a direction.

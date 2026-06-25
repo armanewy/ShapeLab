@@ -24,12 +24,15 @@ cargo build -p shape-app --release
 cargo run -p shape-app --release
 ```
 
-On Windows, launch the release executable directly when you want only the app
-window and no extra console window:
+On Windows, use the launcher script when you want only the app window and no
+extra console window. The script rebuilds the selected profile before launch and
+stops stale Shape Lab processes from this repo's `target` directory, so debug and
+release binaries do not drift during local verification. The native app starts
+as a standard decorated Windows window, maximized to the current monitor's work
+area:
 
 ```powershell
-$env:SHAPE_LAB_PREVIEW_CATALOG="1"
-Start-Process .\target\release\shape-app.exe
+pwsh -File scripts/run_shape_app.ps1 -PreviewCatalog
 ```
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
@@ -55,7 +58,7 @@ recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 
 Use this pass to make one Sci-Fi Crate and export it through the product UI.
 
-1. Launch the release app with `SHAPE_LAB_PREVIEW_CATALOG=1`.
+1. Launch the release app with `pwsh -File scripts/run_shape_app.ps1 -PreviewCatalog`.
 2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
 3. Wait for the status strip to show the model and preview are ready.
 4. Open Directions, generate directions, and choose one coherent whole-model option.

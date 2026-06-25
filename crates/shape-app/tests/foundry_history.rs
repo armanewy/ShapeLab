@@ -37,15 +37,9 @@ fn semantic_revision_tree_rows_keep_branch_structure() {
             .any(|badge| badge.kind == history::FoundryHistoryBadgeKind::Branch)
     );
     assert_eq!(rows[1].summary.label, "Height change");
-    assert_eq!(
-        rows[1].summary.detail.as_deref(),
-        Some("Set height to 0.75")
-    );
-    assert_eq!(rows[2].summary.label, "Provider change");
-    assert_eq!(
-        rows[2].summary.detail.as_deref(),
-        Some("Changed shade provider to brass-shade")
-    );
+    assert_eq!(rows[1].summary.detail.as_deref(), Some("Changed Height"));
+    assert_eq!(rows[2].summary.label, "Changed Shade");
+    assert_eq!(rows[2].summary.detail.as_deref(), Some("Option updated"));
     assert!(rows[2].selected);
     assert!(rows[2].on_current_path);
     assert!(!rows[1].on_current_path);
@@ -62,7 +56,8 @@ fn summaries_identify_controls_providers_and_accepted_candidates() {
         control.kind,
         history::FoundryHistorySummaryKind::ControlEdit
     );
-    assert_eq!(control.label, "Set height to 0.75");
+    assert_eq!(control.label, "Changed Height");
+    assert_eq!(control.detail.as_deref(), Some("Value set to 0.75"));
     assert_eq!(control.changed_controls, vec!["height"]);
 
     let provider_ref = content_ref("brass-shade", 9);
@@ -74,7 +69,8 @@ fn summaries_identify_controls_providers_and_accepted_candidates() {
         provider.kind,
         history::FoundryHistorySummaryKind::ProviderChange
     );
-    assert_eq!(provider.label, "Changed shade provider to brass-shade");
+    assert_eq!(provider.label, "Changed Shade");
+    assert_eq!(provider.detail.as_deref(), Some("Option updated"));
     assert_eq!(provider.changed_provider_roles, vec!["shade"]);
 
     let candidate_id = FoundryCandidateId("candidate-7".to_owned());
@@ -85,7 +81,7 @@ fn summaries_identify_controls_providers_and_accepted_candidates() {
         accepted.kind,
         history::FoundryHistorySummaryKind::CandidateAcceptance
     );
-    assert_eq!(accepted.label, "Accepted candidate candidate-7");
+    assert_eq!(accepted.label, "Chose a direction");
     assert_eq!(accepted.accepted_candidate, Some(candidate_id));
 }
 

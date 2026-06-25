@@ -426,14 +426,14 @@ fn set_style_apply_edit_prunes_incompatible_provider_override() {
 }
 
 #[test]
-fn candidate_generation_job_renders_preview_images_for_cards() {
+fn candidate_generation_job_returns_pending_cards_before_preview_rendering() {
     let fixture = RuntimeFixture::new();
     let request = FoundryJobRequest::GenerateCandidates {
         job_id: 1,
         document: Box::new(fixture.document.clone()),
         request: FoundryCandidateRequest {
             seed: 33,
-            proposal_count: 24,
+            proposal_count: 12,
             result_count: 4,
             mode: FoundryCandidateMode::Refine,
             strategy_id: None,
@@ -452,10 +452,63 @@ fn candidate_generation_job_renders_preview_images_for_cards() {
 
     assert!(!cards.is_empty());
     assert!(cards.iter().all(|card| {
+        card.width == 0
+            && card.height == 0
+            && card.rgba8.is_empty()
+            && card.camera.is_none()
+            && !card.selectable
+            && card
+                .preview_failure
+                .as_deref()
+                .is_some_and(|reason| reason.contains("Preview rendering"))
+    }));
+}
+
+#[test]
+fn candidate_preview_job_renders_preview_images_for_cards() {
+    let fixture = RuntimeFixture::new();
+    let request = FoundryCandidateRequest {
+        seed: 33,
+        proposal_count: 12,
+        result_count: 4,
+        mode: FoundryCandidateMode::Refine,
+        strategy_id: None,
+        preference_profile: None,
+    };
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
+        .expect("candidate generation should succeed");
+    let output_count = output.candidates.len();
+    let preview_request = FoundryJobRequest::RenderCandidatePreviews {
+        job_id: 2,
+        document: Box::new(fixture.document.clone()),
+        request: request.clone(),
+        output: Box::new(output),
+    };
+
+    let event = run_foundry_job(
+        preview_request,
+        &fixture.catalog,
+        &mut FoundryPreviewCache::default(),
+    );
+    let FoundryJobEvent::CandidatePreviewsRendered {
+        cards,
+        rejected_count,
+        ..
+    } = event
+    else {
+        panic!("candidate preview rendering should complete, got {event:?}");
+    };
+
+    assert!(!cards.is_empty());
+    assert!(cards.len() <= output_count);
+    assert_eq!(cards.len() + rejected_count, output_count);
+    assert!(cards.iter().all(|card| {
         card.width > 0
             && card.height > 0
             && card.rgba8.len() == (card.width * card.height * 4) as usize
             && card.camera.is_some()
+            && card.preview_failure.is_none()
+            && card.selectable
     }));
 }
 
@@ -464,7 +517,7 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
     let fixture = RuntimeFixture::new();
     let request = FoundryCandidateRequest {
         seed: 51,
-        proposal_count: 24,
+        proposal_count: 12,
         result_count: 4,
         mode: FoundryCandidateMode::Refine,
         strategy_id: None,
@@ -489,7 +542,7 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
     )
     .expect("preview failures should not fail candidate card generation");
 
-    assert_eq!(cards.len(), output.candidates.len());
+    assert!(cards.len() <= output.candidates.len());
     assert!(cards.iter().any(|card| {
         card.preview_failure
             .as_deref()
@@ -791,7 +844,7 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
     let effects = state
         .request_candidates(FoundryCandidateRequest {
             seed: 77,
-            proposal_count: 24,
+            proposal_count: 12,
             result_count: 4,
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,
@@ -848,7 +901,7 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
     let effects = state
         .request_candidates(FoundryCandidateRequest {
             seed: 78,
-            proposal_count: 24,
+            proposal_count: 12,
             result_count: 4,
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,

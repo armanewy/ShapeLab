@@ -28,7 +28,7 @@ use crate::asset::scoring::{
 
 /// Minimum proposal programs a Foundry candidate request may ask the generator
 /// to attempt.
-pub const FOUNDRY_MIN_PROPOSAL_COUNT: usize = 24;
+pub const FOUNDRY_MIN_PROPOSAL_COUNT: usize = 8;
 /// Maximum proposal programs a Foundry candidate request may ask the generator
 /// to attempt.
 pub const FOUNDRY_MAX_PROPOSAL_COUNT: usize = 72;
@@ -93,7 +93,7 @@ pub enum FoundryCandidateMode {
 pub struct FoundryCandidateRequest {
     /// Deterministic generation seed.
     pub seed: u64,
-    /// Number of proposal programs to attempt. Must be between 24 and 72.
+    /// Maximum number of proposal programs to attempt. Must be between 8 and 72.
     pub proposal_count: usize,
     /// Maximum number of survivors to return. The generator caps this at six.
     pub result_count: usize,
@@ -329,6 +329,7 @@ pub fn generate_foundry_candidate_plans(
     let mut seen_programs = BTreeSet::new();
     let mut scoring_inputs = Vec::new();
     let mut accepted_plans = BTreeMap::<String, FoundryCandidatePlan>::new();
+    let target_accepted_plans = request.result_count.min(FOUNDRY_MAX_RESULT_COUNT).max(1);
 
     for proposal_index in 0..request.proposal_count {
         diagnostics.attempted_proposals += 1;
@@ -429,6 +430,9 @@ pub fn generate_foundry_candidate_plans(
         };
         scoring_inputs.push(scoring_input);
         accepted_plans.insert(plan.id.0.clone(), plan);
+        if accepted_plans.len() >= target_accepted_plans {
+            break;
+        }
     }
 
     diagnostics.scored_candidates = scoring_inputs.len();
@@ -468,12 +472,174 @@ pub fn generate_foundry_candidate_plans(
     })
 }
 
+/// Generate replayable candidate draft plans without compiling every candidate.
+///
+/// This is the interactive path for direction boards: it validates the request,
+/// resolves the parent profile once, builds deterministic edits, and defers
+/// candidate compilation/conformance to the preview legibility job.
+pub fn generate_foundry_candidate_draft_plans(
+    document: &FoundryAssetDocument,
+    resolver: &impl FoundryCatalogResolver,
+    request: &FoundryCandidateRequest,
+) -> Result<FoundryCandidateOutput, FoundryCandidateError> {
+    validate_request(request)?;
+
+    let parent_output = compile_foundry_document(document, resolver)
+        .map_err(|error| FoundryCandidateError::ParentCompilationFailed(format!("{error:?}")))?;
+    let preference_scope = FoundryPreferenceScope::new(
+        parent_output.catalog.family.id.clone(),
+        document.customizer_profile_ref.stable_id.clone(),
+    );
+    let preference_profile =
+        request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
+    let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
+    let strategy_controls = strategy_control_ids(
+        &parent_output.catalog.customizer_profile,
+        &request.strategy_id,
+    )?;
+
+    let mut locked_targets_skipped = 0;
+    let opportunities = collect_control_opportunities(
+        document,
+        &parent_output.catalog.customizer_profile,
+        context,
+        request.mode,
+        strategy_controls.as_ref(),
+        &mut locked_targets_skipped,
+    );
+    if opportunities.is_empty() {
+        return Err(FoundryCandidateError::NoEditableControls);
+    }
+
+    let mut diagnostics = FoundryCandidateGenerationDiagnostics {
+        requested_proposals: request.proposal_count,
+        requested_candidates: request.result_count,
+        attempted_proposals: 0,
+        scored_candidates: 0,
+        accepted_candidates: 0,
+        returned_candidates: 0,
+        available_control_count: opportunities.len(),
+        locked_targets_skipped,
+        rejections: BTreeMap::new(),
+    };
+    let mut seen_programs = BTreeSet::new();
+    let mut accepted_plans = BTreeMap::<String, FoundryCandidatePlan>::new();
+    let mut selected_ids = Vec::new();
+    let parent_descriptor = crate::asset::scoring::asset_descriptor(&descriptor_input_from_output(
+        "parent",
+        &parent_output,
+    ));
+    let target_accepted_plans = request.result_count.min(FOUNDRY_MAX_RESULT_COUNT).max(1);
+
+    for proposal_index in 0..request.proposal_count {
+        diagnostics.attempted_proposals += 1;
+        let proposal_seed = proposal_seed(request.seed, proposal_index as u64);
+        let candidate_id = candidate_id(proposal_seed, proposal_index);
+        let mut rng = ChaCha8Rng::seed_from_u64(proposal_seed);
+        let selected = select_opportunities(&opportunities, request.mode, proposal_index, &mut rng);
+        let proposal = build_candidate_edit(
+            &parent_output.catalog.customizer_profile,
+            context,
+            selected,
+            request.mode,
+            proposal_seed,
+            proposal_index,
+            &mut rng,
+        );
+        let Some(proposal) = proposal else {
+            increment_rejection(
+                &mut diagnostics,
+                FoundryCandidateRejectionReason::EmptyProgram,
+            );
+            continue;
+        };
+        let program_key = format!("{:?}", proposal.edit.commands);
+        if !seen_programs.insert(program_key) {
+            increment_rejection(
+                &mut diagnostics,
+                FoundryCandidateRejectionReason::DuplicateProgram,
+            );
+            continue;
+        }
+
+        let mut candidate_document = document.clone();
+        let mut edit_failed = false;
+        for command in &proposal.edit.commands {
+            if apply_foundry_command(&mut candidate_document, command).is_err() {
+                edit_failed = true;
+                break;
+            }
+        }
+        if edit_failed {
+            increment_rejection(
+                &mut diagnostics,
+                FoundryCandidateRejectionReason::EditRejected,
+            );
+            continue;
+        }
+
+        let candidate_key = candidate_id.0.clone();
+        let plan = FoundryCandidatePlan {
+            id: candidate_id,
+            label: proposal.edit.label.clone(),
+            edit: proposal.edit,
+            document: candidate_document,
+            changed_controls: proposal.changed_controls,
+            diagnostics: FoundryCandidateDiagnostics {
+                changes: proposal.changes,
+            },
+            descriptor: parent_descriptor.clone(),
+            recipe_fingerprint: format!("draft-{candidate_key}"),
+            conformance: FoundryConformanceSummary {
+                accepted: true,
+                required_failure_count: 0,
+                advisory_issue_count: 0,
+                runtime_deferred_count: 0,
+            },
+        };
+        selected_ids.push(candidate_key.clone());
+        accepted_plans.insert(candidate_key, plan);
+        if accepted_plans.len() >= target_accepted_plans {
+            break;
+        }
+    }
+
+    diagnostics.scored_candidates = accepted_plans.len();
+    diagnostics.accepted_candidates = accepted_plans.len();
+    selected_ids.truncate(request.result_count.min(FOUNDRY_MAX_RESULT_COUNT));
+    let preference_report = preference_report(
+        request.preference_profile.as_ref(),
+        preference_profile,
+        preference_scope,
+        &selected_ids,
+        &accepted_plans,
+    );
+    let candidates = selected_ids
+        .iter()
+        .filter_map(|candidate_id| accepted_plans.remove(candidate_id))
+        .collect::<Vec<_>>();
+    diagnostics.returned_candidates = candidates.len();
+
+    Ok(FoundryCandidateOutput {
+        candidates,
+        diagnostics,
+        scoring_report: AssetScoringReport {
+            rejected_candidates: Vec::new(),
+            scored_candidates: Vec::new(),
+            unique_candidates: Vec::new(),
+            duplicate_groups: Vec::new(),
+            representatives: Vec::new(),
+        },
+        preference_report,
+    })
+}
+
 fn validate_request(request: &FoundryCandidateRequest) -> Result<(), FoundryCandidateError> {
     if request.proposal_count < FOUNDRY_MIN_PROPOSAL_COUNT
         || request.proposal_count > FOUNDRY_MAX_PROPOSAL_COUNT
     {
         return Err(FoundryCandidateError::InvalidRequest(
-            "proposal_count must be between 24 and 72",
+            "proposal_count must be between 8 and 72",
         ));
     }
     if request.result_count == 0 {

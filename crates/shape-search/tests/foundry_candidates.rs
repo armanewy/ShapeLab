@@ -57,13 +57,13 @@ fn release_candidate_budget_rejects_unbounded_proposals_and_caps_results() {
     too_few.proposal_count = FOUNDRY_MIN_PROPOSAL_COUNT - 1;
     let error = generate_foundry_candidate_plans(&fixture.document, &fixture, &too_few)
         .expect_err("proposal budget below release minimum should be rejected");
-    assert!(error.to_string().contains("between 24 and 72"));
+    assert!(error.to_string().contains("between 8 and 72"));
 
     let mut too_many = request(7, FoundryCandidateMode::Explore);
     too_many.proposal_count = FOUNDRY_MAX_PROPOSAL_COUNT + 1;
     let error = generate_foundry_candidate_plans(&fixture.document, &fixture, &too_many)
         .expect_err("proposal budget above release maximum should be rejected");
-    assert!(error.to_string().contains("between 24 and 72"));
+    assert!(error.to_string().contains("between 8 and 72"));
 
     let mut oversized_results = request(7, FoundryCandidateMode::Explore);
     oversized_results.proposal_count = FOUNDRY_MIN_PROPOSAL_COUNT;

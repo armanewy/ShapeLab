@@ -19,14 +19,16 @@ use shape_render::foundry::{
 };
 use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
-    FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
-    generate_foundry_candidate_plans,
+    FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRejectionReason,
+    FoundryCandidateRequest, generate_foundry_candidate_draft_plans,
 };
 
 use super::view_model::{FoundryCandidateCard, FoundryPackView};
 
 const CURRENT_PREVIEW_ID: &str = "current";
+const CANDIDATE_PARENT_PREVIEW_ID: &str = "candidate-parent";
 const CANDIDATE_PREVIEW_PIXELS: u32 = 128;
+const PENDING_CANDIDATE_PREVIEW_MESSAGE: &str = "Preview rendering for this direction.";
 
 /// Deterministic background work requested by the Foundry app state.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +74,17 @@ pub(crate) enum FoundryJobRequest {
         document: Box<FoundryAssetDocument>,
         /// Deterministic search request, including the search mode.
         request: FoundryCandidateRequest,
+    },
+    /// Render previews and run the card-size legibility gate for generated directions.
+    RenderCandidatePreviews {
+        /// Monotonic app-local job ID.
+        job_id: u64,
+        /// Source document snapshot used to generate the candidates.
+        document: Box<FoundryAssetDocument>,
+        /// Deterministic search request, including the search mode.
+        request: FoundryCandidateRequest,
+        /// Candidate output to preview and filter.
+        output: Box<FoundryCandidateOutput>,
     },
     /// Apply a replayable edit and rebuild the resulting document.
     ApplyEdit {
@@ -137,6 +150,7 @@ impl FoundryJobRequest {
             | Self::RenderPreview { job_id, .. }
             | Self::PreviewControlValue { job_id, .. }
             | Self::GenerateCandidates { job_id, .. }
+            | Self::RenderCandidatePreviews { job_id, .. }
             | Self::ApplyEdit { job_id, .. }
             | Self::CompilePack { job_id, .. }
             | Self::ExportPack { job_id, .. }
@@ -148,7 +162,8 @@ impl FoundryJobRequest {
     #[must_use]
     pub(crate) fn candidate_mode(&self) -> Option<FoundryCandidateMode> {
         match self {
-            Self::GenerateCandidates { request, .. } => Some(request.mode),
+            Self::GenerateCandidates { request, .. }
+            | Self::RenderCandidatePreviews { request, .. } => Some(request.mode),
             _ => None,
         }
     }
@@ -160,7 +175,9 @@ impl FoundryJobRequest {
             Self::CompileCurrent { .. } => FoundryJobSlot::CompileCurrent,
             Self::RenderPreview { .. } => FoundryJobSlot::RenderPreview,
             Self::PreviewControlValue { .. } => FoundryJobSlot::RenderPreview,
-            Self::GenerateCandidates { .. } => FoundryJobSlot::GenerateCandidates,
+            Self::GenerateCandidates { .. } | Self::RenderCandidatePreviews { .. } => {
+                FoundryJobSlot::GenerateCandidates
+            }
             Self::ApplyEdit { .. } => FoundryJobSlot::ApplyEdit,
             Self::CompilePack { .. } => FoundryJobSlot::CompilePack,
             Self::ExportPack { .. } => FoundryJobSlot::Export,
@@ -206,6 +223,17 @@ pub(crate) enum FoundryJobEvent {
         output: Box<FoundryCandidateOutput>,
         /// UI-ready candidate cards.
         cards: Vec<FoundryCandidateCard>,
+    },
+    /// Candidate card previews completed and visually weak directions were filtered.
+    CandidatePreviewsRendered {
+        /// Matching app-local job ID.
+        job_id: u64,
+        /// Originating search request, including the search mode.
+        request: FoundryCandidateRequest,
+        /// UI-ready candidate cards after the legibility gate.
+        cards: Vec<FoundryCandidateCard>,
+        /// Number of generated cards rejected by the preview legibility gate.
+        rejected_count: usize,
     },
     /// A Foundry edit was applied.
     EditApplied {
@@ -260,6 +288,7 @@ impl FoundryJobEvent {
             Self::CompileFinished { job_id, .. }
             | Self::PreviewRendered { job_id, .. }
             | Self::CandidatesGenerated { job_id, .. }
+            | Self::CandidatePreviewsRendered { job_id, .. }
             | Self::EditApplied { job_id, .. }
             | Self::PackCompiled { job_id, .. }
             | Self::PackExportFinished { job_id, .. }
@@ -309,24 +338,43 @@ pub(crate) fn run_foundry_job(
         ),
         FoundryJobRequest::GenerateCandidates {
             document, request, ..
-        } => generate_foundry_candidate_plans(&document, resolver, &request)
+        } => generate_foundry_candidate_draft_plans(&document, resolver, &request)
             .map_err(|error| error.to_string())
-            .and_then(|output| {
-                let cards = candidate_cards_from_output_with_previews(
-                    &document,
-                    &output,
-                    Some(request.mode),
-                    None,
-                    resolver,
-                    preview_cache,
-                )?;
-                Ok(FoundryJobEvent::CandidatesGenerated {
+            .map(|output| {
+                let cards =
+                    candidate_cards_from_output_pending_previews(&output, Some(request.mode), None);
+                FoundryJobEvent::CandidatesGenerated {
                     job_id,
                     request,
                     output: Box::new(output),
                     cards,
-                })
+                }
             }),
+        FoundryJobRequest::RenderCandidatePreviews {
+            document,
+            request,
+            output,
+            ..
+        } => {
+            let original_count = output.candidates.len();
+            candidate_cards_from_output_with_previews(
+                &document,
+                &output,
+                Some(request.mode),
+                None,
+                resolver,
+                preview_cache,
+            )
+            .map(|cards| {
+                let rejected_count = original_count.saturating_sub(cards.len());
+                FoundryJobEvent::CandidatePreviewsRendered {
+                    job_id,
+                    request,
+                    cards,
+                    rejected_count,
+                }
+            })
+        }
         FoundryJobRequest::ApplyEdit { document, edit, .. } => {
             apply_edit_and_compile(&document, &edit, resolver).map(|output| {
                 FoundryJobEvent::EditApplied {
@@ -649,6 +697,23 @@ pub(crate) fn candidate_cards_from_output(
         .collect()
 }
 
+/// Build candidate cards that can be shown before preview rendering completes.
+pub(crate) fn candidate_cards_from_output_pending_previews(
+    output: &FoundryCandidateOutput,
+    mode: Option<FoundryCandidateMode>,
+    selected: Option<&shape_foundry::FoundryCandidateId>,
+) -> Vec<FoundryCandidateCard> {
+    let mut cards = candidate_cards_from_output(output, mode, selected);
+    for card in &mut cards {
+        card.preview_failure = Some(PENDING_CANDIDATE_PREVIEW_MESSAGE.to_owned());
+        card.validation_label = "Preview pending".to_owned();
+        card.validation_detail =
+            Some("This direction can be chosen after its card preview renders.".to_owned());
+        card.selectable = false;
+    }
+    cards
+}
+
 pub(crate) fn candidate_cards_from_output_with_previews(
     parent_document: &FoundryAssetDocument,
     output: &FoundryCandidateOutput,
@@ -662,6 +727,17 @@ pub(crate) fn candidate_cards_from_output_with_previews(
         return Ok(cards);
     }
 
+    let Some(preview_resolution) = FoundryPreviewResolution::from_pixels(CANDIDATE_PREVIEW_PIXELS)
+    else {
+        for card in &mut cards {
+            card.preview_failure = Some(format!(
+                "Candidate preview size {CANDIDATE_PREVIEW_PIXELS}px is not supported."
+            ));
+            card.selectable = false;
+        }
+        return Ok(cards);
+    };
+
     let parent_output = match compile_foundry_document(parent_document, resolver) {
         Ok(output) => output,
         Err(error) => {
@@ -673,7 +749,7 @@ pub(crate) fn candidate_cards_from_output_with_previews(
         }
     };
     let parent_request = preview_request_for_output(
-        "candidate-parent",
+        CANDIDATE_PARENT_PREVIEW_ID,
         FoundryPreviewKind::CandidateCard {
             candidate_id: "parent".to_owned(),
         },
@@ -705,12 +781,8 @@ pub(crate) fn candidate_cards_from_output_with_previews(
         return Ok(cards);
     }
 
-    let mut batch = FoundryPreviewBatchRequest::new(
-        "candidate-directions",
-        requests,
-        FoundryPreviewResolution::from_pixels(CANDIDATE_PREVIEW_PIXELS)
-            .expect("candidate preview size is supported"),
-    );
+    let mut batch =
+        FoundryPreviewBatchRequest::new("candidate-directions", requests, preview_resolution);
     batch.max_parallel_jobs = 4;
     if let Ok(rendered) = preview_cache.render_batch(batch) {
         let rendered_by_id = rendered
@@ -729,19 +801,39 @@ pub(crate) fn candidate_cards_from_output_with_previews(
             }
         }
 
-        return Ok(cards);
+        return Ok(filter_legible_candidate_cards(
+            cards,
+            rendered_by_id
+                .get(CANDIDATE_PARENT_PREVIEW_ID)
+                .map(|preview| preview.image.rgba8.as_slice()),
+            rendered_by_id
+                .get(CANDIDATE_PARENT_PREVIEW_ID)
+                .map(|preview| (preview.image.width, preview.image.height)),
+            mode,
+        ));
     }
 
+    let mut parent_preview_rgba8 = None;
+    let mut parent_preview_size = None;
     for (preview_id, (index, request)) in candidate_requests {
         let mut batch = FoundryPreviewBatchRequest::new(
             format!("candidate-direction-{preview_id}"),
             vec![parent_request.clone(), request],
-            FoundryPreviewResolution::from_pixels(CANDIDATE_PREVIEW_PIXELS)
-                .expect("candidate preview size is supported"),
+            preview_resolution,
         );
         batch.max_parallel_jobs = 2;
         match preview_cache.render_batch(batch) {
             Ok(rendered) => {
+                if parent_preview_rgba8.is_none()
+                    && let Some(parent_preview) = rendered
+                        .previews
+                        .iter()
+                        .find(|preview| preview.preview_id == CANDIDATE_PARENT_PREVIEW_ID)
+                {
+                    parent_preview_rgba8 = Some(parent_preview.image.rgba8.clone());
+                    parent_preview_size =
+                        Some((parent_preview.image.width, parent_preview.image.height));
+                }
                 let preview = rendered
                     .previews
                     .iter()
@@ -760,7 +852,201 @@ pub(crate) fn candidate_cards_from_output_with_previews(
         }
     }
 
-    Ok(cards)
+    Ok(filter_legible_candidate_cards(
+        cards,
+        parent_preview_rgba8.as_deref(),
+        parent_preview_size,
+        mode,
+    ))
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PreviewLegibilityDelta {
+    mean_pixel_delta: f32,
+    changed_pixel_ratio: f32,
+    silhouette_delta: f32,
+}
+
+impl PreviewLegibilityDelta {
+    fn score(self) -> f32 {
+        self.mean_pixel_delta * 0.55
+            + self.changed_pixel_ratio * 0.35
+            + self.silhouette_delta * 0.75
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PreviewLegibilityThreshold {
+    score: f32,
+    changed_pixel_ratio: f32,
+    silhouette_delta: f32,
+}
+
+fn filter_legible_candidate_cards(
+    cards: Vec<FoundryCandidateCard>,
+    parent_rgba8: Option<&[u8]>,
+    parent_size: Option<(u32, u32)>,
+    mode: Option<FoundryCandidateMode>,
+) -> Vec<FoundryCandidateCard> {
+    let Some(parent_rgba8) = parent_rgba8 else {
+        return cards;
+    };
+    let Some((parent_width, parent_height)) = parent_size else {
+        return cards;
+    };
+    let threshold = legibility_threshold(mode);
+    let duplicate_threshold = duplicate_legibility_threshold(mode);
+    let mut kept = Vec::with_capacity(cards.len());
+    for mut card in cards {
+        if card.preview_failure.is_some() || card.width == 0 || card.height == 0 {
+            kept.push(card);
+            continue;
+        }
+        let Some(parent_delta) = preview_legibility_delta(
+            parent_rgba8,
+            parent_width,
+            parent_height,
+            &card.rgba8,
+            card.width,
+            card.height,
+        ) else {
+            card.preview_failure =
+                Some("Preview could not be compared against the current model.".to_owned());
+            card.selectable = false;
+            kept.push(card);
+            continue;
+        };
+        if !passes_legibility_threshold(parent_delta, threshold) {
+            continue;
+        }
+        let duplicate = kept.iter().any(|kept_card: &FoundryCandidateCard| {
+            kept_card.preview_failure.is_none()
+                && preview_legibility_delta(
+                    &kept_card.rgba8,
+                    kept_card.width,
+                    kept_card.height,
+                    &card.rgba8,
+                    card.width,
+                    card.height,
+                )
+                .is_some_and(|delta| !passes_legibility_threshold(delta, duplicate_threshold))
+        });
+        if duplicate {
+            continue;
+        }
+        card.validation_label = "Visually distinct".to_owned();
+        card.validation_detail = Some(format!(
+            "Card-size visible change score {:.1}%.",
+            parent_delta.score() * 100.0
+        ));
+        card.rejections
+            .remove(&FoundryCandidateRejectionReason::DescriptorRejected);
+        kept.push(card);
+    }
+    kept
+}
+
+fn preview_legibility_delta(
+    left_rgba8: &[u8],
+    left_width: u32,
+    left_height: u32,
+    right_rgba8: &[u8],
+    right_width: u32,
+    right_height: u32,
+) -> Option<PreviewLegibilityDelta> {
+    if left_width != right_width
+        || left_height != right_height
+        || left_width == 0
+        || left_height == 0
+    {
+        return None;
+    }
+    let expected_len = (left_width as usize)
+        .saturating_mul(left_height as usize)
+        .saturating_mul(4);
+    if left_rgba8.len() != expected_len || right_rgba8.len() != expected_len {
+        return None;
+    }
+
+    let mut total_delta = 0.0_f32;
+    let mut changed_pixels = 0_usize;
+    let mut silhouette_pixels = 0_usize;
+    let total_pixels = (left_width as usize).saturating_mul(left_height as usize);
+    for (left, right) in left_rgba8.chunks_exact(4).zip(right_rgba8.chunks_exact(4)) {
+        let left_alpha = left[3] as f32 / 255.0;
+        let right_alpha = right[3] as f32 / 255.0;
+        let alpha_delta = (left_alpha - right_alpha).abs();
+        let visible_weight = left_alpha.max(right_alpha);
+        let color_delta = ((left[0].abs_diff(right[0]) as f32
+            + left[1].abs_diff(right[1]) as f32
+            + left[2].abs_diff(right[2]) as f32)
+            / (3.0 * 255.0))
+            * visible_weight;
+        let pixel_delta = color_delta.max(alpha_delta);
+        total_delta += pixel_delta;
+        if pixel_delta >= 0.08 {
+            changed_pixels += 1;
+        }
+        if (left_alpha > 0.05) != (right_alpha > 0.05) {
+            silhouette_pixels += 1;
+        }
+    }
+    let total_pixels = total_pixels.max(1) as f32;
+    Some(PreviewLegibilityDelta {
+        mean_pixel_delta: total_delta / total_pixels,
+        changed_pixel_ratio: changed_pixels as f32 / total_pixels,
+        silhouette_delta: silhouette_pixels as f32 / total_pixels,
+    })
+}
+
+fn passes_legibility_threshold(
+    delta: PreviewLegibilityDelta,
+    threshold: PreviewLegibilityThreshold,
+) -> bool {
+    delta.score() >= threshold.score
+        || delta.changed_pixel_ratio >= threshold.changed_pixel_ratio
+        || delta.silhouette_delta >= threshold.silhouette_delta
+}
+
+fn legibility_threshold(mode: Option<FoundryCandidateMode>) -> PreviewLegibilityThreshold {
+    match mode.unwrap_or(FoundryCandidateMode::Explore) {
+        FoundryCandidateMode::Refine => PreviewLegibilityThreshold {
+            score: 0.010,
+            changed_pixel_ratio: 0.018,
+            silhouette_delta: 0.008,
+        },
+        FoundryCandidateMode::Explore => PreviewLegibilityThreshold {
+            score: 0.016,
+            changed_pixel_ratio: 0.028,
+            silhouette_delta: 0.014,
+        },
+        FoundryCandidateMode::Silhouette => PreviewLegibilityThreshold {
+            score: 0.024,
+            changed_pixel_ratio: 0.035,
+            silhouette_delta: 0.020,
+        },
+        FoundryCandidateMode::Structure => PreviewLegibilityThreshold {
+            score: 0.018,
+            changed_pixel_ratio: 0.030,
+            silhouette_delta: 0.014,
+        },
+        FoundryCandidateMode::Detail => PreviewLegibilityThreshold {
+            score: 0.007,
+            changed_pixel_ratio: 0.010,
+            silhouette_delta: 0.004,
+        },
+    }
+}
+
+fn duplicate_legibility_threshold(
+    mode: Option<FoundryCandidateMode>,
+) -> PreviewLegibilityThreshold {
+    let threshold = legibility_threshold(mode);
+    PreviewLegibilityThreshold {
+        score: threshold.score * 0.55,
+        changed_pixel_ratio: threshold.changed_pixel_ratio * 0.55,
+        silhouette_delta: threshold.silhouette_delta * 0.55,
+    }
 }
 
 fn apply_candidate_preview(

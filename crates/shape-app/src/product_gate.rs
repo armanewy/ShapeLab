@@ -161,7 +161,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         && direction_mode_actions.len() == 5
         && direction_mode_actions.iter().all(|action| {
             action.request.result_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
-                && action.request.proposal_count >= 24
+                && action.request.proposal_count >= 8
         });
     let product_home_profiles = default_product_home_profile_count();
     let installed_kit_count = installed_product_kit_count();

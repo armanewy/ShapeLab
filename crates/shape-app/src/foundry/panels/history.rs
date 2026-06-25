@@ -420,7 +420,7 @@ pub(crate) fn program_summary(program: &FoundryProjectRevisionProgram) -> Foundr
     if let [command] = commands {
         let mut summary = command_summary(command);
         let label = program.label().trim();
-        if !label.is_empty() && label != summary.label {
+        if !label.is_empty() && label != summary.label && history_program_label_is_safe(label) {
             summary.detail = Some(summary.label);
             summary.label = label.to_owned();
         }
@@ -447,7 +447,7 @@ pub(crate) fn program_summary(program: &FoundryProjectRevisionProgram) -> Foundr
 
     FoundryHistorySummary {
         kind: FoundryHistorySummaryKind::CommandProgram,
-        label: non_empty_label(program.label(), "Foundry changes"),
+        label: safe_history_program_label(program.label(), "Project changes"),
         detail: Some(detail),
         changed_controls: changed_controls.into_iter().collect(),
         changed_provider_roles: changed_provider_roles.into_iter().collect(),
@@ -462,7 +462,7 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
         FoundryCommand::SetControl { control_id, value } => control_edit_summary(control_id, value),
         FoundryCommand::ResetControl { control_id } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::ControlEdit,
-            label: format!("Reset {control_id}"),
+            label: format!("Reset {}", friendly_history_label(control_id)),
             detail: None,
             changed_controls: vec![control_id.clone()],
             changed_provider_roles: Vec::new(),
@@ -474,24 +474,19 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
         FoundryCommand::SetRolePresence { role, enabled } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::ControlEdit,
             label: if *enabled {
-                format!("Enabled {role}")
+                format!("Enabled {}", friendly_history_label(role))
             } else {
-                format!("Disabled {role}")
+                format!("Disabled {}", friendly_history_label(role))
             },
             detail: Some("Role presence changed".to_owned()),
             changed_controls: vec![role.clone()],
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
-        FoundryCommand::SetStyle {
-            style_content_ref, ..
-        } => FoundryHistorySummary {
+        FoundryCommand::SetStyle { .. } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::StyleChange,
-            label: format!("Changed style to {}", style_content_ref.stable_id),
-            detail: Some(format!(
-                "Style fingerprint {}",
-                short_fingerprint(style_content_ref)
-            )),
+            label: "Changed visual style".to_owned(),
+            detail: Some("Style updated".to_owned()),
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
@@ -510,11 +505,8 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
         },
         FoundryCommand::GenerateCandidates(request) => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::CandidateGeneration,
-            label: format!("Generated {} candidates", request.count),
-            detail: request
-                .strategy_id
-                .as_ref()
-                .map(|strategy| format!("Strategy {strategy}, seed {}", request.seed)),
+            label: format!("Generated {} directions", request.count),
+            detail: None,
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
@@ -522,9 +514,9 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
         FoundryCommand::AcceptCandidate { candidate_id } => {
             candidate_acceptance_summary(candidate_id)
         }
-        FoundryCommand::RejectCandidate { candidate_id } => FoundryHistorySummary {
+        FoundryCommand::RejectCandidate { .. } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::RuntimeAction,
-            label: format!("Rejected candidate {}", candidate_id.0),
+            label: "Rejected a direction".to_owned(),
             detail: None,
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
@@ -538,25 +530,25 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
-        FoundryCommand::SwitchRevision { revision_id } => FoundryHistorySummary {
+        FoundryCommand::SwitchRevision { .. } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::RuntimeAction,
-            label: format!("Switched to revision {}", revision_id.0),
+            label: "Switched to an earlier step".to_owned(),
             detail: None,
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
-        FoundryCommand::Export { profile, out_dir } => FoundryHistorySummary {
+        FoundryCommand::Export { .. } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::RuntimeAction,
-            label: format!("Exported {profile}"),
-            detail: out_dir.as_ref().map(|path| format!("Output {path}")),
+            label: "Exported current asset".to_owned(),
+            detail: None,
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
-        FoundryCommand::AddCurrentToPack { pack_id, member_id } => FoundryHistorySummary {
+        FoundryCommand::AddCurrentToPack { .. } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::RuntimeAction,
-            label: format!("Added {member_id} to pack {pack_id}"),
+            label: "Added current asset to pack".to_owned(),
             detail: None,
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
@@ -573,8 +565,8 @@ pub(crate) fn control_edit_summary(
 ) -> FoundryHistorySummary {
     FoundryHistorySummary {
         kind: FoundryHistorySummaryKind::ControlEdit,
-        label: format!("Set {control_id} to {}", format_control_value(value)),
-        detail: None,
+        label: format!("Changed {}", friendly_history_label(control_id)),
+        detail: Some(format!("Value set to {}", friendly_control_value(value))),
         changed_controls: vec![control_id.to_owned()],
         changed_provider_roles: Vec::new(),
         accepted_candidate: None,
@@ -585,15 +577,12 @@ pub(crate) fn control_edit_summary(
 #[must_use]
 pub(crate) fn provider_change_summary(
     role: &str,
-    provider_ref: &CatalogContentRef,
+    _provider_ref: &CatalogContentRef,
 ) -> FoundryHistorySummary {
     FoundryHistorySummary {
         kind: FoundryHistorySummaryKind::ProviderChange,
-        label: format!("Changed {role} provider to {}", provider_ref.stable_id),
-        detail: Some(format!(
-            "Provider fingerprint {}",
-            short_fingerprint(provider_ref)
-        )),
+        label: format!("Changed {}", friendly_history_label(role)),
+        detail: Some("Option updated".to_owned()),
         changed_controls: Vec::new(),
         changed_provider_roles: vec![role.to_owned()],
         accepted_candidate: None,
@@ -607,7 +596,7 @@ pub(crate) fn candidate_acceptance_summary(
 ) -> FoundryHistorySummary {
     FoundryHistorySummary {
         kind: FoundryHistorySummaryKind::CandidateAcceptance,
-        label: format!("Accepted candidate {}", candidate_id.0),
+        label: "Chose a direction".to_owned(),
         detail: None,
         changed_controls: Vec::new(),
         changed_provider_roles: Vec::new(),
@@ -704,15 +693,15 @@ pub(crate) fn save_load_status(
     if !has_project {
         return FoundrySaveLoadStatus {
             state: FoundrySaveLoadState::NoProject,
-            label: "No project loaded".to_owned(),
-            detail: Some("Open or create a Foundry project.".to_owned()),
+            label: "Choose a template to start".to_owned(),
+            detail: Some("Start from a template or open a saved project.".to_owned()),
             path_label: None,
             can_save: false,
             can_save_as: false,
             can_load: true,
             badges: vec![FoundryHistoryBadge {
                 kind: FoundryHistoryBadgeKind::Unsaved,
-                label: "No project".to_owned(),
+                label: "Choose template".to_owned(),
                 detail: None,
             }],
         };
@@ -1023,6 +1012,83 @@ fn non_empty_label(value: &str, fallback: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn safe_history_program_label(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || !history_program_label_is_safe(trimmed) {
+        fallback.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn history_program_label_is_safe(value: &str) -> bool {
+    let lowercase = value.to_ascii_lowercase();
+    ![
+        "provider",
+        "candidate",
+        "revision",
+        "fingerprint",
+        "schema",
+        "catalog",
+        "recipe",
+        "stable id",
+        "semantic id",
+    ]
+    .iter()
+    .any(|marker| lowercase.contains(marker))
+}
+
+fn friendly_history_label(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "asset option".to_owned();
+    }
+    let words = trimmed
+        .split(|character: char| {
+            character == '_'
+                || character == '-'
+                || character == '.'
+                || character == '/'
+                || character == ':'
+                || character.is_whitespace()
+        })
+        .filter(|word| !word.trim().is_empty())
+        .filter(|word| !looks_generated_history_token(word))
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut output = first.to_uppercase().collect::<String>();
+                    output.push_str(&chars.as_str().to_ascii_lowercase());
+                    output
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    if words.is_empty() {
+        "asset option".to_owned()
+    } else {
+        words.join(" ")
+    }
+}
+
+fn friendly_control_value(value: &ControlValue) -> String {
+    match value {
+        ControlValue::Scalar(value) => format_scalar(*value),
+        ControlValue::Integer(value) => value.to_string(),
+        ControlValue::Toggle(true) => "On".to_owned(),
+        ControlValue::Toggle(false) => "Off".to_owned(),
+        ControlValue::Choice(value) | ControlValue::Provider(value) => {
+            friendly_history_label(value)
+        }
+    }
+}
+
+fn looks_generated_history_token(word: &str) -> bool {
+    word.len() >= 8 && word.chars().all(|character| character.is_ascii_hexdigit())
 }
 
 fn format_control_value(value: &ControlValue) -> String {
