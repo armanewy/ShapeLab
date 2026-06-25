@@ -74,6 +74,7 @@ use shape_search::foundry::{
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
+mod foundry_foundation_cli;
 mod foundry_kit_cli;
 mod foundry_visual_benchmark;
 mod hq_quality;
@@ -132,6 +133,8 @@ enum Command {
     FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
     /// Validate, inspect, preview, package, and review curated Foundry kits.
     FoundryKit(foundry_kit_cli::FoundryKitArgs),
+    /// Create, validate, materialize, and review internal Foundry foundation drafts.
+    FoundryFoundation(foundry_foundation_cli::FoundryFoundationArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Emit an HQ asset quality report and contact-sheet evidence.
@@ -640,6 +643,7 @@ fn main() -> anyhow::Result<()> {
             foundry_visual_benchmark::run_foundry_visual_benchmark(args)
         }
         Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
+        Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
         Command::Decompile(args) => run_decompile(args),

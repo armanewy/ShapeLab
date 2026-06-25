@@ -120,6 +120,11 @@ for review:
 - quality report refs
 - contact sheet refs
 
+Wave 36 adds a gated Foundation Draft panel to Author Studio. It can inspect,
+validate, adversarially review, and materialize internal foundation drafts, but
+those drafts stay hidden from the default Visual Foundry catalog until authored
+geometry and human review are complete.
+
 These refs align with `shape-cli foundry-kit package` output filenames such as
 `kit-manifest.json`, `provider-pack.json`, `style-pack.json`,
 `control-profile.json`, `candidate-strategy-pack.json`,

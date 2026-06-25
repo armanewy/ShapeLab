@@ -4,7 +4,10 @@
 //! shell. The pro/internal authoring surface may show technical kit language;
 //! the novice shell must not.
 
-use shape_foundry::{AuthorStudioStep, FoundryAuthorStudioGate, foundry_author_studio_shell};
+use shape_foundry::{
+    AuthorStudioStep, FoundryAuthorStudioGate, foundation_draft_fixtures,
+    foundry_author_studio_shell,
+};
 
 /// Author Studio view-model row for one workflow step.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +43,19 @@ pub(crate) struct FoundryAuthorStudioView {
     pub authoring_terms: Vec<&'static str>,
     /// Descriptor-only note for unsupported mesh/component import.
     pub descriptor_only_notice: Option<&'static str>,
+    /// Gated foundation-draft import panel.
+    pub foundation_draft_panel: Option<FoundryFoundationDraftPanelView>,
+}
+
+/// Gated Foundation Draft panel view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FoundryFoundationDraftPanelView {
+    /// Internal fixture draft IDs.
+    pub internal_draft_ids: Vec<String>,
+    /// Supported author actions.
+    pub actions: Vec<&'static str>,
+    /// Catalog visibility promise.
+    pub catalog_visibility_notice: &'static str,
 }
 
 /// Build a gated Author Studio view model.
@@ -68,6 +84,19 @@ pub(crate) fn foundry_author_studio_view(gate: FoundryAuthorStudioGate) -> Found
         descriptor_only_notice: gate.developer_ui_enabled.then_some(
             "Component import is descriptor only until mesh import support is reviewed.",
         ),
+        foundation_draft_panel: gate.developer_ui_enabled.then(|| FoundryFoundationDraftPanelView {
+            internal_draft_ids: foundation_draft_fixtures()
+                .into_iter()
+                .map(|draft| draft.draft_id)
+                .collect(),
+            actions: vec![
+                "Inspect Draft",
+                "Validate Draft",
+                "Show Adversarial Report",
+                "Materialize Internal Kit Draft",
+            ],
+            catalog_visibility_notice: "Foundation drafts stay internal until human review approves authored geometry.",
+        }),
     }
 }
 
@@ -92,6 +121,8 @@ mod tests {
         let view = foundry_author_studio_view(FoundryAuthorStudioGate::default_release());
         assert!(view.authoring_terms.is_empty());
         assert!(view.descriptor_only_notice.is_none());
+        assert!(view.foundation_draft_panel.is_none());
+        assert!(!visible.contains("fantasy_sword_core_draft"));
     }
 
     #[test]
@@ -106,5 +137,15 @@ mod tests {
             view.descriptor_only_notice
                 .is_some_and(|notice| notice.contains("descriptor only"))
         );
+        let panel = view
+            .foundation_draft_panel
+            .expect("foundation draft panel should be gated");
+        assert!(
+            panel
+                .internal_draft_ids
+                .contains(&"fantasy_sword_core_draft".to_owned())
+        );
+        assert!(panel.actions.contains(&"Materialize Internal Kit Draft"));
+        assert!(panel.catalog_visibility_notice.contains("stay internal"));
     }
 }
