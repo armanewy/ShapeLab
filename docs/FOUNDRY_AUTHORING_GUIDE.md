@@ -106,6 +106,28 @@ chips, review status, clay-preview status, and plain-language hidden reasons.
 Pending kits stay hidden from the default novice catalog until review approval
 is recorded.
 
+## Foundry Author Studio
+
+Wave 35 adds Foundry Author Studio as a gated internal/pro surface for preparing
+and reviewing kit packages. It is not part of the default novice Visual Foundry
+workflow.
+
+Author Studio guides authors through Kit Overview, Family Blueprint, Provider
+Packs, Style Compatibility, Controls, Candidate Strategies, Preview Cameras,
+Quality Gates, and Review & Package. The surface exposes technical descriptors
+only when an explicit developer/pro gate is enabled.
+
+Author Studio validators cover role labels, provider registration, socket/port
+metadata, style compatibility, control ownership, topology-changing control
+policy, candidate strategy labels, preview camera consistency, honest quality
+gate launch states, and package export refs.
+
+See:
+
+- `docs/FOUNDRY_AUTHOR_STUDIO.md`
+- `docs/FOUNDRY_AUTHOR_DESCRIPTOR_FORMAT.md`
+- `docs/FOUNDRY_AUTHOR_STUDIO_MANUAL_GATE.md`
+
 ## Authoring Rules
 
 Keep the novice surface small. A profile should expose no more than seven

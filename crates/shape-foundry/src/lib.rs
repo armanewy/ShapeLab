@@ -6,6 +6,7 @@
 //! catalog resolution, compilation, candidate generation, and persistence are
 //! implemented in later waves.
 
+pub mod author_studio;
 pub mod candidate;
 pub mod catalog;
 pub mod command;
@@ -21,6 +22,7 @@ pub mod project;
 pub mod session;
 pub mod validation;
 
+pub use author_studio::*;
 pub use candidate::*;
 pub use catalog::*;
 pub use command::*;
