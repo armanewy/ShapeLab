@@ -46,7 +46,7 @@ pub(crate) const PRIMARY_ACTION_LABELS: [&str; 13] = [
     "Export",
     "Save",
     "Open Project",
-    "New Project",
+    "New Asset",
     "Lock All",
     "Reset All",
 ];

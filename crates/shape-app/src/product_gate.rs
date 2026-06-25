@@ -71,7 +71,8 @@ impl ProductUiGateReport {
             && !self.startup_blank
             && !self.default_advanced_recipe_visible
             && !self.default_raw_technical_terms_visible
-            && self.product_home_profiles == 0
+            && self.product_home_profiles > 0
+            && self.product_home_profiles < self.installed_kit_count
             && self.installed_kit_count == 17
             && self.developer_preview_kit_count == 17
             && self.directions_board_gate
@@ -267,7 +268,8 @@ mod tests {
 
         assert!(report.passed(), "{report:#?}");
         assert_eq!(report.app_shell, "direct_visual_foundry");
-        assert_eq!(report.product_home_profiles, 0);
+        assert!(report.product_home_profiles > 0);
+        assert!(report.product_home_profiles < report.installed_kit_count);
         assert_eq!(report.installed_kit_count, 17);
         assert_eq!(report.developer_preview_kit_count, 17);
         assert_eq!(report.direction_candidate_slots, 6);

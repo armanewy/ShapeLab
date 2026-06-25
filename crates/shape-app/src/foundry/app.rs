@@ -79,7 +79,7 @@ const ACTION_UNDO: &str = "Undo";
 const ACTION_OPEN_PROJECT: &str = "Open Project";
 const ACTION_SAVE_PROJECT: &str = "Save Project";
 const ACTION_SAVE_PROJECT_AS: &str = "Save Project As";
-const ACTION_NEW_PROJECT: &str = "New Project";
+const ACTION_NEW_ASSET: &str = "New Asset";
 const ACTION_PROJECT_HISTORY: &str = "Project History";
 const ACTION_SAVE_AS: &str = "Save As";
 const ACTION_LOAD: &str = "Load";
@@ -110,7 +110,7 @@ const RENDERED_ACTION_LABELS: [&str; 35] = [
     ACTION_OPEN_PROJECT,
     ACTION_SAVE_PROJECT,
     ACTION_SAVE_PROJECT_AS,
-    ACTION_NEW_PROJECT,
+    ACTION_NEW_ASSET,
     ACTION_PROJECT_HISTORY,
     ACTION_SAVE_AS,
     ACTION_LOAD,
@@ -314,7 +314,7 @@ impl FoundryDesktopApp {
         ui.label(RichText::new("PROJECT").color(colors.accent_hover).small());
         if action_button(
             ui,
-            &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Quiet),
+            &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
         )
         .clicked()
             && let Some(path) = open_foundry_project_file()
@@ -324,7 +324,7 @@ impl FoundryDesktopApp {
         let save_project_spec = action_spec(
             self.state.document.is_some(),
             ACTION_SAVE_PROJECT,
-            ButtonTone::Quiet,
+            ButtonTone::Secondary,
             NEED_PROJECT_REASON,
         );
         if action_button(ui, &save_project_spec).clicked() {
@@ -339,7 +339,7 @@ impl FoundryDesktopApp {
             &action_spec(
                 self.state.document.is_some(),
                 ACTION_SAVE_PROJECT_AS,
-                ButtonTone::Quiet,
+                ButtonTone::Secondary,
                 NEED_PROJECT_REASON,
             ),
         )
@@ -350,7 +350,7 @@ impl FoundryDesktopApp {
         }
         if action_button(
             ui,
-            &ActionSpec::enabled(ACTION_NEW_PROJECT, ButtonTone::Quiet),
+            &ActionSpec::enabled(ACTION_NEW_ASSET, ButtonTone::Secondary),
         )
         .clicked()
         {
@@ -358,7 +358,7 @@ impl FoundryDesktopApp {
         }
         if action_button(
             ui,
-            &ActionSpec::enabled(ACTION_PROJECT_HISTORY, ButtonTone::Quiet),
+            &ActionSpec::enabled(ACTION_PROJECT_HISTORY, ButtonTone::Secondary),
         )
         .clicked()
         {
@@ -376,7 +376,7 @@ impl FoundryDesktopApp {
         if self.recent_projects.is_empty() {
             ui.label(RichText::new("No recent projects yet.").color(colors.text_muted));
             ui.label(
-                RichText::new("Open a project to keep working here.")
+                RichText::new("Saved projects will appear here.")
                     .color(colors.text_subtle)
                     .small(),
             );
@@ -494,25 +494,17 @@ impl FoundryDesktopApp {
             },
         );
         ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            if action_button(
-                ui,
-                &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
-            )
-            .clicked()
-                && let Some(path) = open_foundry_project_file()
-            {
-                self.apply_commands(vec![FoundryAppCommand::Load(path)], ui.ctx());
-            }
-            ui.label(RichText::new("Pick a template to generate whole-model directions.").small());
-        });
+        ui.label(
+            RichText::new("Choose a template below to start a new project.")
+                .color(VisualFoundryTokens::dark().colors.text_muted),
+        );
         ui.add_space(14.0);
         let profiles = product_home_profiles(self.developer_preview_catalog);
         if profiles.is_empty() {
             product_empty_state(
                 ui,
                 "No reviewed templates yet",
-                "Open an existing project. Reviewed templates will appear here after approval.",
+                "Open a saved project, or enable the preview catalog for internal kit testing.",
             );
             return;
         }
@@ -1413,7 +1405,7 @@ fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProf
             let card = cards
                 .iter()
                 .find(|card| card.source_profile_slug.as_deref() == Some(fixture.slug.as_str()))?;
-            if card.hidden_by_default && !developer_preview_enabled {
+            if !product_home_profile_visible(card, developer_preview_enabled) {
                 return None;
             }
             Some(ProductHomeProfile {
@@ -1427,6 +1419,13 @@ fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProf
             })
         })
         .collect()
+}
+
+fn product_home_profile_visible(
+    card: &crate::foundry::kit_view::FoundryKitCardView,
+    developer_preview_enabled: bool,
+) -> bool {
+    developer_preview_enabled || !card.hidden_by_default || card.quality_badge == "Usable"
 }
 
 fn product_home_profile_groups(profiles: Vec<ProductHomeProfile>) -> Vec<ProductHomeProfileGroup> {
@@ -1500,11 +1499,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Open Project",
         "Save Project",
         "Save Project As",
-        "New Project",
+        "New Asset",
         "Project History",
         "Recent Projects",
         "No recent projects yet.",
-        "Open a project to keep working here.",
+        "Saved projects will appear here.",
         "Start",
         "Generate Directions",
         "Build Asset",
@@ -1542,7 +1541,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Current asset ready",
         "Needs a model first",
         HOME_SUBTITLE,
-        "Pick a template to generate whole-model directions.",
+        "Choose a template below to start a new project.",
         "Explore directions",
         "Generate coherent whole-model options from the current asset.",
         "Current Direction",
@@ -1597,7 +1596,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Whole-model options",
         "Primary control",
         "No reviewed templates yet",
-        "Open an existing project. Reviewed templates will appear here after approval.",
+        "Open a saved project, or enable the preview catalog for internal kit testing.",
+        "Choose a template below to start a new project.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -2464,9 +2464,19 @@ mod tests {
     }
 
     #[test]
-    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_seventeen() {
+    fn product_home_shows_usable_kits_by_default_and_preview_mode_lists_seventeen() {
         assert_eq!(installed_product_kit_count(), 17);
-        assert_eq!(default_product_home_profile_count(), 0);
+        assert!(default_product_home_profile_count() > 0);
+        assert!(default_product_home_profile_count() < 17);
+
+        let default_profiles = product_home_profiles(false);
+        let default_labels = default_profiles
+            .iter()
+            .map(|profile| profile.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
+        assert!(default_labels.contains(&"Roman Timber Bridge HQ"));
+        assert!(!default_labels.contains(&"Roman Timber Bridge"));
 
         let profiles = product_home_profiles(true);
         let labels = profiles
@@ -2654,6 +2664,7 @@ mod tests {
             "Save Project",
             "Save Project As",
             "Recent Projects",
+            "New Asset",
             "Generate Directions",
             "Start",
         ] {
