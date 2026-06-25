@@ -6,6 +6,7 @@ use shape_gamekit::export::{
     StaticPropReadinessStatus, StaticPropVisualEvidence, UvPolicy,
     validate_static_prop_game_ready_package, validate_static_prop_game_ready_package_with_root,
 };
+use shape_gamekit::gltf::{StaticPropGlbMetadata, encode_static_prop_glb};
 use shape_gamekit::{
     CellBounds, CollisionProxy, ConstructionPhase, ConstructionProfile, ExportProfile,
     FixedCameraProfile, GAME_ASSET_PACK_SCHEMA_VERSION, GameAssetDefinition, GameAssetPack,
@@ -16,6 +17,7 @@ use shape_gamekit::{
     validate_logical_footprint, validate_snap_anchors, validate_triangle_budget,
     validate_walkable_surfaces,
 };
+use shape_mesh::TriangleMesh;
 
 fn valid_asset(runtime_key: &str) -> GameAssetDefinition {
     GameAssetDefinition {
@@ -385,12 +387,35 @@ fn create_static_prop_artifact_files(root: &std::path::Path, package: &StaticPro
         package.visual_evidence.wireframe.as_str(),
         package.visual_evidence.contact_sheet.as_str(),
     ] {
-        std::fs::write(root.join(path), static_prop_artifact_fixture_bytes(path)).unwrap_or_else(
-            |error| {
-                panic!("write static prop artifact fixture {path}: {error}");
-            },
-        );
+        let bytes = if path.ends_with(".glb") {
+            static_prop_glb_fixture_bytes()
+        } else {
+            static_prop_artifact_fixture_bytes(path).to_vec()
+        };
+        std::fs::write(root.join(path), bytes).unwrap_or_else(|error| {
+            panic!("write static prop artifact fixture {path}: {error}");
+        });
     }
+}
+
+fn static_prop_glb_fixture_bytes() -> Vec<u8> {
+    encode_static_prop_glb(
+        &TriangleMesh {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+            bounds: shape_core::Aabb {
+                min: glam::Vec3::ZERO,
+                max: glam::Vec3::new(1.0, 1.0, 0.0),
+            },
+        },
+        &StaticPropGlbMetadata {
+            profile_id: "sci-fi-crate".to_owned(),
+            display_name: "Sci-Fi Crate".to_owned(),
+            material_slots: vec!["painted_metal_body".to_owned()],
+        },
+    )
+    .expect("valid static prop GLB fixture")
 }
 
 fn static_prop_artifact_fixture_bytes(path: &str) -> &'static [u8] {
@@ -398,8 +423,6 @@ fn static_prop_artifact_fixture_bytes(path: &str) -> &'static [u8] {
         b"\x89PNG\r\n\x1a\nfixture"
     } else if path.ends_with(".obj") {
         b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
-    } else if path.ends_with(".glb") {
-        b"glTFfixture"
     } else if path.ends_with(".py") {
         b"# Shape Lab test script\nimport bpy\n"
     } else if path.ends_with("package-verification.json") {

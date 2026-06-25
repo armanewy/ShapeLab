@@ -8,7 +8,9 @@
 //! labor, damage, movement bonuses, or AI behavior.
 
 pub mod export;
+pub mod gltf;
 pub mod readability;
+pub mod surface;
 pub mod validation;
 
 use serde::{Deserialize, Serialize};

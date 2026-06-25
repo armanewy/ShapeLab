@@ -9,6 +9,9 @@ rust-version.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shape-asset.workspace = true
+shape-mesh.workspace = true
 
 [dev-dependencies]
+glam.workspace = true
+shape-core.workspace = true
 tempfile.workspace = true

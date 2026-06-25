@@ -3856,9 +3856,12 @@ dependencies = [
 name = "shape-gamekit"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "serde",
  "serde_json",
  "shape-asset",
+ "shape-core",
+ "shape-mesh",
  "tempfile",
 ]
 

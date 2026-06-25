@@ -716,7 +716,7 @@ fn validate_artifact_file_content(
         text.lines().any(|line| line.starts_with("v "))
             && text.lines().any(|line| line.starts_with("f "))
     } else if relative_path.ends_with(".glb") {
-        bytes.starts_with(b"glTF")
+        crate::gltf::validate_static_prop_glb(&bytes).valid
     } else if relative_path.ends_with(".py") {
         let text = String::from_utf8_lossy(&bytes);
         text.contains("bpy") || text.contains("Blender") || text.contains("Shape Lab")
