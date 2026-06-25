@@ -20,7 +20,7 @@ use shape_foundry::{
 };
 
 use crate::{
-    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels,
+    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, moba_hero::MOBA_HERO_CLAY_SLUG,
     showcase_gear::is_showcase_gear_slug,
 };
 
@@ -533,6 +533,7 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
             FoundryKitQualityTier::Usable
         }
         slug if is_showcase_gear_slug(slug) => FoundryKitQualityTier::Usable,
+        MOBA_HERO_CLAY_SLUG => FoundryKitQualityTier::Prototype,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -555,6 +556,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         "hero-helmet" => vec!["Armor", "Helmet"],
         "pauldron-pair" => vec!["Armor", "Shoulder"],
         "chest-armor" => vec!["Armor", "Chest"],
+        MOBA_HERO_CLAY_SLUG => vec!["Hero", "Clay MVP"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -572,6 +574,7 @@ fn normalize_kit_slug(slug: &str) -> String {
         "hero_helmet" => "hero-helmet".to_owned(),
         "pauldron_pair" => "pauldron-pair".to_owned(),
         "chest_armor" => "chest-armor".to_owned(),
+        "moba_hero_clay" | "hero-foundry-clay" => MOBA_HERO_CLAY_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -585,7 +588,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 16);
+        assert_eq!(packages.len(), 17);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(

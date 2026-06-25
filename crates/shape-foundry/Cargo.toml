@@ -15,3 +15,4 @@ shape-family-compile.workspace = true
 
 [dev-dependencies]
 shape-character.workspace = true
+shape-foundry-catalog.workspace = true

@@ -12,10 +12,12 @@ use shape_compile::validation::{
     validation_config_from_recipe_with_limits,
 };
 use shape_foundry::{
-    ControlEvaluationContext, ControlKind, ControlValue, CustomizerControl,
-    FoundryCompilationOutput, compile_foundry_document, default_control_value,
+    ControlEvaluationContext, ControlKind, ControlValue, CustomizerControl, FoundryAssetDocument,
+    FoundryCompilationOutput, FoundryDocumentId, FoundryPackDocument, FoundryPackExportProfile,
+    compile_foundry_document, compile_foundry_pack, default_control_value,
     effective_control_domain,
 };
+use shape_foundry_catalog::moba_hero::MOBA_HERO_CLAY_SLUG;
 use shape_foundry_catalog::{FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels};
 use shape_render::{
     RenderSettings, RenderedImage, fit_camera_to_bounds_from_angles, render_mesh,
@@ -246,6 +248,46 @@ pub struct HqExportReopenReport {
     pub finite_numeric_payloads: Option<bool>,
     pub not_run_reason: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HqHeroPackReport {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub pack_id: String,
+    pub source_template_id: String,
+    pub source_template_fingerprint: String,
+    pub pack_report_fingerprint: String,
+    pub shared_style: String,
+    pub shared_controls: Vec<String>,
+    pub members: Vec<HqHeroPackMemberReport>,
+    pub total_triangle_count: u64,
+    pub semantic_part_inventory: HqSemanticPartInventory,
+    pub conformance_status: Vec<String>,
+    pub export_status: HqEvidenceStatus,
+    pub reopen_status: HqEvidenceStatus,
+    pub exported_member_package_count: usize,
+    pub pack_export_dir: String,
+    pub dcc_sidecar_status: HqEvidenceStatus,
+    pub dcc_sidecar_reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HqHeroPackMemberReport {
+    pub name: String,
+    pub role: String,
+    pub differing_controls: Vec<String>,
+    pub triangle_count: u64,
+    pub semantic_part_count: u64,
+    pub conformance_accepted: bool,
+}
+
+type HqHeroPackMemberControls = Vec<(&'static str, ControlValue)>;
+type HqHeroPackMemberSpec = (
+    &'static str,
+    &'static str,
+    &'static str,
+    HqHeroPackMemberControls,
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HqQualityGateEvidence {
@@ -495,10 +537,14 @@ fn benchmark_one_profile(
     let visible_control_difference_evidence =
         visible_control_difference_evidence(&fixture, &output)?;
     let verify_export = args.verify_export
-        || shape_foundry_catalog::showcase_gear::is_showcase_gear_slug(&fixture.slug);
+        || shape_foundry_catalog::showcase_gear::is_showcase_gear_slug(&fixture.slug)
+        || fixture.slug == MOBA_HERO_CLAY_SLUG;
     let export_reopen = export_reopen_report(verify_export, &output, out_dir)?;
+    if fixture.slug == MOBA_HERO_CLAY_SLUG {
+        write_moba_hero_evidence(&fixture, &three_quarter, out_dir)?;
+    }
     let silhouette_metric = silhouette_readability_metric(&mesh);
-    let unsupported_outputs = unsupported_outputs();
+    let unsupported_outputs = unsupported_outputs_for_profile(&fixture.slug);
 
     let gate_evidence = HqQualityGateEvidence {
         compile_valid: output.artifact.validation_report.is_valid() && model_validation.is_valid(),
@@ -606,6 +652,327 @@ fn benchmark_one_profile(
     write_json(out_dir.join("quality-report.json"), &report)?;
 
     Ok(report)
+}
+
+fn write_moba_hero_evidence(
+    fixture: &FoundryFixtureCatalog,
+    parent_preview: &RenderedImage,
+    out_dir: &Path,
+) -> anyhow::Result<()> {
+    write_candidate_mode_contact_sheet(
+        fixture,
+        parent_preview,
+        FoundryCandidateMode::Explore,
+        "explore",
+        out_dir.join("explore-contact-sheet.png"),
+    )?;
+    write_candidate_mode_contact_sheet(
+        fixture,
+        parent_preview,
+        FoundryCandidateMode::Silhouette,
+        "silhouette",
+        out_dir.join("silhouette-contact-sheet.png"),
+    )?;
+    write_candidate_mode_contact_sheet(
+        fixture,
+        parent_preview,
+        FoundryCandidateMode::Structure,
+        "armor_gear",
+        out_dir.join("gear-contact-sheet.png"),
+    )?;
+    let hero_pack_report = moba_hero_pack_report(fixture, out_dir)?;
+    write_json(out_dir.join("hero-pack-report.json"), &hero_pack_report)?;
+    Ok(())
+}
+
+fn write_candidate_mode_contact_sheet(
+    fixture: &FoundryFixtureCatalog,
+    parent_preview: &RenderedImage,
+    mode: FoundryCandidateMode,
+    strategy_id: &str,
+    path: PathBuf,
+) -> anyhow::Result<()> {
+    let request = FoundryCandidateRequest {
+        seed: DEFAULT_QUALITY_SEED,
+        proposal_count: DEFAULT_PROPOSAL_COUNT,
+        result_count: DEFAULT_DIRECTION_COUNT,
+        mode,
+        strategy_id: Some(strategy_id.to_owned()),
+        preference_profile: None,
+    };
+    let output = generate_foundry_candidate_plans(&fixture.document, fixture, &request)
+        .map_err(|error| anyhow::anyhow!("{strategy_id} candidates failed: {error}"))?;
+    anyhow::ensure!(
+        output.candidates.len() >= DEFAULT_DIRECTION_COUNT,
+        "{strategy_id} produced {} candidates, expected {}",
+        output.candidates.len(),
+        DEFAULT_DIRECTION_COUNT
+    );
+    let mut images = Vec::with_capacity(DEFAULT_DIRECTION_COUNT);
+    for candidate in output.candidates.iter().take(DEFAULT_DIRECTION_COUNT) {
+        let compiled = compile_foundry_document(&candidate.document, fixture).map_err(|error| {
+            anyhow::anyhow!("{strategy_id} candidate failed to compile: {error:#?}")
+        })?;
+        let mesh = render_mesh_from_triangles(&compiled.artifact.combined_preview);
+        images.push(render_hq_view(&mesh, 42.0, 18.0, false)?);
+    }
+    let refs = images.iter().collect::<Vec<_>>();
+    save_contact_sheet(parent_preview, &refs, path)?;
+    Ok(())
+}
+
+fn moba_hero_pack_report(
+    fixture: &FoundryFixtureCatalog,
+    out_dir: &Path,
+) -> anyhow::Result<HqHeroPackReport> {
+    let source_template = prepared_hero_template_v1();
+    let pack = moba_hero_pack_document(fixture);
+    let pack_output = compile_foundry_pack(&pack, fixture)
+        .map_err(|error| anyhow::anyhow!("moba hero pack failed to compile: {error:#?}"))?;
+
+    let pack_export_dir = out_dir.join("hero-pack-model-package");
+    fs::create_dir_all(&pack_export_dir)
+        .with_context(|| format!("creating {}", pack_export_dir.display()))?;
+    let pack_document_path = pack_export_dir.join("pack-document.json");
+    write_json(&pack_document_path, &pack_output.pack)?;
+    write_json(
+        pack_export_dir.join("pack-report.json"),
+        &pack_output.report,
+    )?;
+    let serialized_pack = serde_json::from_str::<FoundryPackDocument>(
+        &fs::read_to_string(&pack_document_path)
+            .with_context(|| format!("reading {}", pack_document_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", pack_document_path.display()))?;
+    let reopened_pack = compile_foundry_pack(&serialized_pack, fixture).map_err(|error| {
+        anyhow::anyhow!(
+            "moba hero serialized pack {} failed to reopen: {error:#?}",
+            pack_document_path.display()
+        )
+    })?;
+    let reopened_matches =
+        reopened_pack.report.report_fingerprint == pack_output.report.report_fingerprint;
+
+    let mut exported_member_package_count = 0_usize;
+    let mut member_exports_verified = true;
+    for (member_id, member_output) in &pack_output.member_outputs {
+        let member_dir = pack_export_dir.join(member_id);
+        write_model_package(&member_output.recipe, &member_output.artifact, &member_dir)
+            .with_context(|| format!("writing pack member package {}", member_dir.display()))?;
+        let verification = verify_model_package(&member_dir)
+            .with_context(|| format!("verifying pack member package {}", member_dir.display()))?;
+        let verified = verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads;
+        if verified {
+            exported_member_package_count += 1;
+        }
+        member_exports_verified &= verified;
+    }
+
+    let member_specs = moba_hero_pack_members();
+    let mut members = Vec::new();
+    let mut part_rows = Vec::new();
+    let mut conformance_status = Vec::new();
+    for (member_index, (member_id, name, role, controls)) in member_specs.iter().enumerate() {
+        let output = pack_output
+            .member_outputs
+            .get(*member_id)
+            .ok_or_else(|| anyhow::anyhow!("missing pack member output {member_id}"))?;
+        let inventory = semantic_part_inventory(output);
+        for mut row in inventory.parts {
+            row.instance_id += (member_index as u64) * 10_000;
+            row.name = format!("{name} {}", row.name);
+            part_rows.push(row);
+        }
+        let member_report = pack_output
+            .report
+            .members
+            .iter()
+            .find(|member| member.member_id == *member_id)
+            .ok_or_else(|| anyhow::anyhow!("missing pack member report {member_id}"))?;
+        conformance_status.push(format!(
+            "{name}: {}",
+            if member_report.conformance.accepted {
+                "accepted"
+            } else {
+                "rejected"
+            }
+        ));
+        members.push(HqHeroPackMemberReport {
+            name: (*name).to_owned(),
+            role: (*role).to_owned(),
+            differing_controls: controls
+                .iter()
+                .map(|(control, _)| product_control_label(control).to_owned())
+                .collect(),
+            triangle_count: member_report.triangle_count,
+            semantic_part_count: inventory.part_count,
+            conformance_accepted: member_report.conformance.accepted,
+        });
+    }
+    Ok(HqHeroPackReport {
+        schema_version: 2,
+        profile_id: MOBA_HERO_CLAY_SLUG.to_owned(),
+        pack_id: "moba-hero-clay-demo-pack".to_owned(),
+        source_template_id: source_template.template_id,
+        source_template_fingerprint: source_template.base_topology.base_library_fingerprint.0,
+        pack_report_fingerprint: pack_output.report.report_fingerprint.to_hex(),
+        shared_style: "MOBA Heroic Clay".to_owned(),
+        shared_controls: vec![
+            "Hero Archetype".to_owned(),
+            "Body Proportions".to_owned(),
+            "Silhouette".to_owned(),
+            "Armor Mass".to_owned(),
+            "Head & Face".to_owned(),
+            "Hair / Headgear".to_owned(),
+            "Weapon / Accessory".to_owned(),
+        ],
+        members,
+        total_triangle_count: pack_output.report.triangle_totals.total,
+        semantic_part_inventory: HqSemanticPartInventory {
+            part_count: part_rows.len() as u64,
+            parts: part_rows,
+        },
+        conformance_status,
+        export_status: if member_exports_verified
+            && exported_member_package_count == pack_output.member_outputs.len()
+        {
+            HqEvidenceStatus::Verified
+        } else {
+            HqEvidenceStatus::Failed
+        },
+        reopen_status: if reopened_matches {
+            HqEvidenceStatus::Verified
+        } else {
+            HqEvidenceStatus::Failed
+        },
+        exported_member_package_count,
+        pack_export_dir: pack_export_dir.display().to_string(),
+        dcc_sidecar_status: HqEvidenceStatus::Unsupported,
+        dcc_sidecar_reason: "No DCC sidecar adapter is implemented for clay hero packs yet."
+            .to_owned(),
+    })
+}
+
+fn moba_hero_pack_document(fixture: &FoundryFixtureCatalog) -> FoundryPackDocument {
+    let mut pack = FoundryPackDocument::new(
+        "moba-hero-clay-demo-pack",
+        fixture.document.family_content_ref.clone(),
+        fixture.document.style_content_ref.clone(),
+        FoundryPackExportProfile {
+            profile: "canonical-model-package".to_owned(),
+            require_all_members: true,
+        },
+    );
+    for (member_id, name, _, controls) in moba_hero_pack_members() {
+        pack.members.insert(
+            member_id.to_owned(),
+            moba_hero_member_document(fixture, name, &controls),
+        );
+    }
+    pack
+}
+
+fn moba_hero_member_document(
+    fixture: &FoundryFixtureCatalog,
+    member_name: &str,
+    controls: &[(&'static str, ControlValue)],
+) -> FoundryAssetDocument {
+    let mut document = fixture.document.clone();
+    document.document_id = FoundryDocumentId(format!(
+        "{}-{}",
+        MOBA_HERO_CLAY_SLUG,
+        member_name.to_ascii_lowercase().replace([' ', '/'], "-")
+    ));
+    document.catalog_lock = None;
+    document.build_stamp = None;
+    for (control, value) in controls {
+        document
+            .control_state
+            .insert((*control).to_owned(), value.clone());
+    }
+    document
+}
+
+fn moba_hero_pack_members() -> [HqHeroPackMemberSpec; 3] {
+    [
+        (
+            "duelist-vanguard",
+            "Duelist Vanguard",
+            "Main",
+            vec![
+                (
+                    "hero_archetype",
+                    ControlValue::Choice("armored_duelist".to_owned()),
+                ),
+                (
+                    "armor_mass",
+                    ControlValue::Choice("duelist_mail".to_owned()),
+                ),
+                (
+                    "weapon_accessory",
+                    ControlValue::Choice("blade_and_scabbard".to_owned()),
+                ),
+            ],
+        ),
+        (
+            "arcane-ranger",
+            "Arcane Ranger",
+            "Variant",
+            vec![
+                (
+                    "hero_archetype",
+                    ControlValue::Choice("arcane_ranger".to_owned()),
+                ),
+                ("head_face", ControlValue::Choice("arcane_mask".to_owned())),
+                (
+                    "hair_headgear",
+                    ControlValue::Choice("swept_hair".to_owned()),
+                ),
+                (
+                    "weapon_accessory",
+                    ControlValue::Choice("staff_and_cloak".to_owned()),
+                ),
+            ],
+        ),
+        (
+            "monster-hunter",
+            "Monster Hunter",
+            "Variant",
+            vec![
+                (
+                    "hero_archetype",
+                    ControlValue::Choice("monster_hunter".to_owned()),
+                ),
+                (
+                    "armor_mass",
+                    ControlValue::Choice("hunter_leathers".to_owned()),
+                ),
+                (
+                    "hair_headgear",
+                    ControlValue::Choice("horned_hood".to_owned()),
+                ),
+                (
+                    "weapon_accessory",
+                    ControlValue::Choice("axe_and_trophy".to_owned()),
+                ),
+            ],
+        ),
+    ]
+}
+
+fn product_control_label(control_id: &str) -> &'static str {
+    match control_id {
+        "hero_archetype" => "Hero Archetype",
+        "body_proportions" => "Body Proportions",
+        "silhouette" => "Silhouette",
+        "armor_mass" => "Armor Mass",
+        "head_face" => "Head & Face",
+        "hair_headgear" => "Hair / Headgear",
+        "weapon_accessory" => "Weapon / Accessory",
+        _ => "Unknown Control",
+    }
 }
 
 fn benchmark_prepared_hero_template(
@@ -1317,6 +1684,31 @@ fn unsupported_outputs() -> Vec<HqUnsupportedOutput> {
     .collect()
 }
 
+fn unsupported_outputs_for_profile(profile_id: &str) -> Vec<HqUnsupportedOutput> {
+    let mut outputs = unsupported_outputs();
+    if profile_id == MOBA_HERO_CLAY_SLUG {
+        outputs.extend([
+            HqUnsupportedOutput {
+                output: "dota_ip_reconstruction".to_owned(),
+                reason:
+                    "the clay hero profile is authored original content, not Dota/IP reconstruction"
+                        .to_owned(),
+            },
+            HqUnsupportedOutput {
+                output: "arbitrary_mesh_import".to_owned(),
+                reason:
+                    "arbitrary imported mesh editability is outside the current Shape Lab scope"
+                        .to_owned(),
+            },
+            HqUnsupportedOutput {
+                output: "llm_mesh_generation".to_owned(),
+                reason: "LLM text-to-geometry generation is not implemented".to_owned(),
+            },
+        ]);
+    }
+    outputs
+}
+
 fn control_kind_label(control: &CustomizerControl) -> String {
     match control.kind {
         ControlKind::ContinuousAxis { .. } => "continuous".to_owned(),
@@ -1475,12 +1867,13 @@ mod tests {
     #[test]
     fn hq_quality_builtin_profile_list_is_enumerable() {
         let slugs = benchmark_profile_slugs();
-        assert_eq!(slugs.len(), 17);
+        assert_eq!(slugs.len(), 18);
         assert!(slugs.contains(&"roman-bridge".to_owned()));
         assert!(slugs.contains(&"roman-bridge-hq".to_owned()));
         assert!(slugs.contains(&"stylized-tree".to_owned()));
         assert!(slugs.contains(&"fantasy-sword".to_owned()));
         assert!(slugs.contains(&"chest-armor".to_owned()));
+        assert!(slugs.contains(&MOBA_HERO_CLAY_SLUG.to_owned()));
         assert!(slugs.contains(&PREPARED_HERO_TEMPLATE_PROFILE.to_owned()));
     }
 
@@ -1558,6 +1951,133 @@ mod tests {
     }
 
     #[test]
+    fn moba_hero_pack_report_reopens_serialized_pack_and_exports_members() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let fixture = shape_foundry_catalog::moba_hero::fixture_catalog();
+        let report =
+            moba_hero_pack_report(&fixture, temp_dir.path()).expect("moba hero pack evidence");
+
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.profile_id, MOBA_HERO_CLAY_SLUG);
+        assert_eq!(report.source_template_id, PREPARED_HERO_TEMPLATE_PROFILE);
+        assert!(!report.source_template_fingerprint.is_empty());
+        assert!(!report.pack_report_fingerprint.is_empty());
+        assert_eq!(report.members.len(), 3);
+        assert_eq!(report.exported_member_package_count, 3);
+        assert_eq!(report.export_status, HqEvidenceStatus::Verified);
+        assert_eq!(report.reopen_status, HqEvidenceStatus::Verified);
+        assert_eq!(report.semantic_part_inventory.part_count, 51);
+
+        for name in [
+            "hero-pack-model-package/pack-document.json",
+            "hero-pack-model-package/pack-report.json",
+            "hero-pack-model-package/duelist-vanguard/asset-manifest.json",
+            "hero-pack-model-package/arcane-ranger/asset-manifest.json",
+            "hero-pack-model-package/monster-hunter/asset-manifest.json",
+        ] {
+            let path = temp_dir.path().join(name);
+            assert!(path.exists(), "moba hero pack evidence should write {name}");
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "moba hero pack evidence {name} is empty"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "Wave 40 hero benchmark compiles candidates, mode sheets, and pack member exports"]
+    fn moba_hero_hq_benchmark_emits_pack_and_boundary_evidence() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let args = HqQualityBenchmarkArgs {
+            profile: MOBA_HERO_CLAY_SLUG.to_owned(),
+            out_dir: temp_dir.path().to_path_buf(),
+            quality_tier: HqQualityTier::Usable,
+            verify_export: false,
+            human_approved: false,
+            adversarial_reviewed: false,
+            manual_notes: None,
+            json: false,
+        };
+
+        run_hq_quality_benchmark(args).expect("moba hero benchmark writes report");
+
+        let report = serde_json::from_str::<HqQualityReport>(
+            &fs::read_to_string(temp_dir.path().join("quality-report.json"))
+                .expect("quality report exists"),
+        )
+        .expect("quality report json");
+        assert_eq!(report.profile_id, MOBA_HERO_CLAY_SLUG);
+        assert_eq!(report.quality_tier_achieved, HqQualityTier::Usable);
+        assert!(report.quality_tier_blockers.is_empty());
+        assert_eq!(report.primary_control_count, 7);
+        assert_eq!(
+            report
+                .visible_control_difference_evidence
+                .changed_control_count,
+            7
+        );
+        assert_eq!(report.candidate_survival_count, DEFAULT_DIRECTION_COUNT);
+        assert!(report.six_direction_availability);
+        assert_eq!(report.export_status, HqEvidenceStatus::Verified);
+        assert_eq!(report.reopen_status, HqEvidenceStatus::Verified);
+        assert!(!report.novice_catalog_exposure_allowed_by_default);
+        for unsupported in [
+            "dota_ip_reconstruction",
+            "arbitrary_mesh_import",
+            "llm_mesh_generation",
+            "materials",
+            "textures",
+            "uv_layout",
+            "rigging",
+            "animation",
+            "marketplace_package",
+        ] {
+            assert!(
+                report
+                    .unsupported_outputs
+                    .iter()
+                    .any(|output| output.output == unsupported),
+                "missing unsupported output {unsupported}"
+            );
+        }
+
+        let hero_pack = serde_json::from_str::<HqHeroPackReport>(
+            &fs::read_to_string(temp_dir.path().join("hero-pack-report.json"))
+                .expect("hero pack report exists"),
+        )
+        .expect("hero pack report json");
+        assert_eq!(hero_pack.schema_version, 2);
+        assert_eq!(hero_pack.source_template_id, PREPARED_HERO_TEMPLATE_PROFILE);
+        assert!(!hero_pack.source_template_fingerprint.is_empty());
+        assert!(!hero_pack.pack_report_fingerprint.is_empty());
+        assert_eq!(hero_pack.members.len(), 3);
+        assert_eq!(hero_pack.exported_member_package_count, 3);
+        assert_eq!(hero_pack.export_status, HqEvidenceStatus::Verified);
+        assert_eq!(hero_pack.reopen_status, HqEvidenceStatus::Verified);
+        assert_eq!(hero_pack.semantic_part_inventory.part_count, 51);
+        assert!(temp_dir.path().join("hero-pack-model-package").exists());
+
+        for name in [
+            "explore-contact-sheet.png",
+            "silhouette-contact-sheet.png",
+            "gear-contact-sheet.png",
+            "hero-pack-report.json",
+            "hero-pack-model-package/pack-document.json",
+            "hero-pack-model-package/pack-report.json",
+            "hero-pack-model-package/duelist-vanguard/asset-manifest.json",
+            "hero-pack-model-package/arcane-ranger/asset-manifest.json",
+            "hero-pack-model-package/monster-hunter/asset-manifest.json",
+        ] {
+            let path = temp_dir.path().join(name);
+            assert!(path.exists(), "moba hero benchmark should write {name}");
+            assert!(
+                path.metadata().expect("metadata").len() > 0,
+                "moba hero benchmark {name} is empty"
+            );
+        }
+    }
+
+    #[test]
     fn roman_bridge_hq_explore_candidates_survive_quality_validation() {
         let fixture = shape_foundry_catalog::roman_bridge::hq_fixture_catalog();
         assert_all_explore_candidates_survive("roman-bridge-hq", fixture);
@@ -1567,6 +2087,12 @@ mod tests {
     fn fantasy_sword_explore_candidates_survive_quality_validation() {
         let fixture = shape_foundry_catalog::showcase_gear::fantasy_sword_fixture_catalog();
         assert_all_explore_candidates_survive("fantasy-sword", fixture);
+    }
+
+    #[test]
+    fn moba_hero_explore_candidates_survive_quality_validation() {
+        let fixture = shape_foundry_catalog::moba_hero::fixture_catalog();
+        assert_all_explore_candidates_survive("moba-hero-clay", fixture);
     }
 
     #[test]

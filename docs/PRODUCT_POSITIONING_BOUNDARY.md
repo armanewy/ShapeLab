@@ -16,14 +16,18 @@ editability.
 ## What To Emphasize
 
 - Visual Foundry is the primary novice-facing product surface.
-- The sixteen current kit-backed profiles are installed for preview and QA,
+- The seventeen current kit-backed profiles are installed for preview and QA,
   including the original Visual Foundry families, the HQ Roman bridge profile,
-  and promoted Wave 38 gear. Default novice exposure remains gated by kit
-  review approval.
+  promoted Wave 38 gear, and the hidden Wave 40 Hero Foundry clay MVP. Default
+  novice exposure remains gated by kit review approval.
 - `prepared-hero-template-v1` is a contract-only prepared hero benchmark. It
   validates known-base template metadata but must remain hidden from default
   novice exposure until it has whole-character clay previews, contact sheets,
   candidate evidence, and export/reopen proof.
+- `moba-hero-clay` is an authored clay hero foundry profile sourced from the
+  prepared hero template contract. It can claim a MOBA-quality clay hero family,
+  not Dota reconstruction, textured output, rigging, animation, or arbitrary
+  mesh editing.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
 - Release-readiness reports can verify the direct Visual Foundry shell contract

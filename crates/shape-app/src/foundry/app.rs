@@ -2324,8 +2324,8 @@ mod tests {
     }
 
     #[test]
-    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_sixteen() {
-        assert_eq!(installed_product_kit_count(), 16);
+    fn product_home_hides_pending_kits_by_default_and_preview_mode_lists_seventeen() {
+        assert_eq!(installed_product_kit_count(), 17);
         assert_eq!(default_product_home_profile_count(), 0);
 
         let profiles = product_home_profiles(true);
@@ -2334,7 +2334,7 @@ mod tests {
             .map(|profile| profile.label)
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 16);
+        assert_eq!(profiles.len(), 17);
         assert!(labels.contains(&"Roman Timber Bridge"));
         assert!(labels.contains(&"Roman Timber Bridge HQ"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
@@ -2351,6 +2351,7 @@ mod tests {
         assert!(labels.contains(&"Hero Helmet"));
         assert!(labels.contains(&"Pauldron Pair"));
         assert!(labels.contains(&"Chest Armor"));
+        assert!(labels.contains(&"Hero Foundry, Clay MVP"));
     }
 
     #[test]

@@ -54,6 +54,7 @@ cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir 
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile fantasy-sword --out-dir target/hq-benchmark/fantasy-sword
 cargo run -p shape-cli -- hq-quality-benchmark --profile prepared-hero-template-v1 --out-dir target/hq-benchmark/prepared-hero-template-v1
+cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay
 ```
 
 Use `--profile all --out-dir target/hq-benchmark` to baseline every built-in
@@ -85,3 +86,11 @@ expected automated report is Draft because it has no rendered clay mesh,
 contact sheet, direction candidates, or export/reopen evidence yet. It is
 included in `--profile all` to keep the unsupported evidence visible, not to
 claim novice-catalog readiness.
+
+`moba-hero-clay` is the Wave 40 authored Hero Foundry clay MVP. Its automated
+benchmark verifies six surviving directions, seven visible primary-control
+deltas, model validation, export/reopen, mode contact sheets, and a three-member
+hero pack. It may claim a MOBA-quality clay hero family, not Dota/IP
+reconstruction, textured output, materials, UVs, rigging, animation, or
+marketplace readiness. Default novice-catalog exposure remains gated by manual
+kit review.

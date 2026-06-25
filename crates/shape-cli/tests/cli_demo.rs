@@ -116,7 +116,7 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     );
     assert_eq!(
         stdout_report["visual_product_gate"]["expected_built_in_profile_count"].as_u64(),
-        Some(16)
+        Some(17)
     );
     assert_eq!(
         stdout_report["visual_product_gate"]["expected_primary_controls_per_profile"].as_u64(),
@@ -153,11 +153,11 @@ fn release_readiness_reports_wave30_bounds_and_deferred_release_claims() {
     );
     assert_eq!(
         stdout_report["product_ui_gate"]["installed_kit_count"].as_u64(),
-        Some(16)
+        Some(17)
     );
     assert_eq!(
         stdout_report["product_ui_gate"]["developer_preview_kit_count"].as_u64(),
-        Some(16)
+        Some(17)
     );
     assert_eq!(stdout_report["product_ui_gate"]["startup_blank"], false);
     assert_eq!(
@@ -231,8 +231,8 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
         "requires-explicit-app-test"
     );
     let evidence = &report["visual_product_gate"]["evidence"];
-    assert_eq!(evidence["built_in_profile_count"].as_u64(), Some(16));
-    assert_eq!(evidence["profiles_checked"].as_u64(), Some(16));
+    assert_eq!(evidence["built_in_profile_count"].as_u64(), Some(17));
+    assert_eq!(evidence["profiles_checked"].as_u64(), Some(17));
     assert_eq!(evidence["all_profiles_verified"], true);
     assert_eq!(evidence["option_thumbnail_size_px"].as_u64(), Some(64));
     assert!(
@@ -242,7 +242,7 @@ fn release_readiness_verifies_visual_product_gate_when_requested() {
             > 0,
         "visual gate should render option thumbnails"
     );
-    assert_eq!(evidence["profiles"].as_array().unwrap().len(), 16);
+    assert_eq!(evidence["profiles"].as_array().unwrap().len(), 17);
     assert!(
         evidence["profiles"]
             .as_array()
@@ -283,8 +283,8 @@ fn release_readiness_verifies_product_ui_gate_when_requested() {
     assert_eq!(gate["app_shell"], "direct_visual_foundry");
     assert_eq!(gate["legacy_surfaces_present"], false);
     assert_eq!(gate["product_home_profiles"].as_u64(), Some(0));
-    assert_eq!(gate["installed_kit_count"].as_u64(), Some(16));
-    assert_eq!(gate["developer_preview_kit_count"].as_u64(), Some(16));
+    assert_eq!(gate["installed_kit_count"].as_u64(), Some(17));
+    assert_eq!(gate["developer_preview_kit_count"].as_u64(), Some(17));
     assert_eq!(gate["startup_blank"], false);
     assert_eq!(gate["default_advanced_recipe_visible"], false);
     assert_eq!(gate["default_raw_technical_terms_visible"], false);

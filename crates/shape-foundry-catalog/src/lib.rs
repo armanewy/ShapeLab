@@ -39,6 +39,7 @@ use shape_foundry::{
 pub mod authoring;
 pub mod expanded_profiles;
 pub mod kits;
+pub mod moba_hero;
 pub mod roman_bridge;
 pub mod scifi_crate;
 pub mod showcase_gear;
@@ -217,6 +218,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
             showcase_gear::pauldron_pair_fixture_catalog(),
         ),
         ("Chest Armor", showcase_gear::chest_armor_fixture_catalog()),
+        ("Hero Foundry, Clay MVP", moba_hero::fixture_catalog()),
     ]
 }
 

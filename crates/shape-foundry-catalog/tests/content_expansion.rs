@@ -11,16 +11,16 @@ use shape_foundry::{
 use shape_foundry_catalog::{built_in_fixture_catalogs_with_labels, headless_fixture_catalogs};
 
 #[test]
-fn built_in_catalog_exposes_sixteen_labeled_profiles() {
+fn built_in_catalog_exposes_seventeen_labeled_profiles() {
     let labeled = built_in_fixture_catalogs_with_labels();
-    assert_eq!(labeled.len(), 16);
-    assert_eq!(headless_fixture_catalogs().len(), 16);
+    assert_eq!(labeled.len(), 17);
+    assert_eq!(headless_fixture_catalogs().len(), 17);
 
     let labels = labeled
         .iter()
         .map(|(label, _)| *label)
         .collect::<BTreeSet<_>>();
-    assert_eq!(labels.len(), 16);
+    assert_eq!(labels.len(), 17);
     for expected in [
         "Roman Timber Bridge",
         "Roman Timber Bridge HQ",
@@ -38,6 +38,7 @@ fn built_in_catalog_exposes_sixteen_labeled_profiles() {
         "Hero Helmet",
         "Pauldron Pair",
         "Chest Armor",
+        "Hero Foundry, Clay MVP",
     ] {
         assert!(labels.contains(expected), "missing {expected}");
     }

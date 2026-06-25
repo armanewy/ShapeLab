@@ -131,6 +131,13 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
             slug if showcase_gear::is_showcase_gear_slug(slug) => {
                 &["silhouette", "ornament", "detail_density", "has_accessory"]
             }
+            "moba-hero-clay" => &[
+                "armor_mass",
+                "head_face",
+                "hair_headgear",
+                "weapon_accessory",
+                "silhouette",
+            ],
             _ => &[
                 "body_variant",
                 "accent_style",

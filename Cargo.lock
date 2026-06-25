@@ -3831,6 +3831,7 @@ dependencies = [
  "shape-compile",
  "shape-family",
  "shape-family-compile",
+ "shape-foundry-catalog",
 ]
 
 [[package]]
@@ -3841,10 +3842,12 @@ dependencies = [
  "serde_json",
  "shape-asset",
  "shape-caesar-assets",
+ "shape-character",
  "shape-compile",
  "shape-family",
  "shape-family-compile",
  "shape-foundry",
+ "shape-search",
  "tempfile",
 ]
 

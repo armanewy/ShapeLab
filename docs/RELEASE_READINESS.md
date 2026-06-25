@@ -24,13 +24,13 @@ The JSON report records:
 - the Visual Foundry product gate. Without `--verify-visual-gate`, this records
   the required command and marks CLI evidence as not run. With
   `--verify-visual-gate`, it compiles the built-in profiles and records computed
-  CLI evidence for sixteen profiles, seven primary controls per profile, and
+  CLI evidence for seventeen profiles, seven primary controls per profile, and
   rendered whole-model option thumbnails. The native default-path gate remains
   the explicit ignored app-state release test listed in the report;
 - the Visual Foundry product UI gate. Without `--verify-product-ui-gate`, this
   records the expected direct Visual Foundry shell contract. With
   `--verify-product-ui-gate`, it verifies the default product-visible copy
-  inventory, direct nonblank startup, zero default-visible pending kits, sixteen
+  inventory, direct nonblank startup, zero default-visible pending kits, seventeen
   installed preview-catalog kits, the six-card direction board, five direction
   modes, core profile compile/start evidence, pack/export readiness
   representation, and disabled-state reasons;
@@ -76,7 +76,7 @@ thumbnails with RGBA bytes and a camera for every built-in profile. A 1x1
 placeholder pixel is only acceptable in isolated panel helper tests that do not
 have a compiled Foundry document.
 
-The release gate also requires all sixteen built-in profiles to compile and render
+The release gate also requires all seventeen built-in profiles to compile and render
 through the explicit preview/release evidence path with seven primary controls
 and zero technical surface exposure. Default novice catalog exposure is now
 controlled by Wave 33 kit review policy. Deterministic contact sheets and
@@ -99,7 +99,7 @@ a fast headless gate over the native Visual Foundry product shell. It verifies:
 - no default Legacy, Implicit, Asset Modeling Lab, Modeling Workspace, Advanced
   Recipe, scalar path, provider ID, role binding, fragment/remap, operation ID,
   semantic ID, conformance binding, SDF, compiler, or decompiler copy;
-- zero default-visible pending kits and sixteen installed preview-catalog kits;
+- zero default-visible pending kits and seventeen installed preview-catalog kits;
 - startup is not blank;
 - Advanced Recipe is not visible in the default path;
 - the direction board reserves six whole-model candidate cards and exposes
@@ -202,6 +202,7 @@ cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report targe
 cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report target/hq-benchmark/roman-bridge-hq/quality-report.json --out target/foundry-kit/roman-hq-review.json
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
+cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 cargo build --release --workspace

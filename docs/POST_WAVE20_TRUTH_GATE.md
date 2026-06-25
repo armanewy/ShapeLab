@@ -13,12 +13,13 @@ Demonstrated product capability:
 
 - A novice can use Visual Foundry to create, branch, customize, pack, and export
   coherent variants from review-approved authored profiles with zero technical
-  surface exposure. Automated preview/developer gates currently exercise sixteen
+  surface exposure. Automated preview/developer gates currently exercise seventeen
   built-in authored profiles. The original full-benchmark profiles are Roman
   Timber Bridge, Sci-Fi Industrial Crate, and Stylized Furniture Lamp; Wave 26
   adds seven expansion profiles through the same Foundry catalog and compile
   path, Wave 34 adds the HQ Roman Timber Bridge vertical slice behind manual
-  review, and Wave 38 adds five promoted gear kits behind the same review gate.
+  review, Wave 38 adds five promoted gear kits behind the same review gate, and
+  Wave 40 adds the hidden Hero Foundry clay MVP.
 - A technical user can still exercise authored explicit asset recipes through
   core crates and headless CLI/tests, but the explicit Modeling Workspace is no
   longer a native product surface.
@@ -56,7 +57,7 @@ What can a novice user do today with zero technical surface exposure?
 
 - Open Shape Lab directly into Visual Foundry.
 - Pick a review-approved foundry profile; the developer/preview catalog currently
-  exercises sixteen built-in profiles while default novice exposure remains
+  exercises seventeen built-in profiles while default novice exposure remains
   manual-review gated.
 - Generate six Refine and six Explore directions where profile controls support
   them.

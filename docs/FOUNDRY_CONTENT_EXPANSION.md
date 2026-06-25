@@ -2,8 +2,9 @@
 
 Wave 26 expanded the built-in Visual Foundry catalog from three proof profiles
 to ten authored profiles. Wave 34 added the eleventh built-in profile:
-`roman-bridge-hq`. Wave 38 promotes five authored gear kits, bringing the
-current built-in catalog to sixteen profiles.
+`roman-bridge-hq`. Wave 38 promotes five authored gear kits. Wave 40 adds the
+hidden Hero Foundry clay profile, bringing the current built-in catalog to
+seventeen profiles.
 
 ## Built-In Profiles
 
@@ -23,6 +24,7 @@ current built-in catalog to sixteen profiles.
 - Hero Helmet
 - Pauldron Pair
 - Chest Armor
+- Hero Foundry, Clay MVP
 
 The expansion and showcase gear profiles use the same catalog, customizer,
 candidate, preview, pack, authoring, and compile paths as the original
