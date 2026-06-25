@@ -6,8 +6,8 @@ Visual Foundry shell. Wave 32 adds a separate HQ asset quality benchmark. Wave
 33 adds Foundry kit package validation and review manifests. The intent is to
 make performance, UI surface, packaging status, curated kit metadata, and
 authored content quality evidence auditable without claiming unimplemented GPU,
-installer, signing, app-store, UV, material, rigging, animation, marketplace, or
-photoreal work.
+installer, signing, app-store, broad UV/material coverage, rigging, animation,
+marketplace, or photoreal work.
 
 ## Machine-Readable Report
 
@@ -157,6 +157,24 @@ Prototype because fewer than six candidates survive compile, model validation,
 and preview rendering. That does not invalidate release readiness; it records
 catalog quality work separately from the product shell gate.
 
+## Surface Lab Static Prop Boundary
+
+Surface Lab v1 adds a headless static-prop surface package for
+`sci-fi-crate`. The command:
+
+```bash
+cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/game-ready/sci-fi-crate-static-prop-v1
+```
+
+emits deterministic UV coordinates, material-slot coverage, generated texture
+PNG sidecars, UV layout evidence, swatch/contact sheets, and a surface-aware
+GLB with `TEXCOORD_0`.
+
+This does not make Visual Foundry generally textured, and it does not add a
+novice material editor. Full game-ready status remains blocked until manual
+DCC/runtime review, engine import proof, and engine-native package handoff are
+present.
+
 ## Foundry Kit Package Boundary
 
 Wave 33 adds:
@@ -185,8 +203,8 @@ matches the kit profile/style.
 A release-candidate readiness claim is valid only after the archive-first
 product boundary is verified. It does not claim installers, signing,
 notarization, package-manager publishing, app-store publishing, arbitrary
-imported-mesh editability, LLM integration, UVs, materials, rigging, animation,
-or marketplace workflows.
+imported-mesh editability, LLM integration, broad UV/material coverage, rigging,
+animation, or marketplace workflows.
 
 Run and preserve evidence for:
 

@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::ValueEnum;
 use glam::Vec3;
-use image::{Rgba, RgbaImage};
+use image::{Rgba, RgbaImage, imageops::FilterType};
 use serde::{Deserialize, Serialize};
 use shape_asset::Frame3;
 use shape_compile::export::{verify_model_package, write_grouped_obj_export, write_model_package};
@@ -20,12 +21,17 @@ use shape_gamekit::export::{
     StaticPropGameReadyPackage, StaticPropHandoff, StaticPropLodLevel, StaticPropLodPolicy,
     StaticPropVisualEvidence, UvPolicy, validate_static_prop_game_ready_package_with_root,
 };
-use shape_gamekit::gltf::{StaticPropGlbMetadata, write_static_prop_glb};
+use shape_gamekit::gltf::{
+    StaticPropGlbMetadata, write_static_prop_glb, write_static_prop_surface_glb,
+};
 use shape_gamekit::surface::{
-    MaterialRecipe, MaterialSlotBinding, MaterialStylePack, SURFACE_LAB_PACKAGE_SCHEMA_VERSION,
-    SurfaceEvidence, SurfaceLabPackage, SurfaceUvLayoutPolicy, TextureChannel, TextureRequirement,
-    TextureRequirementSet, UnsupportedSurfaceOutput, UnsupportedSurfaceOutputReport,
-    validate_surface_lab_package_with_root,
+    MaterialRecipe, MaterialSlotBinding, MaterialStylePack, SURFACE_ARTIFACT_SCHEMA_VERSION,
+    SURFACE_CAPABILITIES_SCHEMA_VERSION, SURFACE_LAB_PACKAGE_SCHEMA_VERSION, SurfaceArtifact,
+    SurfaceArtifactEvidence, SurfaceCapabilities, SurfaceEvidence, SurfaceLabPackage,
+    SurfaceMaterialSlot, SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet,
+    SurfaceTriangleBinding, SurfaceUvLayoutPolicy, SurfaceUvSet, SurfaceVariationChannels,
+    TextureChannel, TextureRequirement, TextureRequirementSet, UnsupportedSurfaceOutputReport,
+    validate_surface_artifact_with_root, validate_surface_lab_package_with_root,
 };
 use shape_gamekit::{
     CellBounds, CollisionProxy, ConstructionPhase, ConstructionProfile, ExportProfile,
@@ -49,15 +55,25 @@ const PACKAGE_VERIFICATION_FILE: &str = "package-verification.json";
 const FROZEN_OBJ_FILE: &str = "frozen.obj";
 const GLB_FILE: &str = "sci-fi-crate-static-prop.glb";
 const GLB_VALIDATION_REPORT_FILE: &str = "glb-validation-report.json";
+const SURFACE_GLB_FILE: &str = "sci-fi-crate-surface-static-prop.glb";
+const SURFACE_GLB_VALIDATION_REPORT_FILE: &str = "surface-glb-validation-report.json";
 const GROUPED_OBJ_REPORT_FILE: &str = "grouped-obj-report.json";
 const SOURCE_DOCUMENT_FILE: &str = "source-document.json";
 const SOURCE_RECIPE_FILE: &str = "source-recipe.json";
 const SURFACE_LAB_PACKAGE_FILE: &str = "surface-lab-package.json";
 const SURFACE_LAB_VALIDATION_REPORT_FILE: &str = "surface-lab-validation-report.json";
-const MATERIAL_PACK_FILE: &str = "material-pack.json";
-const TEXTURE_REQUIREMENTS_FILE: &str = "texture-requirements.json";
-const UNSUPPORTED_TEXTURE_REPORT_FILE: &str = "unsupported-texture-report.json";
-const SURFACE_SWATCH_SHEET_FILE: &str = "surface-evidence/swatch-sheet.png";
+const SURFACE_ARTIFACT_FILE: &str = "surface/surface-artifact.json";
+const SURFACE_VALIDATION_REPORT_FILE: &str = "surface/surface-validation-report.json";
+const SURFACE_CAPABILITIES_FILE: &str = "surface/surface-capabilities.json";
+const MATERIAL_PACK_FILE: &str = "surface/material-pack.json";
+const TEXTURE_REQUIREMENTS_FILE: &str = "surface/texture-requirements.json";
+const UNSUPPORTED_TEXTURE_REPORT_FILE: &str = "surface/unsupported-texture-report.json";
+const SURFACE_UV_LAYOUT_FILE: &str = "surface/uv-layout.png";
+const SURFACE_SWATCH_SHEET_FILE: &str = "surface/material-swatch-sheet.png";
+const SURFACE_TEXTURE_CONTACT_SHEET_FILE: &str = "surface/texture-contact-sheet.png";
+const SURFACE_TRIANGLE_COVERAGE_FILE: &str = "surface/triangle-slot-coverage.json";
+const SURFACE_TEXTURE_DIR: &str = "surface/textures";
+const SURFACE_TEXTURE_SIZE: u32 = 256;
 const LOD1_PROXY_FILE: &str = "lods/lod1-proxy.obj";
 const LOD2_COLLISION_FILE: &str = "lods/lod2-collision.obj";
 const FRONT_PREVIEW_FILE: &str = "visual-evidence/front.png";
@@ -132,8 +148,10 @@ fn generate_static_prop_package(
         .with_context(|| format!("creating {}", out_dir.join("lods").display()))?;
     fs::create_dir_all(out_dir.join("visual-evidence"))
         .with_context(|| format!("creating {}", out_dir.join("visual-evidence").display()))?;
-    fs::create_dir_all(out_dir.join("surface-evidence"))
-        .with_context(|| format!("creating {}", out_dir.join("surface-evidence").display()))?;
+    fs::create_dir_all(out_dir.join("surface"))
+        .with_context(|| format!("creating {}", out_dir.join("surface").display()))?;
+    fs::create_dir_all(out_dir.join(SURFACE_TEXTURE_DIR))
+        .with_context(|| format!("creating {}", out_dir.join(SURFACE_TEXTURE_DIR).display()))?;
 
     let fixture = profile.fixture();
     let output = compile_foundry_document(&fixture.document, &fixture)
@@ -172,12 +190,13 @@ fn generate_static_prop_package(
     )
     .with_context(|| format!("writing {}", out_dir.join(LOD2_COLLISION_FILE).display()))?;
 
+    let material_slots = static_crate_material_slot_assignments();
     let glb_report = write_static_prop_glb(
         &mesh,
         &StaticPropGlbMetadata {
             profile_id: profile.slug().to_owned(),
             display_name: "Sci-Fi Crate".to_owned(),
-            material_slots: static_crate_material_slot_assignments()
+            material_slots: material_slots
                 .iter()
                 .map(|slot| slot.slot_id.clone())
                 .collect(),
@@ -201,15 +220,49 @@ fn generate_static_prop_package(
         out_dir.join(CONTACT_SHEET_FILE),
     )?;
 
-    let surface_lab_package = surface_lab_package_for_static_crate();
-    write_swatch_sheet(
-        &surface_lab_package.material_pack,
-        out_dir.join(SURFACE_SWATCH_SHEET_FILE),
+    let material_pack = material_pack_for_static_crate(&material_slots);
+    let texture_sets = write_static_crate_texture_payloads(&material_pack, out_dir)?;
+    let surface_artifact =
+        surface_artifact_for_static_crate(&output, &mesh, &material_pack, texture_sets);
+    write_uv_layout(
+        &surface_artifact,
+        &mesh,
+        out_dir.join(SURFACE_UV_LAYOUT_FILE),
+    )?;
+    write_swatch_sheet(&material_pack, out_dir.join(SURFACE_SWATCH_SHEET_FILE))?;
+    write_texture_contact_sheet(
+        &surface_artifact.texture_sets,
+        out_dir,
+        out_dir.join(SURFACE_TEXTURE_CONTACT_SHEET_FILE),
     )?;
     write_json(
-        out_dir.join(MATERIAL_PACK_FILE),
-        &surface_lab_package.material_pack,
+        out_dir.join(SURFACE_TRIANGLE_COVERAGE_FILE),
+        &triangle_slot_coverage_report(&surface_artifact),
     )?;
+    let surface_artifact_report = validate_surface_artifact_with_root(&surface_artifact, out_dir);
+    write_json(out_dir.join(SURFACE_ARTIFACT_FILE), &surface_artifact)?;
+    write_json(
+        out_dir.join(SURFACE_VALIDATION_REPORT_FILE),
+        &surface_artifact_report,
+    )?;
+    write_json(
+        out_dir.join(SURFACE_CAPABILITIES_FILE),
+        &surface_capabilities_for_static_crate(&surface_artifact),
+    )?;
+    let surface_glb_report = write_static_prop_surface_glb(
+        &mesh,
+        &surface_artifact,
+        SURFACE_ARTIFACT_FILE,
+        out_dir.join(SURFACE_GLB_FILE),
+    )
+    .context("writing static prop surface GLB handoff")?;
+    write_json(
+        out_dir.join(SURFACE_GLB_VALIDATION_REPORT_FILE),
+        &surface_glb_report,
+    )?;
+
+    let surface_lab_package = surface_lab_package_for_static_crate(&material_pack);
+    write_json(out_dir.join(MATERIAL_PACK_FILE), &material_pack)?;
     write_json(
         out_dir.join(TEXTURE_REQUIREMENTS_FILE),
         &surface_lab_package.texture_requirements,
@@ -240,7 +293,11 @@ fn generate_static_prop_package(
         &model_report,
         &package_paths.blender_reconstruct,
         collision_proxy,
-        glb_report.valid,
+        surface_glb_report.valid,
+        surface_artifact_report
+            .blockers
+            .iter()
+            .all(|issue| issue.code == "surface_manual_review_required"),
     );
     let validation_report = validate_static_prop_game_ready_package_with_root(&package, out_dir);
     write_json(out_dir.join(STATIC_PROP_PACKAGE_FILE), &package)?;
@@ -276,7 +333,8 @@ fn static_prop_package_for_output(
     model_report: &shape_compile::validation::ModelValidationReport,
     blender_script: &Path,
     collision_proxy: CollisionProxy,
-    glb_valid: bool,
+    surface_glb_valid: bool,
+    uv_ready: bool,
 ) -> StaticPropGameReadyPackage {
     let triangle_count = output.artifact.statistics.triangle_count.max(1) as u32;
     StaticPropGameReadyPackage {
@@ -326,11 +384,20 @@ fn static_prop_package_for_output(
         },
         material_slots: static_crate_material_slot_assignments(),
         uv_policy: UvPolicy {
-            status: StaticPropFeatureStatus::NotImplemented,
+            status: if uv_ready {
+                StaticPropFeatureStatus::Ready
+            } else {
+                StaticPropFeatureStatus::ManualRequired
+            },
             required_for_game_ready: true,
-            blocker_code: Some("uv_layout_not_implemented".to_owned()),
-            explanation: "UV unwrapping is not implemented in this Shape Lab package; the package records the blocker instead of claiming texture-ready output.".to_owned(),
+            blocker_code: (!uv_ready).then(|| "surface_uv_validation_failed".to_owned()),
+            explanation: if uv_ready {
+                "Deterministic Surface Lab v1 UVs are present for the Sci-Fi Crate static prop.".to_owned()
+            } else {
+                "Surface Lab v1 UV evidence did not pass validation; no texture-ready claim is made.".to_owned()
+            },
         },
+        surface_artifact: Some(SURFACE_ARTIFACT_FILE.to_owned()),
         collision: StaticPropCollision {
             source: "compiled preview bounds expanded into a simple box proxy".to_owned(),
             proxies: vec![collision_proxy],
@@ -339,13 +406,16 @@ fn static_prop_package_for_output(
             primary_package_format: "shape-lab-canonical-model-package".to_owned(),
             blender_handoff_script: format!("{MODEL_PACKAGE_DIR}/blender_reconstruct.py"),
             blender_status: StaticPropFeatureStatus::Ready,
-            glb_artifact: Some(GLB_FILE.to_owned()),
-            glb_status: if glb_valid {
+            glb_artifact: Some(SURFACE_GLB_FILE.to_owned()),
+            glb_status: if surface_glb_valid {
                 StaticPropFeatureStatus::Ready
             } else {
                 StaticPropFeatureStatus::ManualRequired
             },
-            glb_blocker_code: (!glb_valid).then(|| "glb_validation_failed".to_owned()),
+            glb_blocker_code: (!surface_glb_valid).then(|| "surface_glb_validation_failed".to_owned()),
+            engine_import_proof: None,
+            engine_import_status: StaticPropFeatureStatus::ManualRequired,
+            engine_native_package_status: StaticPropFeatureStatus::NotImplemented,
         },
         visual_evidence: StaticPropVisualEvidence {
             front: FRONT_PREVIEW_FILE.to_owned(),
@@ -368,171 +438,160 @@ fn static_crate_material_slot_assignments() -> Vec<MaterialSlotAssignment> {
             slot_id: "painted_metal_body".to_owned(),
             display_name: "Painted Metal Body".to_owned(),
             semantic_roles: vec!["body".to_owned(), "shell".to_owned(), "side-panel".to_owned()],
-            policy: "Primary painted hard-surface body slot. No material graph or texture payload is emitted.".to_owned(),
-            material_payload_ready: false,
+            policy: "Primary painted hard-surface body slot with deterministic procedural texture payload.".to_owned(),
+            material_payload_ready: true,
         },
         MaterialSlotAssignment {
-            slot_id: "dark_recessed_panels".to_owned(),
-            display_name: "Dark Recessed Panels".to_owned(),
-            semantic_roles: vec!["recessed-panel".to_owned(), "inset".to_owned()],
-            policy: "Dark inset panels and recessed shapes. Procedural policy only.".to_owned(),
-            material_payload_ready: false,
+            slot_id: "dark_recesses_and_vents".to_owned(),
+            display_name: "Dark Recesses and Vents".to_owned(),
+            semantic_roles: vec![
+                "recessed-panel".to_owned(),
+                "inset".to_owned(),
+                "vent".to_owned(),
+                "grille".to_owned(),
+            ],
+            policy: "Dark inset panels and vent details with deterministic procedural texture payload.".to_owned(),
+            material_payload_ready: true,
         },
         MaterialSlotAssignment {
-            slot_id: "vents".to_owned(),
-            display_name: "Vents".to_owned(),
-            semantic_roles: vec!["vent".to_owned(), "grille".to_owned()],
-            policy: "Vent and grille details use the dark industrial detail policy.".to_owned(),
-            material_payload_ready: false,
-        },
-        MaterialSlotAssignment {
-            slot_id: "handles".to_owned(),
-            display_name: "Handles".to_owned(),
-            semantic_roles: vec!["handle".to_owned(), "side-handle".to_owned()],
-            policy: "Handle hardware uses exposed edge metal policy until final materials exist.".to_owned(),
-            material_payload_ready: false,
-        },
-        MaterialSlotAssignment {
-            slot_id: "fasteners".to_owned(),
-            display_name: "Fasteners".to_owned(),
-            semantic_roles: vec!["fastener".to_owned(), "bolt".to_owned(), "rivet".to_owned()],
-            policy: "Fasteners and small hardware use exposed metal policy.".to_owned(),
-            material_payload_ready: false,
-        },
-        MaterialSlotAssignment {
-            slot_id: "edge_trim".to_owned(),
-            display_name: "Edge Trim".to_owned(),
+            slot_id: "exposed_edge_trim".to_owned(),
+            display_name: "Exposed Edge Trim".to_owned(),
             semantic_roles: vec!["edge-trim".to_owned(), "bevel".to_owned(), "rail".to_owned()],
-            policy: "Trim and rails reserve a warning/edge-wear policy. Texture payloads are not emitted.".to_owned(),
-            material_payload_ready: false,
+            policy: "Trim, bevel highlights, and exposed edges with deterministic procedural texture payload.".to_owned(),
+            material_payload_ready: true,
+        },
+        MaterialSlotAssignment {
+            slot_id: "handle_grip".to_owned(),
+            display_name: "Handle Grip".to_owned(),
+            semantic_roles: vec!["handle".to_owned(), "side-handle".to_owned(), "grip".to_owned()],
+            policy: "Handle hardware and grips with deterministic procedural texture payload.".to_owned(),
+            material_payload_ready: true,
+        },
+        MaterialSlotAssignment {
+            slot_id: "fasteners_and_mounts".to_owned(),
+            display_name: "Fasteners and Mounts".to_owned(),
+            semantic_roles: vec!["fastener".to_owned(), "bolt".to_owned(), "rivet".to_owned()],
+            policy: "Fasteners and small mounts with deterministic procedural texture payload.".to_owned(),
+            material_payload_ready: true,
+        },
+        MaterialSlotAssignment {
+            slot_id: "fallback_hard_surface".to_owned(),
+            display_name: "Fallback Hard Surface".to_owned(),
+            semantic_roles: vec!["fallback".to_owned(), "hard-surface".to_owned()],
+            policy: "Safe fallback slot for triangles with sparse provenance.".to_owned(),
+            material_payload_ready: true,
         },
     ]
 }
 
-fn surface_lab_package_for_static_crate() -> SurfaceLabPackage {
+fn material_pack_for_static_crate(slots: &[MaterialSlotAssignment]) -> MaterialStylePack {
+    MaterialStylePack {
+        id: "sci-fi-crate-industrial-surface-recipes-v1".to_owned(),
+        display_name: "Industrial Sci-Fi Surface Recipes".to_owned(),
+        texture_packing_policy: "Generated v1 texture set: base color, flat normal, metallic-roughness, and neutral occlusion PNG sidecars.".to_owned(),
+        recipes: vec![
+            MaterialRecipe {
+                material_id: "worn-painted-sci-fi-metal".to_owned(),
+                display_name: "Worn Painted Sci-Fi Metal".to_owned(),
+                base_color_srgb: [104, 112, 102],
+                metallic: 0.0,
+                roughness: 0.76,
+                wear_policy: "Deterministic subtle edge and panel variation only; no authored wear mask.".to_owned(),
+                texture_payload_ready: true,
+            },
+            MaterialRecipe {
+                material_id: "dark-rubber-industrial-detail".to_owned(),
+                display_name: "Dark Rubber / Industrial Detail".to_owned(),
+                base_color_srgb: [28, 31, 32],
+                metallic: 0.0,
+                roughness: 0.84,
+                wear_policy: "Deterministic low-contrast surface noise for recessed details.".to_owned(),
+                texture_payload_ready: true,
+            },
+            MaterialRecipe {
+                material_id: "exposed-edge-metal".to_owned(),
+                display_name: "Exposed Edge Metal".to_owned(),
+                base_color_srgb: [154, 150, 138],
+                metallic: 0.75,
+                roughness: 0.46,
+                wear_policy: "Deterministic brushed variation; no final artist-authored edge mask.".to_owned(),
+                texture_payload_ready: true,
+            },
+            MaterialRecipe {
+                material_id: "industrial-warning-trim".to_owned(),
+                display_name: "Industrial Warning Trim".to_owned(),
+                base_color_srgb: [198, 148, 44],
+                metallic: 0.0,
+                roughness: 0.7,
+                wear_policy: "Deterministic warning-trim color only; no authored stripe mask.".to_owned(),
+                texture_payload_ready: true,
+            },
+            MaterialRecipe {
+                material_id: "neutral-hard-surface-fallback".to_owned(),
+                display_name: "Neutral Hard Surface Fallback".to_owned(),
+                base_color_srgb: [92, 96, 92],
+                metallic: 0.0,
+                roughness: 0.72,
+                wear_policy: "Fallback material for sparse provenance triangles.".to_owned(),
+                texture_payload_ready: true,
+            },
+        ],
+        slot_bindings: surface_material_slot_bindings_for_static_crate(slots),
+    }
+}
+
+fn surface_lab_package_for_static_crate(material_pack: &MaterialStylePack) -> SurfaceLabPackage {
     SurfaceLabPackage {
         schema_version: SURFACE_LAB_PACKAGE_SCHEMA_VERSION,
         profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
         display_name: "Sci-Fi Crate".to_owned(),
         asset_family: "Static Prop Surface Lab".to_owned(),
         uv_layout: SurfaceUvLayoutPolicy {
-            status: StaticPropFeatureStatus::NotImplemented,
+            status: StaticPropFeatureStatus::Ready,
             required_for_texture_ready: true,
-            policy: "No authored unwrap yet; future milestone may start with deterministic box/projected regions for hard-surface slots.".to_owned(),
-            blocker_code: Some("uv_layout_not_implemented".to_owned()),
-            explanation: "UV layout is required before texture-ready or game-ready surface claims. This package records the missing UV layout as a blocker.".to_owned(),
+            policy: "Deterministic normal-aware atlas projection for the Sci-Fi Crate static prop; coordinates are normalized into 0..1.".to_owned(),
+            blocker_code: None,
+            explanation: "Surface Lab v1 emits deterministic UV coordinates for every exported vertex and one UV binding per triangle.".to_owned(),
         },
-        material_pack: MaterialStylePack {
-            id: "sci-fi-crate-industrial-surface-recipes-v0".to_owned(),
-            display_name: "Industrial Sci-Fi Surface Recipes".to_owned(),
-            texture_packing_policy: "Future texture set: base color, normal, and ORM packing where occlusion, roughness, and metallic share one map.".to_owned(),
-            recipes: vec![
-                MaterialRecipe {
-                    material_id: "clean-painted-sci-fi-metal".to_owned(),
-                    display_name: "Clean Painted Sci-Fi Metal".to_owned(),
-                    base_color_srgb: [124, 132, 120],
-                    metallic: 0.0,
-                    roughness: 0.68,
-                    wear_policy: "No wear mask; clean painted finish.".to_owned(),
-                    texture_payload_ready: false,
-                },
-                MaterialRecipe {
-                    material_id: "worn-painted-sci-fi-metal".to_owned(),
-                    display_name: "Worn Painted Sci-Fi Metal".to_owned(),
-                    base_color_srgb: [104, 112, 102],
-                    metallic: 0.0,
-                    roughness: 0.76,
-                    wear_policy: "Reserve edge-wear and corner-chipping masks for later authored textures.".to_owned(),
-                    texture_payload_ready: false,
-                },
-                MaterialRecipe {
-                    material_id: "dark-rubber-industrial-detail".to_owned(),
-                    display_name: "Dark Rubber / Industrial Detail".to_owned(),
-                    base_color_srgb: [28, 31, 32],
-                    metallic: 0.0,
-                    roughness: 0.84,
-                    wear_policy: "Reserve dust and grime masks for recessed details.".to_owned(),
-                    texture_payload_ready: false,
-                },
-                MaterialRecipe {
-                    material_id: "exposed-edge-metal".to_owned(),
-                    display_name: "Exposed Edge Metal".to_owned(),
-                    base_color_srgb: [154, 150, 138],
-                    metallic: 0.75,
-                    roughness: 0.46,
-                    wear_policy: "Reserve bright-edge wear masks for handles and fasteners.".to_owned(),
-                    texture_payload_ready: false,
-                },
-                MaterialRecipe {
-                    material_id: "industrial-warning-trim".to_owned(),
-                    display_name: "Industrial Warning Trim".to_owned(),
-                    base_color_srgb: [198, 148, 44],
-                    metallic: 0.0,
-                    roughness: 0.7,
-                    wear_policy: "Reserve stripe/trim masking and chipped paint for later authored textures.".to_owned(),
-                    texture_payload_ready: false,
-                },
-            ],
-            slot_bindings: surface_material_slot_bindings_for_static_crate(
-                &static_crate_material_slot_assignments(),
-            ),
-        },
+        material_pack: material_pack.clone(),
         texture_requirements: TextureRequirementSet {
-            id: "sci-fi-crate-texture-requirements-v0".to_owned(),
+            id: "sci-fi-crate-texture-requirements-v1".to_owned(),
             channels: vec![
                 TextureRequirement {
                     channel: TextureChannel::BaseColor,
-                    resolution_px: 1024,
+                    resolution_px: SURFACE_TEXTURE_SIZE,
                     required_for_texture_ready: true,
-                    status: StaticPropFeatureStatus::NotImplemented,
-                    blocker_code: Some("base_color_texture_not_authored".to_owned()),
-                    explanation: "A base-color texture or approved procedural bake is required before claiming textured output.".to_owned(),
+                    status: StaticPropFeatureStatus::Ready,
+                    blocker_code: None,
+                    explanation: "A deterministic base-color PNG is emitted for every v1 material recipe.".to_owned(),
                 },
                 TextureRequirement {
                     channel: TextureChannel::Normal,
-                    resolution_px: 1024,
+                    resolution_px: SURFACE_TEXTURE_SIZE,
                     required_for_texture_ready: true,
-                    status: StaticPropFeatureStatus::NotImplemented,
-                    blocker_code: Some("normal_texture_not_authored".to_owned()),
-                    explanation: "A normal texture is required before claiming a complete hard-surface texture set.".to_owned(),
+                    status: StaticPropFeatureStatus::Ready,
+                    blocker_code: None,
+                    explanation: "A deterministic flat normal PNG is emitted for every v1 material recipe.".to_owned(),
                 },
                 TextureRequirement {
                     channel: TextureChannel::MetallicRoughness,
-                    resolution_px: 1024,
+                    resolution_px: SURFACE_TEXTURE_SIZE,
                     required_for_texture_ready: true,
-                    status: StaticPropFeatureStatus::NotImplemented,
-                    blocker_code: Some("orm_texture_not_authored".to_owned()),
-                    explanation: "Packed occlusion/roughness/metallic output is required before runtime texture handoff.".to_owned(),
+                    status: StaticPropFeatureStatus::Ready,
+                    blocker_code: None,
+                    explanation: "A deterministic packed metallic/roughness PNG is emitted for every v1 material recipe.".to_owned(),
                 },
                 TextureRequirement {
                     channel: TextureChannel::Occlusion,
-                    resolution_px: 1024,
+                    resolution_px: SURFACE_TEXTURE_SIZE,
                     required_for_texture_ready: true,
-                    status: StaticPropFeatureStatus::NotImplemented,
-                    blocker_code: Some("occlusion_texture_not_authored".to_owned()),
-                    explanation: "Ambient occlusion is required for the future static-prop texture evidence bundle.".to_owned(),
+                    status: StaticPropFeatureStatus::Ready,
+                    blocker_code: None,
+                    explanation: "A deterministic neutral occlusion PNG is emitted for every v1 material recipe.".to_owned(),
                 },
             ],
         },
-        unsupported_outputs: UnsupportedSurfaceOutputReport {
-            outputs: vec![
-                UnsupportedSurfaceOutput {
-                    output: "authored-uv-layout".to_owned(),
-                    blocker_code: "uv_layout_not_implemented".to_owned(),
-                    explanation: "No authored or generated UV island layout is emitted yet.".to_owned(),
-                },
-                UnsupportedSurfaceOutput {
-                    output: "baked-texture-set".to_owned(),
-                    blocker_code: "texture_baking_not_implemented".to_owned(),
-                    explanation: "No base color, normal, ORM, or packed texture files are baked yet.".to_owned(),
-                },
-                UnsupportedSurfaceOutput {
-                    output: "engine-material-graph".to_owned(),
-                    blocker_code: "engine_material_graph_not_implemented".to_owned(),
-                    explanation: "No Unity, Unreal, Godot, or DCC-specific material graph is emitted.".to_owned(),
-                },
-            ],
-        },
+        unsupported_outputs: UnsupportedSurfaceOutputReport { outputs: Vec::new() },
         evidence: SurfaceEvidence {
             swatch_sheet: SURFACE_SWATCH_SHEET_FILE.to_owned(),
             validation_report: SURFACE_LAB_VALIDATION_REPORT_FILE.to_owned(),
@@ -557,10 +616,10 @@ fn surface_material_slot_bindings_for_static_crate(
 fn material_id_for_static_crate_slot(slot_id: &str) -> &'static str {
     match slot_id {
         "painted_metal_body" => "worn-painted-sci-fi-metal",
-        "dark_recessed_panels" | "vents" => "dark-rubber-industrial-detail",
-        "handles" | "fasteners" => "exposed-edge-metal",
-        "edge_trim" => "industrial-warning-trim",
-        _ => "clean-painted-sci-fi-metal",
+        "dark_recesses_and_vents" => "dark-rubber-industrial-detail",
+        "handle_grip" | "fasteners_and_mounts" => "exposed-edge-metal",
+        "exposed_edge_trim" => "industrial-warning-trim",
+        _ => "neutral-hard-surface-fallback",
     }
 }
 
@@ -611,6 +670,502 @@ fn fill_swatch_rect(
         for px in x..x.saturating_add(width).min(image.width()) {
             image.put_pixel(px, py, color);
         }
+    }
+}
+
+fn write_static_crate_texture_payloads(
+    pack: &MaterialStylePack,
+    out_dir: &Path,
+) -> anyhow::Result<Vec<SurfaceTextureSet>> {
+    let mut texture_sets = Vec::with_capacity(pack.recipes.len());
+    for (recipe_index, recipe) in pack.recipes.iter().enumerate() {
+        let mut files = Vec::new();
+        for channel in [
+            TextureChannel::BaseColor,
+            TextureChannel::MetallicRoughness,
+            TextureChannel::Normal,
+            TextureChannel::Occlusion,
+        ] {
+            let relative = format!(
+                "{SURFACE_TEXTURE_DIR}/{}-{}.png",
+                recipe.material_id,
+                texture_channel_slug(channel)
+            );
+            write_texture_png(
+                recipe,
+                recipe_index as u32,
+                channel,
+                out_dir.join(&relative),
+            )?;
+            files.push(SurfaceTextureFile {
+                channel,
+                path: relative,
+                width: SURFACE_TEXTURE_SIZE,
+                height: SURFACE_TEXTURE_SIZE,
+                color_space: match channel {
+                    TextureChannel::BaseColor => "sRGB".to_owned(),
+                    TextureChannel::Normal
+                    | TextureChannel::MetallicRoughness
+                    | TextureChannel::Occlusion
+                    | TextureChannel::Emissive => "linear".to_owned(),
+                },
+                required_for_texture_ready: true,
+            });
+        }
+        texture_sets.push(SurfaceTextureSet {
+            id: format!("{}-texture-set-v1", recipe.material_id),
+            display_name: format!("{} Texture Set", recipe.display_name),
+            material_recipe_id: recipe.material_id.clone(),
+            files,
+            procedural_source: "Shape Lab deterministic Surface Lab v1 hard-surface texture generator; no image-generation model.".to_owned(),
+            payload_ready: true,
+        });
+    }
+    Ok(texture_sets)
+}
+
+fn write_texture_png(
+    recipe: &MaterialRecipe,
+    recipe_index: u32,
+    channel: TextureChannel,
+    path: impl AsRef<Path>,
+) -> anyhow::Result<()> {
+    let mut image = RgbaImage::from_pixel(
+        SURFACE_TEXTURE_SIZE,
+        SURFACE_TEXTURE_SIZE,
+        Rgba([0, 0, 0, 255]),
+    );
+    for y in 0..SURFACE_TEXTURE_SIZE {
+        for x in 0..SURFACE_TEXTURE_SIZE {
+            let noise = (((x * 13 + y * 7 + recipe_index * 31) % 19) as i16) - 9;
+            let pixel = match channel {
+                TextureChannel::BaseColor => {
+                    let color = recipe
+                        .base_color_srgb
+                        .map(|value| (i16::from(value) + noise).clamp(0, 255) as u8);
+                    Rgba([color[0], color[1], color[2], 255])
+                }
+                TextureChannel::MetallicRoughness => Rgba([
+                    (recipe.metallic.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (recipe.roughness.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    255,
+                    255,
+                ]),
+                TextureChannel::Normal => Rgba([128, 128, 255, 255]),
+                TextureChannel::Occlusion => Rgba([235, 235, 235, 255]),
+                TextureChannel::Emissive => Rgba([0, 0, 0, 255]),
+            };
+            image.put_pixel(x, y, pixel);
+        }
+    }
+    image
+        .save(path.as_ref())
+        .with_context(|| format!("saving texture PNG to {}", path.as_ref().display()))?;
+    Ok(())
+}
+
+fn surface_artifact_for_static_crate(
+    output: &FoundryCompilationOutput,
+    mesh: &TriangleMesh,
+    material_pack: &MaterialStylePack,
+    texture_sets: Vec<SurfaceTextureSet>,
+) -> SurfaceArtifact {
+    let uv_coordinates = generate_static_crate_uvs(mesh);
+    let triangle_count = mesh.indices.len() / 3;
+    let mut coverage = material_pack
+        .slot_bindings
+        .iter()
+        .map(|binding| (binding.slot_id.clone(), 0_u32))
+        .collect::<BTreeMap<_, _>>();
+    let mut triangle_bindings = Vec::with_capacity(triangle_count);
+    for triangle_index in 0..triangle_count {
+        let slot_id = material_slot_for_triangle(output, mesh, triangle_index).to_owned();
+        *coverage.entry(slot_id.clone()).or_default() += 1;
+        triangle_bindings.push(SurfaceTriangleBinding {
+            triangle_index: triangle_index as u32,
+            material_slot_id: slot_id,
+            uv_set_id: "uv0_static_crate_box_projection".to_owned(),
+            source_part: output
+                .artifact
+                .combined_preview
+                .triangle_to_part
+                .get(triangle_index)
+                .and_then(|part| part.map(|id| format!("compiled_part_{:03}", id.0))),
+            source_region: output
+                .artifact
+                .combined_preview
+                .triangle_to_region
+                .get(triangle_index)
+                .and_then(|region| region.map(|id| format!("compiled_region_{:03}", id.0))),
+            source_operation: output
+                .artifact
+                .combined_preview
+                .triangle_to_operation
+                .get(triangle_index)
+                .and_then(|operation| {
+                    operation.map(|id| format!("compiled_operation_{:03}", id.0))
+                }),
+        });
+    }
+    let material_slots = material_pack
+        .slot_bindings
+        .iter()
+        .map(|binding| {
+            let count = coverage.get(&binding.slot_id).copied().unwrap_or_default();
+            SurfaceMaterialSlot {
+                slot_id: binding.slot_id.clone(),
+                display_name: binding.display_name.clone(),
+                semantic_roles: binding.semantic_roles.clone(),
+                recipe_id: binding.material_id.clone(),
+                coverage_triangle_count: count,
+                coverage_fraction: if triangle_count == 0 {
+                    0.0
+                } else {
+                    count as f32 / triangle_count as f32
+                },
+            }
+        })
+        .collect();
+    SurfaceArtifact {
+        schema_version: SURFACE_ARTIFACT_SCHEMA_VERSION,
+        profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
+        display_name: "Sci-Fi Crate".to_owned(),
+        source_artifact_fingerprint: output.build_stamp.artifact_fingerprint.0.to_hex(),
+        source_recipe_hash: output.artifact.source_recipe_hash,
+        frozen_mesh_ref: MODEL_PACKAGE_DIR.to_owned(),
+        uv_sets: vec![SurfaceUvSet {
+            id: "uv0_static_crate_box_projection".to_owned(),
+            display_name: "UV0 Static Crate Box Projection".to_owned(),
+            channel_index: 0,
+            coordinate_count: uv_coordinates.len() as u32,
+            coordinates: uv_coordinates,
+            source_policy:
+                "Normal-aware deterministic box projection into a normalized 0..1 atlas.".to_owned(),
+            readiness_status: StaticPropFeatureStatus::Ready,
+            tiling_allowed: false,
+        }],
+        material_slots,
+        texture_sets,
+        triangle_bindings,
+        evidence: SurfaceArtifactEvidence {
+            uv_layout: SURFACE_UV_LAYOUT_FILE.to_owned(),
+            material_swatch_sheet: SURFACE_SWATCH_SHEET_FILE.to_owned(),
+            texture_contact_sheet: SURFACE_TEXTURE_CONTACT_SHEET_FILE.to_owned(),
+            triangle_slot_coverage: SURFACE_TRIANGLE_COVERAGE_FILE.to_owned(),
+        },
+        validation_report_ref: SURFACE_VALIDATION_REPORT_FILE.to_owned(),
+        manual_review: SurfaceReviewStatus::AutomatedReady,
+    }
+}
+
+fn generate_static_crate_uvs(mesh: &TriangleMesh) -> Vec<[f32; 2]> {
+    let min = mesh.bounds.min;
+    let extent = mesh.bounds.extent().max(Vec3::splat(1.0e-5));
+    mesh.positions
+        .iter()
+        .zip(&mesh.normals)
+        .map(|(position, normal)| {
+            let p = Vec3::from_array(*position);
+            let n = Vec3::from_array(*normal).abs();
+            let coordinate = if n.x >= n.y && n.x >= n.z {
+                [(p.z - min.z) / extent.z, (p.y - min.y) / extent.y]
+            } else if n.y >= n.z {
+                [(p.x - min.x) / extent.x, (p.z - min.z) / extent.z]
+            } else {
+                [(p.x - min.x) / extent.x, (p.y - min.y) / extent.y]
+            };
+            [coordinate[0].clamp(0.0, 1.0), coordinate[1].clamp(0.0, 1.0)]
+        })
+        .collect()
+}
+
+fn material_slot_for_triangle(
+    output: &FoundryCompilationOutput,
+    mesh: &TriangleMesh,
+    triangle_index: usize,
+) -> &'static str {
+    if let Some(part_name) = part_name_for_triangle(output, triangle_index) {
+        let name = part_name.to_ascii_lowercase();
+        if name.contains("fastener") || name.contains("bolt") || name.contains("rivet") {
+            return "fasteners_and_mounts";
+        }
+        if name.contains("handle") || name.contains("grip") {
+            return "handle_grip";
+        }
+        if name.contains("trim") || name.contains("rail") {
+            return "exposed_edge_trim";
+        }
+        if name.contains("panel") || name.contains("vent") || name.contains("recess") {
+            return "dark_recesses_and_vents";
+        }
+    }
+    if let Some(operation) = output
+        .artifact
+        .combined_preview
+        .triangle_to_operation
+        .get(triangle_index)
+        .and_then(|operation| *operation)
+    {
+        match operation.0 {
+            1..=5 => return "dark_recesses_and_vents",
+            6..=7 => return "fasteners_and_mounts",
+            8..=u64::MAX => return "exposed_edge_trim",
+            _ => {}
+        }
+    }
+    if let Some(region) = output
+        .artifact
+        .combined_preview
+        .triangle_to_region
+        .get(triangle_index)
+        .and_then(|region| *region)
+    {
+        match region.0 {
+            10..=79 => return "dark_recesses_and_vents",
+            80..=u64::MAX => return "exposed_edge_trim",
+            _ => {}
+        }
+    }
+    if triangle_centroid_is_near_bounds_edge(mesh, triangle_index) {
+        "exposed_edge_trim"
+    } else if part_name_for_triangle(output, triangle_index).is_some() {
+        "painted_metal_body"
+    } else {
+        "fallback_hard_surface"
+    }
+}
+
+fn part_name_for_triangle(
+    output: &FoundryCompilationOutput,
+    triangle_index: usize,
+) -> Option<&str> {
+    let part = output
+        .artifact
+        .combined_preview
+        .triangle_to_part
+        .get(triangle_index)
+        .and_then(|part| *part)?;
+    output
+        .artifact
+        .compiled_parts
+        .iter()
+        .find(|compiled| compiled.instance_id == part)
+        .map(|compiled| compiled.instance_name.as_str())
+}
+
+fn triangle_centroid_is_near_bounds_edge(mesh: &TriangleMesh, triangle_index: usize) -> bool {
+    let indices = mesh.indices.chunks_exact(3).nth(triangle_index);
+    let Some(indices) = indices else {
+        return false;
+    };
+    let centroid = indices
+        .iter()
+        .filter_map(|index| mesh.positions.get(*index as usize))
+        .map(|position| Vec3::from_array(*position))
+        .fold(Vec3::ZERO, |acc, point| acc + point)
+        / 3.0;
+    let min = mesh.bounds.min;
+    let max = mesh.bounds.max;
+    let extent = mesh.bounds.extent();
+    let threshold = extent.max_element() * 0.045;
+    [
+        centroid.x - min.x,
+        max.x - centroid.x,
+        centroid.y - min.y,
+        max.y - centroid.y,
+        centroid.z - min.z,
+        max.z - centroid.z,
+    ]
+    .into_iter()
+    .any(|distance| distance <= threshold)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TriangleSlotCoverageReport {
+    profile_id: String,
+    triangle_count: u32,
+    slots: Vec<TriangleSlotCoverageRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TriangleSlotCoverageRow {
+    slot_id: String,
+    display_name: String,
+    triangle_count: u32,
+}
+
+fn triangle_slot_coverage_report(artifact: &SurfaceArtifact) -> TriangleSlotCoverageReport {
+    TriangleSlotCoverageReport {
+        profile_id: artifact.profile_id.clone(),
+        triangle_count: artifact.triangle_bindings.len() as u32,
+        slots: artifact
+            .material_slots
+            .iter()
+            .map(|slot| TriangleSlotCoverageRow {
+                slot_id: slot.slot_id.clone(),
+                display_name: slot.display_name.clone(),
+                triangle_count: slot.coverage_triangle_count,
+            })
+            .collect(),
+    }
+}
+
+fn surface_capabilities_for_static_crate(artifact: &SurfaceArtifact) -> SurfaceCapabilities {
+    SurfaceCapabilities {
+        schema_version: SURFACE_CAPABILITIES_SCHEMA_VERSION,
+        profile_id: artifact.profile_id.clone(),
+        surface_payload_ready: true,
+        uv_ready: true,
+        material_slots: artifact
+            .material_slots
+            .iter()
+            .map(|slot| slot.slot_id.clone())
+            .collect(),
+        texture_channels: vec![
+            TextureChannel::BaseColor,
+            TextureChannel::MetallicRoughness,
+            TextureChannel::Normal,
+            TextureChannel::Occlusion,
+        ],
+        variation_channels_supported: SurfaceVariationChannels {
+            surface: true,
+            wear: false,
+        },
+        focus_part_surface_ready: false,
+        human_label: "Sci-Fi Crate Surface Payload".to_owned(),
+        unavailable_reasons: vec![
+            "Part-specific surface editing is not implemented.".to_owned(),
+            "Wear variation is metadata-only in Surface Lab v1.".to_owned(),
+            "Manual DCC/runtime review is still required before a full game-ready claim."
+                .to_owned(),
+        ],
+    }
+}
+
+fn write_uv_layout(
+    artifact: &SurfaceArtifact,
+    mesh: &TriangleMesh,
+    path: impl AsRef<Path>,
+) -> anyhow::Result<()> {
+    let size = 512;
+    let margin = 24_i32;
+    let mut image = RgbaImage::from_pixel(size, size, Rgba([13, 17, 21, 255]));
+    let Some(uv_set) = artifact.uv_sets.first() else {
+        bail!("surface artifact has no UV set");
+    };
+    for binding in &artifact.triangle_bindings {
+        let color = slot_color(&binding.material_slot_id);
+        let Some(indices) = mesh
+            .indices
+            .chunks_exact(3)
+            .nth(binding.triangle_index as usize)
+        else {
+            continue;
+        };
+        let points = [indices[0], indices[1], indices[2]].map(|index| {
+            let uv = uv_set.coordinates[index as usize];
+            uv_to_pixel(uv, size, margin)
+        });
+        draw_line(&mut image, points[0], points[1], color);
+        draw_line(&mut image, points[1], points[2], color);
+        draw_line(&mut image, points[2], points[0], color);
+    }
+    image
+        .save(path.as_ref())
+        .with_context(|| format!("saving UV layout to {}", path.as_ref().display()))?;
+    Ok(())
+}
+
+fn write_texture_contact_sheet(
+    texture_sets: &[SurfaceTextureSet],
+    package_root: &Path,
+    path: impl AsRef<Path>,
+) -> anyhow::Result<()> {
+    let cell = 72_u32;
+    let padding = 12_u32;
+    let columns = 4_u32;
+    let rows = u32::try_from(texture_sets.len().max(1)).context("too many texture sets")?;
+    let width = padding + columns * (cell + padding);
+    let height = padding + rows * (cell + padding);
+    let mut sheet = RgbaImage::from_pixel(width, height, Rgba([16, 19, 23, 255]));
+    for (row, set) in texture_sets.iter().enumerate() {
+        for (column, file) in set.files.iter().enumerate() {
+            let source = image::open(package_root.join(&file.path))
+                .with_context(|| format!("opening texture {}", file.path))?
+                .to_rgba8();
+            let resized = image::imageops::resize(&source, cell, cell, FilterType::Nearest);
+            image::imageops::replace(
+                &mut sheet,
+                &resized,
+                i64::from(padding + column as u32 * (cell + padding)),
+                i64::from(padding + row as u32 * (cell + padding)),
+            );
+        }
+    }
+    sheet.save(path.as_ref()).with_context(|| {
+        format!(
+            "saving texture contact sheet to {}",
+            path.as_ref().display()
+        )
+    })?;
+    Ok(())
+}
+
+fn uv_to_pixel(uv: [f32; 2], size: u32, margin: i32) -> [i32; 2] {
+    let span = (size as i32 - margin * 2).max(1) as f32;
+    [
+        margin + (uv[0].clamp(0.0, 1.0) * span).round() as i32,
+        margin + ((1.0 - uv[1].clamp(0.0, 1.0)) * span).round() as i32,
+    ]
+}
+
+fn draw_line(image: &mut RgbaImage, start: [i32; 2], end: [i32; 2], color: Rgba<u8>) {
+    let mut x0 = start[0];
+    let mut y0 = start[1];
+    let x1 = end[0];
+    let y1 = end[1];
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut error = dx + dy;
+    loop {
+        if x0 >= 0 && y0 >= 0 && (x0 as u32) < image.width() && (y0 as u32) < image.height() {
+            image.put_pixel(x0 as u32, y0 as u32, color);
+        }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let e2 = 2 * error;
+        if e2 >= dy {
+            error += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            error += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn slot_color(slot_id: &str) -> Rgba<u8> {
+    match slot_id {
+        "painted_metal_body" => Rgba([112, 148, 128, 255]),
+        "dark_recesses_and_vents" => Rgba([82, 96, 112, 255]),
+        "exposed_edge_trim" => Rgba([220, 178, 72, 255]),
+        "handle_grip" => Rgba([146, 154, 164, 255]),
+        "fasteners_and_mounts" => Rgba([190, 190, 178, 255]),
+        _ => Rgba([160, 160, 160, 255]),
+    }
+}
+
+fn texture_channel_slug(channel: TextureChannel) -> &'static str {
+    match channel {
+        TextureChannel::BaseColor => "base_color",
+        TextureChannel::Normal => "normal",
+        TextureChannel::MetallicRoughness => "metallic_roughness",
+        TextureChannel::Occlusion => "occlusion",
+        TextureChannel::Emissive => "emissive",
     }
 }
 
@@ -825,7 +1380,10 @@ mod tests {
         StaticPropGameReadyPackage, StaticPropReadinessReport, StaticPropReadinessStatus,
     };
     use shape_gamekit::gltf::StaticPropGlbValidationReport;
-    use shape_gamekit::surface::{SurfaceLabPackage, SurfaceLabStatus, SurfaceLabValidationReport};
+    use shape_gamekit::surface::{
+        SurfaceArtifact, SurfaceCapabilities, SurfaceLabPackage, SurfaceLabStatus,
+        SurfaceLabValidationReport, validate_surface_artifact_with_root,
+    };
 
     #[test]
     fn sci_fi_crate_static_prop_bundle_records_blocked_readiness_truthfully() {
@@ -840,7 +1398,7 @@ mod tests {
         assert!(
             summary
                 .blocker_codes
-                .contains(&"uv_layout_not_implemented".to_owned())
+                .contains(&"manual_review_pending".to_owned())
         );
         assert!(
             !summary
@@ -850,7 +1408,18 @@ mod tests {
         assert!(
             summary
                 .blocker_codes
-                .contains(&"manual_review_pending".to_owned())
+                .contains(&"engine_import_proof_missing".to_owned())
+        );
+        assert!(
+            summary
+                .blocker_codes
+                .contains(&"engine_native_package_not_implemented".to_owned())
+        );
+        assert!(
+            !summary
+                .blocker_codes
+                .contains(&"uv_layout_not_implemented".to_owned()),
+            "UV-not-implemented blocker should be removed after Surface Lab v1 UV generation"
         );
         for file in [
             STATIC_PROP_PACKAGE_FILE,
@@ -859,12 +1428,20 @@ mod tests {
             FROZEN_OBJ_FILE,
             GLB_FILE,
             GLB_VALIDATION_REPORT_FILE,
+            SURFACE_GLB_FILE,
+            SURFACE_GLB_VALIDATION_REPORT_FILE,
             SURFACE_LAB_PACKAGE_FILE,
             SURFACE_LAB_VALIDATION_REPORT_FILE,
+            SURFACE_ARTIFACT_FILE,
+            SURFACE_VALIDATION_REPORT_FILE,
+            SURFACE_CAPABILITIES_FILE,
             MATERIAL_PACK_FILE,
             TEXTURE_REQUIREMENTS_FILE,
             UNSUPPORTED_TEXTURE_REPORT_FILE,
+            SURFACE_UV_LAYOUT_FILE,
             SURFACE_SWATCH_SHEET_FILE,
+            SURFACE_TEXTURE_CONTACT_SHEET_FILE,
+            SURFACE_TRIANGLE_COVERAGE_FILE,
             LOD1_PROXY_FILE,
             LOD2_COLLISION_FILE,
             FRONT_PREVIEW_FILE,
@@ -889,11 +1466,16 @@ mod tests {
         .expect("package decodes");
         assert_eq!(package.profile_id, SCI_FI_CRATE_PROFILE);
         assert_eq!(package.handoff.glb_status, StaticPropFeatureStatus::Ready);
-        assert_eq!(package.handoff.glb_artifact.as_deref(), Some(GLB_FILE));
-        assert_eq!(package.material_slots.len(), 6);
         assert_eq!(
-            package.uv_policy.status,
-            StaticPropFeatureStatus::NotImplemented
+            package.handoff.glb_artifact.as_deref(),
+            Some(SURFACE_GLB_FILE)
+        );
+        assert_eq!(package.material_slots.len(), 6);
+        assert_eq!(package.uv_policy.status, StaticPropFeatureStatus::Ready);
+        assert_eq!(package.uv_policy.blocker_code, None);
+        assert_eq!(
+            package.surface_artifact.as_deref(),
+            Some(SURFACE_ARTIFACT_FILE)
         );
 
         let surface_report: SurfaceLabValidationReport = serde_json::from_str(
@@ -901,15 +1483,83 @@ mod tests {
                 .expect("surface report json"),
         )
         .expect("surface report decodes");
-        let surface_blockers = surface_report
-            .blockers
+        assert_eq!(surface_report.status, SurfaceLabStatus::Ready);
+        assert!(surface_report.is_ready(), "{surface_report:#?}");
+
+        let surface_artifact: SurfaceArtifact = serde_json::from_str(
+            &fs::read_to_string(temp.path().join(SURFACE_ARTIFACT_FILE))
+                .expect("surface artifact json"),
+        )
+        .expect("surface artifact decodes");
+        assert_eq!(surface_artifact.profile_id, SCI_FI_CRATE_PROFILE);
+        assert_eq!(
+            surface_artifact.triangle_bindings.len(),
+            output_triangle_count(&surface_artifact)
+        );
+        assert!(
+            surface_artifact
+                .uv_sets
+                .iter()
+                .flat_map(|set| set.coordinates.iter())
+                .all(|uv| uv[0].is_finite() && uv[1].is_finite())
+        );
+        let surface_artifact_report =
+            validate_surface_artifact_with_root(&surface_artifact, temp.path());
+        assert_eq!(surface_artifact_report.status, SurfaceLabStatus::Blocked);
+        assert!(
+            surface_artifact_report
+                .blockers
+                .iter()
+                .any(|issue| issue.code == "surface_manual_review_required"),
+            "{surface_artifact_report:#?}"
+        );
+        assert!(
+            surface_artifact_report
+                .blockers
+                .iter()
+                .all(|issue| !issue.code.contains("uv")),
+            "{surface_artifact_report:#?}"
+        );
+        let coverage_sum: u32 = surface_artifact
+            .material_slots
             .iter()
-            .map(|issue| issue.code.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(surface_report.status, SurfaceLabStatus::Blocked);
-        assert!(surface_blockers.contains(&"uv_layout_not_implemented"));
-        assert!(surface_blockers.contains(&"texture_payload_policy_only"));
-        assert!(surface_blockers.contains(&"base_color_texture_not_authored"));
+            .map(|slot| slot.coverage_triangle_count)
+            .sum();
+        assert_eq!(
+            coverage_sum as usize,
+            surface_artifact.triangle_bindings.len()
+        );
+        for texture_set in &surface_artifact.texture_sets {
+            assert!(texture_set.payload_ready);
+            for file in &texture_set.files {
+                assert!(
+                    temp.path().join(&file.path).is_file(),
+                    "missing {}",
+                    file.path
+                );
+                assert_eq!(
+                    image::image_dimensions(temp.path().join(&file.path))
+                        .expect("texture dimensions"),
+                    (SURFACE_TEXTURE_SIZE, SURFACE_TEXTURE_SIZE)
+                );
+            }
+        }
+        assert!(temp.path().join(SURFACE_UV_LAYOUT_FILE).is_file());
+        assert!(temp.path().join(SURFACE_SWATCH_SHEET_FILE).is_file());
+        assert!(
+            temp.path()
+                .join(SURFACE_TEXTURE_CONTACT_SHEET_FILE)
+                .is_file()
+        );
+
+        let capabilities: SurfaceCapabilities = serde_json::from_str(
+            &fs::read_to_string(temp.path().join(SURFACE_CAPABILITIES_FILE))
+                .expect("capabilities json"),
+        )
+        .expect("capabilities decode");
+        assert!(capabilities.surface_payload_ready);
+        assert!(capabilities.uv_ready);
+        assert!(!capabilities.focus_part_surface_ready);
 
         let glb_report: StaticPropGlbValidationReport = serde_json::from_str(
             &fs::read_to_string(temp.path().join(GLB_VALIDATION_REPORT_FILE))
@@ -918,6 +1568,12 @@ mod tests {
         .expect("glb report decodes");
         assert!(glb_report.valid, "{glb_report:#?}");
         assert_eq!(glb_report.version, Some(2));
+        let surface_glb_report: StaticPropGlbValidationReport = serde_json::from_str(
+            &fs::read_to_string(temp.path().join(SURFACE_GLB_VALIDATION_REPORT_FILE))
+                .expect("surface glb report json"),
+        )
+        .expect("surface glb report decodes");
+        assert!(surface_glb_report.valid, "{surface_glb_report:#?}");
 
         let surface_package: SurfaceLabPackage = serde_json::from_str(
             &fs::read_to_string(temp.path().join(SURFACE_LAB_PACKAGE_FILE))
@@ -976,7 +1632,15 @@ mod tests {
             MATERIAL_PACK_FILE,
             TEXTURE_REQUIREMENTS_FILE,
             UNSUPPORTED_TEXTURE_REPORT_FILE,
+            SURFACE_ARTIFACT_FILE,
+            SURFACE_VALIDATION_REPORT_FILE,
+            SURFACE_CAPABILITIES_FILE,
+            SURFACE_UV_LAYOUT_FILE,
             SURFACE_SWATCH_SHEET_FILE,
+            SURFACE_TEXTURE_CONTACT_SHEET_FILE,
+            SURFACE_TRIANGLE_COVERAGE_FILE,
+            SURFACE_GLB_FILE,
+            SURFACE_GLB_VALIDATION_REPORT_FILE,
         ] {
             let left_bytes = fs::read(left.path().join(file))
                 .unwrap_or_else(|error| panic!("read left {file}: {error}"));
@@ -984,5 +1648,33 @@ mod tests {
                 .unwrap_or_else(|error| panic!("read right {file}: {error}"));
             assert_eq!(left_bytes, right_bytes, "{file} should be deterministic");
         }
+        for texture in deterministic_texture_files(left.path()) {
+            let relative = texture.strip_prefix(left.path()).expect("relative texture");
+            let right_texture = right.path().join(relative);
+            assert_eq!(
+                fs::read(&texture).expect("left texture"),
+                fs::read(&right_texture).expect("right texture"),
+                "{} should be deterministic",
+                relative.display()
+            );
+        }
+    }
+
+    fn output_triangle_count(surface_artifact: &SurfaceArtifact) -> usize {
+        surface_artifact
+            .triangle_bindings
+            .iter()
+            .map(|binding| binding.triangle_index as usize)
+            .max()
+            .map_or(0, |max| max + 1)
+    }
+
+    fn deterministic_texture_files(root: &Path) -> Vec<PathBuf> {
+        let mut files = fs::read_dir(root.join(SURFACE_TEXTURE_DIR))
+            .expect("texture dir")
+            .map(|entry| entry.expect("texture entry").path())
+            .collect::<Vec<_>>();
+        files.sort();
+        files
     }
 }

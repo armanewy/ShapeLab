@@ -172,9 +172,11 @@ cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-di
 ```
 
 The package emits a frozen canonical model package, OBJ handoff, deterministic
-proxy LODs, material-slot assignments, collision proxy, visual evidence, and a
-validation report. The report intentionally blocks a full game-ready claim until
-UV layout, direct GLB handoff, and manual DCC/runtime review are complete.
+proxy LODs, collision proxy, visual evidence, a geometry-only GLB, and a
+Surface Lab v1 sidecar for the Sci-Fi Crate with deterministic UV/material/
+texture evidence. The report intentionally blocks a full game-ready claim until
+manual DCC/runtime review, engine import proof, and engine-native package
+handoff are complete.
 
 Inspect and package curated Foundry kit metadata:
 
@@ -237,7 +239,8 @@ Release readiness is archive-first only. The repository documents manual package
 - LLM integration, LLM geometry generation, or direct LLM recipe mutation
 - General Blender integration beyond the decompiler reconstruction script
 - General imported mesh editing without known vertex correspondence
-- Rigging, animation, UVs, or texturing
+- Broad UV/texturing, rigging, or animation beyond the headless Sci-Fi Crate
+  Surface Lab static-prop package
 - Materials or marketplace publishing workflows
 - GPU compute or a custom GPU viewport
 - Cloud or collaborative features
