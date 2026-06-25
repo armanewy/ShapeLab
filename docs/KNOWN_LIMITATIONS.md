@@ -25,6 +25,12 @@
 - HQ quality reports are clay-mesh truth reports. They do not claim UVs,
   materials, textures, rigging, animation, photoreal renders, marketplace-ready
   packages, or automatic Showcase approval.
+- HQ adversarial review records evidence gaps and required manual art-review
+  questions. It cannot automatically decide whether output looks toy-like,
+  art-directed, or better than a curated Blender/Houdini kit.
+- `moba-hero-clay` remains clay mesh only. It does not claim Dota/IP
+  reconstruction, UVs, materials, textures, rigging, animation, marketplace
+  readiness, or arbitrary imported mesh editability.
 - Schema-3 bend inference is experimental and limited to a single uniform-curvature bend plus at most one affine-family stage before or after it.
 - Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains affine-only by default.
 - Ambiguous affine/bend compositions may select deterministic approximation programs rather than the exact generating affine/bend order, then rely on the final lossless correction for exact replay.

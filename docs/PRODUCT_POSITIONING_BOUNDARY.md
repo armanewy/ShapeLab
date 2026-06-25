@@ -26,8 +26,8 @@ editability.
   candidate evidence, and export/reopen proof.
 - `moba-hero-clay` is an authored clay hero foundry profile sourced from the
   prepared hero template contract. It can claim a MOBA-quality clay hero family,
-  not Dota reconstruction, textured output, rigging, animation, or arbitrary
-  mesh editing.
+  not Dota reconstruction, textured output, UVs, rigging, animation,
+  marketplace readiness, or arbitrary mesh editing.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
 - Release-readiness reports can verify the direct Visual Foundry shell contract
@@ -36,6 +36,9 @@ editability.
 - HQ quality reports can baseline authored content with clay views, contact
   sheets, mesh validity, semantic parts, candidate survival, visible-control
   evidence, export/reopen status, and unsupported-output records.
+- HQ adversarial reviews are required before stronger quality claims. They
+  record missing evidence, manual art-review questions, and tier downgrades
+  instead of pretending automation can judge taste.
 - Foundry kits package curated authored content with review evidence and
   visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.
@@ -105,6 +108,7 @@ The strongest product proof remains:
 - Export a pack with zero technical surface exposure.
 - Complete the UI manual gate screenshots at 1280x800 and 1440x900.
 - Preserve HQ quality evidence for any kit claimed as Usable or Showcase.
+- Preserve HQ adversarial review evidence before public demo quality claims.
 - Validate, inspect, and package curated kits before exposing them in the
   default novice catalog.
 

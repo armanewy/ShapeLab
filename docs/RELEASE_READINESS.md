@@ -143,6 +143,11 @@ visual review markers. Photoreal screenshots, textures, materials, UVs,
 rigging, animation, and marketplace packages are recorded as unsupported rather
 than implied.
 
+Wave 41 adds `shape-cli hq-adversarial-review` as the quality adversary gate.
+Run it after each preserved HQ benchmark. The gate records missing evidence,
+manual-only art questions, tier recommendations, and downgrades. It cannot
+promote a profile above the evidence in `quality-report.json`.
+
 An automated Usable result is evidence, not automatic catalog exposure. Novice
 catalog exposure remains disabled by default until human review approval is
 recorded for the kit.
@@ -203,6 +208,8 @@ cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report ta
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
 cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay
+cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/roman-bridge-hq --out target/hq-benchmark/roman-bridge-hq/adversarial-review.json
+cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/moba-hero-clay --out target/hq-benchmark/moba-hero-clay/adversarial-review.json
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 cargo build --release --workspace

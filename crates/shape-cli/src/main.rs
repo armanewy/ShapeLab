@@ -139,6 +139,8 @@ enum Command {
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Emit an HQ asset quality report and contact-sheet evidence.
     HqQualityBenchmark(hq_quality::HqQualityBenchmarkArgs),
+    /// Emit a deterministic adversarial review over an HQ benchmark evidence directory.
+    HqAdversarialReview(hq_quality::HqAdversarialReviewArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -646,6 +648,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
+        Command::HqAdversarialReview(args) => hq_quality::run_hq_adversarial_review(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1388,6 +1391,8 @@ fn release_readiness_report(
             "cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export",
             "cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export",
             "cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay",
+            "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/roman-bridge-hq --out target/hq-benchmark/roman-bridge-hq/adversarial-review.json",
+            "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/moba-hero-clay --out target/hq-benchmark/moba-hero-clay/adversarial-review.json",
             "cargo clippy --workspace --all-targets -- -D warnings",
             "cargo test --workspace --no-fail-fast",
             "cargo build --release --workspace",

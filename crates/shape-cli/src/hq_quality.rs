@@ -65,6 +65,16 @@ pub struct HqQualityBenchmarkArgs {
     json: bool,
 }
 
+#[derive(Debug, clap::Args)]
+pub struct HqAdversarialReviewArgs {
+    /// Directory containing an HQ benchmark quality-report.json and evidence files.
+    #[arg(long)]
+    benchmark_dir: PathBuf,
+    /// Output adversarial-review.json path.
+    #[arg(long)]
+    out: PathBuf,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HqQualityTier {
@@ -89,6 +99,33 @@ pub enum HqEvidenceStatus {
 pub enum HqHumanApprovalStatus {
     Pending,
     Approved,
+}
+
+pub const HQ_ADVERSARIAL_REVIEW_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HqAdversarialReviewReport {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub reviewed_quality_report: Option<String>,
+    pub visual_questions: Vec<HqAdversarialReviewQuestion>,
+    pub mesh_questions: Vec<HqAdversarialReviewQuestion>,
+    #[serde(rename = "UX_questions")]
+    pub ux_questions: Vec<HqAdversarialReviewQuestion>,
+    pub blocker_findings: Vec<String>,
+    pub non_blocking_findings: Vec<String>,
+    pub tier_recommendation: HqQualityTier,
+    pub required_followups: Vec<String>,
+    pub human_review_required: bool,
+    pub human_reviewer_status: HqHumanApprovalStatus,
+    pub cannot_automatically_judge_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HqAdversarialReviewQuestion {
+    pub question: String,
+    pub manual_review_required: bool,
+    pub evidence_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,6 +351,418 @@ pub struct HqQualityGateEvidence {
 pub struct HqQualityTierDecision {
     pub achieved: HqQualityTier,
     pub blockers: Vec<String>,
+}
+
+pub fn run_hq_adversarial_review(args: HqAdversarialReviewArgs) -> anyhow::Result<()> {
+    let report = build_hq_adversarial_review(&args.benchmark_dir);
+    if let Some(parent) = args.out.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    write_json(&args.out, &report)?;
+    println!(
+        "HQ adversarial review {}: recommendation={:?} blockers={}",
+        report.profile_id,
+        report.tier_recommendation,
+        report.blocker_findings.len()
+    );
+    Ok(())
+}
+
+#[must_use]
+pub fn build_hq_adversarial_review(benchmark_dir: &Path) -> HqAdversarialReviewReport {
+    let inferred_profile_id = benchmark_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown-profile")
+        .to_owned();
+    let quality_report_path = benchmark_dir.join("quality-report.json");
+    let mut blocker_findings = Vec::new();
+    let mut non_blocking_findings = Vec::new();
+    let mut required_followups = Vec::new();
+    let mut reviewed_quality_report = None;
+    let mut profile_id = inferred_profile_id.clone();
+    let mut tier_recommendation = HqQualityTier::Draft;
+    let mut human_reviewer_status = HqHumanApprovalStatus::Pending;
+
+    if !benchmark_dir.is_dir() {
+        blocker_findings.push(format!(
+            "missing_benchmark_dir: {} does not exist",
+            benchmark_dir.display()
+        ));
+        required_followups.push("Run the HQ quality benchmark before claiming a tier.".to_owned());
+    } else if !quality_report_path.is_file() {
+        blocker_findings.push(format!(
+            "missing_quality_report: {} is missing",
+            quality_report_path.display()
+        ));
+        required_followups.push(
+            "Generate quality-report.json before adversarial review can assess evidence."
+                .to_owned(),
+        );
+    } else {
+        reviewed_quality_report = Some(quality_report_path.display().to_string());
+        match fs::read_to_string(&quality_report_path)
+            .ok()
+            .and_then(|json| serde_json::from_str::<HqQualityReport>(&json).ok())
+        {
+            Some(quality) => {
+                profile_id = quality.profile_id.clone();
+                human_reviewer_status = quality.human_approval_status;
+                let correction = adversarial_tier_correction(
+                    &quality,
+                    benchmark_dir,
+                    &mut blocker_findings,
+                    &mut non_blocking_findings,
+                    &mut required_followups,
+                );
+                tier_recommendation = correction;
+            }
+            None => {
+                blocker_findings.push(format!(
+                    "unreadable_quality_report: {} could not be parsed",
+                    quality_report_path.display()
+                ));
+                required_followups
+                    .push("Regenerate quality-report.json with the current schema.".to_owned());
+            }
+        }
+    }
+
+    HqAdversarialReviewReport {
+        schema_version: HQ_ADVERSARIAL_REVIEW_SCHEMA_VERSION,
+        profile_id,
+        reviewed_quality_report,
+        visual_questions: adversarial_visual_questions(),
+        mesh_questions: adversarial_mesh_questions(),
+        ux_questions: adversarial_ux_questions(),
+        blocker_findings,
+        non_blocking_findings,
+        tier_recommendation,
+        required_followups,
+        human_review_required: true,
+        human_reviewer_status,
+        cannot_automatically_judge_fields: cannot_automatically_judge_fields(),
+    }
+}
+
+fn adversarial_tier_correction(
+    quality: &HqQualityReport,
+    benchmark_dir: &Path,
+    blocker_findings: &mut Vec<String>,
+    non_blocking_findings: &mut Vec<String>,
+    required_followups: &mut Vec<String>,
+) -> HqQualityTier {
+    for blocker in &quality.quality_tier_blockers {
+        blocker_findings.push(format!("quality_report_blocker: {blocker}"));
+    }
+
+    let mut recommendation = quality.quality_tier_achieved;
+    if !quality.quality_tier_blockers.is_empty()
+        && quality.quality_tier_achieved == quality.quality_tier_requested
+    {
+        let downgraded = downgrade_one_tier(recommendation);
+        if downgraded < recommendation {
+            blocker_findings.push(format!(
+                "tier_overclaim.report_blockers: claimed {:?} while quality blockers are present",
+                recommendation
+            ));
+            recommendation = downgraded;
+        }
+    }
+    let recomputed = evaluate_quality_tier(
+        quality.quality_tier_requested,
+        &gate_evidence_from_report(quality),
+    );
+    if recomputed.achieved < recommendation {
+        blocker_findings.push(format!(
+            "tier_overclaim.recomputed_evidence: quality report achieved {:?}, but evidence recomputes to {:?}",
+            recommendation, recomputed.achieved
+        ));
+        required_followups.push(
+            "Regenerate the quality report or correct the tier before public demo review."
+                .to_owned(),
+        );
+        recommendation = recomputed.achieved;
+    }
+    for blocker in recomputed.blockers {
+        let finding = format!("recomputed_quality_blocker: {blocker}");
+        if !blocker_findings.contains(&finding) {
+            blocker_findings.push(finding);
+        }
+    }
+    let claimed_or_recommended_usable = quality.quality_tier_achieved >= HqQualityTier::Usable
+        || recommendation >= HqQualityTier::Usable;
+    let required_files = [
+        (
+            "contact_sheet",
+            "contact-sheet.png",
+            quality.contact_sheet_available,
+        ),
+        ("front_view", "front.png", quality.front_view_available),
+        (
+            "three_quarter_view",
+            "three-quarter.png",
+            quality.three_quarter_view_available,
+        ),
+        ("side_view", "side.png", quality.side_view_available),
+        ("back_view", "back.png", quality.back_view_available),
+        (
+            "wireframe_view",
+            "wireframe.png",
+            quality.wireframe_available,
+        ),
+        (
+            "silhouette_view",
+            "silhouette.png",
+            quality.silhouette_available,
+        ),
+        ("mesh_stats", "mesh-stats.json", true),
+        ("semantic_parts", "semantic-parts.json", true),
+        ("candidate_report", "candidate-report.json", true),
+        (
+            "controls_visibility_report",
+            "controls-visibility-report.json",
+            true,
+        ),
+        ("export_reopen_report", "export-reopen-report.json", true),
+    ];
+    let mut missing_required_file = false;
+    for (label, file, report_claims_available) in required_files {
+        if !report_claims_available || !benchmark_dir.join(file).is_file() {
+            let finding = format!("missing_evidence.{label}: {file}");
+            if claimed_or_recommended_usable {
+                blocker_findings.push(finding);
+                missing_required_file = true;
+            } else {
+                non_blocking_findings.push(finding);
+            }
+        }
+    }
+
+    if quality.advanced_recipe_required && claimed_or_recommended_usable {
+        blocker_findings.push(
+            "tier_overclaim.advanced_recipe: Usable cannot require Advanced Recipe".to_owned(),
+        );
+        required_followups
+            .push("Keep this profile below Usable until the novice path no longer depends on Advanced Recipe.".to_owned());
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+    }
+    if (quality.export_status != HqEvidenceStatus::Verified
+        || quality.reopen_status != HqEvidenceStatus::Verified)
+        && claimed_or_recommended_usable
+    {
+        blocker_findings.push(
+            "tier_overclaim.export_reopen: Usable requires verified export and reopen".to_owned(),
+        );
+        required_followups
+            .push("Regenerate package export/reopen evidence before claiming Usable.".to_owned());
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+    }
+    if quality.candidate_survival_count < DEFAULT_DIRECTION_COUNT && claimed_or_recommended_usable {
+        blocker_findings.push(format!(
+            "tier_overclaim.candidates: expected {DEFAULT_DIRECTION_COUNT} surviving candidates, found {}",
+            quality.candidate_survival_count
+        ));
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+    }
+    if !quality
+        .visible_control_difference_evidence
+        .all_primary_controls_changed()
+        && claimed_or_recommended_usable
+    {
+        blocker_findings.push(
+            "tier_overclaim.controls: every primary control needs visible whole-model evidence"
+                .to_owned(),
+        );
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+    }
+    if quality.placeholder_thumbnail_detected && claimed_or_recommended_usable {
+        blocker_findings.push(
+            "tier_overclaim.placeholder_thumbnail: placeholder thumbnails cannot support Usable"
+                .to_owned(),
+        );
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+    }
+    if missing_required_file && claimed_or_recommended_usable {
+        recommendation = recommendation.min(HqQualityTier::Prototype);
+        required_followups
+            .push("Fill missing benchmark evidence files before public demo review.".to_owned());
+    }
+    if quality.quality_tier_achieved == HqQualityTier::Showcase
+        && (quality.human_approval_status != HqHumanApprovalStatus::Approved
+            || quality.adversarial_review_status != HqHumanApprovalStatus::Approved)
+    {
+        blocker_findings.push(
+            "tier_overclaim.showcase_review: Showcase requires human/pro approval and adversarial visual review"
+                .to_owned(),
+        );
+        recommendation = recommendation.min(HqQualityTier::Usable);
+    }
+    if matches!(
+        recommendation,
+        HqQualityTier::Draft | HqQualityTier::Prototype
+    ) && quality.novice_catalog_exposure_allowed_by_default
+    {
+        blocker_findings.push(
+            "visibility_policy: Draft and Prototype profiles must stay hidden from the default novice catalog"
+                .to_owned(),
+        );
+        required_followups
+            .push("Remove default novice exposure for Draft/Prototype content.".to_owned());
+    }
+
+    if quality.human_approval_status != HqHumanApprovalStatus::Approved {
+        non_blocking_findings.push(
+            "manual_review_pending: automatic evidence is not a human art approval".to_owned(),
+        );
+    }
+    if quality.profile_id.contains("hero") {
+        non_blocking_findings
+            .push("hero_boundary: clay hero output remains clay mesh only; no UV/material/rig/animation claim".to_owned());
+    }
+    recommendation
+}
+
+fn downgrade_one_tier(tier: HqQualityTier) -> HqQualityTier {
+    match tier {
+        HqQualityTier::Showcase => HqQualityTier::Usable,
+        HqQualityTier::Usable => HqQualityTier::Prototype,
+        HqQualityTier::Prototype => HqQualityTier::Draft,
+        HqQualityTier::Draft => HqQualityTier::Draft,
+    }
+}
+
+fn gate_evidence_from_report(report: &HqQualityReport) -> HqQualityGateEvidence {
+    HqQualityGateEvidence {
+        compile_valid: report.mesh_validity_summary.compile_valid
+            && report.mesh_validity_summary.model_valid,
+        clay_preview_available: report.clay_preview_available,
+        contact_sheet_available: report.contact_sheet_available,
+        front_view_available: report.front_view_available,
+        three_quarter_view_available: report.three_quarter_view_available,
+        side_view_available: report.side_view_available,
+        back_view_available: report.back_view_available,
+        wireframe_available: report.wireframe_available,
+        silhouette_available: report.silhouette_available,
+        visible_control_difference_evidence: report
+            .visible_control_difference_evidence
+            .all_primary_controls_changed(),
+        advanced_recipe_required: report.advanced_recipe_required,
+        export_verified: report.export_status == HqEvidenceStatus::Verified,
+        reopen_verified: report.reopen_status == HqEvidenceStatus::Verified,
+        candidate_survival_count: report.candidate_survival_count,
+        placeholder_thumbnails: report.placeholder_thumbnail_detected,
+        human_approved: report.human_approval_status == HqHumanApprovalStatus::Approved,
+        adversarial_reviewed: report.adversarial_review_status == HqHumanApprovalStatus::Approved,
+    }
+}
+
+fn adversarial_visual_questions() -> Vec<HqAdversarialReviewQuestion> {
+    [
+        (
+            "Does this look like a toy?",
+            ["contact-sheet.png", "three-quarter.png"].as_slice(),
+        ),
+        (
+            "Does the silhouette read at 128px?",
+            ["silhouette.png"].as_slice(),
+        ),
+        (
+            "Do variants preserve identity?",
+            ["candidate-report.json", "contact-sheet.png"].as_slice(),
+        ),
+        (
+            "Do armor/bridge/gear pieces look attached or pasted on?",
+            ["wireframe.png", "three-quarter.png"].as_slice(),
+        ),
+        (
+            "Do all generated candidates look art-directed?",
+            ["candidate-report.json", "contact-sheet.png"].as_slice(),
+        ),
+        (
+            "Would this embarrass us next to a private clay-render reference board?",
+            ["contact-sheet.png"].as_slice(),
+        ),
+        (
+            "Does any output look like procedural filler?",
+            ["contact-sheet.png", "candidate-report.json"].as_slice(),
+        ),
+        (
+            "Would a curated Blender/Houdini kit beat this today?",
+            ["contact-sheet.png", "export-reopen-report.json"].as_slice(),
+        ),
+    ]
+    .into_iter()
+    .map(|(question, refs)| manual_question(question, refs))
+    .collect()
+}
+
+fn adversarial_mesh_questions() -> Vec<HqAdversarialReviewQuestion> {
+    [
+        (
+            "Are there visible mesh seams, accidental intersections, or pasted-on parts?",
+            ["wireframe.png", "mesh-stats.json", "semantic-parts.json"].as_slice(),
+        ),
+        (
+            "Are primary controls visibly meaningful?",
+            ["controls-visibility-report.json"].as_slice(),
+        ),
+        (
+            "Does the quality tier overclaim the evidence?",
+            ["quality-report.json", "export-reopen-report.json"].as_slice(),
+        ),
+    ]
+    .into_iter()
+    .map(|(question, refs)| manual_question(question, refs))
+    .collect()
+}
+
+fn adversarial_ux_questions() -> Vec<HqAdversarialReviewQuestion> {
+    [
+        (
+            "Are there too many choices for a noob?",
+            ["quality-report.json", "controls-visibility-report.json"].as_slice(),
+        ),
+        (
+            "Are candidates coherent or just random combinations?",
+            ["candidate-report.json", "contact-sheet.png"].as_slice(),
+        ),
+        (
+            "Is Visual Foundry still simpler than traditional modeling for the task?",
+            ["quality-report.json", "contact-sheet.png"].as_slice(),
+        ),
+    ]
+    .into_iter()
+    .map(|(question, refs)| manual_question(question, refs))
+    .collect()
+}
+
+fn manual_question(question: &str, evidence_refs: &[&str]) -> HqAdversarialReviewQuestion {
+    HqAdversarialReviewQuestion {
+        question: question.to_owned(),
+        manual_review_required: true,
+        evidence_refs: evidence_refs
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect(),
+    }
+}
+
+fn cannot_automatically_judge_fields() -> Vec<String> {
+    [
+        "toy_like_art_quality",
+        "silhouette_readability_at_128px",
+        "variant_identity_preservation",
+        "attachment_visual_believability",
+        "candidate_art_direction",
+        "private_reference_board_comparison",
+        "procedural_filler_impression",
+        "curated_blender_or_houdini_comparison",
+        "novice_simplicity",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
 }
 
 pub fn run_hq_quality_benchmark(args: HqQualityBenchmarkArgs) -> anyhow::Result<()> {
@@ -1775,6 +2224,97 @@ mod tests {
         }
     }
 
+    fn sample_quality_report(profile_id: &str, tier: HqQualityTier) -> HqQualityReport {
+        HqQualityReport {
+            schema_version: HQ_QUALITY_REPORT_SCHEMA_VERSION,
+            generated_at: "deterministic".to_owned(),
+            deterministic_timestamp_policy: "fixed-test-value".to_owned(),
+            profile_id: profile_id.to_owned(),
+            profile_label: profile_id.to_owned(),
+            kit_id: None,
+            style_id: None,
+            quality_tier_requested: tier,
+            quality_tier_achieved: tier,
+            quality_tier_blockers: Vec::new(),
+            clay_preview_available: true,
+            contact_sheet_available: true,
+            front_view_available: true,
+            three_quarter_view_available: true,
+            side_view_available: true,
+            back_view_available: true,
+            wireframe_available: true,
+            silhouette_available: true,
+            silhouette_readability_metric: Some(0.8),
+            silhouette_manual_review_required: true,
+            mesh_validity_summary: HqMeshValiditySummary {
+                compile_valid: true,
+                model_valid: true,
+                issue_count: 0,
+                error_count: 0,
+                warning_count: 0,
+                provenance_coverage: 1.0,
+                manifold_closed_part_fraction: 1.0,
+                accidental_intersection_count: 0,
+            },
+            triangle_count: 1024,
+            triangle_budget: Some(DEFAULT_TRIANGLE_BUDGET),
+            semantic_part_inventory: HqSemanticPartInventory {
+                part_count: 1,
+                parts: Vec::new(),
+            },
+            required_role_coverage: HqRequiredRoleCoverage {
+                required_role_count: 1,
+                covered_required_role_count: 1,
+                missing_required_roles: Vec::new(),
+                accepted: true,
+            },
+            provider_attachment_validity: HqProviderAttachmentValidity {
+                provider_override_count: 1,
+                final_conformance_accepted: true,
+                required_attachment_issue_count: 0,
+            },
+            candidate_survival_count: DEFAULT_DIRECTION_COUNT,
+            six_direction_availability: true,
+            primary_control_count: 7,
+            visible_control_difference_evidence: HqVisibleControlDifferenceEvidence {
+                primary_controls_checked: 7,
+                changed_control_count: 7,
+                controls: Vec::new(),
+            },
+            advanced_recipe_required: false,
+            export_status: HqEvidenceStatus::Verified,
+            reopen_status: HqEvidenceStatus::Verified,
+            unsupported_outputs: unsupported_outputs(),
+            placeholder_thumbnail_detected: false,
+            human_review_required: true,
+            human_approval_status: HqHumanApprovalStatus::Pending,
+            adversarial_review_status: HqHumanApprovalStatus::Pending,
+            manual_notes_path: None,
+            novice_catalog_exposure_allowed_by_default: false,
+        }
+    }
+
+    fn write_sample_benchmark(dir: &Path, report: &HqQualityReport) {
+        fs::create_dir_all(dir).expect("benchmark dir");
+        write_json(dir.join("quality-report.json"), report).expect("quality report");
+        for file in [
+            "contact-sheet.png",
+            "front.png",
+            "three-quarter.png",
+            "side.png",
+            "back.png",
+            "wireframe.png",
+            "silhouette.png",
+            "mesh-stats.json",
+            "semantic-parts.json",
+            "candidate-report.json",
+            "controls-visibility-report.json",
+            "export-reopen-report.json",
+        ] {
+            fs::write(dir.join(file), b"evidence").expect("evidence file");
+        }
+    }
+
     #[test]
     fn hq_quality_tier_cannot_exceed_requested_tier() {
         let decision = evaluate_quality_tier(HqQualityTier::Prototype, &full_evidence());
@@ -1862,6 +2402,203 @@ mod tests {
                 .iter()
                 .any(|blocker| blocker.contains("adversarial"))
         );
+    }
+
+    #[test]
+    fn hq_adversarial_review_schema_serializes_required_fields() {
+        let report = HqAdversarialReviewReport {
+            schema_version: HQ_ADVERSARIAL_REVIEW_SCHEMA_VERSION,
+            profile_id: "test-profile".to_owned(),
+            reviewed_quality_report: Some("quality-report.json".to_owned()),
+            visual_questions: adversarial_visual_questions(),
+            mesh_questions: adversarial_mesh_questions(),
+            ux_questions: adversarial_ux_questions(),
+            blocker_findings: Vec::new(),
+            non_blocking_findings: vec!["manual_review_pending".to_owned()],
+            tier_recommendation: HqQualityTier::Usable,
+            required_followups: Vec::new(),
+            human_review_required: true,
+            human_reviewer_status: HqHumanApprovalStatus::Pending,
+            cannot_automatically_judge_fields: cannot_automatically_judge_fields(),
+        };
+
+        let json = serde_json::to_string(&report).expect("serialize adversarial review");
+        assert!(json.contains("\"schema_version\""));
+        assert!(json.contains("\"reviewed_quality_report\""));
+        assert!(json.contains("\"UX_questions\""));
+        assert!(json.contains("\"cannot_automatically_judge_fields\""));
+    }
+
+    #[test]
+    fn hq_adversarial_missing_benchmark_dir_reports_missing_evidence() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let missing = temp_dir.path().join("missing-profile");
+        let review = build_hq_adversarial_review(&missing);
+        assert_eq!(review.profile_id, "missing-profile");
+        assert_eq!(review.tier_recommendation, HqQualityTier::Draft);
+        assert!(review.reviewed_quality_report.is_none());
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("missing_benchmark_dir"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_missing_quality_report_is_not_passed() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("empty-profile");
+        fs::create_dir_all(&benchmark_dir).expect("benchmark dir");
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(review.tier_recommendation, HqQualityTier::Draft);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("missing_quality_report"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_subjective_fields_are_manual_required() {
+        let review = build_hq_adversarial_review(Path::new("target/nonexistent-adversarial-test"));
+        assert!(review.human_review_required);
+        assert!(!review.cannot_automatically_judge_fields.is_empty());
+        assert!(
+            review
+                .visual_questions
+                .iter()
+                .chain(review.mesh_questions.iter())
+                .chain(review.ux_questions.iter())
+                .all(|question| question.manual_review_required)
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_tier_downgrades_usable_with_advanced_recipe() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("advanced-profile");
+        let mut quality = sample_quality_report("advanced-profile", HqQualityTier::Usable);
+        quality.advanced_recipe_required = true;
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(review.tier_recommendation, HqQualityTier::Prototype);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("advanced_recipe"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_report_blockers_lower_claimed_tier() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("blocked-usable-profile");
+        let mut quality = sample_quality_report("blocked-usable-profile", HqQualityTier::Usable);
+        quality
+            .quality_tier_blockers
+            .push("stale blocker should not keep usable".to_owned());
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(review.tier_recommendation, HqQualityTier::Prototype);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("report_blockers"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_visibility_policy_uses_downgraded_tier() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("downgraded-visible-profile");
+        let mut quality =
+            sample_quality_report("downgraded-visible-profile", HqQualityTier::Usable);
+        quality.advanced_recipe_required = true;
+        quality.novice_catalog_exposure_allowed_by_default = true;
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(review.tier_recommendation, HqQualityTier::Prototype);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("visibility_policy"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_showcase_requires_human_approval() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("showcase-profile");
+        let quality = sample_quality_report("showcase-profile", HqQualityTier::Showcase);
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(review.tier_recommendation, HqQualityTier::Usable);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("showcase_review"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_draft_and_prototype_stay_hidden_from_novice_catalog() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("prototype-profile");
+        let mut quality = sample_quality_report("prototype-profile", HqQualityTier::Prototype);
+        quality.novice_catalog_exposure_allowed_by_default = true;
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let review = build_hq_adversarial_review(&benchmark_dir);
+        assert!(
+            review
+                .blocker_findings
+                .iter()
+                .any(|finding| finding.contains("Draft and Prototype"))
+        );
+    }
+
+    #[test]
+    fn hq_adversarial_review_results_are_deterministic() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let benchmark_dir = temp_dir.path().join("deterministic-profile");
+        let quality = sample_quality_report("deterministic-profile", HqQualityTier::Usable);
+        write_sample_benchmark(&benchmark_dir, &quality);
+
+        let first = build_hq_adversarial_review(&benchmark_dir);
+        let second = build_hq_adversarial_review(&benchmark_dir);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn hq_adversarial_public_product_strings_do_not_claim_dota_or_ip_output() {
+        for text in [
+            include_str!("../../../docs/PRODUCT_POSITIONING_BOUNDARY.md"),
+            include_str!("../../../docs/MOBA_HERO_FOUNDRY_MVP.md"),
+            include_str!("../../../docs/WAVE40_MOBA_HERO_FOUNDRY_REPORT.md"),
+        ] {
+            let lower = text.to_ascii_lowercase();
+            for forbidden_claim in [
+                "can create dota",
+                "dota reconstruction is supported",
+                "ip reconstruction is supported",
+                "public dota claim",
+            ] {
+                assert!(
+                    !lower.contains(forbidden_claim),
+                    "forbidden public output claim found: {forbidden_claim}"
+                );
+            }
+        }
     }
 
     #[test]
