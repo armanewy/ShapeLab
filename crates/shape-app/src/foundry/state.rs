@@ -819,14 +819,11 @@ impl FoundryAppState {
         }
         if rejected_count > 0 {
             self.status = Some(format!(
-                "Generated {} visually distinct direction(s). Rejected {rejected_count} subtle candidate(s) that looked too similar.",
+                "Found {} clear ideas. Rejected {rejected_count} that looked too similar.",
                 self.candidates.len()
             ));
         } else if !self.candidates.is_empty() {
-            self.status = Some(format!(
-                "Generated {} visually distinct direction(s).",
-                self.candidates.len()
-            ));
+            self.status = Some(format!("Found {} clear ideas.", self.candidates.len()));
         }
     }
 

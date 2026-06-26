@@ -621,20 +621,26 @@ pub(crate) fn direction_part_groups_for_document(
 /// Human-facing active focus label.
 #[must_use]
 pub(crate) fn focus_part_status_label(group: &DirectionPartGroup) -> String {
-    format!("Focused: {}", group.label)
+    format!("{} is focused", group.label)
 }
 
 /// Human-facing focus chip label.
 #[must_use]
 pub(crate) fn focus_part_chip_label(group: &DirectionPartGroup) -> String {
-    format!("Focus: {}", group.label)
+    group.label.clone()
 }
 
 /// Human-facing focused generation label.
 #[must_use]
 pub(crate) fn generate_focused_part_label(group: &DirectionPartGroup) -> String {
+    try_focused_part_label(group)
+}
+
+/// Human-facing focused idea generation label for the Make canvas.
+#[must_use]
+pub(crate) fn try_focused_part_label(group: &DirectionPartGroup) -> String {
     format!(
-        "Generate {} variations",
+        "Try {} ideas",
         singular_part_label(&group.label).to_ascii_lowercase()
     )
 }

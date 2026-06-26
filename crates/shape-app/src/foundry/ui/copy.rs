@@ -7,7 +7,7 @@ pub(crate) struct WorkflowStepCopy {
     pub detail: &'static str,
 }
 
-pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 5] = [
+pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     WorkflowStepCopy {
         index: 1,
         label: "Choose",
@@ -15,33 +15,17 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 5] = [
     },
     WorkflowStepCopy {
         index: 2,
-        label: "Directions",
-        detail: "Explore options",
-    },
-    WorkflowStepCopy {
-        index: 3,
-        label: "Customize",
-        detail: "Adjust controls",
-    },
-    WorkflowStepCopy {
-        index: 4,
-        label: "Pack",
-        detail: "Build your set",
-    },
-    WorkflowStepCopy {
-        index: 5,
-        label: "Export",
-        detail: "Output your assets",
+        label: "Make",
+        detail: "Model workspace",
     },
 ];
 
-pub(crate) const PRIMARY_ACTION_LABELS: [&str; 13] = [
-    "Generate 6 Directions",
-    "Refine",
-    "Explore",
-    "Use This Direction",
-    "Customize",
-    "Add Current",
+pub(crate) const PRIMARY_ACTION_LABELS: [&str; 12] = [
+    "Try 6 whole-asset ideas",
+    "Try handle ideas",
+    "Use This Idea",
+    "Add to Pack",
+    "Add Current Asset",
     "Export Pack",
     "Export",
     "Save",
@@ -65,9 +49,9 @@ pub(crate) const STATUS_LABELS: [&str; 8] = [
 pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Visual Foundry",
     "Choose what to make",
-    "Directions",
-    "Explore Directions",
-    "Customize",
+    "Make",
+    "Make asset",
+    "Model workspace",
     "Pack preview",
     "Export ready",
     "Recent Projects",
@@ -164,10 +148,7 @@ mod tests {
             .iter()
             .map(|step| step.label)
             .collect::<Vec<_>>();
-        assert_eq!(
-            labels,
-            vec!["Choose", "Directions", "Customize", "Pack", "Export"]
-        );
+        assert_eq!(labels, vec!["Choose", "Make"]);
     }
 
     #[test]

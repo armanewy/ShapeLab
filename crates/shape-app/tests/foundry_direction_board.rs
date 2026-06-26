@@ -223,15 +223,15 @@ fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
     assert!(handles.focusable);
     assert_eq!(
         foundry::panels::directions::focus_part_chip_label(handles),
-        "Focus: Handles"
+        "Handles"
     );
     assert_eq!(
         foundry::panels::directions::focus_part_status_label(handles),
-        "Focused: Handles"
+        "Handles is focused"
     );
     assert_eq!(
         foundry::panels::directions::generate_focused_part_label(handles),
-        "Generate handle variations"
+        "Try handle ideas"
     );
     assert_eq!(
         foundry::panels::directions::lock_focused_part_label(handles),
