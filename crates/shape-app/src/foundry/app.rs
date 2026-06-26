@@ -1,6 +1,6 @@
 //! Native desktop host for the Foundry workflow state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -9,19 +9,24 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
+use shape_core::Aabb;
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
-    FoundryCatalogResolver, FoundryCommand, STATIC_PROP_FULL_READY_BLOCKED_NOTE,
-    STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL, STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION,
-    VariationIntent, built_in_surface_capability_for_profile,
+    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput,
+    STATIC_PROP_FULL_READY_BLOCKED_NOTE, STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL,
+    STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION, VariationIntent,
+    built_in_surface_capability_for_profile, compile_foundry_document,
 };
 use shape_foundry_catalog::{
     FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, headless_fixture_catalogs,
 };
+use shape_mesh::TriangleMesh;
 use shape_project::foundry::{
     FOUNDRY_PROJECT_FILE_SUFFIX, FoundryProject, FoundryProjectFile, ensure_foundry_project_path,
 };
-use shape_render::foundry::FoundryPreviewCache;
+use shape_render::{
+    OrbitCamera, RenderSettings, fit_camera_to_bounds, foundry::FoundryPreviewCache, render_mesh,
+};
 
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
@@ -46,9 +51,10 @@ pub(crate) struct FoundryDesktopApp {
     state: FoundryAppState,
     tab: FoundryTab,
     jobs: FoundryJobCoordinator,
+    home_thumbnails: HomeThumbnailCoordinator,
     texture_cache: FoundryTextureCache,
+    home_profiles: Vec<ProductHomeProfile>,
     recent_projects: Vec<PathBuf>,
-    developer_preview_catalog: bool,
     requested_start_window_mode: bool,
 }
 
@@ -152,13 +158,15 @@ const RENDERED_ACTION_LABELS: [&str; 38] = [
 
 impl Default for FoundryDesktopApp {
     fn default() -> Self {
+        let developer_preview_catalog = developer_preview_catalog_enabled();
         Self {
             state: FoundryAppState::default(),
             tab: FoundryTab::Home,
             jobs: FoundryJobCoordinator::default(),
+            home_thumbnails: HomeThumbnailCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
+            home_profiles: product_home_profiles(developer_preview_catalog),
             recent_projects: Vec::new(),
-            developer_preview_catalog: developer_preview_catalog_enabled(),
             requested_start_window_mode: false,
         }
     }
@@ -176,6 +184,7 @@ impl FoundryDesktopApp {
         }
         apply_visual_foundry_theme(&ctx);
         self.poll_jobs(&ctx);
+        self.poll_home_thumbnail_jobs(&ctx);
 
         let tokens = VisualFoundryTokens::dark();
         let colors = tokens.colors;
@@ -224,7 +233,7 @@ impl FoundryDesktopApp {
             });
 
         self.apply_commands(commands, &ctx);
-        if !self.state.active_jobs.is_empty() {
+        if !self.state.active_jobs.is_empty() || self.home_thumbnails.has_active_jobs() {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         let _ = frame;
@@ -497,7 +506,7 @@ impl FoundryDesktopApp {
                 .color(VisualFoundryTokens::dark().colors.text_muted),
         );
         ui.add_space(14.0);
-        let profiles = product_home_profiles(self.developer_preview_catalog);
+        let profiles = self.home_profiles.as_slice();
         if profiles.is_empty() {
             product_empty_state(
                 ui,
@@ -520,11 +529,16 @@ impl FoundryDesktopApp {
                         .strong(),
                 );
                 ui.add_space(6.0);
-                let featured = profiles.iter().take(3).cloned().collect::<Vec<_>>();
-                if let Some(fixture) = show_home_profile_grid(ui, &featured) {
+                let featured_count = profiles.len().min(3);
+                let (featured, remaining) = profiles.split_at(featured_count);
+                if let Some(fixture) = show_home_profile_grid(
+                    ui,
+                    featured,
+                    &mut self.home_thumbnails,
+                    &mut self.texture_cache,
+                ) {
                     selected_fixture = Some(fixture);
                 }
-                let remaining = profiles.iter().skip(3).cloned().collect::<Vec<_>>();
                 if !remaining.is_empty() {
                     ui.add_space(14.0);
                     ui.label(
@@ -534,7 +548,12 @@ impl FoundryDesktopApp {
                             .strong(),
                     );
                     ui.add_space(6.0);
-                    if let Some(fixture) = show_home_profile_grid(ui, &remaining) {
+                    if let Some(fixture) = show_home_profile_grid(
+                        ui,
+                        remaining,
+                        &mut self.home_thumbnails,
+                        &mut self.texture_cache,
+                    ) {
                         selected_fixture = Some(fixture);
                     }
                 }
@@ -1384,6 +1403,12 @@ impl FoundryDesktopApp {
         }
     }
 
+    fn poll_home_thumbnail_jobs(&mut self, ctx: &egui::Context) {
+        if self.home_thumbnails.poll() {
+            ctx.request_repaint();
+        }
+    }
+
     fn save_project(&mut self, path: PathBuf, project: FoundryProject) {
         if let Err(error) = ensure_foundry_project_path(&path) {
             self.state.status = Some(error.to_string());
@@ -1541,6 +1566,227 @@ impl FoundryCatalogResolver for BuiltInFoundryCatalogResolver {
                 content_ref: content_ref.clone(),
             })
     }
+}
+
+#[derive(Default)]
+struct HomeThumbnailCoordinator {
+    tx: Option<Sender<HomeThumbnailEvent>>,
+    rx: Option<Receiver<HomeThumbnailEvent>>,
+    active: BTreeSet<String>,
+    failed: BTreeSet<String>,
+    pending_rerenders: BTreeSet<String>,
+    thumbnails: BTreeMap<String, HomeTemplateThumbnail>,
+}
+
+#[derive(Debug)]
+struct HomeThumbnailEvent {
+    slug: String,
+    version: u64,
+    result: Result<HomeTemplateThumbnail, String>,
+}
+
+#[derive(Debug, Clone)]
+struct HomeTemplateThumbnail {
+    rgba8: Vec<u8>,
+    width: u32,
+    height: u32,
+    camera: OrbitCamera,
+    mesh: Arc<TriangleMesh>,
+    version: u64,
+}
+
+const HOME_THUMBNAIL_PIXELS: u32 = 192;
+const MAX_HOME_THUMBNAIL_JOBS: usize = 2;
+const HOME_THUMBNAIL_YAW_DEGREES_PER_POINT: f32 = 0.45;
+const HOME_THUMBNAIL_PITCH_DEGREES_PER_POINT: f32 = 0.30;
+
+impl HomeThumbnailCoordinator {
+    fn ensure(&mut self, profile: &ProductHomeProfile) {
+        let slug = profile.fixture.slug.clone();
+        if self.thumbnails.contains_key(&slug)
+            || self.active.contains(&slug)
+            || self.failed.contains(&slug)
+            || self.active.len() >= MAX_HOME_THUMBNAIL_JOBS
+        {
+            return;
+        }
+
+        self.active.insert(slug.clone());
+        let fixture = profile.fixture.clone();
+        let tx = self.tx().clone();
+        thread::spawn(move || {
+            let resolver = BuiltInFoundryCatalogResolver::default();
+            let result = compile_foundry_document(&fixture.document, &resolver)
+                .map_err(|error| format!("{error:?}"))
+                .and_then(|output| {
+                    render_home_thumbnail_from_output(&output, 0)
+                        .ok_or_else(|| "Could not render template thumbnail.".to_owned())
+                });
+            let _ = tx.send(HomeThumbnailEvent {
+                slug,
+                version: 0,
+                result,
+            });
+        });
+    }
+
+    fn orbit_thumbnail(&mut self, slug: &str, delta: egui::Vec2) -> bool {
+        let Some(thumbnail) = self.thumbnails.get_mut(slug) else {
+            return false;
+        };
+        if delta == egui::Vec2::ZERO {
+            return false;
+        }
+
+        thumbnail.camera = orbit_home_thumbnail_camera(&thumbnail.camera, delta);
+        thumbnail.version = thumbnail.version.saturating_add(1);
+        if self.active.contains(slug) {
+            self.pending_rerenders.insert(slug.to_owned());
+            return true;
+        }
+
+        self.spawn_rerender(slug);
+        true
+    }
+
+    fn poll(&mut self) -> bool {
+        let mut changed = false;
+        let rx = self.rx().clone();
+        loop {
+            match rx.try_recv() {
+                Ok(event) => {
+                    self.active.remove(&event.slug);
+                    match event.result {
+                        Ok(thumbnail) => {
+                            let current_version = self
+                                .thumbnails
+                                .get(&event.slug)
+                                .map_or(0, |thumbnail| thumbnail.version);
+                            if event.version >= current_version {
+                                self.failed.remove(&event.slug);
+                                self.thumbnails.insert(event.slug.clone(), thumbnail);
+                                changed = true;
+                            }
+                        }
+                        Err(_) => {
+                            self.failed.insert(event.slug.clone());
+                            changed = true;
+                        }
+                    }
+                    if self.pending_rerenders.remove(&event.slug) {
+                        self.spawn_rerender(&event.slug);
+                    }
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => break,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    self.active.clear();
+                    break;
+                }
+            }
+        }
+        changed
+    }
+
+    fn thumbnail(&self, slug: &str) -> Option<&HomeTemplateThumbnail> {
+        self.thumbnails.get(slug)
+    }
+
+    fn has_active_jobs(&self) -> bool {
+        !self.active.is_empty()
+    }
+
+    fn spawn_rerender(&mut self, slug: &str) {
+        let Some(thumbnail) = self.thumbnails.get(slug) else {
+            return;
+        };
+        self.active.insert(slug.to_owned());
+        let mesh = Arc::clone(&thumbnail.mesh);
+        let camera = thumbnail.camera.clone();
+        let version = thumbnail.version;
+        let tx = self.tx().clone();
+        let slug = slug.to_owned();
+        thread::spawn(move || {
+            let result = render_home_thumbnail(mesh, camera, version)
+                .ok_or_else(|| "Could not render template thumbnail.".to_owned());
+            let _ = tx.send(HomeThumbnailEvent {
+                slug,
+                version,
+                result,
+            });
+        });
+    }
+
+    fn reset(&mut self) {
+        let (tx, rx) = unbounded();
+        self.tx = Some(tx);
+        self.rx = Some(rx);
+        self.active.clear();
+        self.failed.clear();
+        self.pending_rerenders.clear();
+        self.thumbnails.clear();
+    }
+
+    fn tx(&mut self) -> &Sender<HomeThumbnailEvent> {
+        if self.tx.is_none() || self.rx.is_none() {
+            self.reset();
+        }
+        self.tx.as_ref().expect("home thumbnail tx initialized")
+    }
+
+    fn rx(&mut self) -> &Receiver<HomeThumbnailEvent> {
+        if self.tx.is_none() || self.rx.is_none() {
+            self.reset();
+        }
+        self.rx.as_ref().expect("home thumbnail rx initialized")
+    }
+}
+
+fn render_home_thumbnail_from_output(
+    output: &FoundryCompilationOutput,
+    version: u64,
+) -> Option<HomeTemplateThumbnail> {
+    let mesh = &output.artifact.combined_preview.mesh;
+    let mesh = Arc::new(TriangleMesh {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        indices: mesh.indices.clone(),
+        bounds: Aabb {
+            min: mesh.bounds.min.into(),
+            max: mesh.bounds.max.into(),
+        },
+    });
+    let camera = fit_camera_to_bounds(mesh.bounds);
+    render_home_thumbnail(mesh, camera, version)
+}
+
+fn render_home_thumbnail(
+    mesh: Arc<TriangleMesh>,
+    camera: OrbitCamera,
+    version: u64,
+) -> Option<HomeTemplateThumbnail> {
+    let settings = RenderSettings {
+        width: HOME_THUMBNAIL_PIXELS,
+        height: HOME_THUMBNAIL_PIXELS,
+        ..RenderSettings::default()
+    };
+    let image = render_mesh(mesh.as_ref(), &camera, &settings).ok()?;
+    Some(HomeTemplateThumbnail {
+        rgba8: image.rgba8,
+        width: image.width,
+        height: image.height,
+        camera,
+        mesh,
+        version,
+    })
+}
+
+fn orbit_home_thumbnail_camera(camera: &OrbitCamera, delta: egui::Vec2) -> OrbitCamera {
+    let mut camera = camera.clone();
+    camera.orbit(
+        delta.x * HOME_THUMBNAIL_YAW_DEGREES_PER_POINT,
+        -delta.y * HOME_THUMBNAIL_PITCH_DEGREES_PER_POINT,
+    );
+    camera
 }
 
 fn button_with_disabled_reason(
@@ -2217,13 +2463,15 @@ fn show_template_filter_bar(ui: &mut egui::Ui) {
 fn show_home_profile_grid(
     ui: &mut egui::Ui,
     profiles: &[ProductHomeProfile],
+    home_thumbnails: &mut HomeThumbnailCoordinator,
+    texture_cache: &mut FoundryTextureCache,
 ) -> Option<FoundryFixtureCatalog> {
     let mut selected_fixture = None;
     let columns = home_profile_grid_columns(ui.available_width());
     for row in profiles.chunks(columns) {
         ui.columns(columns, |column_uis| {
             for (column, profile) in column_uis.iter_mut().zip(row) {
-                if show_home_profile_card(column, profile)
+                if show_home_profile_card(column, profile, home_thumbnails, texture_cache)
                     .as_ref()
                     .is_some_and(egui::Response::clicked)
                 {
@@ -2249,26 +2497,38 @@ fn home_profile_grid_columns(width: f32) -> usize {
 fn show_home_profile_card(
     ui: &mut egui::Ui,
     profile: &ProductHomeProfile,
+    home_thumbnails: &mut HomeThumbnailCoordinator,
+    texture_cache: &mut FoundryTextureCache,
 ) -> Option<egui::Response> {
     let mut action = None;
     product_card(ui, false, |ui| {
         ui.set_min_height(260.0);
-        show_home_profile_thumbnail(ui, profile);
+        show_home_profile_thumbnail(ui, profile, home_thumbnails, texture_cache);
         ui.add_space(8.0);
         show_home_profile_summary(ui, profile, ui.available_width().max(220.0));
         ui.add_space(10.0);
-        action = Some(action_button(
-            ui,
-            &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
-        ));
+        action = Some(start_template_button(ui));
     });
     action
 }
 
-fn show_home_profile_thumbnail(ui: &mut egui::Ui, profile: &ProductHomeProfile) {
+fn show_home_profile_thumbnail(
+    ui: &mut egui::Ui,
+    profile: &ProductHomeProfile,
+    home_thumbnails: &mut HomeThumbnailCoordinator,
+    texture_cache: &mut FoundryTextureCache,
+) {
     let colors = VisualFoundryTokens::dark().colors;
     let width = ui.available_width().max(180.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 128.0), egui::Sense::hover());
+    let height = 148.0;
+    home_thumbnails.ensure(profile);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
+    if response.dragged_by(egui::PointerButton::Secondary)
+        && home_thumbnails.orbit_thumbnail(&profile.fixture.slug, response.drag_delta())
+    {
+        ui.ctx().request_repaint();
+    }
     ui.painter()
         .rect_filled(rect, egui::CornerRadius::same(6), colors.panel_subtle);
     ui.painter().rect_stroke(
@@ -2277,6 +2537,32 @@ fn show_home_profile_thumbnail(ui: &mut egui::Ui, profile: &ProductHomeProfile) 
         egui::Stroke::new(1.0, colors.stroke_strong),
         egui::StrokeKind::Inside,
     );
+
+    if let Some(thumbnail) = home_thumbnails.thumbnail(&profile.fixture.slug)
+        && let Some(size) = scaled_preview_size(
+            thumbnail.width,
+            thumbnail.height,
+            (height - 10.0).min(width - 12.0),
+        )
+    {
+        let preview_id = format!("home-template-{}", profile.fixture.slug);
+        let texture = texture_cache.texture(
+            ui.ctx(),
+            &preview_id,
+            None,
+            &thumbnail.rgba8,
+            thumbnail.width,
+            thumbnail.height,
+        );
+        let image_rect = egui::Rect::from_center_size(rect.center(), size);
+        ui.painter().image(
+            texture.id(),
+            image_rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        return;
+    }
 
     let object_rect = egui::Rect::from_center_size(
         egui::pos2(rect.center().x, rect.center().y + 5.0),
@@ -2369,6 +2655,11 @@ fn show_home_profile_thumbnail(ui: &mut egui::Ui, profile: &ProductHomeProfile) 
     }
 }
 
+fn start_template_button(ui: &mut egui::Ui) -> egui::Response {
+    ui.horizontal(|ui| action_button(ui, &ActionSpec::enabled(ACTION_START, ButtonTone::Primary)))
+        .inner
+}
+
 fn show_home_profile_row(
     ui: &mut egui::Ui,
     profile: &ProductHomeProfile,
@@ -2379,19 +2670,13 @@ fn show_home_profile_row(
         if content_width < 520.0 {
             show_home_profile_summary(ui, profile, content_width);
             ui.add_space(8.0);
-            action = Some(action_button(
-                ui,
-                &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
-            ));
+            action = Some(start_template_button(ui));
         } else {
             ui.horizontal(|ui| {
                 let text_width = (content_width - 132.0).max(220.0);
                 show_home_profile_summary(ui, profile, text_width);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    action = Some(action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
-                    ));
+                    action = Some(start_template_button(ui));
                 });
             });
         }
@@ -3732,6 +4017,17 @@ mod tests {
             egui::vec2(320.0, 160.0)
         );
         assert!(scaled_preview_size(0, 128, 256.0).is_none());
+    }
+
+    #[test]
+    fn home_thumbnail_drag_delta_orbits_camera() {
+        let camera = OrbitCamera::default();
+        let rotated = orbit_home_thumbnail_camera(&camera, egui::vec2(20.0, -10.0));
+
+        assert!((rotated.yaw_degrees - 44.0).abs() < f32::EPSILON);
+        assert!((rotated.pitch_degrees - 28.0).abs() < f32::EPSILON);
+        assert_eq!(rotated.target, camera.target);
+        assert_eq!(rotated.distance, camera.distance);
     }
 
     #[test]
