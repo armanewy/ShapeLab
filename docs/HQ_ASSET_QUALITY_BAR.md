@@ -28,6 +28,7 @@ Usable:
 - must not require Advanced Recipe for the intended novice task
 - must have six surviving direction candidates, or a documented family-specific exception
 - must have visible primary-control difference evidence
+- must reject candidate directions that are not Clear or Strong unless the user explicitly requested Detail
 - must expose product-safe semantic part groups when Focus Part is available
 - must reject hidden/internal-only candidate changes through rendered preview delta evidence
 - must have export and package-reopen verification
@@ -77,6 +78,11 @@ preview evidence is visible to the user.
 Candidate survival means more than receiving six candidate records: each
 survivor must compile, pass model validation, and render a non-placeholder
 whole-model preview.
+
+Candidate survival also means passing Candidate Legibility Engine v1. Six weak
+candidates are not acceptable; fewer honest candidates are acceptable when the
+diagnostics report how many duplicate-looking or too-subtle proposals were
+rejected. Diversity selection happens only after legibility rejection.
 
 Promoted Wave 38 gear benchmarks verify export/reopen by default because their
 kit metadata targets the Usable tier. `--verify-export` remains accepted and is
