@@ -230,6 +230,8 @@ pub struct FoundrySurfaceCapabilityView {
     pub material_slot_count: usize,
     /// Product-facing texture channel labels.
     pub texture_channels: Vec<String>,
+    /// Whether headless textured preview/contact-sheet evidence exists.
+    pub surface_visual_evidence_ready: bool,
     /// Whether the app can render and compare surface/material candidates.
     pub visual_surface_variation_ready: bool,
     /// Whether part-specific surface editing is truly available.
@@ -257,6 +259,7 @@ impl FoundrySurfaceCapabilityView {
                 "Normal".to_owned(),
                 "Occlusion".to_owned(),
             ],
+            surface_visual_evidence_ready: true,
             visual_surface_variation_ready: false,
             focus_part_surface_ready: false,
             human_label: "Sci-Fi Crate surface package".to_owned(),
@@ -279,6 +282,7 @@ impl FoundrySurfaceCapabilityView {
             uv_ready: false,
             material_slot_count: 0,
             texture_channels: Vec::new(),
+            surface_visual_evidence_ready: false,
             visual_surface_variation_ready: false,
             focus_part_surface_ready: false,
             human_label: human_label.into(),
@@ -619,6 +623,7 @@ pub fn parse_foundry_surface_capability_sidecar_json(
         .map(|channel| texture_channel_label(channel).map(str::to_owned))
         .collect::<Result<Vec<_>, _>>()?;
     let visual_surface_variation_ready = false;
+    let surface_visual_evidence_ready = sidecar.surface_visual_evidence_ready;
     let focus_part_surface_ready =
         sidecar.focus_part_surface_ready && visual_surface_variation_ready;
     let mut unavailable_reasons = Vec::new();
@@ -646,6 +651,7 @@ pub fn parse_foundry_surface_capability_sidecar_json(
         uv_ready: sidecar.uv_ready,
         material_slot_count: sidecar.material_slots.len(),
         texture_channels,
+        surface_visual_evidence_ready,
         visual_surface_variation_ready,
         focus_part_surface_ready,
         human_label: sidecar.human_label,
@@ -663,6 +669,8 @@ struct SurfaceCapabilitySidecar {
     material_slots: Vec<String>,
     texture_channels: Vec<String>,
     variation_channels_supported: SurfaceSidecarVariationChannels,
+    #[serde(default)]
+    surface_visual_evidence_ready: bool,
     focus_part_surface_ready: bool,
     human_label: String,
     unavailable_reasons: Vec<String>,
@@ -729,6 +737,11 @@ fn validate_surface_capability_sidecar(
     {
         return Err(FoundrySurfaceCapabilityParseError::new(
             "Surface capability sidecar cannot mark payload ready without UV, material slot, and texture channel evidence.",
+        ));
+    }
+    if sidecar.surface_visual_evidence_ready && !sidecar.surface_payload_ready {
+        return Err(FoundrySurfaceCapabilityParseError::new(
+            "Surface capability sidecar cannot mark visual evidence ready without a surface payload.",
         ));
     }
     Ok(())

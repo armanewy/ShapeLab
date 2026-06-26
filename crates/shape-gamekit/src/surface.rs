@@ -372,6 +372,9 @@ pub struct SurfaceCapabilities {
     pub texture_channels: Vec<TextureChannel>,
     /// Supported variation channels.
     pub variation_channels_supported: SurfaceVariationChannels,
+    /// Whether headless textured previews/contact sheets exist as visual evidence.
+    #[serde(default)]
+    pub surface_visual_evidence_ready: bool,
     /// Whether part-specific surface editing is ready.
     pub focus_part_surface_ready: bool,
     /// Human-facing label.

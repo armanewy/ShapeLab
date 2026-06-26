@@ -1078,6 +1078,7 @@ fn surface_capabilities_for_static_crate(artifact: &SurfaceArtifact) -> SurfaceC
             surface: true,
             wear: false,
         },
+        surface_visual_evidence_ready: true,
         focus_part_surface_ready: false,
         human_label: "Sci-Fi Crate Surface Payload".to_owned(),
         unavailable_reasons: vec![

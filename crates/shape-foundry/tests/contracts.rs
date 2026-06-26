@@ -221,6 +221,7 @@ fn sci_fi_crate_reports_surface_package_without_enabling_surface_candidates() {
     assert!(capability.surface_package_available);
     assert!(capability.surface_payload_ready);
     assert!(capability.uv_ready);
+    assert!(capability.surface_visual_evidence_ready);
     assert_eq!(capability.material_slot_count, 6);
     assert_eq!(
         capability.texture_channels,
@@ -256,6 +257,7 @@ fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
             "surface": true,
             "wear": false
         },
+        "surface_visual_evidence_ready": true,
         "focus_part_surface_ready": false,
         "human_label": "Sci-Fi Crate Surface Payload",
         "unavailable_reasons": [
@@ -269,12 +271,52 @@ fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
     assert!(capability.surface_package_available);
     assert!(capability.surface_payload_ready);
     assert!(capability.uv_ready);
+    assert!(capability.surface_visual_evidence_ready);
     assert_eq!(capability.material_slot_count, 2);
     assert_eq!(
         capability.texture_channels,
         vec!["Base color", "Metallic roughness", "Normal", "Occlusion"]
     );
     assert!(!capability.visual_surface_variation_ready);
+    assert!(!capability.focus_part_surface_ready);
+    assert!(
+        capability
+            .unavailable_reasons
+            .contains(&SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned())
+    );
+}
+
+#[test]
+fn surface_capability_visual_evidence_does_not_enable_app_surface_modes() {
+    let sidecar = r#"{
+        "schema_version": 1,
+        "profile_id": "sci-fi-crate",
+        "surface_payload_ready": true,
+        "uv_ready": true,
+        "material_slots": [
+            "painted_metal_body"
+        ],
+        "texture_channels": [
+            "base_color"
+        ],
+        "variation_channels_supported": {
+            "surface": true,
+            "wear": false
+        },
+        "surface_visual_evidence_ready": true,
+        "focus_part_surface_ready": true,
+        "human_label": "Sci-Fi Crate Surface Payload",
+        "unavailable_reasons": []
+    }"#;
+
+    let capability =
+        parse_foundry_surface_capability_sidecar_json(sidecar).expect("sidecar should parse");
+
+    assert!(capability.surface_package_available);
+    assert!(capability.surface_payload_ready);
+    assert!(capability.surface_visual_evidence_ready);
+    assert!(!capability.visual_surface_variation_ready);
+    assert!(!capability.surface_candidate_mode_available());
     assert!(!capability.focus_part_surface_ready);
     assert!(
         capability
@@ -320,6 +362,27 @@ fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
     let error = parse_foundry_surface_capability_sidecar_json(absolute_path)
         .expect_err("absolute local path should fail");
     assert!(error.diagnostic().contains("absolute local paths"));
+
+    let visual_without_payload = r#"{
+        "schema_version": 1,
+        "profile_id": "sci-fi-crate",
+        "surface_payload_ready": false,
+        "uv_ready": true,
+        "material_slots": ["painted_metal_body"],
+        "texture_channels": ["base_color"],
+        "variation_channels_supported": ["surface"],
+        "surface_visual_evidence_ready": true,
+        "focus_part_surface_ready": false,
+        "human_label": "Sci-Fi Crate Surface Payload",
+        "unavailable_reasons": []
+    }"#;
+    let error = parse_foundry_surface_capability_sidecar_json(visual_without_payload)
+        .expect_err("visual evidence without payload should fail");
+    assert!(
+        error
+            .diagnostic()
+            .contains("cannot mark visual evidence ready without a surface payload")
+    );
 }
 
 #[test]

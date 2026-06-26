@@ -4552,6 +4552,16 @@ mod tests {
             "unity package",
             "unreal package",
             "godot package",
+            "surface mode ready",
+            "material editor",
+            "rigartifact",
+            "motionartifact",
+            "skeleton template",
+            "joint id",
+            "skinning",
+            "rigged",
+            "animated",
+            "retarget",
         ] {
             assert!(
                 !joined.contains(overclaim),

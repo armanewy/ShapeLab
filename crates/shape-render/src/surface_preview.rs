@@ -40,19 +40,14 @@ pub enum SurfacePreviewTextureChannel {
 }
 
 /// Texture sampling mode.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextureSampling {
     /// Select the nearest texel after wrapping UVs into 0..1.
     Nearest,
     /// Bilinearly blend the four nearest wrapped texels.
+    #[default]
     Bilinear,
-}
-
-impl Default for TextureSampling {
-    fn default() -> Self {
-        Self::Bilinear
-    }
 }
 
 /// Decoded RGBA texture payload.
@@ -413,7 +408,7 @@ pub fn surface_preview_contact_sheet(images: &[RenderedImage]) -> RenderedImage 
     let mut sheet = RenderedImage {
         width,
         height,
-        rgba8: vec![18, 20, 22, 255].repeat((width as usize) * (height as usize)),
+        rgba8: [18, 20, 22, 255].repeat((width as usize) * (height as usize)),
     };
     for (index, image) in images.iter().enumerate() {
         let origin_x = padding + u32::try_from(index).unwrap_or(0) * (cell_width + padding);
