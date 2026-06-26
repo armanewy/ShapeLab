@@ -275,7 +275,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "handle",
                 [0.055, 0.08, 0.42],
                 0.025,
-                [1.76, 0.0, 0.0],
+                [1.31, 0.0, 0.0],
                 Vec::new(),
             ),
             rounded_box_fragment(
@@ -283,7 +283,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "handle",
                 [0.62, 0.055, 0.055],
                 0.02,
-                [0.0, 0.64, -0.82],
+                [0.0, 0.64, -0.77],
                 Vec::new(),
             ),
             plate_fragment(

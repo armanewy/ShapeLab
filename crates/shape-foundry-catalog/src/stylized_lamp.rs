@@ -471,7 +471,7 @@ fn lamp_attachment_bindings() -> Vec<FragmentAttachmentBinding> {
             "joint",
             "stem_mount",
             FragmentAttachmentPairing::ByOccurrenceIndex,
-            [0.0, 0.0, -0.62],
+            [0.0, 0.0, -0.28],
         ),
         attachment_binding(
             "shade_to_stem",
@@ -480,7 +480,7 @@ fn lamp_attachment_bindings() -> Vec<FragmentAttachmentBinding> {
             "shade",
             "stem_mount",
             FragmentAttachmentPairing::ByOccurrenceIndex,
-            [0.85, 0.05, 0.0],
+            [0.5, 0.05, 0.0],
         ),
     ]
 }

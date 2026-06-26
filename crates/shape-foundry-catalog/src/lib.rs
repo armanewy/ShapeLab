@@ -1222,6 +1222,89 @@ mod tests {
     }
 
     #[test]
+    fn choose_visible_fixtures_keep_default_parts_visually_connected() {
+        let visible_slugs = BTreeSet::from([
+            "roman-bridge-hq",
+            "sci-fi-crate",
+            "stylized-lamp",
+            "sci-fi-door",
+            "signpost",
+            "fantasy-sword",
+            "round-shield",
+            "hero-helmet",
+            "pauldron-pair",
+            "chest-armor",
+        ]);
+        for fixture in headless_fixture_catalogs()
+            .into_iter()
+            .filter(|fixture| visible_slugs.contains(fixture.slug.as_str()))
+        {
+            let output = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
+                .unwrap_or_else(|error| panic!("{} should compile: {error:#?}", fixture.slug));
+            let disconnected_parts = visually_disconnected_parts(&output.artifact.compiled_parts);
+
+            assert!(
+                disconnected_parts.is_empty(),
+                "{} should not have visibly disconnected default parts: {disconnected_parts:?}",
+                fixture.slug
+            );
+        }
+    }
+
+    fn visually_disconnected_parts(parts: &[shape_compile::CompiledPart]) -> Vec<(String, f32)> {
+        const MAX_NEAREST_PART_GAP: f32 = 0.36;
+        let parts = parts
+            .iter()
+            .filter(|part| !part.world_mesh.bounds.is_empty())
+            .collect::<Vec<_>>();
+        if parts.len() <= 1 {
+            return Vec::new();
+        }
+
+        parts
+            .iter()
+            .filter_map(|part| {
+                let nearest_gap = parts
+                    .iter()
+                    .filter(|other| other.instance_id != part.instance_id)
+                    .map(|other| {
+                        bounds_gap(
+                            part.world_mesh.bounds.min,
+                            part.world_mesh.bounds.max,
+                            other.world_mesh.bounds.min,
+                            other.world_mesh.bounds.max,
+                        )
+                    })
+                    .fold(f32::INFINITY, f32::min);
+                (nearest_gap > MAX_NEAREST_PART_GAP)
+                    .then(|| (part.instance_name.clone(), nearest_gap))
+            })
+            .collect()
+    }
+
+    fn bounds_gap(
+        left_min: [f32; 3],
+        left_max: [f32; 3],
+        right_min: [f32; 3],
+        right_max: [f32; 3],
+    ) -> f32 {
+        let dx = axis_gap(left_min[0], left_max[0], right_min[0], right_max[0]);
+        let dy = axis_gap(left_min[1], left_max[1], right_min[1], right_max[1]);
+        let dz = axis_gap(left_min[2], left_max[2], right_min[2], right_max[2]);
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+
+    fn axis_gap(left_min: f32, left_max: f32, right_min: f32, right_max: f32) -> f32 {
+        if left_max < right_min {
+            right_min - left_max
+        } else if right_max < left_min {
+            left_min - right_max
+        } else {
+            0.0
+        }
+    }
+
+    #[test]
     fn advisory_and_runtime_controls_do_not_change_geometry_identity_but_required_controls_do() {
         let fixture = scifi_crate::fixture_catalog();
         let base = shape_foundry::compile_foundry_document(&fixture.document, &fixture)

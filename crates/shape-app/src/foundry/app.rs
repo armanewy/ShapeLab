@@ -54,6 +54,9 @@ pub(crate) struct FoundryDesktopApp {
     home_thumbnails: HomeThumbnailCoordinator,
     texture_cache: FoundryTextureCache,
     home_profiles: Vec<ProductHomeProfile>,
+    home_search_query: String,
+    home_filter: HomeTemplateFilter,
+    selected_home_profile_slug: Option<String>,
     recent_projects: Vec<PathBuf>,
     requested_start_window_mode: bool,
 }
@@ -67,6 +70,25 @@ enum FoundryTab {
     History,
     Export,
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum HomeTemplateFilter {
+    All,
+    Props,
+    Architecture,
+    Gear,
+    Furniture,
+    Environment,
+}
+
+const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 6] = [
+    HomeTemplateFilter::All,
+    HomeTemplateFilter::Props,
+    HomeTemplateFilter::Architecture,
+    HomeTemplateFilter::Gear,
+    HomeTemplateFilter::Furniture,
+    HomeTemplateFilter::Environment,
+];
 
 const HOME_SUBTITLE: &str =
     "Start with an asset template, then generate directions and customize the result.";
@@ -159,13 +181,18 @@ const RENDERED_ACTION_LABELS: [&str; 38] = [
 impl Default for FoundryDesktopApp {
     fn default() -> Self {
         let developer_preview_catalog = developer_preview_catalog_enabled();
+        let home_profiles = product_home_profiles(developer_preview_catalog);
+        let selected_home_profile_slug = default_home_profile_slug(&home_profiles);
         Self {
             state: FoundryAppState::default(),
             tab: FoundryTab::Home,
             jobs: FoundryJobCoordinator::default(),
             home_thumbnails: HomeThumbnailCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
-            home_profiles: product_home_profiles(developer_preview_catalog),
+            home_profiles,
+            home_search_query: String::new(),
+            home_filter: HomeTemplateFilter::All,
+            selected_home_profile_slug,
             recent_projects: Vec::new(),
             requested_start_window_mode: false,
         }
@@ -492,20 +519,6 @@ impl FoundryDesktopApp {
     }
 
     fn show_home(&mut self, ui: &mut egui::Ui) {
-        section_header(
-            ui,
-            SectionHeaderSpec {
-                eyebrow: "Choose",
-                title: "Choose what to make",
-                subtitle: Some(HOME_SUBTITLE),
-            },
-        );
-        ui.add_space(10.0);
-        ui.label(
-            RichText::new("Choose a template below to start a new project.")
-                .color(VisualFoundryTokens::dark().colors.text_muted),
-        );
-        ui.add_space(14.0);
         let profiles = self.home_profiles.as_slice();
         if profiles.is_empty() {
             product_empty_state(
@@ -516,48 +529,51 @@ impl FoundryDesktopApp {
             return;
         }
         let mut selected_fixture = None;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                show_template_filter_bar(ui);
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new("Featured")
-                        .color(VisualFoundryTokens::dark().colors.text)
-                        .size(16.0)
-                        .strong(),
-                );
-                ui.add_space(6.0);
-                let featured_count = profiles.len().min(3);
-                let (featured, remaining) = profiles.split_at(featured_count);
-                if let Some(fixture) = show_home_profile_grid(
-                    ui,
-                    featured,
-                    &mut self.home_thumbnails,
-                    &mut self.texture_cache,
-                ) {
-                    selected_fixture = Some(fixture);
-                }
-                if !remaining.is_empty() {
-                    ui.add_space(14.0);
-                    ui.label(
-                        RichText::new("All templates")
-                            .color(VisualFoundryTokens::dark().colors.text)
-                            .size(16.0)
-                            .strong(),
-                    );
-                    ui.add_space(6.0);
-                    if let Some(fixture) = show_home_profile_grid(
+
+        ui.horizontal_top(|ui| {
+            let left_width = home_browser_width(ui.available_width());
+            ui.allocate_ui_with_layout(
+                egui::vec2(left_width, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    show_home_browser_panel(
                         ui,
-                        remaining,
-                        &mut self.home_thumbnails,
-                        &mut self.texture_cache,
-                    ) {
-                        selected_fixture = Some(fixture);
+                        profiles,
+                        &mut self.home_search_query,
+                        &mut self.home_filter,
+                        &mut self.selected_home_profile_slug,
+                    );
+                },
+            );
+            ui.add_space(18.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let selected =
+                        selected_home_profile(profiles, &self.selected_home_profile_slug);
+                    if let Some(profile) = selected {
+                        if show_home_selected_template_stage(
+                            ui,
+                            profile,
+                            &mut self.home_thumbnails,
+                            &mut self.texture_cache,
+                        )
+                        .clicked()
+                        {
+                            selected_fixture = Some(profile.fixture.clone());
+                        }
+                    } else {
+                        product_empty_state(
+                            ui,
+                            "No matching template",
+                            "Change the search or filter to choose a template.",
+                        );
                     }
-                }
-            });
+                },
+            );
+        });
+
         if let Some(fixture) = selected_fixture {
             self.load_fixture(fixture, ui.ctx());
         }
@@ -1574,31 +1590,46 @@ struct HomeThumbnailCoordinator {
     rx: Option<Receiver<HomeThumbnailEvent>>,
     active: BTreeSet<String>,
     failed: BTreeSet<String>,
-    pending_rerenders: BTreeSet<String>,
+    pending_frames: BTreeMap<String, i32>,
     thumbnails: BTreeMap<String, HomeTemplateThumbnail>,
 }
 
 #[derive(Debug)]
 struct HomeThumbnailEvent {
     slug: String,
-    version: u64,
-    result: Result<HomeTemplateThumbnail, String>,
+    frame_index: i32,
+    result: Result<HomeThumbnailJobOutput, String>,
+}
+
+#[derive(Debug)]
+struct HomeThumbnailJobOutput {
+    mesh: Option<Arc<TriangleMesh>>,
+    base_camera: OrbitCamera,
+    frame: HomeThumbnailFrame,
 }
 
 #[derive(Debug, Clone)]
 struct HomeTemplateThumbnail {
+    mesh: Arc<TriangleMesh>,
+    base_camera: OrbitCamera,
+    selected_yaw_degrees: f32,
+    selected_frame_index: i32,
+    prewarm_cursor: usize,
+    frames: BTreeMap<i32, HomeThumbnailFrame>,
+}
+
+#[derive(Debug, Clone)]
+struct HomeThumbnailFrame {
+    frame_index: i32,
     rgba8: Vec<u8>,
     width: u32,
     height: u32,
-    camera: OrbitCamera,
-    mesh: Arc<TriangleMesh>,
-    version: u64,
 }
 
-const HOME_THUMBNAIL_PIXELS: u32 = 192;
+const HOME_THUMBNAIL_PIXELS: u32 = 512;
+const HOME_TURNTABLE_FRAME_COUNT: i32 = 24;
 const MAX_HOME_THUMBNAIL_JOBS: usize = 2;
 const HOME_THUMBNAIL_YAW_DEGREES_PER_POINT: f32 = 0.45;
-const HOME_THUMBNAIL_PITCH_DEGREES_PER_POINT: f32 = 0.30;
 
 impl HomeThumbnailCoordinator {
     fn ensure(&mut self, profile: &ProductHomeProfile) {
@@ -1624,7 +1655,7 @@ impl HomeThumbnailCoordinator {
                 });
             let _ = tx.send(HomeThumbnailEvent {
                 slug,
-                version: 0,
+                frame_index: 0,
                 result,
             });
         });
@@ -1638,14 +1669,15 @@ impl HomeThumbnailCoordinator {
             return false;
         }
 
-        thumbnail.camera = orbit_home_thumbnail_camera(&thumbnail.camera, delta);
-        thumbnail.version = thumbnail.version.saturating_add(1);
-        if self.active.contains(slug) {
-            self.pending_rerenders.insert(slug.to_owned());
-            return true;
-        }
-
-        self.spawn_rerender(slug);
+        let frame_index = {
+            thumbnail.selected_yaw_degrees = home_turntable_yaw(
+                thumbnail.selected_yaw_degrees + delta.x * HOME_THUMBNAIL_YAW_DEGREES_PER_POINT,
+            );
+            let frame_index = home_turntable_frame_index(thumbnail.selected_yaw_degrees);
+            thumbnail.selected_frame_index = frame_index;
+            frame_index
+        };
+        self.ensure_frame(slug, frame_index);
         true
     }
 
@@ -1657,25 +1689,20 @@ impl HomeThumbnailCoordinator {
                 Ok(event) => {
                     self.active.remove(&event.slug);
                     match event.result {
-                        Ok(thumbnail) => {
-                            let current_version = self
-                                .thumbnails
-                                .get(&event.slug)
-                                .map_or(0, |thumbnail| thumbnail.version);
-                            if event.version >= current_version {
-                                self.failed.remove(&event.slug);
-                                self.thumbnails.insert(event.slug.clone(), thumbnail);
-                                changed = true;
-                            }
+                        Ok(output) => {
+                            self.failed.remove(&event.slug);
+                            self.store_frame(event.slug.clone(), output);
+                            changed = true;
                         }
                         Err(_) => {
                             self.failed.insert(event.slug.clone());
                             changed = true;
                         }
                     }
-                    if self.pending_rerenders.remove(&event.slug) {
-                        self.spawn_rerender(&event.slug);
+                    if let Some(frame_index) = self.pending_frames.remove(&event.slug) {
+                        self.spawn_frame_render(&event.slug, frame_index);
                     }
+                    self.spawn_next_pending_frame();
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
@@ -1687,33 +1714,126 @@ impl HomeThumbnailCoordinator {
         changed
     }
 
-    fn thumbnail(&self, slug: &str) -> Option<&HomeTemplateThumbnail> {
-        self.thumbnails.get(slug)
+    fn thumbnail(&self, slug: &str) -> Option<&HomeThumbnailFrame> {
+        let thumbnail = self.thumbnails.get(slug)?;
+        thumbnail
+            .frames
+            .get(&thumbnail.selected_frame_index)
+            .or_else(|| nearest_home_thumbnail_frame(thumbnail))
+    }
+
+    fn prewarm_turntable(&mut self, slug: &str) {
+        if self.active.len() >= MAX_HOME_THUMBNAIL_JOBS {
+            return;
+        }
+        let Some(frame_index) = ({
+            let Some(thumbnail) = self.thumbnails.get_mut(slug) else {
+                return;
+            };
+            let frame_order = home_turntable_prewarm_order(thumbnail.selected_frame_index);
+            let mut frame_index = None;
+            for offset in 0..frame_order.len() {
+                let cursor = (thumbnail.prewarm_cursor + offset) % frame_order.len();
+                let candidate = frame_order[cursor];
+                if !thumbnail.frames.contains_key(&candidate) {
+                    thumbnail.prewarm_cursor = (cursor + 1) % frame_order.len();
+                    frame_index = Some(candidate);
+                    break;
+                }
+            }
+            frame_index
+        }) else {
+            return;
+        };
+        self.spawn_frame_render(slug, frame_index);
+    }
+
+    fn spawn_next_pending_frame(&mut self) {
+        while self.active.len() < MAX_HOME_THUMBNAIL_JOBS {
+            let next = self.pending_frames.iter().find_map(|(slug, frame_index)| {
+                let thumbnail = self.thumbnails.get(slug)?;
+                (!self.active.contains(slug) && !thumbnail.frames.contains_key(frame_index))
+                    .then(|| (slug.clone(), *frame_index))
+            });
+            let Some((slug, frame_index)) = next else {
+                self.pending_frames.retain(|slug, frame_index| {
+                    self.thumbnails
+                        .get(slug)
+                        .is_some_and(|thumbnail| !thumbnail.frames.contains_key(frame_index))
+                });
+                return;
+            };
+            self.pending_frames.remove(&slug);
+            self.spawn_frame_render(&slug, frame_index);
+        }
     }
 
     fn has_active_jobs(&self) -> bool {
         !self.active.is_empty()
     }
 
-    fn spawn_rerender(&mut self, slug: &str) {
+    fn ensure_frame(&mut self, slug: &str, frame_index: i32) {
+        let Some(thumbnail) = self.thumbnails.get(slug) else {
+            return;
+        };
+        if thumbnail.frames.contains_key(&frame_index) {
+            return;
+        }
+        if self.active.contains(slug) {
+            self.pending_frames.insert(slug.to_owned(), frame_index);
+            return;
+        }
+        self.spawn_frame_render(slug, frame_index);
+    }
+
+    fn spawn_frame_render(&mut self, slug: &str, frame_index: i32) {
+        if self.active.len() >= MAX_HOME_THUMBNAIL_JOBS {
+            self.pending_frames.insert(slug.to_owned(), frame_index);
+            return;
+        }
         let Some(thumbnail) = self.thumbnails.get(slug) else {
             return;
         };
         self.active.insert(slug.to_owned());
         let mesh = Arc::clone(&thumbnail.mesh);
-        let camera = thumbnail.camera.clone();
-        let version = thumbnail.version;
+        let camera = home_turntable_camera(&thumbnail.base_camera, frame_index);
+        let base_camera = thumbnail.base_camera.clone();
         let tx = self.tx().clone();
         let slug = slug.to_owned();
         thread::spawn(move || {
-            let result = render_home_thumbnail(mesh, camera, version)
+            let result = render_home_thumbnail(mesh, base_camera, camera, frame_index, None)
                 .ok_or_else(|| "Could not render template thumbnail.".to_owned());
             let _ = tx.send(HomeThumbnailEvent {
                 slug,
-                version,
+                frame_index,
                 result,
             });
         });
+    }
+
+    fn store_frame(&mut self, slug: String, output: HomeThumbnailJobOutput) {
+        if let Some(thumbnail) = self.thumbnails.get_mut(&slug) {
+            thumbnail
+                .frames
+                .insert(output.frame.frame_index, output.frame);
+            return;
+        }
+        let Some(mesh) = output.mesh else {
+            return;
+        };
+        let mut frames = BTreeMap::new();
+        frames.insert(output.frame.frame_index, output.frame);
+        self.thumbnails.insert(
+            slug,
+            HomeTemplateThumbnail {
+                mesh,
+                base_camera: output.base_camera,
+                selected_yaw_degrees: 0.0,
+                selected_frame_index: 0,
+                prewarm_cursor: 0,
+                frames,
+            },
+        );
     }
 
     fn reset(&mut self) {
@@ -1722,7 +1842,7 @@ impl HomeThumbnailCoordinator {
         self.rx = Some(rx);
         self.active.clear();
         self.failed.clear();
-        self.pending_rerenders.clear();
+        self.pending_frames.clear();
         self.thumbnails.clear();
     }
 
@@ -1743,8 +1863,8 @@ impl HomeThumbnailCoordinator {
 
 fn render_home_thumbnail_from_output(
     output: &FoundryCompilationOutput,
-    version: u64,
-) -> Option<HomeTemplateThumbnail> {
+    frame_index: i32,
+) -> Option<HomeThumbnailJobOutput> {
     let mesh = &output.artifact.combined_preview.mesh;
     let mesh = Arc::new(TriangleMesh {
         positions: mesh.positions.clone(),
@@ -1755,38 +1875,90 @@ fn render_home_thumbnail_from_output(
             max: mesh.bounds.max.into(),
         },
     });
-    let camera = fit_camera_to_bounds(mesh.bounds);
-    render_home_thumbnail(mesh, camera, version)
+    let base_camera = fit_camera_to_bounds(mesh.bounds);
+    let camera = home_turntable_camera(&base_camera, frame_index);
+    render_home_thumbnail(
+        Arc::clone(&mesh),
+        base_camera,
+        camera,
+        frame_index,
+        Some(Arc::clone(&mesh)),
+    )
 }
 
 fn render_home_thumbnail(
     mesh: Arc<TriangleMesh>,
+    base_camera: OrbitCamera,
     camera: OrbitCamera,
-    version: u64,
-) -> Option<HomeTemplateThumbnail> {
+    frame_index: i32,
+    include_mesh: Option<Arc<TriangleMesh>>,
+) -> Option<HomeThumbnailJobOutput> {
     let settings = RenderSettings {
         width: HOME_THUMBNAIL_PIXELS,
         height: HOME_THUMBNAIL_PIXELS,
         ..RenderSettings::default()
     };
     let image = render_mesh(mesh.as_ref(), &camera, &settings).ok()?;
-    Some(HomeTemplateThumbnail {
-        rgba8: image.rgba8,
-        width: image.width,
-        height: image.height,
-        camera,
-        mesh,
-        version,
+    Some(HomeThumbnailJobOutput {
+        mesh: include_mesh,
+        base_camera,
+        frame: HomeThumbnailFrame {
+            frame_index,
+            rgba8: image.rgba8,
+            width: image.width,
+            height: image.height,
+        },
     })
 }
 
+#[cfg(test)]
 fn orbit_home_thumbnail_camera(camera: &OrbitCamera, delta: egui::Vec2) -> OrbitCamera {
     let mut camera = camera.clone();
-    camera.orbit(
-        delta.x * HOME_THUMBNAIL_YAW_DEGREES_PER_POINT,
-        -delta.y * HOME_THUMBNAIL_PITCH_DEGREES_PER_POINT,
-    );
+    camera.orbit(delta.x * HOME_THUMBNAIL_YAW_DEGREES_PER_POINT, 0.0);
     camera
+}
+
+fn home_turntable_yaw(yaw_degrees: f32) -> f32 {
+    yaw_degrees.rem_euclid(360.0)
+}
+
+fn home_turntable_frame_index(yaw_degrees: f32) -> i32 {
+    let frame_width = 360.0 / HOME_TURNTABLE_FRAME_COUNT as f32;
+    ((home_turntable_yaw(yaw_degrees) / frame_width).round() as i32)
+        .rem_euclid(HOME_TURNTABLE_FRAME_COUNT)
+}
+
+fn home_turntable_camera(base_camera: &OrbitCamera, frame_index: i32) -> OrbitCamera {
+    let mut camera = base_camera.clone();
+    let frame_width = 360.0 / HOME_TURNTABLE_FRAME_COUNT as f32;
+    camera.yaw_degrees = home_turntable_yaw(frame_index as f32 * frame_width);
+    camera.clamped()
+}
+
+fn home_turntable_prewarm_order(selected_frame_index: i32) -> Vec<i32> {
+    let selected = selected_frame_index.rem_euclid(HOME_TURNTABLE_FRAME_COUNT);
+    let mut frames = Vec::with_capacity(HOME_TURNTABLE_FRAME_COUNT as usize);
+    frames.push(selected);
+    for distance in 1..=HOME_TURNTABLE_FRAME_COUNT / 2 {
+        frames.push((selected + distance).rem_euclid(HOME_TURNTABLE_FRAME_COUNT));
+        let opposite = (selected - distance).rem_euclid(HOME_TURNTABLE_FRAME_COUNT);
+        if opposite != *frames.last().expect("distance frame was inserted") {
+            frames.push(opposite);
+        }
+    }
+    frames.truncate(HOME_TURNTABLE_FRAME_COUNT as usize);
+    frames
+}
+
+fn nearest_home_thumbnail_frame(thumbnail: &HomeTemplateThumbnail) -> Option<&HomeThumbnailFrame> {
+    thumbnail.frames.values().min_by_key(|frame| {
+        home_turntable_frame_distance(frame.frame_index, thumbnail.selected_frame_index)
+    })
+}
+
+fn home_turntable_frame_distance(left: i32, right: i32) -> i32 {
+    let direct = (left - right).abs();
+    direct.min(HOME_TURNTABLE_FRAME_COUNT - direct)
 }
 
 fn button_with_disabled_reason(
@@ -1955,6 +2127,7 @@ struct ProductHomeProfile {
     category_chips: Vec<String>,
 }
 
+#[cfg(test)]
 struct ProductHomeProfileGroup {
     family_id: String,
     family_name: String,
@@ -1992,6 +2165,7 @@ fn product_home_profile_visible(
     developer_preview_enabled || !card.hidden_by_default || card.quality_badge == "Usable"
 }
 
+#[cfg(test)]
 fn product_home_profile_groups(profiles: Vec<ProductHomeProfile>) -> Vec<ProductHomeProfileGroup> {
     let mut groups = BTreeMap::<String, (String, Vec<ProductHomeProfile>)>::new();
     for profile in profiles {
@@ -2107,8 +2281,14 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         HOME_SUBTITLE,
         "Choose a template below to start a new project.",
         "Search assets...",
-        "Featured",
-        "All templates",
+        "All",
+        "Props",
+        "Architecture",
+        "Gear",
+        "Furniture",
+        "Environment",
+        "Preview building",
+        "No matching templates",
         "Explore directions",
         "Generate coherent whole-model options from the current asset.",
         "Current Asset",
@@ -2411,117 +2591,241 @@ pub(crate) fn default_app_launches_on_home() -> bool {
     app.tab == FoundryTab::Home && app.state.document.is_none()
 }
 
-fn show_home_profile_group_header(ui: &mut egui::Ui, group: &ProductHomeProfileGroup) {
-    let colors = VisualFoundryTokens::dark().colors;
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(&group.family_name)
-                .color(colors.text)
-                .strong(),
-        );
-        ui.label(
-            RichText::new(home_profile_group_count_label(group.profiles.len()))
-                .color(colors.text_subtle)
-                .small(),
-        );
-    });
+fn home_browser_width(available_width: f32) -> f32 {
+    available_width.clamp(320.0, 420.0)
 }
 
-fn home_profile_group_count_label(count: usize) -> String {
-    match count {
-        1 => "1 template".to_owned(),
-        count => format!("{count} templates"),
-    }
-}
-
-fn show_template_filter_bar(ui: &mut egui::Ui) {
-    let colors = VisualFoundryTokens::dark().colors;
-    ui.horizontal_wrapped(|ui| {
-        product_card(ui, false, |ui| {
-            ui.set_min_width(220.0);
-            ui.label(RichText::new("Search assets...").color(colors.text_muted));
-        });
-        ui.add_space(8.0);
-        for chip in [
-            "All",
-            "Props",
-            "Architecture",
-            "Gear",
-            "Furniture",
-            "Environment",
-        ] {
-            let tone = if chip == "All" {
-                ButtonTone::Primary
-            } else {
-                ButtonTone::Quiet
-            };
-            let _ = action_button(ui, &ActionSpec::enabled(chip, tone));
-        }
-    });
-}
-
-fn show_home_profile_grid(
+fn show_home_browser_panel(
     ui: &mut egui::Ui,
     profiles: &[ProductHomeProfile],
-    home_thumbnails: &mut HomeThumbnailCoordinator,
-    texture_cache: &mut FoundryTextureCache,
-) -> Option<FoundryFixtureCatalog> {
-    let mut selected_fixture = None;
-    let columns = home_profile_grid_columns(ui.available_width());
-    for row in profiles.chunks(columns) {
-        ui.columns(columns, |column_uis| {
-            for (column, profile) in column_uis.iter_mut().zip(row) {
-                if show_home_profile_card(column, profile, home_thumbnails, texture_cache)
-                    .as_ref()
-                    .is_some_and(egui::Response::clicked)
-                {
-                    selected_fixture = Some(profile.fixture.clone());
+    search_query: &mut String,
+    filter: &mut HomeTemplateFilter,
+    selected_slug: &mut Option<String>,
+) {
+    let colors = VisualFoundryTokens::dark().colors;
+    product_card(ui, false, |ui| {
+        ui.set_min_height(ui.available_height().max(420.0));
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Choose",
+                title: "Choose what to make",
+                subtitle: Some(HOME_SUBTITLE),
+            },
+        );
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Choose a template below to start a new project.")
+                .color(colors.text_muted)
+                .small(),
+        );
+        ui.add_space(12.0);
+        let response = ui.add_sized(
+            [ui.available_width(), 32.0],
+            egui::TextEdit::singleline(search_query)
+                .hint_text("Search assets...")
+                .desired_width(f32::INFINITY),
+        );
+        if response.changed() {
+            *selected_slug = default_filtered_home_profile_slug(profiles, search_query, *filter);
+        }
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for option in HOME_TEMPLATE_FILTERS {
+                if home_filter_button(ui, option, *filter).clicked() {
+                    *filter = option;
+                    *selected_slug =
+                        default_filtered_home_profile_slug(profiles, search_query, *filter);
                 }
             }
         });
-        ui.add_space(8.0);
-    }
-    selected_fixture
+        normalize_home_selection(profiles, search_query, *filter, selected_slug);
+        ui.add_space(12.0);
+
+        let filtered_indices = filtered_home_profile_indices(profiles, search_query, *filter);
+        let count_label = home_profile_count_label(filtered_indices.len());
+        ui.label(
+            RichText::new(count_label)
+                .color(colors.text_subtle)
+                .small()
+                .strong(),
+        );
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical()
+            .id_salt("foundry_home_template_list")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if filtered_indices.is_empty() {
+                    ui.label(
+                        RichText::new("No matching templates")
+                            .color(colors.text_muted)
+                            .small(),
+                    );
+                }
+                for index in filtered_indices {
+                    let profile = &profiles[index];
+                    let selected = selected_slug.as_deref() == Some(profile.fixture.slug.as_str());
+                    if show_home_template_row(ui, profile, selected).clicked() {
+                        *selected_slug = Some(profile.fixture.slug.clone());
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+    });
 }
 
-fn home_profile_grid_columns(width: f32) -> usize {
-    if width >= 1320.0 {
-        3
-    } else if width >= 820.0 {
-        2
+fn home_filter_button(
+    ui: &mut egui::Ui,
+    option: HomeTemplateFilter,
+    selected: HomeTemplateFilter,
+) -> egui::Response {
+    let colors = VisualFoundryTokens::dark().colors;
+    let is_selected = option == selected;
+    let fill = if is_selected {
+        colors.accent_soft
     } else {
-        1
-    }
+        colors.panel_elevated
+    };
+    let stroke = if is_selected {
+        egui::Stroke::new(1.0, colors.accent_hover)
+    } else {
+        egui::Stroke::new(1.0, colors.stroke)
+    };
+    let text = if is_selected {
+        colors.text
+    } else {
+        colors.text_muted
+    };
+    ui.add(
+        egui::Button::new(RichText::new(option.label()).color(text))
+            .fill(fill)
+            .stroke(stroke)
+            .corner_radius(egui::CornerRadius::same(6))
+            .min_size(egui::vec2(58.0, 28.0)),
+    )
 }
 
-fn show_home_profile_card(
+fn show_home_template_row(
+    ui: &mut egui::Ui,
+    profile: &ProductHomeProfile,
+    selected: bool,
+) -> egui::Response {
+    let colors = VisualFoundryTokens::dark().colors;
+    let fill = if selected {
+        colors.accent_soft
+    } else {
+        colors.panel_subtle
+    };
+    let stroke = if selected {
+        egui::Stroke::new(1.0, colors.accent_hover)
+    } else {
+        egui::Stroke::new(1.0, colors.stroke)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                RichText::new(profile.label.as_str())
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.add_space(2.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!(
+                        "{}. {}",
+                        profile.style_name,
+                        profile_description(&profile.fixture.slug)
+                    ))
+                    .color(colors.text_muted)
+                    .small(),
+                )
+                .wrap(),
+            );
+            ui.add_space(5.0);
+            ui.horizontal_wrapped(|ui| {
+                let _ = status_pill(
+                    ui,
+                    StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
+                );
+                for chip in &profile.category_chips {
+                    let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
+                }
+            });
+        })
+        .response
+        .interact(egui::Sense::click())
+}
+
+fn show_home_selected_template_stage(
     ui: &mut egui::Ui,
     profile: &ProductHomeProfile,
     home_thumbnails: &mut HomeThumbnailCoordinator,
     texture_cache: &mut FoundryTextureCache,
-) -> Option<egui::Response> {
+) -> egui::Response {
     let mut action = None;
-    product_card(ui, false, |ui| {
-        ui.set_min_height(260.0);
-        show_home_profile_thumbnail(ui, profile, home_thumbnails, texture_cache);
+    product_stage(ui, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.set_min_height(ui.available_height().max(480.0));
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(profile.label.as_str())
+                    .color(colors.text)
+                    .size(18.0)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
+            );
+            for chip in &profile.category_chips {
+                let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
+            }
+        });
         ui.add_space(8.0);
-        show_home_profile_summary(ui, profile, ui.available_width().max(220.0));
-        ui.add_space(10.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!(
+                    "{}. {}",
+                    profile.style_name,
+                    profile_description(&profile.fixture.slug)
+                ))
+                .color(colors.text_muted),
+            )
+            .wrap(),
+        );
+        ui.add_space(14.0);
+        let preview_height = (ui.available_height() - 98.0).clamp(320.0, 620.0);
+        show_home_selected_model_preview(
+            ui,
+            profile,
+            home_thumbnails,
+            texture_cache,
+            preview_height,
+        );
+        ui.add_space(14.0);
         action = Some(start_template_button(ui));
     });
-    action
+    action.expect("selected template stage always renders start action")
 }
 
-fn show_home_profile_thumbnail(
+fn show_home_selected_model_preview(
     ui: &mut egui::Ui,
     profile: &ProductHomeProfile,
     home_thumbnails: &mut HomeThumbnailCoordinator,
     texture_cache: &mut FoundryTextureCache,
+    height: f32,
 ) {
     let colors = VisualFoundryTokens::dark().colors;
-    let width = ui.available_width().max(180.0);
-    let height = 148.0;
+    let width = ui.available_width().max(260.0);
     home_thumbnails.ensure(profile);
+    home_thumbnails.prewarm_turntable(&profile.fixture.slug);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
     if response.dragged_by(egui::PointerButton::Secondary)
@@ -2538,21 +2842,21 @@ fn show_home_profile_thumbnail(
         egui::StrokeKind::Inside,
     );
 
-    if let Some(thumbnail) = home_thumbnails.thumbnail(&profile.fixture.slug)
-        && let Some(size) = scaled_preview_size(
-            thumbnail.width,
-            thumbnail.height,
-            (height - 10.0).min(width - 12.0),
-        )
+    if let Some(frame) = home_thumbnails.thumbnail(&profile.fixture.slug)
+        && let Some(size) =
+            scaled_preview_size(frame.width, frame.height, (height - 24.0).min(width - 24.0))
     {
-        let preview_id = format!("home-template-{}", profile.fixture.slug);
+        let preview_id = format!(
+            "home-template-{}-frame-{}",
+            profile.fixture.slug, frame.frame_index
+        );
         let texture = texture_cache.texture(
             ui.ctx(),
             &preview_id,
             None,
-            &thumbnail.rgba8,
-            thumbnail.width,
-            thumbnail.height,
+            &frame.rgba8,
+            frame.width,
+            frame.height,
         );
         let image_rect = egui::Rect::from_center_size(rect.center(), size);
         ui.painter().image(
@@ -2561,96 +2865,149 @@ fn show_home_profile_thumbnail(
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
+    } else {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Preview building",
+            egui::FontId::proportional(13.0),
+            colors.text_muted,
+        );
+    }
+}
+
+fn home_profile_count_label(count: usize) -> String {
+    match count {
+        1 => "1 template".to_owned(),
+        count => format!("{count} templates"),
+    }
+}
+
+fn selected_home_profile<'a>(
+    profiles: &'a [ProductHomeProfile],
+    selected_slug: &Option<String>,
+) -> Option<&'a ProductHomeProfile> {
+    selected_slug
+        .as_deref()
+        .and_then(|slug| profiles.iter().find(|profile| profile.fixture.slug == slug))
+}
+
+fn normalize_home_selection(
+    profiles: &[ProductHomeProfile],
+    search_query: &str,
+    filter: HomeTemplateFilter,
+    selected_slug: &mut Option<String>,
+) {
+    if selected_slug
+        .as_deref()
+        .is_some_and(|slug| home_profile_is_visible(profiles, slug, search_query, filter))
+    {
         return;
     }
+    *selected_slug = default_filtered_home_profile_slug(profiles, search_query, filter);
+}
 
-    let object_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.center().y + 5.0),
-        egui::vec2((width * 0.36).clamp(96.0, 160.0), 42.0),
-    );
-    let family = profile.family_name.to_ascii_lowercase();
-    let accent = if family.contains("armor") || family.contains("hero") {
-        colors.warning
-    } else if family.contains("tree") || family.contains("market") {
-        colors.success
-    } else {
-        colors.accent_hover
-    };
+fn default_home_profile_slug(profiles: &[ProductHomeProfile]) -> Option<String> {
+    profiles.first().map(|profile| profile.fixture.slug.clone())
+}
 
-    if family.contains("bridge") {
-        let deck = egui::Rect::from_center_size(rect.center(), egui::vec2(width * 0.54, 12.0));
-        ui.painter().rect_filled(
-            deck,
-            egui::CornerRadius::same(3),
-            accent.gamma_multiply(0.55),
-        );
-        for index in 0..5 {
-            let x = deck.left() + 16.0 + index as f32 * (deck.width() - 32.0) / 4.0;
-            ui.painter().line_segment(
-                [
-                    egui::pos2(x, deck.bottom()),
-                    egui::pos2(x + 10.0, deck.bottom() + 26.0),
-                ],
-                egui::Stroke::new(2.0, colors.stroke_strong),
-            );
+fn default_filtered_home_profile_slug(
+    profiles: &[ProductHomeProfile],
+    search_query: &str,
+    filter: HomeTemplateFilter,
+) -> Option<String> {
+    filtered_home_profile_indices(profiles, search_query, filter)
+        .first()
+        .map(|index| profiles[*index].fixture.slug.clone())
+}
+
+fn home_profile_is_visible(
+    profiles: &[ProductHomeProfile],
+    slug: &str,
+    search_query: &str,
+    filter: HomeTemplateFilter,
+) -> bool {
+    filtered_home_profile_indices(profiles, search_query, filter)
+        .into_iter()
+        .any(|index| profiles[index].fixture.slug == slug)
+}
+
+fn filtered_home_profile_indices(
+    profiles: &[ProductHomeProfile],
+    search_query: &str,
+    filter: HomeTemplateFilter,
+) -> Vec<usize> {
+    profiles
+        .iter()
+        .enumerate()
+        .filter_map(|(index, profile)| {
+            (filter.matches(profile) && home_profile_matches_search(profile, search_query))
+                .then_some(index)
+        })
+        .collect()
+}
+
+fn home_profile_matches_search(profile: &ProductHomeProfile, search_query: &str) -> bool {
+    let terms = search_query
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return true;
+    }
+    let haystack = home_profile_search_haystack(profile);
+    terms.iter().all(|term| haystack.contains(term))
+}
+
+fn home_profile_search_haystack(profile: &ProductHomeProfile) -> String {
+    format!(
+        "{} {} {} {} {} {}",
+        profile.label,
+        profile.style_name,
+        profile.family_id,
+        profile.family_name,
+        profile.category_chips.join(" "),
+        profile_description(&profile.fixture.slug)
+    )
+    .to_ascii_lowercase()
+}
+
+impl HomeTemplateFilter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Props => "Props",
+            Self::Architecture => "Architecture",
+            Self::Gear => "Gear",
+            Self::Furniture => "Furniture",
+            Self::Environment => "Environment",
         }
-    } else if family.contains("lamp") || family.contains("sign") {
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.center().x, rect.top() + 22.0),
-                egui::pos2(rect.center().x, rect.bottom() - 18.0),
-            ],
-            egui::Stroke::new(4.0, accent),
-        );
-        ui.painter().circle_filled(
-            egui::pos2(rect.center().x, rect.top() + 30.0),
-            18.0,
-            accent.gamma_multiply(0.45),
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.center().x - 28.0, rect.bottom() - 18.0),
-                egui::pos2(rect.center().x + 28.0, rect.bottom() - 18.0),
-            ],
-            egui::Stroke::new(3.0, colors.stroke_strong),
-        );
-    } else if family.contains("armor") || family.contains("shield") || family.contains("helmet") {
-        ui.painter()
-            .circle_filled(rect.center(), 28.0, accent.gamma_multiply(0.45));
-        ui.painter().circle_stroke(
-            rect.center(),
-            28.0,
-            egui::Stroke::new(2.0, colors.stroke_strong),
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(rect.center().x - 22.0, rect.center().y),
-                egui::pos2(rect.center().x + 22.0, rect.center().y),
-            ],
-            egui::Stroke::new(2.0, accent),
-        );
-    } else {
-        ui.painter().rect_filled(
-            object_rect,
-            egui::CornerRadius::same(5),
-            accent.gamma_multiply(0.4),
-        );
-        ui.painter().rect_stroke(
-            object_rect,
-            egui::CornerRadius::same(5),
-            egui::Stroke::new(2.0, accent),
-            egui::StrokeKind::Inside,
-        );
-        let slot_width = object_rect.width() / 5.0;
-        for index in 1..5 {
-            let x = object_rect.left() + index as f32 * slot_width;
-            ui.painter().line_segment(
-                [
-                    egui::pos2(x, object_rect.top() + 6.0),
-                    egui::pos2(x, object_rect.bottom() - 6.0),
-                ],
-                egui::Stroke::new(1.0, colors.stroke_strong),
-            );
+    }
+
+    fn matches(self, profile: &ProductHomeProfile) -> bool {
+        if self == Self::All {
+            return true;
+        }
+        let chips = profile
+            .category_chips
+            .iter()
+            .map(|chip| chip.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        match self {
+            Self::All => true,
+            Self::Props => chips.iter().any(|chip| chip == "prop" || chip == "weapon"),
+            Self::Architecture => chips
+                .iter()
+                .any(|chip| chip == "architecture" || chip == "structure"),
+            Self::Gear => chips
+                .iter()
+                .any(|chip| chip == "armor" || chip == "weapon" || chip == "heroic"),
+            Self::Furniture => chips
+                .iter()
+                .any(|chip| chip == "furniture" || chip == "lighting"),
+            Self::Environment => chips
+                .iter()
+                .any(|chip| chip == "environment" || chip == "market" || chip == "wayfinding"),
         }
     }
 }
@@ -2658,64 +3015,6 @@ fn show_home_profile_thumbnail(
 fn start_template_button(ui: &mut egui::Ui) -> egui::Response {
     ui.horizontal(|ui| action_button(ui, &ActionSpec::enabled(ACTION_START, ButtonTone::Primary)))
         .inner
-}
-
-fn show_home_profile_row(
-    ui: &mut egui::Ui,
-    profile: &ProductHomeProfile,
-) -> Option<egui::Response> {
-    let mut action = None;
-    product_card(ui, false, |ui| {
-        let content_width = ui.available_width().max(220.0);
-        if content_width < 520.0 {
-            show_home_profile_summary(ui, profile, content_width);
-            ui.add_space(8.0);
-            action = Some(start_template_button(ui));
-        } else {
-            ui.horizontal(|ui| {
-                let text_width = (content_width - 132.0).max(220.0);
-                show_home_profile_summary(ui, profile, text_width);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    action = Some(start_template_button(ui));
-                });
-            });
-        }
-    });
-    action
-}
-
-fn show_home_profile_summary(ui: &mut egui::Ui, profile: &ProductHomeProfile, width: f32) {
-    let colors = VisualFoundryTokens::dark().colors;
-    ui.vertical(|ui| {
-        ui.set_width(width);
-        ui.horizontal_wrapped(|ui| {
-            let _ = status_pill(
-                ui,
-                StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
-            );
-            for chip in &profile.category_chips {
-                let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
-            }
-        });
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(profile.label.as_str())
-                .color(colors.text)
-                .strong(),
-        );
-        ui.add(
-            egui::Label::new(
-                RichText::new(format!(
-                    "{}. {}",
-                    profile.style_name,
-                    profile_description(&profile.fixture.slug)
-                ))
-                .color(colors.text_muted)
-                .small(),
-            )
-            .wrap(),
-        );
-    });
 }
 
 fn show_direction_candidate_grid(
@@ -3974,6 +4273,35 @@ mod tests {
     }
 
     #[test]
+    fn home_template_search_defaults_to_first_matching_profile() {
+        let profiles = product_home_profiles(false);
+        let selected_slug =
+            default_filtered_home_profile_slug(&profiles, "door", HomeTemplateFilter::All);
+
+        assert_eq!(selected_slug.as_deref(), Some("sci-fi-door"));
+    }
+
+    #[test]
+    fn home_template_selection_tracks_filter_visibility() {
+        let profiles = product_home_profiles(false);
+        let mut selected_slug = Some("sci-fi-crate".to_owned());
+
+        normalize_home_selection(
+            &profiles,
+            "",
+            HomeTemplateFilter::Architecture,
+            &mut selected_slug,
+        );
+
+        assert_eq!(selected_slug.as_deref(), Some("roman-bridge-hq"));
+        assert!(
+            filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::Props)
+                .iter()
+                .any(|index| profiles[*index].fixture.slug == "sci-fi-crate")
+        );
+    }
+
+    #[test]
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
         let bridge = profiles
@@ -4025,9 +4353,18 @@ mod tests {
         let rotated = orbit_home_thumbnail_camera(&camera, egui::vec2(20.0, -10.0));
 
         assert!((rotated.yaw_degrees - 44.0).abs() < f32::EPSILON);
-        assert!((rotated.pitch_degrees - 28.0).abs() < f32::EPSILON);
+        assert_eq!(rotated.pitch_degrees, camera.pitch_degrees);
         assert_eq!(rotated.target, camera.target);
         assert_eq!(rotated.distance, camera.distance);
+    }
+
+    #[test]
+    fn home_turntable_frame_index_wraps_yaw() {
+        assert_eq!(home_turntable_frame_index(0.0), 0);
+        assert_eq!(home_turntable_frame_index(359.0), 0);
+        assert_eq!(home_turntable_frame_index(15.0), 1);
+        assert_eq!(home_turntable_frame_index(-15.0), 23);
+        assert_eq!(home_turntable_frame_distance(0, 23), 1);
     }
 
     #[test]
