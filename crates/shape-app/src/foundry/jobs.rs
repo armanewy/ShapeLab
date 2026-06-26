@@ -30,7 +30,7 @@ use super::view_model::{FoundryCandidateCard, FoundryPackView};
 
 const CURRENT_PREVIEW_ID: &str = "current";
 const CANDIDATE_PARENT_PREVIEW_ID: &str = "candidate-parent";
-const CANDIDATE_PREVIEW_PIXELS: u32 = 128;
+const CANDIDATE_PREVIEW_PIXELS: u32 = 512;
 const PENDING_CANDIDATE_PREVIEW_MESSAGE: &str = "Preview rendering for this direction.";
 
 /// Deterministic background work requested by the Foundry app state.
@@ -1036,29 +1036,29 @@ fn passes_legibility_threshold(
 fn legibility_threshold(mode: Option<FoundryCandidateMode>) -> PreviewLegibilityThreshold {
     match mode.unwrap_or(FoundryCandidateMode::Explore) {
         FoundryCandidateMode::Refine => PreviewLegibilityThreshold {
-            score: 0.010,
-            changed_pixel_ratio: 0.018,
-            silhouette_delta: 0.008,
+            score: 0.020,
+            changed_pixel_ratio: 0.040,
+            silhouette_delta: 0.014,
         },
         FoundryCandidateMode::Explore => PreviewLegibilityThreshold {
-            score: 0.016,
-            changed_pixel_ratio: 0.028,
-            silhouette_delta: 0.014,
+            score: 0.040,
+            changed_pixel_ratio: 0.085,
+            silhouette_delta: 0.030,
         },
         FoundryCandidateMode::Silhouette => PreviewLegibilityThreshold {
-            score: 0.024,
-            changed_pixel_ratio: 0.035,
-            silhouette_delta: 0.020,
+            score: 0.055,
+            changed_pixel_ratio: 0.105,
+            silhouette_delta: 0.045,
         },
         FoundryCandidateMode::Structure => PreviewLegibilityThreshold {
-            score: 0.018,
-            changed_pixel_ratio: 0.030,
-            silhouette_delta: 0.014,
+            score: 0.045,
+            changed_pixel_ratio: 0.090,
+            silhouette_delta: 0.032,
         },
         FoundryCandidateMode::Detail => PreviewLegibilityThreshold {
-            score: 0.007,
-            changed_pixel_ratio: 0.010,
-            silhouette_delta: 0.004,
+            score: 0.012,
+            changed_pixel_ratio: 0.022,
+            silhouette_delta: 0.008,
         },
     }
 }
@@ -1223,9 +1223,9 @@ fn preview_delta_class(
         return CandidateLegibilityClass::DetailOnly;
     }
     let score = delta.score();
-    if score >= 0.05 || delta.changed_pixel_ratio >= 0.08 || delta.silhouette_delta >= 0.04 {
+    if score >= 0.10 || delta.changed_pixel_ratio >= 0.16 || delta.silhouette_delta >= 0.075 {
         CandidateLegibilityClass::Strong
-    } else if score >= 0.018 || delta.changed_pixel_ratio >= 0.03 || delta.silhouette_delta >= 0.014
+    } else if score >= 0.04 || delta.changed_pixel_ratio >= 0.085 || delta.silhouette_delta >= 0.030
     {
         CandidateLegibilityClass::Clear
     } else {

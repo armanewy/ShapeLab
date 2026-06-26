@@ -624,11 +624,11 @@ impl FoundryDesktopApp {
     ) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         let colors = VisualFoundryTokens::dark().colors;
-        let panel_height = ui.available_height().clamp(300.0, 460.0);
+        let panel_height = ui.available_height().clamp(260.0, 380.0);
         product_card(ui, false, |ui| {
             ui.set_min_height(panel_height);
             ui.horizontal_top(|ui| {
-                let preview_edge = (ui.available_width() * 0.42).clamp(360.0, 620.0);
+                let preview_edge = (ui.available_width() * 0.46).clamp(340.0, 560.0);
                 ui.vertical(|ui| {
                     ui.set_width(preview_edge + 24.0);
                     ui.label(
@@ -940,8 +940,17 @@ impl FoundryDesktopApp {
             return commands;
         }
 
+        let current_preview = self.state.current_preview.clone();
         let current_build = self.state.current_build.as_ref();
         let texture_cache = &mut self.texture_cache;
+        commands.extend(show_selected_candidate_comparison(
+            ui,
+            texture_cache,
+            current_build,
+            current_preview.as_ref(),
+            &self.state.candidates,
+        ));
+        ui.add_space(10.0);
         commands.extend(show_direction_candidate_grid(
             ui,
             texture_cache,
@@ -3140,6 +3149,130 @@ fn start_template_button(ui: &mut egui::Ui) -> egui::Response {
         .inner
 }
 
+fn show_selected_candidate_comparison(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    current_preview: Option<&FoundryPreviewImage>,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let Some(candidate) = candidates
+        .iter()
+        .find(|candidate| candidate.selected)
+        .or_else(|| candidates.first())
+    else {
+        return commands;
+    };
+    let Some(current_preview) = current_preview else {
+        return commands;
+    };
+    if candidate.rgba8.is_empty() || current_preview.rgba8.is_empty() {
+        return commands;
+    }
+
+    product_card(ui, true, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.label(
+            RichText::new("Compare current vs. selected direction")
+                .color(colors.accent_hover)
+                .small()
+                .strong(),
+        );
+        ui.add_space(8.0);
+        let preview_edge = (ui.available_width() * 0.28).clamp(360.0, 560.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.set_width(preview_edge + 18.0);
+                ui.label(RichText::new("Current").color(colors.text_muted).small());
+                show_rgba_preview(
+                    ui,
+                    texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: "direction-current-comparison",
+                        build: current_preview.build.as_ref(),
+                        rgba8: &current_preview.rgba8,
+                        width: current_preview.width,
+                        height: current_preview.height,
+                        max_edge: preview_edge,
+                    },
+                );
+            });
+            ui.add_space(18.0);
+            ui.vertical_centered(|ui| {
+                ui.set_width(preview_edge + 18.0);
+                ui.label(
+                    RichText::new(candidate_display_title(candidate))
+                        .color(colors.text)
+                        .strong(),
+                );
+                let preview_id = format!("direction-selected-comparison-{}", candidate.id.0);
+                show_rgba_preview(
+                    ui,
+                    texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: &preview_id,
+                        build: current_build,
+                        rgba8: &candidate.rgba8,
+                        width: candidate.width,
+                        height: candidate.height,
+                        max_edge: preview_edge,
+                    },
+                );
+            });
+            ui.add_space(18.0);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width().max(260.0));
+                ui.label(RichText::new("What changed").color(colors.text).strong());
+                if let Some(detail) = candidate_display_detail(candidate) {
+                    ui.add(egui::Label::new(RichText::new(detail).color(colors.text_muted)).wrap());
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(candidate_display_subtitle(candidate))
+                        .color(colors.text_muted)
+                        .small(),
+                );
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    if action_button(ui, &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Quiet))
+                        .clicked()
+                    {
+                        commands.push(FoundryAppCommand::SelectCandidate(Some(
+                            candidate.id.clone(),
+                        )));
+                    }
+                    let choose_reason = candidate
+                        .preview_failure
+                        .as_ref()
+                        .map(|reason| {
+                            product_panel_message(
+                                reason,
+                                "Preview this direction before choosing it.",
+                            )
+                        })
+                        .unwrap_or_else(|| NEED_DIRECTION_REASON.to_owned());
+                    if action_button(
+                        ui,
+                        &action_spec(
+                            candidate.selectable,
+                            ACTION_CHOOSE_DIRECTION,
+                            ButtonTone::Primary,
+                            choose_reason.as_str(),
+                        ),
+                    )
+                    .clicked()
+                    {
+                        commands.push(directions::accept_candidate_command(candidate.id.clone()));
+                    }
+                });
+            });
+        });
+    });
+
+    commands
+}
+
 fn show_direction_candidate_grid(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -3208,54 +3341,27 @@ fn show_direction_candidate_card(
     let mut commands = Vec::new();
     product_card(ui, candidate.selected, |ui| {
         let preview_id = candidate_preview_texture_id(candidate);
-        let wide_layout = ui.available_width() >= 720.0;
-        ui.set_min_height(if wide_layout { 300.0 } else { 420.0 });
-        let preview_edge = if wide_layout {
-            (ui.available_width() * 0.42).clamp(360.0, 520.0)
-        } else {
-            ui.available_width().clamp(260.0, 420.0)
-        };
-        if wide_layout {
-            ui.horizontal_top(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.set_width(preview_edge + 12.0);
-                    show_rgba_preview(
-                        ui,
-                        texture_cache,
-                        FoundryPreviewDraw {
-                            preview_id: &preview_id,
-                            build: current_build,
-                            rgba8: &candidate.rgba8,
-                            width: candidate.width,
-                            height: candidate.height,
-                            max_edge: preview_edge,
-                        },
-                    );
-                });
-                ui.add_space(16.0);
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width());
-                    commands.extend(show_direction_candidate_details(ui, candidate));
-                });
-            });
-        } else {
-            ui.vertical_centered(|ui| {
-                show_rgba_preview(
-                    ui,
-                    texture_cache,
-                    FoundryPreviewDraw {
-                        preview_id: &preview_id,
-                        build: current_build,
-                        rgba8: &candidate.rgba8,
-                        width: candidate.width,
-                        height: candidate.height,
-                        max_edge: preview_edge,
-                    },
-                );
-            });
-            ui.add_space(8.0);
-            commands.extend(show_direction_candidate_details(ui, candidate));
-        }
+        let available_width = ui.available_width().max(1.0);
+        let preview_edge = available_width.clamp(420.0, 760.0);
+        ui.set_min_height(preview_edge + 150.0);
+
+        ui.vertical_centered(|ui| {
+            show_rgba_preview(
+                ui,
+                texture_cache,
+                FoundryPreviewDraw {
+                    preview_id: &preview_id,
+                    build: current_build,
+                    rgba8: &candidate.rgba8,
+                    width: candidate.width,
+                    height: candidate.height,
+                    max_edge: preview_edge,
+                },
+            );
+        });
+
+        ui.add_space(10.0);
+        commands.extend(show_direction_candidate_details(ui, candidate));
     });
     commands
 }
@@ -3342,20 +3448,27 @@ fn candidate_display_title(candidate: &crate::foundry::view_model::FoundryCandid
 fn candidate_display_subtitle(
     candidate: &crate::foundry::view_model::FoundryCandidateCard,
 ) -> String {
-    let intent = product_panel_message(&candidate.variation_intent_label, "Direction");
     let delta = product_panel_message(&candidate.visible_delta_label, "Visible change");
     if let Some(focus_part) = &candidate.focus_part_label {
-        return format!("{intent} · {focus_part} · {delta}");
+        return format!(
+            "{} · {}",
+            product_panel_message(focus_part, "Focused part"),
+            delta
+        );
     }
+
+    let intent = product_panel_message(&candidate.variation_intent_label, "Direction");
     let channels = candidate
         .variation_channel_labels
         .iter()
         .map(|label| product_panel_message(label, "Variation"))
+        .filter(|label| label != &intent && label != "Complete Look" && label != "Complete Looks")
         .collect::<Vec<_>>();
+
     if channels.is_empty() {
-        format!("{intent} · {delta}")
+        delta
     } else {
-        format!("{intent} · {} · {delta}", channels.join(", "))
+        format!("{} · {}", channels.join(", "), delta)
     }
 }
 
@@ -3368,24 +3481,34 @@ fn candidate_display_detail(
             "This direction is unavailable for the current kit.",
         ));
     }
-    if !candidate.what_changed_summary.trim().is_empty() {
-        let summary =
-            product_panel_message(&candidate.what_changed_summary, "Visible shape adjusted.");
-        if !summary.trim().is_empty() {
-            return Some(summary);
-        }
-    }
+
     let labels = candidate
         .changed_controls
         .iter()
         .chain(candidate.changed_roles.iter())
         .filter_map(|label| candidate_change_phrase(label))
-        .take(3)
+        .take(4)
         .collect::<Vec<_>>();
-    if labels.is_empty() {
-        return None;
+
+    if !labels.is_empty() {
+        return Some(labels.join(" · "));
     }
-    Some(labels.join(" · "))
+
+    let raw_summary = candidate.what_changed_summary.trim();
+    if !raw_summary.is_empty()
+        && !raw_summary.contains(':')
+        && !raw_summary.to_ascii_lowercase().contains("option changed")
+        && !raw_summary
+            .to_ascii_lowercase()
+            .contains("proportion adjusted")
+    {
+        let summary = product_panel_message(raw_summary, "Visible shape adjusted.");
+        if !summary.trim().is_empty() {
+            return Some(summary);
+        }
+    }
+
+    Some("Direction changes are visible in the comparison above.".to_owned())
 }
 
 const DIRECTION_INTENT_TITLES: [&str; 6] = [
@@ -3607,11 +3730,9 @@ fn show_customize_option_grid(
 }
 
 fn customize_option_grid_columns(width: f32) -> usize {
-    if width >= 960.0 {
-        4
-    } else if width >= 700.0 {
+    if width >= 1160.0 {
         3
-    } else if width >= 460.0 {
+    } else if width >= 720.0 {
         2
     } else {
         1
@@ -3629,9 +3750,9 @@ fn show_customize_option_tile(
     let mut commands = Vec::new();
     product_card(ui, option.selected, |ui| {
         let colors = VisualFoundryTokens::dark().colors;
-        let tile_width = ui.available_width().clamp(156.0, 260.0);
+        let tile_width = ui.available_width().clamp(220.0, 360.0);
         ui.set_width(tile_width);
-        ui.set_min_height(if show_preview { 190.0 } else { 124.0 });
+        ui.set_min_height(if show_preview { 250.0 } else { 150.0 });
         if show_preview {
             let preview_id = option_preview_texture_id(option);
             show_rgba_preview(
@@ -3643,7 +3764,7 @@ fn show_customize_option_tile(
                     rgba8: &option.rgba8,
                     width: option.width,
                     height: option.height,
-                    max_edge: 112.0,
+                    max_edge: 170.0,
                 },
             );
         }
@@ -3668,22 +3789,6 @@ fn show_customize_option_tile(
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if action_button(
-                ui,
-                &action_spec(
-                    disabled_reason.is_none(),
-                    ACTION_TRY,
-                    ButtonTone::Quiet,
-                    disabled_message.as_str(),
-                ),
-            )
-            .clicked()
-            {
-                commands.extend(customize::preview_control_value_intents(
-                    control,
-                    option.value.clone(),
-                ));
-            }
             if action_button(
                 ui,
                 &action_spec(
