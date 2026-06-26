@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use shape_asset::{
     AssetId, AssetRecipe, BoundaryLoopId, CountRangeHint, CutEdgeTreatment, CutGroupRole, Frame3,
     GeometryRecipe, GeometrySource, ModelingOperationSpec, OperationId, ParameterId,
-    PartDefinition, PartInstance, PlanarCutFace, RegionId, SemanticCutGroupHint, SocketId,
-    SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3, validate_asset_recipe,
+    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, PlanarCutFace, RegionId,
+    SemanticCutGroupHint, SocketId, SocketSpec, SurfaceRegionSpec, SurfaceRole, Transform3,
+    validate_asset_recipe,
 };
 use shape_family::{AllowedOperationKind, RoleMultiplicity};
 use shape_family_compile::{
@@ -27,8 +28,9 @@ use crate::{
 };
 
 const FRONT_REGION: RegionId = RegionId(0);
-const BODY_HALF_EXTENTS: [f32; 3] = [1.2, 0.45, 0.72];
+const BODY_HALF_EXTENTS: [f32; 3] = [1.25, 0.54, 0.78];
 const BODY_RADIUS: f32 = 0.075;
+const FRONT_DETAIL_Y: f32 = 0.63;
 
 /// Build the sci-fi crate fixture catalog.
 #[must_use]
@@ -164,8 +166,20 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "geometry.rounded_box.half_extents.x",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 1.0,
-                    maximum: 1.55,
+                    minimum: 0.92,
+                    maximum: 1.68,
+                },
+            },
+            ParameterBinding::Scalar {
+                slot: "body_proportions".to_owned(),
+                role: "body".to_owned(),
+                local_path: shape_asset::definition_scalar_path(
+                    crate::LOCAL_DEFINITION,
+                    "geometry.rounded_box.half_extents.z",
+                ),
+                transform: ScalarTransform::Ratio {
+                    minimum: 0.64,
+                    maximum: 0.9,
                 },
             },
             ParameterBinding::Scalar {
@@ -176,7 +190,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "geometry.rounded_box.half_extents.y",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.36,
+                    minimum: 0.34,
                     maximum: 0.56,
                 },
             },
@@ -188,8 +202,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "operation.1.recessed_panel_cut.depth",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.025,
-                    maximum: 0.085,
+                    minimum: 0.035,
+                    maximum: 0.13,
                 },
             },
             ParameterBinding::ChoiceToPrototype {
@@ -247,54 +261,49 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("trim".to_owned(), "edge_trim".to_owned()),
         ]),
         vec![
-            body_fragment("sparse_vent_body", &[[-0.22, -0.16], [0.22, -0.16]]),
+            body_fragment(
+                "sparse_vent_body",
+                &[
+                    VentSpec::new([-0.32, -0.26], [0.28, 0.065], 0.024),
+                    VentSpec::new([0.32, -0.26], [0.28, 0.065], 0.024),
+                ],
+            ),
             body_fragment(
                 "standard_vent_body",
-                &[[-0.3, -0.16], [0.0, -0.16], [0.3, -0.16]],
+                &[
+                    VentSpec::new([-0.34, -0.27], [0.22, 0.055], 0.019),
+                    VentSpec::new([0.0, -0.27], [0.22, 0.055], 0.019),
+                    VentSpec::new([0.34, -0.27], [0.22, 0.055], 0.019),
+                ],
             ),
             body_fragment(
                 "dense_vent_body",
-                &[[-0.39, -0.16], [-0.13, -0.16], [0.13, -0.16], [0.39, -0.16]],
+                &[
+                    VentSpec::new([-0.48, -0.28], [0.135, 0.043], 0.014),
+                    VentSpec::new([-0.24, -0.28], [0.135, 0.043], 0.014),
+                    VentSpec::new([0.0, -0.28], [0.135, 0.043], 0.014),
+                    VentSpec::new([0.24, -0.28], [0.135, 0.043], 0.014),
+                    VentSpec::new([0.48, -0.28], [0.135, 0.043], 0.014),
+                ],
             ),
-            plate_fragment(
+            rounded_box_fragment(
                 "front_access_plate",
                 "panel",
-                [1.45, 0.11],
-                0.035,
-                [0.0, 0.61, 0.62],
+                [0.78, 0.055, 0.08],
+                0.018,
+                [0.0, FRONT_DETAIL_Y, 0.58],
                 Vec::new(),
             ),
             fastener_fragment(),
-            rounded_box_fragment(
-                "flush_handle",
-                "handle",
-                [0.42, 0.055, 0.055],
-                0.018,
-                [0.0, 0.605, -0.47],
-                Vec::new(),
-            ),
-            rounded_box_fragment(
-                "side_rail_handle",
-                "handle",
-                [0.055, 0.08, 0.42],
-                0.025,
-                [1.305, 0.0, 0.0],
-                Vec::new(),
-            ),
-            rounded_box_fragment(
-                "cargo_bar_handle",
-                "handle",
-                [0.62, 0.055, 0.055],
-                0.02,
-                [0.0, 0.605, -0.82],
-                Vec::new(),
-            ),
+            flush_handle_fragment(),
+            side_rail_handle_fragment(),
+            cargo_bar_handle_fragment(),
             plate_fragment(
                 "edge_trim",
                 "trim",
-                [2.05, 0.06],
-                0.03,
-                [0.0, 0.625, 0.705],
+                [2.2, 0.11],
+                0.05,
+                [0.0, FRONT_DETAIL_Y, 0.72],
                 vec![linear_array(1, 2, [0.0, 0.0, -1.41])],
             ),
         ],
@@ -363,13 +372,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
     );
     profile.candidate_strategies = vec![
         CandidateStrategy {
-            id: "compact-storage".to_owned(),
-            label: "Compact Storage".to_owned(),
+            id: "compact-vented".to_owned(),
+            label: "Compact Vented".to_owned(),
             control_ids: vec![
                 "body_proportions".to_owned(),
-                "structural_heft".to_owned(),
+                "vent_density".to_owned(),
                 "handle_style".to_owned(),
-                "has_trim".to_owned(),
+                "detail_density".to_owned(),
             ],
         },
         CandidateStrategy {
@@ -377,17 +386,39 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             label: "Reinforced Cargo".to_owned(),
             control_ids: vec![
                 "structural_heft".to_owned(),
-                "edge_softness".to_owned(),
+                "panel_depth".to_owned(),
                 "detail_density".to_owned(),
                 "handle_style".to_owned(),
             ],
         },
         CandidateStrategy {
-            id: "vented-equipment".to_owned(),
-            label: "Vented Equipment".to_owned(),
+            id: "clean-lab-crate".to_owned(),
+            label: "Clean Lab Crate".to_owned(),
             control_ids: vec![
+                "body_proportions".to_owned(),
                 "vent_density".to_owned(),
+                "handle_style".to_owned(),
+                "detail_density".to_owned(),
+                "has_trim".to_owned(),
+            ],
+        },
+        CandidateStrategy {
+            id: "heavy-utility".to_owned(),
+            label: "Heavy Utility".to_owned(),
+            control_ids: vec![
+                "structural_heft".to_owned(),
+                "body_proportions".to_owned(),
+                "handle_style".to_owned(),
+                "detail_density".to_owned(),
+            ],
+        },
+        CandidateStrategy {
+            id: "deep-panel-equipment".to_owned(),
+            label: "Deep Panel Equipment".to_owned(),
+            control_ids: vec![
                 "panel_depth".to_owned(),
+                "vent_density".to_owned(),
+                "edge_softness".to_owned(),
                 "detail_density".to_owned(),
             ],
         },
@@ -395,23 +426,11 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             id: "minimal-industrial".to_owned(),
             label: "Minimal Industrial".to_owned(),
             control_ids: vec![
+                "body_proportions".to_owned(),
                 "panel_depth".to_owned(),
                 "handle_style".to_owned(),
                 "edge_softness".to_owned(),
                 "has_trim".to_owned(),
-            ],
-        },
-        CandidateStrategy {
-            id: "hero-prop".to_owned(),
-            label: "Hero Prop".to_owned(),
-            control_ids: vec![
-                "body_proportions".to_owned(),
-                "structural_heft".to_owned(),
-                "panel_depth".to_owned(),
-                "vent_density".to_owned(),
-                "handle_style".to_owned(),
-                "edge_softness".to_owned(),
-                "detail_density".to_owned(),
             ],
         },
     ];
@@ -451,7 +470,24 @@ pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
     built_in_part_group_descriptors_for_profile("sci-fi-crate")
 }
 
-fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
+#[derive(Debug, Clone, Copy)]
+struct VentSpec {
+    center: [f32; 2],
+    size: [f32; 2],
+    rim_width: f32,
+}
+
+impl VentSpec {
+    const fn new(center: [f32; 2], size: [f32; 2], rim_width: f32) -> Self {
+        Self {
+            center,
+            size,
+            rim_width,
+        }
+    }
+}
+
+fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
     let mut recipe = AssetRecipe::new(AssetId(1), format!("{id} fragment"));
     recipe.definitions.insert(
         crate::LOCAL_DEFINITION,
@@ -464,9 +500,9 @@ fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
                     half_extents: BODY_HALF_EXTENTS,
                     radius: BODY_RADIUS,
                 },
-                operations: body_operations(vent_centers),
+                operations: body_operations(vents),
             },
-            regions: body_regions(vent_centers.len()),
+            regions: body_regions(vents.len()),
             sockets: BTreeMap::from([(
                 SocketId(7),
                 SocketSpec {
@@ -515,7 +551,7 @@ fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
         SemanticCutGroupHint {
             label: "Vent slots".to_owned(),
             definition: crate::LOCAL_DEFINITION,
-            operations: (0..vent_centers.len())
+            operations: (0..vents.len())
                 .map(|index| OperationId(3 + index as u64))
                 .collect(),
             role: CutGroupRole::Vents,
@@ -525,7 +561,7 @@ fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
             }),
         },
     );
-    let hole_start = 3 + vent_centers.len() as u64;
+    let hole_start = 3 + vents.len() as u64;
     recipe.variation.semantic_cut_groups.insert(
         "mount_holes".to_owned(),
         SemanticCutGroupHint {
@@ -609,7 +645,7 @@ fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
             ),
             "Main panel depth",
             0.02,
-            0.09,
+            0.14,
             0.005,
             false,
         ),
@@ -652,27 +688,27 @@ fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {
     }
 }
 
-fn body_operations(vent_centers: &[[f32; 2]]) -> Vec<ModelingOperationSpec> {
+fn body_operations(vents: &[VentSpec]) -> Vec<ModelingOperationSpec> {
     let mut operations = vec![
         recessed_panel(1, [-0.38, 0.22], 1, 2, 10, 11, 12),
         recessed_panel(2, [0.38, 0.22], 3, 4, 13, 14, 15),
     ];
-    for (index, center) in vent_centers.iter().enumerate() {
+    for (index, vent) in vents.iter().enumerate() {
         let operation = 3 + index as u64;
         let loop_base = 5 + index as u64 * 2;
         let region_base = 30 + index as u64 * 2;
         operations.push(rectangular_vent(
             operation,
-            *center,
+            *vent,
             loop_base,
             loop_base + 1,
             region_base,
             region_base + 1,
         ));
     }
-    let hole_start = 3 + vent_centers.len() as u64;
-    let loop_start = 5 + vent_centers.len() as u64 * 2;
-    let region_start = 30 + vent_centers.len() as u64 * 2;
+    let hole_start = 3 + vents.len() as u64;
+    let loop_start = 5 + vents.len() as u64 * 2;
+    let region_start = 30 + vents.len() as u64 * 2;
     operations.push(mount_hole(
         hole_start,
         [-0.72, -0.45],
@@ -713,10 +749,10 @@ fn recessed_panel(
         region: FRONT_REGION,
         face: PlanarCutFace::PositiveY,
         center,
-        size: [0.36, 0.22],
+        size: [0.44, 0.32],
         depth: 0.058,
-        corner_radius: 0.025,
-        rim_width: 0.022,
+        corner_radius: 0.035,
+        rim_width: 0.036,
         corner_segments: 3,
         entry_loop: BoundaryLoopId(entry_loop),
         floor_loop: BoundaryLoopId(floor_loop),
@@ -730,7 +766,7 @@ fn recessed_panel(
 
 fn rectangular_vent(
     operation: u64,
-    center: [f32; 2],
+    vent: VentSpec,
     entry_loop: u64,
     exit_loop: u64,
     rim_region: u64,
@@ -740,10 +776,10 @@ fn rectangular_vent(
         operation: OperationId(operation),
         region: FRONT_REGION,
         face: PlanarCutFace::PositiveY,
-        center,
-        size: [0.18, 0.045],
+        center: vent.center,
+        size: vent.size,
         corner_radius: 0.012,
-        rim_width: 0.016,
+        rim_width: vent.rim_width,
         corner_segments: 2,
         entry_loop: BoundaryLoopId(entry_loop),
         exit_loop: BoundaryLoopId(exit_loop),
@@ -820,11 +856,11 @@ fn fastener_fragment() -> RecipeFragment {
     let mut fragment = cylinder_fragment(
         "corner_fastener",
         "fastener",
-        0.035,
-        0.038,
-        18,
-        [-0.77, 0.625, -0.62],
-        vec![linear_array(1, 8, [0.14, 0.0, 0.0])],
+        0.03,
+        0.08,
+        20,
+        [-0.82, FRONT_DETAIL_Y, -0.82],
+        vec![linear_array(1, 8, [0.15, 0.0, 0.0])],
     );
     let recipe = &mut fragment.recipe;
     recipe.parameters.insert(
@@ -852,4 +888,216 @@ fn fastener_fragment() -> RecipeFragment {
     recipe.next_ids.parameter = 5;
     assert!(validate_asset_recipe(recipe).is_valid());
     fragment
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BoxAssemblyPart {
+    definition: PartDefinitionId,
+    instance: PartInstanceId,
+    parent: Option<PartInstanceId>,
+    name: &'static str,
+    half_extents: [f32; 3],
+    radius: f32,
+    translation: [f32; 3],
+}
+
+fn flush_handle_fragment() -> RecipeFragment {
+    rounded_box_assembly_fragment(
+        "flush_handle",
+        "handle",
+        &[
+            BoxAssemblyPart {
+                definition: PartDefinitionId(90),
+                instance: PartInstanceId(91),
+                parent: None,
+                name: "flush inset grip back plate",
+                half_extents: [0.48, 0.065, 0.13],
+                radius: 0.026,
+                translation: [0.0, FRONT_DETAIL_Y, -0.47],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(92),
+                instance: PartInstanceId(93),
+                parent: Some(PartInstanceId(91)),
+                name: "left flush grip cheek",
+                half_extents: [0.055, 0.055, 0.19],
+                radius: 0.018,
+                translation: [-0.39, 0.13, 0.0],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(94),
+                instance: PartInstanceId(95),
+                parent: Some(PartInstanceId(91)),
+                name: "right flush grip cheek",
+                half_extents: [0.055, 0.055, 0.19],
+                radius: 0.018,
+                translation: [0.39, 0.13, 0.0],
+            },
+        ],
+    )
+}
+
+fn side_rail_handle_fragment() -> RecipeFragment {
+    rounded_box_assembly_fragment(
+        "side_rail_handle",
+        "handle",
+        &[
+            BoxAssemblyPart {
+                definition: PartDefinitionId(90),
+                instance: PartInstanceId(91),
+                parent: None,
+                name: "left side rail handle",
+                half_extents: [0.055, 0.065, 0.38],
+                radius: 0.024,
+                translation: [-0.72, FRONT_DETAIL_Y, -0.16],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(92),
+                instance: PartInstanceId(93),
+                parent: Some(PartInstanceId(91)),
+                name: "right side rail handle",
+                half_extents: [0.055, 0.065, 0.38],
+                radius: 0.024,
+                translation: [1.44, 0.0, 0.0],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(94),
+                instance: PartInstanceId(95),
+                parent: Some(PartInstanceId(91)),
+                name: "upper side rail bracket",
+                half_extents: [0.82, 0.05, 0.055],
+                radius: 0.018,
+                translation: [0.72, 0.14, 0.33],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(96),
+                instance: PartInstanceId(97),
+                parent: Some(PartInstanceId(91)),
+                name: "lower side rail bracket",
+                half_extents: [0.82, 0.05, 0.055],
+                radius: 0.018,
+                translation: [0.72, 0.14, -0.33],
+            },
+        ],
+    )
+}
+
+fn cargo_bar_handle_fragment() -> RecipeFragment {
+    rounded_box_assembly_fragment(
+        "cargo_bar_handle",
+        "handle",
+        &[
+            BoxAssemblyPart {
+                definition: PartDefinitionId(90),
+                instance: PartInstanceId(91),
+                parent: None,
+                name: "cargo bar grip",
+                half_extents: [0.72, 0.055, 0.06],
+                radius: 0.024,
+                translation: [0.0, FRONT_DETAIL_Y, -0.50],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(92),
+                instance: PartInstanceId(93),
+                parent: Some(PartInstanceId(91)),
+                name: "left cargo bar mount",
+                half_extents: [0.11, 0.055, 0.14],
+                radius: 0.022,
+                translation: [-0.58, 0.115, 0.0],
+            },
+            BoxAssemblyPart {
+                definition: PartDefinitionId(94),
+                instance: PartInstanceId(95),
+                parent: Some(PartInstanceId(91)),
+                name: "right cargo bar mount",
+                half_extents: [0.11, 0.055, 0.14],
+                radius: 0.022,
+                translation: [0.58, 0.115, 0.0],
+            },
+        ],
+    )
+}
+
+fn rounded_box_assembly_fragment(
+    id: &str,
+    role: &str,
+    parts: &[BoxAssemblyPart],
+) -> RecipeFragment {
+    let mut recipe = AssetRecipe::new(AssetId(1), format!("{id} fragment"));
+    for part in parts {
+        recipe.definitions.insert(
+            part.definition,
+            PartDefinition {
+                id: part.definition,
+                name: part.name.to_owned(),
+                tags: BTreeSet::from([role.to_owned(), format!("role:{role}")]),
+                geometry: GeometryRecipe {
+                    source: GeometrySource::RoundedBox {
+                        half_extents: part.half_extents,
+                        radius: part.radius,
+                    },
+                    operations: Vec::new(),
+                },
+                regions: BTreeMap::new(),
+                sockets: BTreeMap::new(),
+                local_pivot: Frame3::default(),
+                variant_group: None,
+                production_hints: None,
+            },
+        );
+        recipe.instances.insert(
+            part.instance,
+            PartInstance {
+                id: part.instance,
+                definition: part.definition,
+                name: part.name.to_owned(),
+                parent: part.parent,
+                local_transform: Transform3 {
+                    translation: part.translation,
+                    ..Transform3::default()
+                },
+                attachment: None,
+                enabled: true,
+                tags: BTreeSet::from([role.to_owned(), format!("role:{role}")]),
+                generated_by: None,
+            },
+        );
+    }
+    recipe.root_instances.extend(
+        parts
+            .iter()
+            .filter(|part| part.parent.is_none())
+            .map(|part| part.instance),
+    );
+    recipe.next_ids.part_definition = parts
+        .iter()
+        .map(|part| part.definition.0)
+        .max()
+        .unwrap_or(crate::LOCAL_DEFINITION.0)
+        + 1;
+    recipe.next_ids.part_instance = parts
+        .iter()
+        .map(|part| part.instance.0)
+        .max()
+        .unwrap_or(crate::LOCAL_INSTANCE.0)
+        + 1;
+    recipe.next_ids.parameter = 1;
+    recipe.next_ids.operation = 1;
+    recipe.next_ids.socket = 1;
+    assert!(
+        validate_asset_recipe(&recipe).is_valid(),
+        "{id} handle assembly should validate"
+    );
+    RecipeFragment {
+        schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
+        id: id.to_owned(),
+        provided_role: role.to_owned(),
+        exports: RecipeFragmentExports {
+            role_occurrence_roots: recipe.root_instances.clone(),
+            internal_roots: Vec::new(),
+            socket_ports: Vec::new(),
+            surface_ports: Vec::new(),
+        },
+        recipe,
+    }
 }
