@@ -28,10 +28,12 @@ use shape_gamekit::surface::{
     MaterialRecipe, MaterialSlotBinding, MaterialStylePack, SURFACE_ARTIFACT_SCHEMA_VERSION,
     SURFACE_CAPABILITIES_SCHEMA_VERSION, SURFACE_LAB_PACKAGE_SCHEMA_VERSION, SurfaceArtifact,
     SurfaceArtifactEvidence, SurfaceCapabilities, SurfaceEvidence, SurfaceLabPackage,
-    SurfaceMaterialSlot, SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet,
-    SurfaceTriangleBinding, SurfaceUvLayoutPolicy, SurfaceUvSet, SurfaceVariationChannels,
+    SurfaceMaterialSlot, SurfaceMaterialVariantCandidate, SurfaceMaterialVariantCandidateSet,
+    SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet, SurfaceTriangleBinding,
+    SurfaceUvLayoutPolicy, SurfaceUvSet, SurfaceVariationChannels, SurfaceVisualDeltaEvidence,
     TextureChannel, TextureRequirement, TextureRequirementSet, UnsupportedSurfaceOutputReport,
-    validate_surface_artifact_with_root, validate_surface_lab_package_with_root,
+    surface_visual_delta_report, validate_surface_artifact_with_root,
+    validate_surface_lab_package_with_root, validate_surface_material_variant_candidate_set,
 };
 use shape_gamekit::{
     CellBounds, CollisionProxy, ConstructionPhase, ConstructionProfile, ExportProfile,
@@ -42,6 +44,12 @@ use shape_gamekit::{
     validate_game_asset_pack,
 };
 use shape_mesh::{TriangleMesh, write_obj_to_path};
+use shape_render::surface_preview::{
+    SurfacePreviewMaterialBinding, SurfacePreviewOutput, SurfacePreviewRequest,
+    SurfacePreviewTexture, SurfacePreviewTextureChannel, SurfacePreviewTriangleBinding,
+    TextureSampling, default_surface_preview_request, render_material_slot_overlay,
+    render_surface_preview, surface_preview_contact_sheet,
+};
 use shape_render::{RenderSettings, RenderedImage, fit_camera_to_bounds_from_angles, render_mesh};
 
 use crate::{render_mesh_from_triangles, save_contact_sheet, save_png, write_json};
@@ -71,6 +79,13 @@ const UNSUPPORTED_TEXTURE_REPORT_FILE: &str = "surface/unsupported-texture-repor
 const SURFACE_UV_LAYOUT_FILE: &str = "surface/uv-layout.png";
 const SURFACE_SWATCH_SHEET_FILE: &str = "surface/material-swatch-sheet.png";
 const SURFACE_TEXTURE_CONTACT_SHEET_FILE: &str = "surface/texture-contact-sheet.png";
+const SURFACE_TEXTURED_PREVIEW_FILE: &str = "surface/textured-preview.png";
+const SURFACE_TEXTURED_CONTACT_SHEET_FILE: &str = "surface/textured-contact-sheet.png";
+const SURFACE_MATERIAL_SLOT_OVERLAY_FILE: &str = "surface/material-slot-overlay.png";
+const SURFACE_PREVIEW_REPORT_FILE: &str = "surface/surface-preview-report.json";
+const SURFACE_VARIANTS_DIR: &str = "surface/variants";
+const SURFACE_VARIANTS_CANDIDATES_FILE: &str = "surface/variants/candidates.json";
+const SURFACE_VARIANTS_CONTACT_SHEET_FILE: &str = "surface/variants/contact-sheet.png";
 const SURFACE_TRIANGLE_COVERAGE_FILE: &str = "surface/triangle-slot-coverage.json";
 const SURFACE_TEXTURE_DIR: &str = "surface/textures";
 const SURFACE_TEXTURE_SIZE: u32 = 256;
@@ -152,6 +167,8 @@ fn generate_static_prop_package(
         .with_context(|| format!("creating {}", out_dir.join("surface").display()))?;
     fs::create_dir_all(out_dir.join(SURFACE_TEXTURE_DIR))
         .with_context(|| format!("creating {}", out_dir.join(SURFACE_TEXTURE_DIR).display()))?;
+    fs::create_dir_all(out_dir.join(SURFACE_VARIANTS_DIR))
+        .with_context(|| format!("creating {}", out_dir.join(SURFACE_VARIANTS_DIR).display()))?;
 
     let fixture = profile.fixture();
     let output = compile_foundry_document(&fixture.document, &fixture)
@@ -245,6 +262,24 @@ fn generate_static_prop_package(
         out_dir.join(SURFACE_VALIDATION_REPORT_FILE),
         &surface_artifact_report,
     )?;
+    let surface_preview = write_surface_preview_evidence(&mesh, &surface_artifact, out_dir)
+        .context("writing textured surface preview evidence")?;
+    let surface_variant_candidates = write_static_crate_material_variants(
+        &mesh,
+        &surface_artifact,
+        &material_pack,
+        out_dir,
+        &surface_preview.image,
+    )
+    .context("writing static crate material-only surface variants")?;
+    let surface_variant_report =
+        validate_surface_material_variant_candidate_set(&surface_variant_candidates);
+    if !surface_variant_report.is_ready() {
+        bail!(
+            "generated material-only surface variants failed validation: {:#?}",
+            surface_variant_report.blockers
+        );
+    }
     write_json(
         out_dir.join(SURFACE_CAPABILITIES_FILE),
         &surface_capabilities_for_static_crate(&surface_artifact),
@@ -677,6 +712,14 @@ fn write_static_crate_texture_payloads(
     pack: &MaterialStylePack,
     out_dir: &Path,
 ) -> anyhow::Result<Vec<SurfaceTextureSet>> {
+    write_static_crate_texture_payloads_in_dir(pack, out_dir, SURFACE_TEXTURE_DIR)
+}
+
+fn write_static_crate_texture_payloads_in_dir(
+    pack: &MaterialStylePack,
+    out_dir: &Path,
+    texture_dir: &str,
+) -> anyhow::Result<Vec<SurfaceTextureSet>> {
     let mut texture_sets = Vec::with_capacity(pack.recipes.len());
     for (recipe_index, recipe) in pack.recipes.iter().enumerate() {
         let mut files = Vec::new();
@@ -687,7 +730,7 @@ fn write_static_crate_texture_payloads(
             TextureChannel::Occlusion,
         ] {
             let relative = format!(
-                "{SURFACE_TEXTURE_DIR}/{}-{}.png",
+                "{texture_dir}/{}-{}.png",
                 recipe.material_id,
                 texture_channel_slug(channel)
             );
@@ -730,6 +773,10 @@ fn write_texture_png(
     channel: TextureChannel,
     path: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
+    if let Some(parent) = path.as_ref().parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating texture directory {}", parent.display()))?;
+    }
     let mut image = RgbaImage::from_pixel(
         SURFACE_TEXTURE_SIZE,
         SURFACE_TEXTURE_SIZE,
@@ -1111,6 +1158,322 @@ fn write_texture_contact_sheet(
     Ok(())
 }
 
+fn write_surface_preview_evidence(
+    mesh: &TriangleMesh,
+    artifact: &SurfaceArtifact,
+    out_dir: &Path,
+) -> anyhow::Result<SurfacePreviewOutput> {
+    let request = surface_preview_request_for_artifact(mesh, artifact, out_dir, 512)?;
+    let preview = render_surface_preview(&request).map_err(|error| anyhow::anyhow!("{error}"))?;
+    save_png(&preview.image, out_dir.join(SURFACE_TEXTURED_PREVIEW_FILE))?;
+
+    let mut sheet_images = vec![preview.image.clone()];
+    for (yaw, pitch) in [(0.0, 12.0), (90.0, 12.0), (180.0, 18.0)] {
+        let mut view_request = request.clone();
+        view_request.camera = fit_camera_to_bounds_from_angles(mesh.bounds, yaw, pitch, 1.0);
+        let rendered =
+            render_surface_preview(&view_request).map_err(|error| anyhow::anyhow!("{error}"))?;
+        sheet_images.push(rendered.image);
+    }
+    let contact_sheet = surface_preview_contact_sheet(&sheet_images);
+    save_png(
+        &contact_sheet,
+        out_dir.join(SURFACE_TEXTURED_CONTACT_SHEET_FILE),
+    )?;
+
+    let overlay =
+        render_material_slot_overlay(&request).map_err(|error| anyhow::anyhow!("{error}"))?;
+    save_png(
+        &overlay.image,
+        out_dir.join(SURFACE_MATERIAL_SLOT_OVERLAY_FILE),
+    )?;
+    write_json(out_dir.join(SURFACE_PREVIEW_REPORT_FILE), &preview.report)?;
+    Ok(preview)
+}
+
+fn surface_preview_request_for_artifact(
+    mesh: &TriangleMesh,
+    artifact: &SurfaceArtifact,
+    package_root: &Path,
+    size: u32,
+) -> anyhow::Result<SurfacePreviewRequest> {
+    let uv_set = artifact
+        .uv_sets
+        .iter()
+        .find(|set| set.channel_index == 0)
+        .or_else(|| artifact.uv_sets.first())
+        .context("surface artifact has no TEXCOORD_0 set")?;
+    let material_bindings = artifact
+        .material_slots
+        .iter()
+        .map(|slot| SurfacePreviewMaterialBinding {
+            slot_id: slot.slot_id.clone(),
+            display_name: slot.display_name.clone(),
+            material_id: slot.recipe_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    let triangle_bindings = artifact
+        .triangle_bindings
+        .iter()
+        .map(|binding| SurfacePreviewTriangleBinding {
+            triangle_index: binding.triangle_index,
+            material_slot_id: binding.material_slot_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    let mut textures = Vec::new();
+    for texture_set in &artifact.texture_sets {
+        for file in &texture_set.files {
+            let Some(channel) = preview_texture_channel(file.channel) else {
+                continue;
+            };
+            let image = image::open(package_root.join(&file.path))
+                .with_context(|| format!("opening preview texture {}", file.path))?
+                .to_rgba8();
+            textures.push(SurfacePreviewTexture {
+                material_id: texture_set.material_recipe_id.clone(),
+                channel,
+                width: image.width(),
+                height: image.height(),
+                rgba8: image.into_raw(),
+            });
+        }
+    }
+    let mut request = default_surface_preview_request(
+        mesh.clone(),
+        uv_set.coordinates.clone(),
+        material_bindings,
+        triangle_bindings,
+        textures,
+        size,
+    );
+    request.sampling = TextureSampling::Bilinear;
+    Ok(request)
+}
+
+fn preview_texture_channel(channel: TextureChannel) -> Option<SurfacePreviewTextureChannel> {
+    match channel {
+        TextureChannel::BaseColor => Some(SurfacePreviewTextureChannel::BaseColor),
+        TextureChannel::Normal => Some(SurfacePreviewTextureChannel::Normal),
+        TextureChannel::MetallicRoughness => Some(SurfacePreviewTextureChannel::MetallicRoughness),
+        TextureChannel::Occlusion => Some(SurfacePreviewTextureChannel::Occlusion),
+        TextureChannel::Emissive => None,
+    }
+}
+
+fn write_static_crate_material_variants(
+    mesh: &TriangleMesh,
+    base_artifact: &SurfaceArtifact,
+    base_pack: &MaterialStylePack,
+    out_dir: &Path,
+    base_preview: &RenderedImage,
+) -> anyhow::Result<SurfaceMaterialVariantCandidateSet> {
+    let specs = material_variant_specs();
+    let mut candidates = Vec::with_capacity(specs.len());
+    let mut preview_images = Vec::with_capacity(specs.len());
+
+    for spec in specs {
+        let variant_dir = format!("{SURFACE_VARIANTS_DIR}/{}", spec.slug);
+        fs::create_dir_all(out_dir.join(&variant_dir))
+            .with_context(|| format!("creating {}", out_dir.join(&variant_dir).display()))?;
+        let material_pack = material_pack_variant(base_pack, &spec);
+        let texture_dir = format!("{variant_dir}/textures");
+        let texture_sets =
+            write_static_crate_texture_payloads_in_dir(&material_pack, out_dir, &texture_dir)?;
+        let mut artifact = base_artifact.clone();
+        artifact.texture_sets = texture_sets;
+        artifact.material_slots = artifact
+            .material_slots
+            .into_iter()
+            .map(|mut slot| {
+                if let Some(binding) = material_pack
+                    .slot_bindings
+                    .iter()
+                    .find(|binding| binding.slot_id == slot.slot_id)
+                {
+                    slot.recipe_id = binding.material_id.clone();
+                }
+                slot
+            })
+            .collect();
+
+        let surface_artifact_ref = format!("{variant_dir}/surface-artifact.json");
+        let material_pack_ref = format!("{variant_dir}/material-pack.json");
+        let textured_preview_ref = format!("{variant_dir}/textured-preview.png");
+        let surface_delta_ref = format!("{variant_dir}/surface-delta.json");
+        write_json(out_dir.join(&surface_artifact_ref), &artifact)?;
+        write_json(out_dir.join(&material_pack_ref), &material_pack)?;
+
+        let request = surface_preview_request_for_artifact(mesh, &artifact, out_dir, 256)?;
+        let preview =
+            render_surface_preview(&request).map_err(|error| anyhow::anyhow!("{error}"))?;
+        save_png(&preview.image, out_dir.join(&textured_preview_ref))?;
+        preview_images.push(preview.image.clone());
+
+        let visible_delta = image_pixel_delta(base_preview, &preview.image);
+        let delta = surface_visual_delta_report(
+            base_artifact,
+            &artifact,
+            spec.slug,
+            SurfaceVisualDeltaEvidence {
+                base_frozen_mesh_fingerprint: base_artifact.source_artifact_fingerprint.clone(),
+                candidate_frozen_mesh_fingerprint: artifact.source_artifact_fingerprint.clone(),
+                base_textured_preview_ref: Some(SURFACE_TEXTURED_PREVIEW_FILE.to_owned()),
+                candidate_textured_preview_ref: Some(textured_preview_ref.clone()),
+                visible_surface_pixel_delta: Some(visible_delta),
+            },
+        );
+        write_json(out_dir.join(&surface_delta_ref), &delta)?;
+        candidates.push(SurfaceMaterialVariantCandidate {
+            candidate_id: spec.slug.to_owned(),
+            display_name: spec.display_name.to_owned(),
+            variant_dir,
+            surface_artifact_ref,
+            material_pack_ref,
+            textured_preview_ref,
+            surface_delta_ref,
+            frozen_mesh_fingerprint: base_artifact.source_artifact_fingerprint.clone(),
+            preserves_frozen_geometry: !delta.shape_delta_leak_detected,
+            result_class: delta.result_class,
+            diagnostics: delta.diagnostics,
+        });
+    }
+
+    let contact_sheet = surface_preview_contact_sheet(&preview_images);
+    save_png(
+        &contact_sheet,
+        out_dir.join(SURFACE_VARIANTS_CONTACT_SHEET_FILE),
+    )?;
+    let set = SurfaceMaterialVariantCandidateSet {
+        schema_version: shape_gamekit::surface::SURFACE_MATERIAL_VARIANT_CANDIDATES_SCHEMA_VERSION,
+        profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
+        base_surface_artifact_ref: SURFACE_ARTIFACT_FILE.to_owned(),
+        base_textured_preview_ref: SURFACE_TEXTURED_PREVIEW_FILE.to_owned(),
+        candidates,
+    };
+    write_json(out_dir.join(SURFACE_VARIANTS_CANDIDATES_FILE), &set)?;
+    Ok(set)
+}
+
+#[derive(Debug, Copy, Clone)]
+struct MaterialVariantSpec {
+    slug: &'static str,
+    display_name: &'static str,
+    body: [u8; 3],
+    dark: [u8; 3],
+    trim: [u8; 3],
+    metal: [u8; 3],
+    fallback: [u8; 3],
+}
+
+fn material_variant_specs() -> Vec<MaterialVariantSpec> {
+    vec![
+        MaterialVariantSpec {
+            slug: "clean-lab-white",
+            display_name: "Clean Lab White",
+            body: [218, 224, 218],
+            dark: [76, 83, 86],
+            trim: [170, 190, 184],
+            metal: [176, 178, 172],
+            fallback: [190, 196, 190],
+        },
+        MaterialVariantSpec {
+            slug: "worn-hazard-yellow",
+            display_name: "Worn Hazard Yellow",
+            body: [204, 166, 42],
+            dark: [42, 39, 32],
+            trim: [228, 190, 48],
+            metal: [142, 135, 118],
+            fallback: [116, 102, 68],
+        },
+        MaterialVariantSpec {
+            slug: "dark-industrial-metal",
+            display_name: "Dark Industrial Metal",
+            body: [42, 47, 50],
+            dark: [18, 20, 21],
+            trim: [112, 116, 116],
+            metal: [118, 124, 124],
+            fallback: [54, 58, 60],
+        },
+        MaterialVariantSpec {
+            slug: "field-blue-utility",
+            display_name: "Field Blue Utility",
+            body: [55, 94, 140],
+            dark: [24, 34, 44],
+            trim: [92, 132, 172],
+            metal: [136, 146, 150],
+            fallback: [58, 78, 102],
+        },
+        MaterialVariantSpec {
+            slug: "graphite-cargo",
+            display_name: "Graphite Cargo",
+            body: [70, 76, 76],
+            dark: [26, 28, 29],
+            trim: [108, 116, 110],
+            metal: [150, 150, 142],
+            fallback: [82, 86, 84],
+        },
+        MaterialVariantSpec {
+            slug: "orange-warning-trim",
+            display_name: "Orange Warning Trim",
+            body: [92, 98, 96],
+            dark: [28, 30, 32],
+            trim: [216, 102, 36],
+            metal: [156, 148, 136],
+            fallback: [104, 90, 78],
+        },
+    ]
+}
+
+fn material_pack_variant(
+    base_pack: &MaterialStylePack,
+    spec: &MaterialVariantSpec,
+) -> MaterialStylePack {
+    let mut pack = base_pack.clone();
+    pack.id = format!("{}-{}", base_pack.id, spec.slug);
+    pack.display_name = format!("{} - {}", base_pack.display_name, spec.display_name);
+    for recipe in &mut pack.recipes {
+        recipe.base_color_srgb = match recipe.material_id.as_str() {
+            "worn-painted-sci-fi-metal" => spec.body,
+            "dark-rubber-industrial-detail" => spec.dark,
+            "exposed-edge-metal" => spec.metal,
+            "industrial-warning-trim" => spec.trim,
+            _ => spec.fallback,
+        };
+        recipe.display_name = format!("{} {}", spec.display_name, recipe.display_name);
+    }
+    pack
+}
+
+fn image_pixel_delta(left: &RenderedImage, right: &RenderedImage) -> f32 {
+    let width = left.width.min(right.width);
+    let height = left.height.min(right.height);
+    if width == 0 || height == 0 {
+        return 0.0;
+    }
+    let mut total = 0.0_f32;
+    let mut count = 0_u32;
+    for y in 0..height {
+        for x in 0..width {
+            let Some(left_pixel) = left.pixel(x, y) else {
+                continue;
+            };
+            let Some(right_pixel) = right.pixel(x, y) else {
+                continue;
+            };
+            total += ((f32::from(left_pixel[0]) - f32::from(right_pixel[0])).abs()
+                + (f32::from(left_pixel[1]) - f32::from(right_pixel[1])).abs()
+                + (f32::from(left_pixel[2]) - f32::from(right_pixel[2])).abs())
+                / (255.0 * 3.0);
+            count = count.saturating_add(1);
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        (total / count as f32).clamp(0.0, 1.0)
+    }
+}
+
 fn uv_to_pixel(uv: [f32; 2], size: u32, margin: i32) -> [i32; 2] {
     let span = (size as i32 - margin * 2).max(1) as f32;
     [
@@ -1441,6 +1804,12 @@ mod tests {
             SURFACE_UV_LAYOUT_FILE,
             SURFACE_SWATCH_SHEET_FILE,
             SURFACE_TEXTURE_CONTACT_SHEET_FILE,
+            SURFACE_TEXTURED_PREVIEW_FILE,
+            SURFACE_TEXTURED_CONTACT_SHEET_FILE,
+            SURFACE_MATERIAL_SLOT_OVERLAY_FILE,
+            SURFACE_PREVIEW_REPORT_FILE,
+            SURFACE_VARIANTS_CANDIDATES_FILE,
+            SURFACE_VARIANTS_CONTACT_SHEET_FILE,
             SURFACE_TRIANGLE_COVERAGE_FILE,
             LOD1_PROXY_FILE,
             LOD2_COLLISION_FILE,
@@ -1551,6 +1920,43 @@ mod tests {
                 .join(SURFACE_TEXTURE_CONTACT_SHEET_FILE)
                 .is_file()
         );
+        assert!(temp.path().join(SURFACE_TEXTURED_PREVIEW_FILE).is_file());
+        assert!(
+            temp.path()
+                .join(SURFACE_TEXTURED_CONTACT_SHEET_FILE)
+                .is_file()
+        );
+        assert!(temp.path().join(SURFACE_PREVIEW_REPORT_FILE).is_file());
+        assert!(temp.path().join(SURFACE_VARIANTS_CANDIDATES_FILE).is_file());
+        assert!(
+            temp.path()
+                .join(SURFACE_VARIANTS_CONTACT_SHEET_FILE)
+                .is_file()
+        );
+        let variant_candidates: SurfaceMaterialVariantCandidateSet = serde_json::from_str(
+            &fs::read_to_string(temp.path().join(SURFACE_VARIANTS_CANDIDATES_FILE))
+                .expect("variant candidates json"),
+        )
+        .expect("variant candidates decode");
+        assert_eq!(variant_candidates.candidates.len(), 6);
+        assert!(
+            variant_candidates
+                .candidates
+                .iter()
+                .all(|candidate| candidate.preserves_frozen_geometry)
+        );
+        for candidate in &variant_candidates.candidates {
+            assert!(
+                temp.path().join(&candidate.textured_preview_ref).is_file(),
+                "missing {}",
+                candidate.textured_preview_ref
+            );
+            assert!(
+                temp.path().join(&candidate.surface_delta_ref).is_file(),
+                "missing {}",
+                candidate.surface_delta_ref
+            );
+        }
 
         let capabilities: SurfaceCapabilities = serde_json::from_str(
             &fs::read_to_string(temp.path().join(SURFACE_CAPABILITIES_FILE))
@@ -1639,6 +2045,12 @@ mod tests {
             SURFACE_SWATCH_SHEET_FILE,
             SURFACE_TEXTURE_CONTACT_SHEET_FILE,
             SURFACE_TRIANGLE_COVERAGE_FILE,
+            SURFACE_TEXTURED_PREVIEW_FILE,
+            SURFACE_TEXTURED_CONTACT_SHEET_FILE,
+            SURFACE_MATERIAL_SLOT_OVERLAY_FILE,
+            SURFACE_PREVIEW_REPORT_FILE,
+            SURFACE_VARIANTS_CANDIDATES_FILE,
+            SURFACE_VARIANTS_CONTACT_SHEET_FILE,
             SURFACE_GLB_FILE,
             SURFACE_GLB_VALIDATION_REPORT_FILE,
         ] {
