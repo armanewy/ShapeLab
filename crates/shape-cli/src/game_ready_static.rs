@@ -1277,9 +1277,14 @@ fn write_static_crate_material_variants(
         fs::create_dir_all(out_dir.join(&variant_dir))
             .with_context(|| format!("creating {}", out_dir.join(&variant_dir).display()))?;
         let material_pack = material_pack_variant(base_pack, &spec);
+        let changed_material_slots = changed_material_slots(base_pack, &material_pack);
         let texture_dir = format!("{variant_dir}/textures");
         let texture_sets =
             write_static_crate_texture_payloads_in_dir(&material_pack, out_dir, &texture_dir)?;
+        let texture_files = texture_sets
+            .iter()
+            .flat_map(|set| set.files.iter().map(|file| file.path.clone()))
+            .collect::<Vec<_>>();
         let mut artifact = base_artifact.clone();
         artifact.texture_sets = texture_sets;
         artifact.material_slots = artifact
@@ -1326,14 +1331,25 @@ fn write_static_crate_material_variants(
         write_json(out_dir.join(&surface_delta_ref), &delta)?;
         candidates.push(SurfaceMaterialVariantCandidate {
             candidate_id: spec.slug.to_owned(),
+            title: spec.display_name.to_owned(),
             display_name: spec.display_name.to_owned(),
+            summary: format!(
+                "Material-only Sci-Fi Crate surface variant changing {} slots; frozen mesh, UVs, and triangle bindings are preserved.",
+                changed_material_slots.len()
+            ),
             variant_dir,
+            changed_material_slots,
             surface_artifact_ref,
             material_pack_ref,
-            textured_preview_ref,
+            textured_preview_ref: textured_preview_ref.clone(),
+            preview_path: textured_preview_ref,
             surface_delta_ref,
+            surface_delta: delta.clone(),
+            texture_files,
             frozen_mesh_fingerprint: base_artifact.source_artifact_fingerprint.clone(),
             preserves_frozen_geometry: !delta.shape_delta_leak_detected,
+            full_ready_status: shape_gamekit::surface::SurfaceLabStatus::Blocked,
+            blocked_full_ready: true,
             result_class: delta.result_class,
             diagnostics: delta.diagnostics,
         });
@@ -1353,6 +1369,36 @@ fn write_static_crate_material_variants(
     };
     write_json(out_dir.join(SURFACE_VARIANTS_CANDIDATES_FILE), &set)?;
     Ok(set)
+}
+
+fn changed_material_slots(
+    base_pack: &MaterialStylePack,
+    candidate_pack: &MaterialStylePack,
+) -> Vec<String> {
+    let base_colors = material_slot_base_colors(base_pack);
+    material_slot_base_colors(candidate_pack)
+        .into_iter()
+        .filter_map(|(slot_id, color)| {
+            (base_colors.get(slot_id.as_str()).copied() != Some(color)).then_some(slot_id)
+        })
+        .collect()
+}
+
+fn material_slot_base_colors(pack: &MaterialStylePack) -> BTreeMap<String, [u8; 3]> {
+    let recipe_colors = pack
+        .recipes
+        .iter()
+        .map(|recipe| (recipe.material_id.as_str(), recipe.base_color_srgb))
+        .collect::<BTreeMap<_, _>>();
+    pack.slot_bindings
+        .iter()
+        .filter_map(|binding| {
+            recipe_colors
+                .get(binding.material_id.as_str())
+                .copied()
+                .map(|color| (binding.slot_id.clone(), color))
+        })
+        .collect()
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1946,7 +1992,24 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.preserves_frozen_geometry)
         );
+        assert!(
+            variant_candidates
+                .candidates
+                .iter()
+                .all(
+                    |candidate| candidate.full_ready_status == SurfaceLabStatus::Blocked
+                        && candidate.blocked_full_ready
+                )
+        );
         for candidate in &variant_candidates.candidates {
+            assert_eq!(candidate.title, candidate.display_name);
+            assert!(!candidate.summary.is_empty());
+            assert!(!candidate.changed_material_slots.is_empty());
+            assert_eq!(candidate.preview_path, candidate.textured_preview_ref);
+            assert_eq!(candidate.surface_delta.candidate_id, candidate.candidate_id);
+            assert_eq!(candidate.surface_delta.result_class, candidate.result_class);
+            assert!(!candidate.surface_delta.shape_delta_leak_detected);
+            assert!(!candidate.texture_files.is_empty());
             assert!(
                 temp.path().join(&candidate.textured_preview_ref).is_file(),
                 "missing {}",
@@ -1956,6 +2019,30 @@ mod tests {
                 temp.path().join(&candidate.surface_delta_ref).is_file(),
                 "missing {}",
                 candidate.surface_delta_ref
+            );
+            for texture_file in &candidate.texture_files {
+                assert!(
+                    temp.path().join(texture_file).is_file(),
+                    "missing {texture_file}"
+                );
+            }
+            let candidate_artifact: SurfaceArtifact = serde_json::from_str(
+                &fs::read_to_string(temp.path().join(&candidate.surface_artifact_ref))
+                    .expect("candidate artifact json"),
+            )
+            .expect("candidate artifact decodes");
+            assert_eq!(
+                candidate_artifact.source_artifact_fingerprint,
+                surface_artifact.source_artifact_fingerprint
+            );
+            assert_eq!(
+                candidate_artifact.frozen_mesh_ref,
+                surface_artifact.frozen_mesh_ref
+            );
+            assert_eq!(candidate_artifact.uv_sets, surface_artifact.uv_sets);
+            assert_eq!(
+                candidate_artifact.triangle_bindings,
+                surface_artifact.triangle_bindings
             );
         }
 
