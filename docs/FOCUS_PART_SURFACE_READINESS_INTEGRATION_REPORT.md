@@ -24,6 +24,42 @@ Surface, rigging, skinning, or animation claims in the novice UI.
 - Full game-ready status remains blocked without manual review and engine import
   proof.
 
+## Integration Questions
+
+- Were both branches merged?
+  Yes.
+
+- Did Focus Part still work after Surface Preview/Rig/Motion integration?
+  The focused Foundry, search, render, app, and direction-board gates passed.
+
+- Does Surface mode remain truthful in the UI?
+  Yes. Surface package availability is separate from Visual Foundry Surface
+  variation and Focus Part Surface availability.
+
+- Are shape and surface deltas kept separate?
+  Yes. Foundry shape candidates still use `CandidateVisibleDeltaReport`, while
+  surface material variants use `SurfaceVisualDeltaReport`.
+
+- Does Sci-Fi Crate package include textured preview evidence and material
+  variants?
+  Yes.
+
+- Does the package remain blocked from full game-ready?
+  Yes.
+
+- Are rig/motion contracts hidden from novice UI?
+  Yes. Product-visible copy tests reject rig, skinning, animation, and
+  retargeting overclaims.
+
+- Did manual screenshot verification pass?
+  Not completed. The Windows automation helper failed before app launch.
+
+- Did clippy and release build pass?
+  Yes.
+
+- Are any failing workspace tests inherited from main?
+  No failing gates remained in the commands run for this integration branch.
+
 ## Package Evidence
 
 The integrated static prop package is expected to emit:
