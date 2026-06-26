@@ -97,6 +97,24 @@ pub struct AttachmentSocketDescriptor {
     pub local_rotation_xyzw: [f32; 4],
 }
 
+/// Descriptor-only mechanical pivot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PivotDescriptor {
+    /// Stable pivot ID.
+    pub pivot_id: String,
+    /// Product-facing label.
+    pub display_name: String,
+    /// Optional joint this pivot follows.
+    #[serde(default)]
+    pub parent_joint_id: Option<String>,
+    /// Local pivot origin.
+    pub local_translation: [f32; 3],
+    /// Local pivot rotation as `[x, y, z, w]`.
+    pub local_rotation_xyzw: [f32; 4],
+    /// Local normalized pivot axis.
+    pub local_axis: [f32; 3],
+}
+
 /// One rig artifact.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RigArtifact {
@@ -116,6 +134,9 @@ pub struct RigArtifact {
     /// Descriptor-only sockets.
     #[serde(default)]
     pub attachment_sockets: Vec<AttachmentSocketDescriptor>,
+    /// Descriptor-only pivots for simple mechanical assets.
+    #[serde(default)]
+    pub pivots: Vec<PivotDescriptor>,
     /// Skin binding readiness.
     pub skin_binding_status: SkinBindingStatus,
     /// True only when bind pose evidence is present.
@@ -191,6 +212,7 @@ pub fn validate_rig_artifact(artifact: &RigArtifact) -> RigValidationReport {
         &mut passed_checks,
         &mut blockers,
     );
+    validate_pivots(&artifact.pivots, &mut passed_checks, &mut blockers);
 
     let status = match artifact.target_kind {
         RigTargetKind::StaticProp => {
@@ -207,7 +229,10 @@ pub fn validate_rig_artifact(artifact: &RigArtifact) -> RigValidationReport {
             if artifact.skin_binding_status != SkinBindingStatus::DescriptorOnlyNoSkinning {
                 blockers.push("mechanical_prop_must_be_descriptor_only_no_skinning".to_owned());
             }
-            if artifact.attachment_sockets.is_empty() && artifact.skeleton.is_none() {
+            if artifact.attachment_sockets.is_empty()
+                && artifact.pivots.is_empty()
+                && artifact.skeleton.is_none()
+            {
                 blockers.push("mechanical_descriptor_missing".to_owned());
             }
             if blockers.is_empty() {
@@ -321,6 +346,31 @@ fn validate_sockets(
     }
 }
 
+fn validate_pivots(
+    pivots: &[PivotDescriptor],
+    passed_checks: &mut Vec<String>,
+    blockers: &mut Vec<String>,
+) {
+    let mut ids = Vec::<&str>::new();
+    for pivot in pivots {
+        require_non_empty(&pivot.pivot_id, "missing_pivot_id", blockers);
+        require_non_empty(&pivot.display_name, "missing_pivot_display_name", blockers);
+        if ids.contains(&pivot.pivot_id.as_str()) {
+            blockers.push("duplicate_pivot_id".to_owned());
+        }
+        if !array_is_finite(&pivot.local_translation)
+            || !quat_is_finite(&pivot.local_rotation_xyzw)
+            || !axis_is_finite_nonzero(&pivot.local_axis)
+        {
+            blockers.push("pivot_transform_non_finite".to_owned());
+        }
+        ids.push(&pivot.pivot_id);
+    }
+    if !pivots.is_empty() {
+        passed_checks.push("pivot_descriptors_valid".to_owned());
+    }
+}
+
 fn require_non_empty(value: &str, issue: &str, blockers: &mut Vec<String>) {
     if value.trim().is_empty() {
         blockers.push(issue.to_owned());
@@ -333,6 +383,11 @@ fn array_is_finite(values: &[f32; 3]) -> bool {
 
 fn quat_is_finite(values: &[f32; 4]) -> bool {
     values.iter().all(|value| value.is_finite())
+}
+
+fn axis_is_finite_nonzero(values: &[f32; 3]) -> bool {
+    values.iter().all(|value| value.is_finite())
+        && values.iter().map(|value| value * value).sum::<f32>() > 0.0
 }
 
 #[cfg(test)]
@@ -351,6 +406,7 @@ mod tests {
             mesh_layer: mesh_layer(),
             skeleton: None,
             attachment_sockets: Vec::new(),
+            pivots: Vec::new(),
             skin_binding_status: SkinBindingStatus::NotApplicable,
             bind_pose_evidence: false,
             skin_weight_evidence: false,
@@ -377,6 +433,7 @@ mod tests {
                 local_translation: [0.0, 0.0, 0.0],
                 local_rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
             }],
+            pivots: Vec::new(),
             skin_binding_status: SkinBindingStatus::DescriptorOnlyNoSkinning,
             bind_pose_evidence: false,
             skin_weight_evidence: false,
@@ -385,6 +442,39 @@ mod tests {
 
         assert_eq!(report.status, RigReadinessStatus::DescriptorOnly);
         assert!(!report.is_rig_ready());
+    }
+
+    #[test]
+    fn mechanical_prop_allows_descriptor_only_pivots_without_skinning() {
+        let report = validate_rig_artifact(&RigArtifact {
+            schema_version: RIG_ARTIFACT_SCHEMA_VERSION,
+            artifact_id: "rig:gear".to_owned(),
+            display_name: "Gear Pivot".to_owned(),
+            target_kind: RigTargetKind::MechanicalProp,
+            mesh_layer: mesh_layer(),
+            skeleton: None,
+            attachment_sockets: Vec::new(),
+            pivots: vec![PivotDescriptor {
+                pivot_id: "rotation_axis".to_owned(),
+                display_name: "Rotation Axis".to_owned(),
+                parent_joint_id: None,
+                local_translation: [0.0, 0.0, 0.0],
+                local_rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+                local_axis: [0.0, 1.0, 0.0],
+            }],
+            skin_binding_status: SkinBindingStatus::DescriptorOnlyNoSkinning,
+            bind_pose_evidence: false,
+            skin_weight_evidence: false,
+            arbitrary_auto_rig_claim: false,
+        });
+
+        assert_eq!(report.status, RigReadinessStatus::DescriptorOnly);
+        assert!(!report.is_rig_ready());
+        assert!(
+            report
+                .passed_checks
+                .contains(&"pivot_descriptors_valid".to_owned())
+        );
     }
 
     #[test]
@@ -458,6 +548,7 @@ mod tests {
                 ],
             }),
             attachment_sockets: Vec::new(),
+            pivots: Vec::new(),
             skin_binding_status: SkinBindingStatus::Complete,
             bind_pose_evidence: true,
             skin_weight_evidence: true,

@@ -9,6 +9,10 @@ use shape_gamekit::export::{
 use shape_gamekit::gltf::{
     StaticPropGlbMetadata, encode_static_prop_glb, encode_static_prop_surface_glb,
 };
+use shape_gamekit::lineage::{
+    GameAssetLayerKind, GameAssetLayerRef, layers_invalidated_by_frozen_topology_change,
+    material_only_variant_preserves_rig_motion,
+};
 use shape_gamekit::surface::{
     SURFACE_ARTIFACT_SCHEMA_VERSION, SurfaceArtifact, SurfaceArtifactEvidence, SurfaceMaterialSlot,
     SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet, SurfaceTriangleBinding,
@@ -841,4 +845,73 @@ fn static_prop_lower_lods_must_be_distinct_decreasing_and_non_exact() {
     assert!(blocker_codes.contains(&"duplicate_lod_artifact"));
     assert!(blocker_codes.contains(&"lod_triangle_targets_not_decreasing"));
     assert!(blocker_codes.contains(&"lower_lod_marked_exact_source"));
+}
+
+#[test]
+fn rig_motion_lineage_topology_change_invalidates_dependent_layers() {
+    let invalidated = layers_invalidated_by_frozen_topology_change(
+        "mesh:a",
+        "topology:a",
+        "mesh:a",
+        "topology:b",
+    );
+
+    assert!(invalidated.contains(&GameAssetLayerKind::Rig));
+    assert!(invalidated.contains(&GameAssetLayerKind::Motion));
+}
+
+#[test]
+fn rig_motion_lineage_material_only_variant_preserves_dependent_layers() {
+    let base = GameAssetLayerRef::new(
+        GameAssetLayerKind::Surface,
+        "surface/base.json",
+        "mesh:abc",
+        "topology:abc",
+        Some("mesh/frozen.obj".to_owned()),
+    );
+    let variant = GameAssetLayerRef::new(
+        GameAssetLayerKind::Surface,
+        "surface/variants/hazard/surface-artifact.json",
+        "mesh:abc",
+        "topology:abc",
+        Some("mesh/frozen.obj".to_owned()),
+    );
+
+    assert!(material_only_variant_preserves_rig_motion(&base, &variant));
+    assert!(
+        layers_invalidated_by_frozen_topology_change(
+            "mesh:abc",
+            "topology:abc",
+            "mesh:abc",
+            "topology:abc"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn rig_motion_product_docs_keep_default_novice_ui_hidden() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let stack = std::fs::read_to_string(root.join("docs/FOUNDRY_MAKE_CANVAS_PRODUCT_STACK.md"))
+        .expect("product stack doc");
+    let positioning = std::fs::read_to_string(root.join("docs/PRODUCT_POSITIONING_BOUNDARY.md"))
+        .expect("positioning doc");
+
+    assert!(stack.contains("Rig and motion readiness remain hidden from the novice UI."));
+    assert!(stack.contains("rig/motion contracts remain hidden"));
+    for forbidden in [
+        "rig-ready",
+        "animation-ready",
+        "auto-rig",
+        "automatic rigging",
+        "animated character",
+    ] {
+        assert!(
+            !positioning.to_ascii_lowercase().contains(forbidden),
+            "product positioning must not advertise {forbidden}"
+        );
+    }
 }
