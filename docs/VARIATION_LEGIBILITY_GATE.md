@@ -49,3 +49,20 @@ The product may report smaller boards, for example "Generated 4 visually
 distinct directions." and "Rejected 2 subtle candidates that looked too
 similar." Surface Focus remains unavailable until textured previews and
 material candidate support exist.
+
+## v1 Candidate Engine
+
+Candidate Legibility Engine v1 adds a strict `PerceptualCandidateReport` before
+duplicate collapse and diversity selection. The report compares parent and
+candidate evidence across fixed cameras, records max and average preview delta,
+silhouette delta, bounding-box delta, changed semantic part groups, changed
+controls, a product legibility class, and a plain rejection reason.
+
+Whole-asset Shape and Complete Look candidates must be Clear or Strong. Detail
+candidates may be subtler only when Detail was explicitly requested. Surface
+and Wear remain unavailable until real surface/material preview evidence
+exists.
+
+The generator must not pad to six. If only three candidates pass, the board
+returns three and diagnostics say how many visually weak candidates were
+rejected.
