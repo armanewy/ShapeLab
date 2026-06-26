@@ -73,10 +73,21 @@ pub enum FoundryCommand {
     },
     /// Clear part/material/detail focus and return to whole-asset variation.
     ClearVariationFocus,
+    /// Clear semantic part focus and return to whole-asset variation.
+    ClearFocusPartGroup,
     /// Focus a semantic part group.
     SetFocusPartGroup {
         /// Stable semantic part-group ID.
         group_id: String,
+    },
+    /// Generate candidates for a focused semantic part group.
+    GenerateFocusedPartCandidates {
+        /// Stable semantic part-group ID.
+        group_id: String,
+        /// Product-safe variation channels.
+        channels: Vec<VariationChannel>,
+        /// Product-safe generation mode name.
+        mode: String,
     },
     /// Generate candidates.
     GenerateCandidates(GenerateCandidatesRequest),

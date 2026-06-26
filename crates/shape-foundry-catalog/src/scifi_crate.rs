@@ -13,7 +13,10 @@ use shape_family_compile::{
     FragmentSocketPort, ParameterBinding, RECIPE_FRAGMENT_SCHEMA_VERSION, RecipeFragment,
     RecipeFragmentExports, ScalarTransform, scalar_parameter,
 };
-use shape_foundry::{CandidateStrategy, ControlValue};
+use shape_foundry::{
+    CandidateStrategy, ControlValue, FoundryPartGroupDescriptor,
+    built_in_part_group_descriptors_for_profile,
+};
 
 use crate::{
     FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog, advisory_control,
@@ -283,7 +286,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "handle",
                 [0.62, 0.055, 0.055],
                 0.02,
-                [0.0, 0.64, -0.77],
+                [0.0, 0.64, -0.86],
                 Vec::new(),
             ),
             plate_fragment(
@@ -440,6 +443,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("advisory_weathering".to_owned(), ControlValue::Scalar(0.25)),
         ]),
     })
+}
+
+/// Product-safe semantic part groups for the Sci-Fi Industrial Crate.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("sci-fi-crate")
 }
 
 fn body_fragment(id: &str, vent_centers: &[[f32; 2]]) -> RecipeFragment {

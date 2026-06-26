@@ -27,6 +27,7 @@ use shape_project::foundry::{
 use shape_render::{
     OrbitCamera, RenderSettings, fit_camera_to_bounds, foundry::FoundryPreviewCache, render_mesh,
 };
+use shape_search::foundry::{FoundryCandidateMode, FoundryCandidateRequest};
 
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
@@ -759,6 +760,119 @@ impl FoundryDesktopApp {
                         );
                     }
                     ui.add_space(16.0);
+                    if let Some(document) = self.state.document.as_ref() {
+                        let part_groups = directions::direction_part_groups_for_document(document);
+                        if !part_groups.is_empty() {
+                            let active_group_id = document
+                                .variation_state
+                                .intent
+                                .scope
+                                .semantic_part_group_id()
+                                .map(str::to_owned);
+                            ui.label(
+                                RichText::new("Focus Part")
+                                    .color(colors.text_muted)
+                                    .small()
+                                    .strong(),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal_wrapped(|ui| {
+                                for group in &part_groups {
+                                    let selected = active_group_id.as_deref()
+                                        == Some(group.group_id.as_str());
+                                    let reason = group
+                                        .unavailable_reason
+                                        .as_deref()
+                                        .unwrap_or("This part has no focused variations yet.");
+                                    let response = variation_mode_button(
+                                        ui,
+                                        &directions::focus_part_chip_label(group),
+                                        selected,
+                                        group.focusable,
+                                        reason,
+                                    );
+                                    if response.clicked() && group.focusable {
+                                        commands
+                                            .push(directions::set_focus_part_group_command(group));
+                                    }
+                                }
+                            });
+                            if let Some(active_group) =
+                                active_group_id.as_deref().and_then(|group_id| {
+                                    part_groups.iter().find(|group| group.group_id == group_id)
+                                })
+                            {
+                                ui.add_space(8.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    let generate_label =
+                                        directions::generate_focused_part_label(active_group);
+                                    let lock_label =
+                                        directions::lock_focused_part_label(active_group);
+                                    ui.label(
+                                        RichText::new(directions::focus_part_status_label(
+                                            active_group,
+                                        ))
+                                        .color(colors.accent_hover)
+                                        .strong(),
+                                    );
+                                    if action_button(
+                                        ui,
+                                        &ActionSpec::enabled(&generate_label, ButtonTone::Primary),
+                                    )
+                                    .clicked()
+                                    {
+                                        commands.push(FoundryAppCommand::RequestCandidates(
+                                            FoundryCandidateRequest {
+                                                seed: document.seed,
+                                                proposal_count:
+                                                    directions::DEFAULT_DIRECTION_PROPOSALS,
+                                                result_count:
+                                                    directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+                                                mode: FoundryCandidateMode::Refine,
+                                                strategy_id: None,
+                                                preference_profile: None,
+                                                variation_intent: VariationIntent::focus_part_shape(
+                                                    &active_group.group_id,
+                                                    &active_group.label,
+                                                ),
+                                            },
+                                        ));
+                                    }
+                                    if action_button(
+                                        ui,
+                                        &ActionSpec::enabled(&lock_label, ButtonTone::Secondary),
+                                    )
+                                    .clicked()
+                                    {
+                                        commands.push(FoundryAppCommand::run(
+                                            FoundryCommand::SetLock {
+                                                lock: shape_foundry::FoundryLock {
+                                                    target: shape_foundry::FoundryLockTarget::FocusPartGroup(
+                                                        active_group.group_id.clone(),
+                                                    ),
+                                                    mode: shape_foundry::FoundryLockMode::SearchProtected,
+                                                    reason: Some(format!(
+                                                        "{} kept while generating directions.",
+                                                        active_group.label
+                                                    )),
+                                                },
+                                            },
+                                        ));
+                                    }
+                                    if action_button(
+                                        ui,
+                                        &ActionSpec::enabled("Clear focus", ButtonTone::Quiet),
+                                    )
+                                    .clicked()
+                                    {
+                                        commands
+                                            .push(directions::clear_focus_part_group_command());
+                                    }
+                                });
+                            }
+                            ui.add_space(16.0);
+                        }
+                    }
                     ui.label(
                         RichText::new("Generation style")
                             .color(colors.text_muted)
@@ -2243,6 +2357,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Recent Projects",
         "Start",
         "Generate 6 Directions",
+        "Generated 4 visually distinct directions.",
+        "Rejected 2 subtle candidates that looked too similar.",
+        "Focus: Handles",
+        "Focused: Handles",
+        "Generate handle variations",
+        "Lock handles",
+        "Clear focus",
+        "Surface options need textured previews before they can be shown.",
+        "This part has no focused variations yet.",
         "Generating...",
         "Choose Template",
         "Build Asset",

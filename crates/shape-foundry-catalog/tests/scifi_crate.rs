@@ -25,6 +25,32 @@ fn profile(fixture: &FoundryFixtureCatalog) -> CustomizerProfile {
     payload(fixture, "sci-fi-crate-profile")
 }
 
+#[test]
+fn scifi_crate_exposes_product_part_groups() {
+    let groups = scifi_crate::part_group_descriptors();
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.display_name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Body",
+            "Panels",
+            "Vents",
+            "Handles",
+            "Edge Trim",
+            "Fasteners"
+        ]
+    );
+    let handles = groups
+        .iter()
+        .find(|group| group.group_id == "handles")
+        .expect("handles group");
+    assert_eq!(handles.bound_control_ids, vec!["handle_style"]);
+    assert!(handles.focusable);
+}
+
 fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
     let fixture = scifi_crate::fixture_catalog();
     let mut document = fixture.document.clone();

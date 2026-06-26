@@ -534,14 +534,16 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,
         },
-        FoundryCommand::ClearVariationFocus => FoundryHistorySummary {
-            kind: FoundryHistorySummaryKind::ControlEdit,
-            label: "Cleared part focus".to_owned(),
-            detail: Some("Returned to whole-asset variation".to_owned()),
-            changed_controls: Vec::new(),
-            changed_provider_roles: Vec::new(),
-            accepted_candidate: None,
-        },
+        FoundryCommand::ClearVariationFocus | FoundryCommand::ClearFocusPartGroup => {
+            FoundryHistorySummary {
+                kind: FoundryHistorySummaryKind::ControlEdit,
+                label: "Cleared part focus".to_owned(),
+                detail: Some("Returned to whole-asset variation".to_owned()),
+                changed_controls: Vec::new(),
+                changed_provider_roles: Vec::new(),
+                accepted_candidate: None,
+            }
+        }
         FoundryCommand::SetFocusPartGroup { group_id } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::ControlEdit,
             label: "Set Focus Part".to_owned(),
@@ -554,6 +556,14 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
             kind: FoundryHistorySummaryKind::CandidateGeneration,
             label: format!("Generated {} directions", request.count),
             detail: None,
+            changed_controls: Vec::new(),
+            changed_provider_roles: Vec::new(),
+            accepted_candidate: None,
+        },
+        FoundryCommand::GenerateFocusedPartCandidates { group_id, .. } => FoundryHistorySummary {
+            kind: FoundryHistorySummaryKind::CandidateGeneration,
+            label: "Generated focused directions".to_owned(),
+            detail: Some(friendly_history_label(group_id)),
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),
             accepted_candidate: None,

@@ -17,7 +17,10 @@ use shape_family_compile::{
     RecipeFragmentExports, RigidOffset, STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform,
     scalar_parameter,
 };
-use shape_foundry::{CandidateStrategy, ControlValue};
+use shape_foundry::{
+    CandidateStrategy, ControlValue, FoundryPartGroupDescriptor,
+    built_in_part_group_descriptors_for_profile,
+};
 
 use crate::{
     FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog, build_fixture_catalog,
@@ -431,6 +434,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("edge_softness".to_owned(), ControlValue::Scalar(0.45)),
         ]),
     })
+}
+
+/// Product-safe semantic part groups for the Stylized Furniture Lamp.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("stylized-lamp")
 }
 
 fn lamp_attachment_rules() -> Vec<AttachmentRule> {

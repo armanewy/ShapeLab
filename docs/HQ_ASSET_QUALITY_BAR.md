@@ -28,6 +28,8 @@ Usable:
 - must not require Advanced Recipe for the intended novice task
 - must have six surviving direction candidates, or a documented family-specific exception
 - must have visible primary-control difference evidence
+- must expose product-safe semantic part groups when Focus Part is available
+- must reject hidden/internal-only candidate changes through rendered preview delta evidence
 - must have export and package-reopen verification
 
 Showcase:
@@ -66,6 +68,11 @@ The automated benchmark can establish that a kit reaches the Usable evidence
 bar, but default novice-catalog exposure remains blocked until manual review is
 approved. Primary-control evidence is measured with rendered whole-model pixel
 deltas, not recipe fingerprints alone.
+
+Focus Part evidence is measured against authored product-facing groups such as
+Handles, Deck, Shade, and Fasteners. A focused candidate may ship only when its
+changed controls/provider choices are bound to the selected group and the
+preview evidence is visible to the user.
 
 Candidate survival means more than receiving six candidate records: each
 survivor must compile, pass model validation, and render a non-placeholder

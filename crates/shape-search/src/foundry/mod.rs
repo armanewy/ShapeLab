@@ -15,9 +15,10 @@ use shape_foundry::{
     FOUNDRY_PREFERENCE_PROFILE_SCHEMA_VERSION, FeasibleControlDomain, FoundryAssetDocument,
     FoundryCandidateId, FoundryCatalogResolver, FoundryCommand, FoundryCompilationError,
     FoundryCompilationOutput, FoundryConformanceSummary, FoundryEdit, FoundryLockMode,
-    FoundryLockTarget, FoundryPreferenceProfile, FoundryPreferenceScope, MaterialSlotChange,
-    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, SemanticPartGroupChange, VariationChannel,
-    VariationIntent, VariationScope, apply_foundry_command, canonicalize_control_value,
+    FoundryLockTarget, FoundryPartGroupDescriptor, FoundryPreferenceProfile,
+    FoundryPreferenceScope, MaterialSlotChange, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
+    SemanticPartGroupChange, VariationChannel, VariationIntent, VariationScope,
+    apply_foundry_command, built_in_part_group_descriptors_for_profile, canonicalize_control_value,
     compile_foundry_document, default_control_value, effective_control_domain,
     explain_control_delta,
 };
@@ -837,7 +838,22 @@ fn variation_metadata_for_proposal(
     proposal: &CandidateEditProposal,
     scoring_input: Option<&AssetCandidateInput>,
 ) -> CandidateVariationMetadata {
-    let changed_part_groups = changed_part_groups_for_proposal(document, proposal);
+    let mut changed_part_groups = changed_part_groups_for_proposal(document, proposal);
+    if let VariationScope::SemanticPartGroup {
+        group_id,
+        display_name,
+    } = &intent.scope
+    {
+        changed_part_groups.retain(|group| group.group_id == *group_id);
+        if changed_part_groups.is_empty() && !proposal.changed_controls.is_empty() {
+            changed_part_groups.push(SemanticPartGroupChange {
+                group_id: group_id.clone(),
+                display_name: display_name.clone(),
+                change_label: "Shape adjusted".to_owned(),
+                visible: true,
+            });
+        }
+    }
     let changed_roles = changed_roles_from_commands(&proposal.edit.commands);
     let changed_material_slots = changed_material_slots_for_intent(intent);
     let visible_delta = candidate_visible_delta_report(intent, proposal, scoring_input);
@@ -1002,7 +1018,7 @@ fn changed_part_groups_for_proposal(
     let mut groups = Vec::new();
     for change in &proposal.changes {
         for group in known_part_groups(document) {
-            if control_change_matches_group(change, &group.group_id)
+            if control_change_matches_group(change, &group)
                 && !groups
                     .iter()
                     .any(|existing: &SemanticPartGroupChange| existing.group_id == group.group_id)
@@ -1056,60 +1072,27 @@ fn changed_roles_from_commands(commands: &[FoundryCommand]) -> Vec<String> {
 struct KnownPartGroup {
     group_id: String,
     display_name: String,
-    keywords: &'static [&'static str],
+    bound_control_ids: BTreeSet<String>,
+    bound_provider_roles: BTreeSet<String>,
 }
 
 fn known_part_groups(document: &FoundryAssetDocument) -> Vec<KnownPartGroup> {
-    let text = format!(
+    let profile_hint = format!(
         "{} {}",
         document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
-    )
-    .to_ascii_lowercase();
-    if text.contains("crate") {
-        return vec![
-            part_group(
-                "body",
-                "Body",
-                &["body", "proportion", "size", "height", "width"],
-            ),
-            part_group("panels", "Panels", &["panel", "depth"]),
-            part_group("vents", "Vents", &["vent"]),
-            part_group("handles", "Handles", &["handle"]),
-            part_group("edge-trim", "Edge Trim", &["edge", "trim", "bevel"]),
-            part_group("fasteners", "Fasteners", &["bolt", "fastener"]),
-        ];
-    }
-    if text.contains("bridge") {
-        return vec![
-            part_group("deck", "Deck", &["deck", "span", "length"]),
-            part_group("supports", "Supports", &["support", "pier"]),
-            part_group("bracing", "Bracing", &["brace", "bracing"]),
-            part_group("railing", "Railing", &["rail"]),
-            part_group("ramps", "Ramps", &["ramp"]),
-            part_group("fasteners", "Fasteners", &["bolt", "connector", "fastener"]),
-        ];
-    }
-    if text.contains("lamp") {
-        return vec![
-            part_group("base", "Base", &["base"]),
-            part_group("stem", "Stem", &["stem", "height"]),
-            part_group("joints", "Joints", &["joint"]),
-            part_group("shade", "Shade", &["shade"]),
-            part_group("trim", "Trim", &["trim", "edge"]),
-        ];
-    }
-    Vec::new()
+    );
+    built_in_part_group_descriptors_for_profile(&profile_hint)
+        .into_iter()
+        .map(part_group_from_descriptor)
+        .collect()
 }
 
-fn part_group(
-    group_id: &str,
-    display_name: &str,
-    keywords: &'static [&'static str],
-) -> KnownPartGroup {
+fn part_group_from_descriptor(descriptor: FoundryPartGroupDescriptor) -> KnownPartGroup {
     KnownPartGroup {
-        group_id: group_id.to_owned(),
-        display_name: display_name.to_owned(),
-        keywords,
+        group_id: descriptor.group_id,
+        display_name: descriptor.display_name,
+        bound_control_ids: descriptor.bound_control_ids.into_iter().collect(),
+        bound_provider_roles: descriptor.bound_provider_roles.into_iter().collect(),
     }
 }
 
@@ -1122,18 +1105,38 @@ fn control_matches_part_group(
         .into_iter()
         .find(|group| group.group_id == group_id)
         .is_some_and(|group| {
-            let mut text = format!("{} {}", control.id, control.label).to_ascii_lowercase();
-            for binding in &control.bindings {
-                text.push(' ');
-                text.push_str(&binding.slot.to_ascii_lowercase());
+            if group.bound_control_ids.contains(&control.id)
+                || control
+                    .bindings
+                    .iter()
+                    .any(|binding| group.bound_control_ids.contains(&binding.slot))
+            {
+                return true;
             }
-            group.keywords.iter().any(|keyword| text.contains(keyword))
+            matches!(
+                &control.kind,
+                ControlKind::ProviderGallery { role, .. }
+                    if group.bound_provider_roles.contains(role)
+            )
         })
 }
 
-fn control_change_matches_group(change: &FoundryCandidateControlChange, group_id: &str) -> bool {
+fn control_change_matches_group(
+    change: &FoundryCandidateControlChange,
+    group: &KnownPartGroup,
+) -> bool {
+    if group.bound_control_ids.contains(&change.control_id) {
+        return true;
+    }
     let text = format!("{} {}", change.control_id, change.control_label).to_ascii_lowercase();
-    match group_id {
+    if group
+        .bound_provider_roles
+        .iter()
+        .any(|role| text.contains(&role.to_ascii_lowercase()))
+    {
+        return true;
+    }
+    match group.group_id.as_str() {
         "body" => contains_any(&text, &["body", "proportion", "height", "width", "size"]),
         "panels" => contains_any(&text, &["panel", "depth"]),
         "vents" => text.contains("vent"),

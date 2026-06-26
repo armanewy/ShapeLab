@@ -7,6 +7,35 @@ use shape_foundry::{ControlKind, ControlValue};
 use shape_foundry_catalog::roman_bridge;
 
 #[test]
+fn roman_bridge_exposes_product_part_groups() {
+    let groups = roman_bridge::part_group_descriptors();
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.display_name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Deck",
+            "Supports",
+            "Bracing",
+            "Railing",
+            "Ramps",
+            "Fasteners"
+        ]
+    );
+    let ramps = groups
+        .iter()
+        .find(|group| group.group_id == "ramps")
+        .expect("ramps group");
+    assert!(!ramps.focusable);
+    assert_eq!(
+        ramps.capability.unavailable_reasons,
+        vec!["This part has no focused variations yet."]
+    );
+}
+
+#[test]
 fn roman_bridge_profile_declares_required_controls_and_strategies() {
     let fixture = roman_bridge::fixture_catalog();
     let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)

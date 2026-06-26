@@ -365,9 +365,41 @@ pub fn validate_foundry_command(
                 );
             }
         }
-        FoundryCommand::ClearVariationFocus => {}
+        FoundryCommand::ClearVariationFocus | FoundryCommand::ClearFocusPartGroup => {}
         FoundryCommand::SetFocusPartGroup { group_id } => {
             validate_identifier(&mut report, "set_focus_part_group.group_id", group_id);
+        }
+        FoundryCommand::GenerateFocusedPartCandidates {
+            group_id,
+            channels,
+            mode,
+        } => {
+            validate_identifier(
+                &mut report,
+                "generate_focused_part_candidates.group_id",
+                group_id,
+            );
+            if channels.is_empty() {
+                report.push(
+                    "generate_focused_part_candidates.channels",
+                    "empty_variation_channels",
+                    "Focused candidates need at least one variation channel.",
+                );
+            }
+            for (index, channel) in channels.iter().enumerate() {
+                validate_variation_channel(
+                    &mut report,
+                    &format!("generate_focused_part_candidates.channels.{index}"),
+                    channel,
+                );
+            }
+            if mode.trim().is_empty() {
+                report.push(
+                    "generate_focused_part_candidates.mode",
+                    "empty_generation_mode",
+                    "Focused candidates need a generation mode.",
+                );
+            }
         }
         FoundryCommand::GenerateCandidates(request) => {
             if request.count == 0 {

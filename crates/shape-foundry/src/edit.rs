@@ -254,7 +254,7 @@ pub fn apply_foundry_command_with_style_context(
             document.variation_state.intent = document.variation_state.intent.clone().normalized();
             Ok(FoundryCommandApplicationReport::default())
         }
-        crate::FoundryCommand::ClearVariationFocus => {
+        crate::FoundryCommand::ClearVariationFocus | crate::FoundryCommand::ClearFocusPartGroup => {
             document.variation_state.intent.scope = crate::VariationScope::WholeAsset;
             document.variation_state.intent = document.variation_state.intent.clone().normalized();
             Ok(FoundryCommandApplicationReport::default())
@@ -270,6 +270,7 @@ pub fn apply_foundry_command_with_style_context(
             Ok(FoundryCommandApplicationReport::default())
         }
         crate::FoundryCommand::GenerateCandidates(_)
+        | crate::FoundryCommand::GenerateFocusedPartCandidates { .. }
         | crate::FoundryCommand::AcceptCandidate { .. }
         | crate::FoundryCommand::RejectCandidate { .. }
         | crate::FoundryCommand::Undo
@@ -529,7 +530,11 @@ fn command_kind(command: &crate::FoundryCommand) -> &'static str {
         crate::FoundryCommand::SetVariationScope { .. } => "set_variation_scope",
         crate::FoundryCommand::SetVariationChannels { .. } => "set_variation_channels",
         crate::FoundryCommand::ClearVariationFocus => "clear_variation_focus",
+        crate::FoundryCommand::ClearFocusPartGroup => "clear_focus_part_group",
         crate::FoundryCommand::SetFocusPartGroup { .. } => "set_focus_part_group",
+        crate::FoundryCommand::GenerateFocusedPartCandidates { .. } => {
+            "generate_focused_part_candidates"
+        }
         crate::FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         crate::FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         crate::FoundryCommand::RejectCandidate { .. } => "reject_candidate",

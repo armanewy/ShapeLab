@@ -21,8 +21,8 @@ use shape_family_compile::{
 use shape_foundry::{
     CandidateStrategy, ChoiceOption, ClosedInterval, ControlKind, ControlSlotBinding,
     ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
-    DomainCertification, FeasibleControlDomain, ProviderOption, ResponseCurve,
-    WholeModelPreviewRef,
+    DomainCertification, FeasibleControlDomain, FoundryPartGroupDescriptor, ProviderOption,
+    ResponseCurve, WholeModelPreviewRef, built_in_part_group_descriptors_for_profile,
 };
 
 use crate::{
@@ -53,6 +53,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
 #[must_use]
 pub fn hq_fixture_catalog() -> FoundryFixtureCatalog {
     fixture_catalog_for(BridgeQuality::Hq)
+}
+
+/// Product-safe semantic part groups for Roman Timber Bridge profiles.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("roman-bridge")
 }
 
 fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {

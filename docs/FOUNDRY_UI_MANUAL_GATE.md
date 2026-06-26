@@ -33,6 +33,9 @@ additional observations and cannot replace the required screenshots.
 - Stylized Furniture Lamp option gallery.
 - Pack workspace.
 - Export screen.
+- Focus Handles active on Sci-Fi Industrial Crate.
+- Focused handle candidate generation and selected A/B comparison.
+- Customize panel showing a focused control card.
 - One disabled-control or disabled-action reason.
 - One stale, building, or working status message.
 - 1280x800 layout.
@@ -51,6 +54,10 @@ additional observations and cannot replace the required screenshots.
 - Customize controls are meaningful and not raw IDs.
 - Disabled reasons are plain English.
 - Pack and export readiness are plain English.
+- Focus Part chips are semantic nouns only and show plain unavailable reasons.
+- Selected candidates show larger parent/candidate comparison previews and an
+  exact what-changed summary.
+- Surface options say they need textured previews before they can be shown.
 
 ## Fail Criteria
 
@@ -76,6 +83,10 @@ Sci-fi crate customize screenshot:
 Stylized lamp option gallery screenshot:
 Pack workspace screenshot:
 Export screen screenshot:
+Focus Handles screenshot:
+Focused handle candidates screenshot:
+Selected candidate comparison screenshot:
+Focused customize control screenshot:
 Disabled reason screenshot:
 Status message screenshot:
 1280x800 screenshot:

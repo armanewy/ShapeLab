@@ -211,6 +211,81 @@ fn surface_package_capability_does_not_enable_visual_surface_mode() {
 }
 
 #[test]
+fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let groups = foundry::panels::directions::direction_part_groups_for_document(&fixture.document);
+    let handles = groups
+        .iter()
+        .find(|group| group.group_id == "handles")
+        .expect("crate exposes handles focus group");
+
+    assert_eq!(handles.label, "Handles");
+    assert!(handles.focusable);
+    assert_eq!(
+        foundry::panels::directions::focus_part_chip_label(handles),
+        "Focus: Handles"
+    );
+    assert_eq!(
+        foundry::panels::directions::focus_part_status_label(handles),
+        "Focused: Handles"
+    );
+    assert_eq!(
+        foundry::panels::directions::generate_focused_part_label(handles),
+        "Generate handle variations"
+    );
+    assert_eq!(
+        foundry::panels::directions::lock_focused_part_label(handles),
+        "Lock handles"
+    );
+
+    let command = foundry::panels::directions::set_focus_part_group_command(handles);
+    assert!(matches!(
+        command.single_foundry_command(),
+        Some(FoundryCommand::SetFocusPartGroup { group_id }) if group_id == "handles"
+    ));
+    let clear = foundry::panels::directions::clear_focus_part_group_command();
+    assert!(matches!(
+        clear.single_foundry_command(),
+        Some(FoundryCommand::ClearFocusPartGroup)
+    ));
+}
+
+#[test]
+fn focus_part_mode_targets_active_group_when_selected() {
+    let intent = VariationIntent::focus_part_shape("handles", "Handles");
+    let groups = vec![
+        foundry::panels::directions::DirectionPartGroup {
+            group_id: "body".to_owned(),
+            label: "Body".to_owned(),
+            focusable: true,
+            unavailable_reason: None,
+        },
+        foundry::panels::directions::DirectionPartGroup {
+            group_id: "handles".to_owned(),
+            label: "Handles".to_owned(),
+            focusable: true,
+            unavailable_reason: None,
+        },
+    ];
+
+    let actions = direction_variation_mode_actions(&intent, 73, None, None, &groups);
+    let focus = actions
+        .iter()
+        .find(|action| action.label == "Focus Part")
+        .expect("focus action exists");
+
+    assert!(focus.selected);
+    assert!(focus.enabled);
+    assert_eq!(
+        focus
+            .request
+            .as_ref()
+            .and_then(|request| request.variation_intent.scope.semantic_part_group_id()),
+        Some("handles")
+    );
+}
+
+#[test]
 fn candidate_cards_expose_explanations_role_badges_and_hover_highlight() {
     let camera = OrbitCamera::default();
     let parent = parent_card(camera.clone());
