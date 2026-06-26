@@ -22,6 +22,50 @@ pub const STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION: &str = "Exports a frozen crat
 /// Product-facing export caveat for full game-ready status.
 pub const STATIC_PROP_FULL_READY_BLOCKED_NOTE: &str = "Still blocked from full game-ready status until manual review, engine import proof, and engine-native package handoff are complete.";
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartPreviewHint {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approximate_screen_anchor: Option<[u16; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_color_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartGroupCapability {
+    pub shape_ready: bool,
+    pub surface_ready: bool,
+    pub detail_ready: bool,
+    #[serde(default)]
+    pub unavailable_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryPartGroupDescriptor {
+    pub group_id: String,
+    pub display_name: String,
+    pub description: String,
+    #[serde(default)]
+    pub supported_channels: Vec<VariationChannel>,
+    #[serde(default)]
+    pub bound_control_ids: Vec<String>,
+    #[serde(default)]
+    pub bound_provider_roles: Vec<String>,
+    pub lockable: bool,
+    pub focusable: bool,
+    pub preview_hint: PartPreviewHint,
+    pub capability: PartGroupCapability,
+}
+
+impl FoundryPartGroupDescriptor {
+    #[must_use]
+    pub fn supports_channel(&self, channel: &VariationChannel) -> bool {
+        self.supported_channels
+            .iter()
+            .any(|supported| supported == channel)
+    }
+}
+
 /// Product-visible area a variation is allowed to affect.
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "scope", rename_all = "snake_case")]
@@ -267,6 +311,248 @@ pub fn built_in_surface_capability_for_profile(profile_id: &str) -> FoundrySurfa
         FoundrySurfaceCapabilityView::sci_fi_crate_static_prop()
     } else {
         FoundrySurfaceCapabilityView::unavailable(profile_id.to_owned(), "Surface package")
+    }
+}
+
+#[must_use]
+pub fn built_in_part_group_descriptors_for_profile(
+    profile_id: &str,
+) -> Vec<FoundryPartGroupDescriptor> {
+    let normalized = profile_id.replace('_', "-").to_ascii_lowercase();
+    if normalized.contains("sci-fi-crate") || normalized.contains("scifi-crate") {
+        return vec![
+            focus_group(
+                "body",
+                "Body",
+                "Main container form.",
+                &["body_proportions", "structural_heft"],
+                &["body"],
+                "Body",
+                [50, 48],
+            ),
+            focus_group(
+                "panels",
+                "Panels",
+                "Front access panels.",
+                &["panel_depth"],
+                &["panel"],
+                "Panels",
+                [50, 44],
+            ),
+            focus_group(
+                "vents",
+                "Vents",
+                "Cooling vents on the shell.",
+                &["vent_density"],
+                &["body"],
+                "Vents",
+                [50, 38],
+            ),
+            focus_group(
+                "handles",
+                "Handles",
+                "Lift handles and carry bars.",
+                &["handle_style"],
+                &["handle"],
+                "Handles",
+                [50, 70],
+            ),
+            focus_group(
+                "edge-trim",
+                "Edge Trim",
+                "Outer protective trim.",
+                &["edge_softness", "has_trim"],
+                &["trim"],
+                "Edge Trim",
+                [50, 24],
+            ),
+            focus_group(
+                "fasteners",
+                "Fasteners",
+                "Bolts and small attachment details.",
+                &["detail_density"],
+                &["fastener"],
+                "Fasteners",
+                [50, 30],
+            ),
+        ];
+    }
+    if normalized.contains("roman-bridge") || normalized.contains("bridge") {
+        return vec![
+            focus_group(
+                "deck",
+                "Deck",
+                "Walkable deck surface.",
+                &["span_length", "deck_width", "edge_finish"],
+                &["deck", "span"],
+                "Deck",
+                [50, 48],
+            ),
+            focus_group(
+                "supports",
+                "Supports",
+                "Posts, piles, and piers.",
+                &["structural_heft", "support_rhythm", "support_style"],
+                &["support"],
+                "Supports",
+                [50, 78],
+            ),
+            focus_group(
+                "bracing",
+                "Bracing",
+                "Under-structure bracing.",
+                &["bracing_style"],
+                &["brace"],
+                "Bracing",
+                [50, 64],
+            ),
+            focus_group(
+                "railing",
+                "Railing",
+                "Side rail courses.",
+                &["railing", "railing_style"],
+                &["rail"],
+                "Railing",
+                [50, 30],
+            ),
+            unavailable_group(
+                "ramps",
+                "Ramps",
+                "Approach ramps.",
+                "This part has no focused variations yet.",
+                "Ramps",
+                [18, 58],
+            ),
+            focus_group(
+                "fasteners",
+                "Fasteners",
+                "Small joinery details.",
+                &["detail_density"],
+                &["connector"],
+                "Fasteners",
+                [50, 42],
+            ),
+        ];
+    }
+    if normalized.contains("stylized-lamp") || normalized.contains("lamp") {
+        return vec![
+            focus_group(
+                "base",
+                "Base",
+                "Weighted lamp base.",
+                &["base_weight"],
+                &["base"],
+                "Base",
+                [45, 82],
+            ),
+            focus_group(
+                "stem",
+                "Stem",
+                "Curved support stem.",
+                &["overall_height", "stem_curvature", "edge_softness"],
+                &["stem"],
+                "Stem",
+                [46, 52],
+            ),
+            focus_group(
+                "joints",
+                "Joints",
+                "Pivot joints.",
+                &["joint_size", "edge_softness"],
+                &["joint"],
+                "Joints",
+                [54, 40],
+            ),
+            focus_group(
+                "shade",
+                "Shade",
+                "Lamp shade form.",
+                &["shade_style", "shade_scale", "edge_softness"],
+                &["shade"],
+                "Shade",
+                [68, 24],
+            ),
+            unavailable_group(
+                "trim",
+                "Trim",
+                "Shade trim rings.",
+                "This part has no focused variations yet.",
+                "Trim",
+                [68, 28],
+            ),
+        ];
+    }
+    Vec::new()
+}
+
+fn focus_group(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    controls: &[&str],
+    provider_roles: &[&str],
+    preview_label: &str,
+    anchor_percent: [u16; 2],
+) -> FoundryPartGroupDescriptor {
+    FoundryPartGroupDescriptor {
+        group_id: group_id.to_owned(),
+        display_name: display_name.to_owned(),
+        description: description.to_owned(),
+        supported_channels: vec![VariationChannel::Shape, VariationChannel::Detail],
+        bound_control_ids: controls
+            .iter()
+            .map(|control| (*control).to_owned())
+            .collect(),
+        bound_provider_roles: provider_roles
+            .iter()
+            .map(|role| (*role).to_owned())
+            .collect(),
+        lockable: true,
+        focusable: true,
+        preview_hint: PartPreviewHint {
+            label: preview_label.to_owned(),
+            approximate_screen_anchor: Some(anchor_percent),
+            highlight_color_name: Some("accent".to_owned()),
+        },
+        capability: PartGroupCapability {
+            shape_ready: true,
+            surface_ready: false,
+            detail_ready: true,
+            unavailable_reasons: vec![
+                "Surface options need textured previews before they can be shown.".to_owned(),
+            ],
+        },
+    }
+}
+
+fn unavailable_group(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    reason: &str,
+    preview_label: &str,
+    anchor_percent: [u16; 2],
+) -> FoundryPartGroupDescriptor {
+    FoundryPartGroupDescriptor {
+        group_id: group_id.to_owned(),
+        display_name: display_name.to_owned(),
+        description: description.to_owned(),
+        supported_channels: Vec::new(),
+        bound_control_ids: Vec::new(),
+        bound_provider_roles: Vec::new(),
+        lockable: false,
+        focusable: false,
+        preview_hint: PartPreviewHint {
+            label: preview_label.to_owned(),
+            approximate_screen_anchor: Some(anchor_percent),
+            highlight_color_name: None,
+        },
+        capability: PartGroupCapability {
+            shape_ready: false,
+            surface_ready: false,
+            detail_ready: false,
+            unavailable_reasons: vec![reason.to_owned()],
+        },
     }
 }
 

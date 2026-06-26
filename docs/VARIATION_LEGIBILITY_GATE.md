@@ -37,3 +37,15 @@ Surface candidates must pass surface/material/wear evidence. If no surface paylo
 Detail candidates may be subtle, but must be labeled DetailOnly or SubtleButExplainable and should not replace normal Explore or Silhouette directions unless Detail was requested.
 
 When fewer than six candidates survive the gate, the result count is smaller. Shape Lab must not pad with weak, hidden-only, duplicate-looking, unsupported, or explanation-mismatched candidates.
+
+## v0 Implementation Claims
+
+Focus Part v0 uses semantic part groups and requires visible selected-part
+evidence for focused shape candidates. Whole-asset and focused candidates are
+filtered again after CPU preview rendering so hidden/control-only changes do
+not count as shown directions.
+
+The product may report smaller boards, for example "Generated 4 visually
+distinct directions." and "Rejected 2 subtle candidates that looked too
+similar." Surface Focus remains unavailable until textured previews and
+material candidate support exist.

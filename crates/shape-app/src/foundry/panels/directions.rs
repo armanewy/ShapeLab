@@ -3,6 +3,7 @@
 use shape_foundry::{
     FoundryAssetDocument, FoundryCandidateId, FoundryCommand, FoundrySurfaceCapabilityView,
     SURFACE_PACKAGE_UNAVAILABLE_REASON, VariationIntent,
+    built_in_part_group_descriptors_for_profile,
 };
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
@@ -359,6 +360,10 @@ pub(crate) struct DirectionPartGroup {
     pub group_id: String,
     /// Product-facing label.
     pub label: String,
+    /// Whether focused shape generation is available today.
+    pub focusable: bool,
+    /// Plain reason when unavailable.
+    pub unavailable_reason: Option<String>,
 }
 
 /// A/B comparison state for the selected direction.
@@ -532,8 +537,7 @@ pub(crate) fn direction_variation_mode_actions(
         SURFACE_PACKAGE_UNAVAILABLE_REASON,
         FoundrySurfaceCapabilityView::surface_mode_unavailable_reason,
     );
-    let focus_part = part_groups
-        .first()
+    let focus_part = active_focus_part(part_groups, &active_intent)
         .map(|group| VariationIntent::focus_part_shape(&group.group_id, &group.label));
 
     vec![
@@ -599,41 +603,60 @@ pub(crate) fn direction_variation_mode_actions(
 pub(crate) fn direction_part_groups_for_document(
     document: &FoundryAssetDocument,
 ) -> Vec<DirectionPartGroup> {
-    let text = format!(
+    let profile_hint = format!(
         "{} {}",
         document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
+    );
+    built_in_part_group_descriptors_for_profile(&profile_hint)
+        .into_iter()
+        .map(|descriptor| DirectionPartGroup {
+            group_id: descriptor.group_id,
+            label: descriptor.display_name,
+            focusable: descriptor.focusable && descriptor.capability.shape_ready,
+            unavailable_reason: descriptor.capability.unavailable_reasons.first().cloned(),
+        })
+        .collect()
+}
+
+/// Human-facing active focus label.
+#[must_use]
+pub(crate) fn focus_part_status_label(group: &DirectionPartGroup) -> String {
+    format!("Focused: {}", group.label)
+}
+
+/// Human-facing focus chip label.
+#[must_use]
+pub(crate) fn focus_part_chip_label(group: &DirectionPartGroup) -> String {
+    format!("Focus: {}", group.label)
+}
+
+/// Human-facing focused generation label.
+#[must_use]
+pub(crate) fn generate_focused_part_label(group: &DirectionPartGroup) -> String {
+    format!(
+        "Generate {} variations",
+        singular_part_label(&group.label).to_ascii_lowercase()
     )
-    .to_ascii_lowercase();
-    if text.contains("crate") {
-        return part_groups(&[
-            ("body", "Body"),
-            ("panels", "Panels"),
-            ("vents", "Vents"),
-            ("handles", "Handles"),
-            ("edge-trim", "Edge Trim"),
-            ("fasteners", "Fasteners"),
-        ]);
-    }
-    if text.contains("bridge") {
-        return part_groups(&[
-            ("deck", "Deck"),
-            ("supports", "Supports"),
-            ("bracing", "Bracing"),
-            ("railing", "Railing"),
-            ("ramps", "Ramps"),
-            ("fasteners", "Fasteners"),
-        ]);
-    }
-    if text.contains("lamp") {
-        return part_groups(&[
-            ("base", "Base"),
-            ("stem", "Stem"),
-            ("joints", "Joints"),
-            ("shade", "Shade"),
-            ("trim", "Trim"),
-        ]);
-    }
-    Vec::new()
+}
+
+/// Human-facing focused lock label.
+#[must_use]
+pub(crate) fn lock_focused_part_label(group: &DirectionPartGroup) -> String {
+    format!("Lock {}", group.label.to_ascii_lowercase())
+}
+
+/// Command emitted by a part chip.
+#[must_use]
+pub(crate) fn set_focus_part_group_command(group: &DirectionPartGroup) -> FoundryAppCommand {
+    FoundryAppCommand::run(FoundryCommand::SetFocusPartGroup {
+        group_id: group.group_id.clone(),
+    })
+}
+
+/// Command emitted by the clear focus action.
+#[must_use]
+pub(crate) fn clear_focus_part_group_command() -> FoundryAppCommand {
+    FoundryAppCommand::run(FoundryCommand::ClearFocusPartGroup)
 }
 
 /// Build a Foundry candidate request for one board mode.
@@ -680,14 +703,29 @@ fn variation_intents_match(left: &VariationIntent, right: &VariationIntent) -> b
     left.scope == right.scope && left.channels == right.channels
 }
 
-fn part_groups(groups: &[(&str, &str)]) -> Vec<DirectionPartGroup> {
-    groups
-        .iter()
-        .map(|(group_id, label)| DirectionPartGroup {
-            group_id: (*group_id).to_owned(),
-            label: (*label).to_owned(),
-        })
-        .collect()
+fn active_focus_part<'a>(
+    part_groups: &'a [DirectionPartGroup],
+    active_intent: &VariationIntent,
+) -> Option<&'a DirectionPartGroup> {
+    if let Some(group_id) = active_intent.scope.semantic_part_group_id() {
+        return part_groups
+            .iter()
+            .find(|group| group.group_id == group_id && group.focusable);
+    }
+    part_groups.iter().find(|group| group.focusable)
+}
+
+fn singular_part_label(label: &str) -> &str {
+    match label {
+        "Handles" => "Handle",
+        "Panels" => "Panel",
+        "Vents" => "Vent",
+        "Fasteners" => "Fastener",
+        "Supports" => "Support",
+        "Joints" => "Joint",
+        "Ramps" => "Ramp",
+        other => other,
+    }
 }
 
 /// Human-facing label for a Foundry candidate mode.

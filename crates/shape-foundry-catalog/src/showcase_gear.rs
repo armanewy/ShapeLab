@@ -256,7 +256,7 @@ pub fn fantasy_sword_fixture_catalog() -> FoundryFixtureCatalog {
                 "guard",
                 [0.52, 0.055, 0.06],
                 0.018,
-                [0.0, -0.95, 0.0],
+                [0.0, -0.43, 0.0],
             ),
             rounded(
                 "winged_guard",
@@ -264,7 +264,7 @@ pub fn fantasy_sword_fixture_catalog() -> FoundryFixtureCatalog {
                 "guard",
                 [0.68, 0.065, 0.065],
                 0.025,
-                [0.0, -0.96, 0.0],
+                [0.0, -0.43, 0.0],
             ),
             rounded(
                 "compact_guard",
@@ -272,7 +272,7 @@ pub fn fantasy_sword_fixture_catalog() -> FoundryFixtureCatalog {
                 "guard",
                 [0.38, 0.075, 0.06],
                 0.02,
-                [0.0, -0.96, 0.0],
+                [0.0, -0.43, 0.0],
             ),
         ],
         detail_fragment: rounded_array(
@@ -281,7 +281,7 @@ pub fn fantasy_sword_fixture_catalog() -> FoundryFixtureCatalog {
             "rune_set",
             [0.028, 0.05, 0.012],
             0.004,
-            [-0.05, 0.2, 0.09],
+            [-0.05, 0.2, 0.05],
             array(5, [0.0, 0.25, 0.0]),
         ),
         accessory_fragment: cylinder(
@@ -289,7 +289,7 @@ pub fn fantasy_sword_fixture_catalog() -> FoundryFixtureCatalog {
             "Faceted Pommel",
             "pommel",
             cylinder_spec(0.12, 0.18, 10),
-            [0.0, -1.2, 0.0],
+            [0.0, -0.6, 0.0],
         ),
     })
 }
@@ -430,7 +430,7 @@ pub fn hero_helmet_fixture_catalog() -> FoundryFixtureCatalog {
                 "visor",
                 [0.48, 0.075, 0.055],
                 0.018,
-                [0.0, 0.05, 0.78],
+                [0.0, 0.05, 0.58],
             ),
             rounded(
                 "heavy_visor",
@@ -438,7 +438,7 @@ pub fn hero_helmet_fixture_catalog() -> FoundryFixtureCatalog {
                 "visor",
                 [0.58, 0.12, 0.065],
                 0.02,
-                [0.0, -0.02, 0.8],
+                [0.0, -0.02, 0.59],
             ),
             rounded(
                 "open_visor",
@@ -446,7 +446,7 @@ pub fn hero_helmet_fixture_catalog() -> FoundryFixtureCatalog {
                 "visor",
                 [0.36, 0.065, 0.05],
                 0.02,
-                [0.0, 0.1, 0.78],
+                [0.0, 0.1, 0.58],
             ),
         ],
         detail_fragment: rounded_array(
@@ -455,7 +455,7 @@ pub fn hero_helmet_fixture_catalog() -> FoundryFixtureCatalog {
             "vent_set",
             [0.035, 0.08, 0.018],
             0.006,
-            [-0.24, -0.18, 0.9],
+            [-0.24, -0.18, 0.58],
             array(5, [0.12, 0.0, 0.0]),
         ),
         accessory_fragment: rounded(
@@ -518,7 +518,7 @@ pub fn pauldron_pair_fixture_catalog() -> FoundryFixtureCatalog {
                 "rim_trim",
                 [0.92, 0.06, 0.45],
                 0.025,
-                [0.0, -0.35, 0.02],
+                [0.0, -0.23, 0.02],
             ),
             rounded(
                 "wide_trim",
@@ -526,7 +526,7 @@ pub fn pauldron_pair_fixture_catalog() -> FoundryFixtureCatalog {
                 "rim_trim",
                 [1.0, 0.075, 0.5],
                 0.03,
-                [0.0, -0.37, 0.02],
+                [0.0, -0.24, 0.02],
             ),
             rounded(
                 "split_trim",
@@ -534,7 +534,7 @@ pub fn pauldron_pair_fixture_catalog() -> FoundryFixtureCatalog {
                 "rim_trim",
                 [0.8, 0.05, 0.36],
                 0.018,
-                [0.0, -0.35, 0.03],
+                [0.0, -0.23, 0.03],
             ),
         ],
         detail_fragment: cylinder_array(
@@ -542,7 +542,7 @@ pub fn pauldron_pair_fixture_catalog() -> FoundryFixtureCatalog {
             "Rim Studs",
             "stud_set",
             cylinder_spec(0.045, 0.035, 10),
-            [-0.48, -0.18, 0.68],
+            [-0.48, -0.18, 0.54],
             array(6, [0.19, 0.0, 0.0]),
         ),
         accessory_fragment: rounded(
@@ -551,7 +551,7 @@ pub fn pauldron_pair_fixture_catalog() -> FoundryFixtureCatalog {
             "strap",
             [0.74, 0.045, 0.055],
             0.012,
-            [0.0, -0.55, -0.22],
+            [0.0, -0.46, -0.32],
         ),
     })
 }
@@ -605,7 +605,7 @@ pub fn chest_armor_fixture_catalog() -> FoundryFixtureCatalog {
                 "collar",
                 [0.5, 0.07, 0.08],
                 0.02,
-                [0.0, 1.28, 0.04],
+                [0.0, 0.97, 0.04],
             ),
             rounded(
                 "raised_collar",
@@ -613,7 +613,7 @@ pub fn chest_armor_fixture_catalog() -> FoundryFixtureCatalog {
                 "collar",
                 [0.62, 0.11, 0.09],
                 0.025,
-                [0.0, 1.32, 0.05],
+                [0.0, 1.01, 0.05],
             ),
             rounded(
                 "split_collar",
@@ -621,7 +621,7 @@ pub fn chest_armor_fixture_catalog() -> FoundryFixtureCatalog {
                 "collar",
                 [0.4, 0.08, 0.08],
                 0.018,
-                [0.0, 1.28, 0.05],
+                [0.0, 0.98, 0.05],
             ),
         ],
         detail_fragment: cylinder_array(
@@ -629,7 +629,7 @@ pub fn chest_armor_fixture_catalog() -> FoundryFixtureCatalog {
             "Armor Rivets",
             "rivet_set",
             cylinder_spec(0.035, 0.025, 10),
-            [-0.42, 0.42, 0.44],
+            [-0.42, 0.42, 0.22],
             array(6, [0.17, -0.16, 0.0]),
         ),
         accessory_fragment: rounded(
@@ -638,7 +638,7 @@ pub fn chest_armor_fixture_catalog() -> FoundryFixtureCatalog {
             "emblem",
             [0.16, 0.22, 0.035],
             0.025,
-            [0.0, 0.02, 0.34],
+            [0.0, 0.02, 0.22],
         ),
     })
 }

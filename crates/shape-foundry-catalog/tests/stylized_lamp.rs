@@ -9,6 +9,25 @@ use shape_foundry::{
 use shape_foundry_catalog::{FoundryFixtureCatalog, stylized_lamp};
 
 #[test]
+fn stylized_lamp_exposes_product_part_groups() {
+    let groups = stylized_lamp::part_group_descriptors();
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.display_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Base", "Stem", "Joints", "Shade", "Trim"]
+    );
+    let shade = groups
+        .iter()
+        .find(|group| group.group_id == "shade")
+        .expect("shade group");
+    assert!(shade.bound_control_ids.contains(&"shade_style".to_owned()));
+    assert!(shade.focusable);
+}
+
+#[test]
 fn shade_style_provider_alternatives_preserve_attachment() {
     let fixture = stylized_lamp::fixture_catalog();
     let baseline = compile_with(&fixture, &[]);

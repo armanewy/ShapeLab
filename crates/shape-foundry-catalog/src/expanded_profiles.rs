@@ -419,7 +419,7 @@ pub fn signpost_fixture_catalog() -> FoundryFixtureCatalog {
             "marker",
             [0.18, 0.24],
             0.018,
-            [0.0, 0.82, 0.35],
+            [0.0, 0.82, 0.2],
         ),
     })
 }

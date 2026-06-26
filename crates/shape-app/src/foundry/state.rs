@@ -483,6 +483,13 @@ impl FoundryAppState {
             FoundryCommand::GenerateCandidates(request) => {
                 self.request_candidates(candidate_request_from_command(request))
             }
+            FoundryCommand::GenerateFocusedPartCandidates {
+                group_id,
+                channels,
+                mode,
+            } => self.request_candidates(focused_candidate_request_from_command(
+                group_id, channels, mode,
+            )),
             FoundryCommand::AcceptCandidate { candidate_id } => self.accept_candidate(candidate_id),
             FoundryCommand::RejectCandidate { candidate_id } => {
                 self.reject_candidate(&candidate_id);
@@ -1272,6 +1279,62 @@ fn candidate_request_from_command(request: GenerateCandidatesRequest) -> Foundry
     }
 }
 
+fn focused_candidate_request_from_command(
+    group_id: String,
+    channels: Vec<shape_foundry::VariationChannel>,
+    mode: String,
+) -> FoundryCandidateRequest {
+    let display_name = group_id
+        .split(['_', '-', '.'])
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut label = first.to_uppercase().collect::<String>();
+                    label.push_str(&chars.as_str().to_ascii_lowercase());
+                    label
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let channels = if channels.is_empty() {
+        vec![shape_foundry::VariationChannel::Shape]
+    } else {
+        channels
+    };
+    FoundryCandidateRequest {
+        seed: 0,
+        proposal_count: 24,
+        result_count: 6,
+        mode: focused_candidate_mode(&mode),
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: shape_foundry::VariationIntent {
+            scope: shape_foundry::VariationScope::SemanticPartGroup {
+                group_id,
+                display_name: display_name.clone(),
+            },
+            channels,
+            human_label: "Focus Part".to_owned(),
+            human_summary: format!("Vary the {display_name} part group."),
+        }
+        .normalized(),
+    }
+}
+
+fn focused_candidate_mode(mode: &str) -> FoundryCandidateMode {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "explore" => FoundryCandidateMode::Explore,
+        "silhouette" => FoundryCandidateMode::Silhouette,
+        "structure" => FoundryCandidateMode::Structure,
+        "detail" => FoundryCandidateMode::Detail,
+        _ => FoundryCandidateMode::Refine,
+    }
+}
+
 fn control_views_from_output(
     document: &FoundryAssetDocument,
     output: &FoundryCompilationOutput,
@@ -1692,7 +1755,9 @@ fn foundry_command_label(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetVariationScope { .. } => "Set variation scope",
         FoundryCommand::SetVariationChannels { .. } => "Set variation channels",
         FoundryCommand::ClearVariationFocus => "Clear variation focus",
+        FoundryCommand::ClearFocusPartGroup => "Clear focus part",
         FoundryCommand::SetFocusPartGroup { .. } => "Set focus part",
+        FoundryCommand::GenerateFocusedPartCandidates { .. } => "Generate focused candidates",
         FoundryCommand::GenerateCandidates(_) => "Generate candidates",
         FoundryCommand::AcceptCandidate { .. } => "Accept candidate",
         FoundryCommand::RejectCandidate { .. } => "Reject candidate",

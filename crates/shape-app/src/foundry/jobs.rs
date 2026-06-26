@@ -18,8 +18,9 @@ use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
     FoundryPreviewBatchRequest, FoundryPreviewCache, FoundryPreviewKind, FoundryPreviewRequest,
     FoundryPreviewResolution, FoundryPreviewVariationMetadata,
+    compare_foundry_rendered_visible_delta,
 };
-use shape_render::{OrbitCamera, RenderSettings, fit_camera_to_bounds, render_mesh};
+use shape_render::{OrbitCamera, RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRejectionReason,
     FoundryCandidateRequest, generate_foundry_candidate_draft_plans,
@@ -909,13 +910,12 @@ struct PreviewLegibilityDelta {
     mean_pixel_delta: f32,
     changed_pixel_ratio: f32,
     silhouette_delta: f32,
+    score: f32,
 }
 
 impl PreviewLegibilityDelta {
     fn score(self) -> f32 {
-        self.mean_pixel_delta * 0.55
-            + self.changed_pixel_ratio * 0.35
-            + self.silhouette_delta * 0.75
+        self.score
     }
 }
 
@@ -1001,48 +1001,26 @@ fn preview_legibility_delta(
     right_width: u32,
     right_height: u32,
 ) -> Option<PreviewLegibilityDelta> {
-    if left_width != right_width
-        || left_height != right_height
-        || left_width == 0
-        || left_height == 0
-    {
-        return None;
-    }
-    let expected_len = (left_width as usize)
-        .saturating_mul(left_height as usize)
-        .saturating_mul(4);
-    if left_rgba8.len() != expected_len || right_rgba8.len() != expected_len {
-        return None;
-    }
-
-    let mut total_delta = 0.0_f32;
-    let mut changed_pixels = 0_usize;
-    let mut silhouette_pixels = 0_usize;
-    let total_pixels = (left_width as usize).saturating_mul(left_height as usize);
-    for (left, right) in left_rgba8.chunks_exact(4).zip(right_rgba8.chunks_exact(4)) {
-        let left_alpha = left[3] as f32 / 255.0;
-        let right_alpha = right[3] as f32 / 255.0;
-        let alpha_delta = (left_alpha - right_alpha).abs();
-        let visible_weight = left_alpha.max(right_alpha);
-        let color_delta = ((left[0].abs_diff(right[0]) as f32
-            + left[1].abs_diff(right[1]) as f32
-            + left[2].abs_diff(right[2]) as f32)
-            / (3.0 * 255.0))
-            * visible_weight;
-        let pixel_delta = color_delta.max(alpha_delta);
-        total_delta += pixel_delta;
-        if pixel_delta >= 0.08 {
-            changed_pixels += 1;
-        }
-        if (left_alpha > 0.05) != (right_alpha > 0.05) {
-            silhouette_pixels += 1;
-        }
-    }
-    let total_pixels = total_pixels.max(1) as f32;
-    Some(PreviewLegibilityDelta {
-        mean_pixel_delta: total_delta / total_pixels,
-        changed_pixel_ratio: changed_pixels as f32 / total_pixels,
-        silhouette_delta: silhouette_pixels as f32 / total_pixels,
+    let parent = RenderedImage {
+        width: left_width,
+        height: left_height,
+        rgba8: left_rgba8.to_vec(),
+    };
+    let candidate = RenderedImage {
+        width: right_width,
+        height: right_height,
+        rgba8: right_rgba8.to_vec(),
+    };
+    let delta = compare_foundry_rendered_visible_delta(
+        &parent,
+        &candidate,
+        RenderSettings::default().background,
+    );
+    delta.available().then_some(PreviewLegibilityDelta {
+        mean_pixel_delta: delta.mean_pixel_delta,
+        changed_pixel_ratio: delta.changed_pixel_ratio,
+        silhouette_delta: delta.silhouette_delta,
+        score: delta.score,
     })
 }
 

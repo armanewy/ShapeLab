@@ -6,9 +6,9 @@ use shape_render::foundry::{
     FoundryChangedRoleOverlay, FoundryPreviewBatchRequest, FoundryPreviewCache,
     FoundryPreviewCacheStatus, FoundryPreviewControlValue, FoundryPreviewError, FoundryPreviewKind,
     FoundryPreviewRequest, FoundryPreviewResolution, FoundryPreviewVariationMetadata,
-    render_foundry_previews,
+    compare_foundry_rendered_visible_delta, render_foundry_previews,
 };
-use shape_render::{OrbitCamera, RenderError, RenderSettings};
+use shape_render::{OrbitCamera, RenderError, RenderSettings, RenderedImage};
 
 #[test]
 fn cache_hit_reuses_whole_model_preview() {
@@ -606,6 +606,58 @@ fn foundry_variation_metadata_is_preserved_without_changing_cache_key() {
         hit.previews[0].variation_metadata.legibility_class,
         Some(CandidateLegibilityClass::Strong)
     );
+}
+
+#[test]
+fn foundry_rendered_visible_delta_ignores_shared_background_and_clamps_scores() {
+    let background = [7, 9, 11, 255];
+    let parent = RenderedImage {
+        width: 2,
+        height: 1,
+        rgba8: vec![
+            7, 9, 11, 255, // shared background
+            200, 200, 200, 255,
+        ],
+    };
+    let candidate = RenderedImage {
+        width: 2,
+        height: 1,
+        rgba8: vec![
+            7, 9, 11, 255, // ignored
+            20, 20, 20, 255,
+        ],
+    };
+
+    let delta = compare_foundry_rendered_visible_delta(&parent, &candidate, background);
+
+    assert!(delta.available());
+    assert!(delta.mean_pixel_delta > 0.70);
+    assert_eq!(delta.changed_pixel_ratio, 1.0);
+    assert_eq!(delta.silhouette_delta, 0.0);
+    assert!((0.0..=1.0).contains(&delta.score));
+}
+
+#[test]
+fn foundry_rendered_visible_delta_reports_unavailable_for_hidden_or_mismatched_previews() {
+    let background = [7, 9, 11, 255];
+    let hidden = RenderedImage {
+        width: 1,
+        height: 1,
+        rgba8: vec![7, 9, 11, 255],
+    };
+    let mismatch = RenderedImage {
+        width: 2,
+        height: 1,
+        rgba8: vec![7, 9, 11, 255, 7, 9, 11, 255],
+    };
+
+    let hidden_delta = compare_foundry_rendered_visible_delta(&hidden, &hidden, background);
+    let mismatch_delta = compare_foundry_rendered_visible_delta(&hidden, &mismatch, background);
+
+    assert!(!hidden_delta.available());
+    assert_eq!(hidden_delta.score, 0.0);
+    assert!(!mismatch_delta.available());
+    assert_eq!(mismatch_delta.score, 0.0);
 }
 
 fn batch(

@@ -911,7 +911,7 @@ fn apply_semantic_command(
             document.variation_state.intent.channels = channels.clone();
             document.variation_state.intent = document.variation_state.intent.clone().normalized();
         }
-        FoundryCommand::ClearVariationFocus => {
+        FoundryCommand::ClearVariationFocus | FoundryCommand::ClearFocusPartGroup => {
             document.variation_state.intent.scope = shape_foundry::VariationScope::WholeAsset;
             document.variation_state.intent = document.variation_state.intent.clone().normalized();
         }
@@ -929,6 +929,7 @@ fn apply_semantic_command(
                 .insert(role.clone(), ControlValue::Toggle(*enabled));
         }
         FoundryCommand::GenerateCandidates(_)
+        | FoundryCommand::GenerateFocusedPartCandidates { .. }
         | FoundryCommand::AcceptCandidate { .. }
         | FoundryCommand::RejectCandidate { .. }
         | FoundryCommand::Undo
@@ -989,7 +990,9 @@ fn command_name(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SetVariationScope { .. } => "set_variation_scope",
         FoundryCommand::SetVariationChannels { .. } => "set_variation_channels",
         FoundryCommand::ClearVariationFocus => "clear_variation_focus",
+        FoundryCommand::ClearFocusPartGroup => "clear_focus_part_group",
         FoundryCommand::SetFocusPartGroup { .. } => "set_focus_part_group",
+        FoundryCommand::GenerateFocusedPartCandidates { .. } => "generate_focused_part_candidates",
         FoundryCommand::GenerateCandidates(_) => "generate_candidates",
         FoundryCommand::AcceptCandidate { .. } => "accept_candidate",
         FoundryCommand::RejectCandidate { .. } => "reject_candidate",

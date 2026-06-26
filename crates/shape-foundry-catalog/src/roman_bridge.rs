@@ -21,8 +21,8 @@ use shape_family_compile::{
 use shape_foundry::{
     CandidateStrategy, ChoiceOption, ClosedInterval, ControlKind, ControlSlotBinding,
     ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
-    DomainCertification, FeasibleControlDomain, ProviderOption, ResponseCurve,
-    WholeModelPreviewRef,
+    DomainCertification, FeasibleControlDomain, FoundryPartGroupDescriptor, ProviderOption,
+    ResponseCurve, WholeModelPreviewRef, built_in_part_group_descriptors_for_profile,
 };
 
 use crate::{
@@ -53,6 +53,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
 #[must_use]
 pub fn hq_fixture_catalog() -> FoundryFixtureCatalog {
     fixture_catalog_for(BridgeQuality::Hq)
+}
+
+/// Product-safe semantic part groups for Roman Timber Bridge profiles.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("roman-bridge")
 }
 
 fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
@@ -145,7 +151,7 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
                 },
                 vec![
                     bevel(1, 0.014),
-                    linear_array(2, 5, [0.0, 0.17, 0.0]),
+                    linear_array(2, 5, [0.0, -0.34, 0.0]),
                     linear_array(3, 3, [1.35, 0.0, 0.0]),
                 ],
             ),
@@ -767,11 +773,11 @@ fn bridge_family_implementation(
         family_implementation(BRIDGE_FAMILY_ID, "Roman bridge base", parameter_bindings);
     let support_offset = match quality {
         BridgeQuality::Standard => [-1.65, -0.76, -0.01],
-        BridgeQuality::Hq => [-1.65, -1.08, -0.01],
+        BridgeQuality::Hq => [-1.65, -0.55, -0.01],
     };
     let deck_offset = match quality {
         BridgeQuality::Standard => [0.0, 0.25, 0.45],
-        BridgeQuality::Hq => [0.0, 0.38, 0.45],
+        BridgeQuality::Hq => [0.0, 0.3, 0.45],
     };
     let rail_offset = match quality {
         BridgeQuality::Standard => [0.0, 0.37, -0.62],
@@ -779,7 +785,7 @@ fn bridge_family_implementation(
     };
     let brace_offset = match quality {
         BridgeQuality::Standard => [0.0, -0.32, 0.45],
-        BridgeQuality::Hq => [0.0, -0.58, -0.72],
+        BridgeQuality::Hq => [0.0, -0.36, 0.0],
     };
     family_impl.attachment_bindings = vec![
         attachment_binding(
@@ -836,7 +842,7 @@ fn bridge_family_implementation(
             "connector",
             "connector_joint",
             FragmentAttachmentPairing::AllPairs,
-            [-1.7, 0.34, -0.46],
+            [-1.65, 0.09, -0.46],
         ));
     }
     family_impl

@@ -17,7 +17,10 @@ use shape_family_compile::{
     RecipeFragmentExports, RigidOffset, STYLE_IMPLEMENTATION_SCHEMA_VERSION, ScalarTransform,
     scalar_parameter,
 };
-use shape_foundry::{CandidateStrategy, ControlValue};
+use shape_foundry::{
+    CandidateStrategy, ControlValue, FoundryPartGroupDescriptor,
+    built_in_part_group_descriptors_for_profile,
+};
 
 use crate::{
     FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog, build_fixture_catalog,
@@ -433,6 +436,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
     })
 }
 
+/// Product-safe semantic part groups for the Stylized Furniture Lamp.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("stylized-lamp")
+}
+
 fn lamp_attachment_rules() -> Vec<AttachmentRule> {
     vec![
         attachment_rule("stem_to_base", "stem", "base"),
@@ -471,7 +480,7 @@ fn lamp_attachment_bindings() -> Vec<FragmentAttachmentBinding> {
             "joint",
             "stem_mount",
             FragmentAttachmentPairing::ByOccurrenceIndex,
-            [0.0, 0.0, -0.62],
+            [0.0, 0.0, -0.28],
         ),
         attachment_binding(
             "shade_to_stem",
@@ -480,7 +489,7 @@ fn lamp_attachment_bindings() -> Vec<FragmentAttachmentBinding> {
             "shade",
             "stem_mount",
             FragmentAttachmentPairing::ByOccurrenceIndex,
-            [0.85, 0.05, 0.0],
+            [0.5, 0.05, 0.0],
         ),
     ]
 }
