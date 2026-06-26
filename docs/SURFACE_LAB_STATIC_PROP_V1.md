@@ -34,3 +34,10 @@ proof, and any future engine-native package adapters.
 Surface Lab v1 also does not make Surface a visual direction mode. The Foundry
 Surface channel remains a future visual variation channel until textured
 previews and material candidate support exist.
+
+Surface Preview v2 narrows the headless evidence gap for this same static-prop
+path. The Sci-Fi Crate package now also emits `surface/textured-preview.png`,
+`surface/textured-contact-sheet.png`, `surface/material-slot-overlay.png`,
+`surface/surface-preview-report.json`, and material-only variants under
+`surface/variants/`. This still does not enable Surface mode in the app and
+does not create a material editor or artist-approved game-ready claim.

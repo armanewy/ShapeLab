@@ -28,6 +28,12 @@ pub const SURFACE_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 /// Surface capability sidecar schema version.
 pub const SURFACE_CAPABILITIES_SCHEMA_VERSION: u32 = 1;
 
+/// Surface visual delta report schema version.
+pub const SURFACE_VISUAL_DELTA_REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Sci-Fi Crate material variant candidate schema version.
+pub const SURFACE_MATERIAL_VARIANT_CANDIDATES_SCHEMA_VERSION: u32 = 1;
+
 /// Surface readiness status.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -374,6 +380,128 @@ pub struct SurfaceCapabilities {
     pub unavailable_reasons: Vec<String>,
 }
 
+/// Result class for material/surface-only visual deltas.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceVisualDeltaResultClass {
+    /// Strong material/surface difference with preview evidence.
+    Strong,
+    /// Clear material/surface difference with preview evidence.
+    Clear,
+    /// Subtle but non-duplicate material/surface difference.
+    Subtle,
+    /// Looks too similar to the base preview.
+    DuplicateLooking,
+    /// Unsupported because evidence is missing or shape changed.
+    Unsupported,
+}
+
+/// Evidence values used to classify a surface-only visual delta.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceVisualDeltaEvidence {
+    /// Frozen mesh fingerprint for the base artifact.
+    pub base_frozen_mesh_fingerprint: String,
+    /// Frozen mesh fingerprint for the candidate artifact.
+    pub candidate_frozen_mesh_fingerprint: String,
+    /// Base textured preview reference.
+    #[serde(default)]
+    pub base_textured_preview_ref: Option<String>,
+    /// Candidate textured preview reference.
+    #[serde(default)]
+    pub candidate_textured_preview_ref: Option<String>,
+    /// Optional normalized visible pixel delta from textured previews.
+    #[serde(default)]
+    pub visible_surface_pixel_delta: Option<f32>,
+}
+
+/// Surface-only visual delta report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceVisualDeltaReport {
+    /// Report schema version.
+    pub schema_version: u32,
+    /// Base profile slug.
+    pub profile_id: String,
+    /// Candidate ID, when this report describes a variant.
+    pub candidate_id: String,
+    /// Normalized base-color recipe delta.
+    pub base_color_delta: f32,
+    /// Normalized slot-to-recipe binding delta.
+    pub material_slot_delta: f32,
+    /// Normalized texture-channel metadata delta.
+    pub texture_channel_delta: f32,
+    /// Optional normalized wear-policy delta.
+    #[serde(default)]
+    pub wear_delta: Option<f32>,
+    /// Normalized visible surface pixel delta from textured previews.
+    pub visible_surface_pixel_delta: f32,
+    /// True when frozen mesh/topology changed and the candidate leaked shape delta.
+    pub shape_delta_leak_detected: bool,
+    /// Classified result.
+    pub result_class: SurfaceVisualDeltaResultClass,
+    /// Stable blocker/diagnostic codes.
+    pub diagnostics: Vec<String>,
+}
+
+impl SurfaceVisualDeltaReport {
+    /// Return true only when this is a supported surface-only delta with
+    /// preview evidence.
+    #[must_use]
+    pub fn can_pass_surface_delta(&self) -> bool {
+        !self.shape_delta_leak_detected
+            && !matches!(
+                self.result_class,
+                SurfaceVisualDeltaResultClass::Unsupported
+                    | SurfaceVisualDeltaResultClass::DuplicateLooking
+            )
+            && self
+                .diagnostics
+                .iter()
+                .all(|code| code != "missing_textured_preview_evidence")
+    }
+}
+
+/// One material-only surface variant candidate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceMaterialVariantCandidate {
+    /// Stable candidate ID.
+    pub candidate_id: String,
+    /// Product-facing variant name.
+    pub display_name: String,
+    /// Package-relative candidate directory.
+    pub variant_dir: String,
+    /// Package-relative surface artifact override.
+    pub surface_artifact_ref: String,
+    /// Package-relative material pack override.
+    pub material_pack_ref: String,
+    /// Package-relative textured preview PNG.
+    pub textured_preview_ref: String,
+    /// Package-relative surface delta report.
+    pub surface_delta_ref: String,
+    /// Frozen mesh fingerprint copied from the base artifact.
+    pub frozen_mesh_fingerprint: String,
+    /// True when geometry, UVs, and triangle/material slot bindings are preserved.
+    pub preserves_frozen_geometry: bool,
+    /// Candidate result class copied from the delta report.
+    pub result_class: SurfaceVisualDeltaResultClass,
+    /// Candidate diagnostics.
+    pub diagnostics: Vec<String>,
+}
+
+/// Candidate list emitted by the headless material-only variant generator.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceMaterialVariantCandidateSet {
+    /// Candidate-set schema version.
+    pub schema_version: u32,
+    /// Source profile slug.
+    pub profile_id: String,
+    /// Base surface artifact.
+    pub base_surface_artifact_ref: String,
+    /// Base textured preview.
+    pub base_textured_preview_ref: String,
+    /// Candidates in deterministic order.
+    pub candidates: Vec<SurfaceMaterialVariantCandidate>,
+}
+
 /// Surface variation channel availability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceVariationChannels {
@@ -503,6 +631,161 @@ pub fn validate_surface_lab_package_with_root(
     )
 }
 
+/// Build a surface-only visual delta report for two artifacts. The report is
+/// unsupported when textured preview evidence is missing or frozen geometry
+/// fingerprints differ.
+#[must_use]
+pub fn surface_visual_delta_report(
+    base: &SurfaceArtifact,
+    candidate: &SurfaceArtifact,
+    candidate_id: impl Into<String>,
+    evidence: SurfaceVisualDeltaEvidence,
+) -> SurfaceVisualDeltaReport {
+    let mut diagnostics = Vec::new();
+    let shape_delta_leak_detected = evidence.base_frozen_mesh_fingerprint
+        != evidence.candidate_frozen_mesh_fingerprint
+        || base.source_artifact_fingerprint != candidate.source_artifact_fingerprint
+        || base.frozen_mesh_ref != candidate.frozen_mesh_ref
+        || base.uv_sets != candidate.uv_sets
+        || base.triangle_bindings != candidate.triangle_bindings;
+    if shape_delta_leak_detected {
+        diagnostics.push("shape_delta_leak_detected".to_owned());
+    }
+    if evidence
+        .base_textured_preview_ref
+        .as_deref()
+        .is_none_or(|path| path.trim().is_empty())
+        || evidence
+            .candidate_textured_preview_ref
+            .as_deref()
+            .is_none_or(|path| path.trim().is_empty())
+        || evidence.visible_surface_pixel_delta.is_none()
+    {
+        diagnostics.push("missing_textured_preview_evidence".to_owned());
+    }
+
+    let base_color_delta = base_color_delta(base, candidate);
+    let material_slot_delta = material_slot_delta(base, candidate);
+    let texture_channel_delta = texture_channel_delta(base, candidate);
+    let wear_delta_value = wear_delta(base, candidate);
+    let wear_delta = Some(wear_delta_value);
+    let visible_surface_pixel_delta = evidence.visible_surface_pixel_delta.unwrap_or(0.0);
+
+    let result_class = if diagnostics.iter().any(|code| {
+        code == "missing_textured_preview_evidence" || code == "shape_delta_leak_detected"
+    }) {
+        SurfaceVisualDeltaResultClass::Unsupported
+    } else {
+        classify_surface_delta(
+            base_color_delta,
+            material_slot_delta,
+            texture_channel_delta,
+            wear_delta_value,
+            visible_surface_pixel_delta,
+        )
+    };
+    if result_class == SurfaceVisualDeltaResultClass::DuplicateLooking {
+        diagnostics.push("duplicate_looking_surface_variant".to_owned());
+    }
+
+    SurfaceVisualDeltaReport {
+        schema_version: SURFACE_VISUAL_DELTA_REPORT_SCHEMA_VERSION,
+        profile_id: base.profile_id.clone(),
+        candidate_id: candidate_id.into(),
+        base_color_delta,
+        material_slot_delta,
+        texture_channel_delta,
+        wear_delta,
+        visible_surface_pixel_delta,
+        shape_delta_leak_detected,
+        result_class,
+        diagnostics,
+    }
+}
+
+/// Validate the candidate set emitted by the material-only variant generator.
+#[must_use]
+pub fn validate_surface_material_variant_candidate_set(
+    set: &SurfaceMaterialVariantCandidateSet,
+) -> SurfaceLabValidationReport {
+    let mut builder = SurfaceLabValidationReportBuilder::new(&set.profile_id);
+    builder.require(
+        "surface_variant_candidate_schema_version_supported",
+        set.schema_version == SURFACE_MATERIAL_VARIANT_CANDIDATES_SCHEMA_VERSION,
+        Some("schema_version"),
+        "unsupported_surface_variant_candidate_schema",
+        "Surface variant candidate schema is supported.",
+        "Surface variant candidate schema is not supported.",
+    );
+    builder.require_non_empty("profile_id", &set.profile_id, "empty_profile_id");
+    builder.require_non_empty(
+        "base_surface_artifact_ref",
+        &set.base_surface_artifact_ref,
+        "missing_base_surface_artifact_ref",
+    );
+    builder.require_non_empty(
+        "base_textured_preview_ref",
+        &set.base_textured_preview_ref,
+        "missing_base_textured_preview_ref",
+    );
+    builder.require(
+        "surface_variant_candidate_count_supported",
+        (6..=12).contains(&set.candidates.len()),
+        Some("candidates"),
+        "surface_variant_candidate_count_out_of_range",
+        "Surface variant generator emitted 6 to 12 candidates.",
+        "Surface variant generator must emit 6 to 12 candidates.",
+    );
+    let mut ids = BTreeSet::new();
+    for candidate in &set.candidates {
+        builder.require_non_empty(
+            format!("candidates.{}.candidate_id", candidate.candidate_id),
+            &candidate.candidate_id,
+            "empty_surface_variant_candidate_id",
+        );
+        if !ids.insert(candidate.candidate_id.as_str()) {
+            builder.block(
+                Some(format!(
+                    "candidates.{}.candidate_id",
+                    candidate.candidate_id
+                )),
+                "duplicate_surface_variant_candidate_id",
+                "Surface variant candidate IDs must be unique.",
+            );
+        }
+        builder.require_non_empty(
+            format!("candidates.{}.display_name", candidate.candidate_id),
+            &candidate.display_name,
+            "empty_surface_variant_display_name",
+        );
+        builder.require(
+            format!(
+                "candidate_{}_preserves_frozen_geometry",
+                candidate.candidate_id
+            ),
+            candidate.preserves_frozen_geometry,
+            Some(format!(
+                "candidates.{}.preserves_frozen_geometry",
+                candidate.candidate_id
+            )),
+            "surface_variant_changed_geometry",
+            "Material-only surface variant preserves frozen geometry.",
+            "Material-only surface variants must preserve geometry, UVs, and triangle/material slot bindings.",
+        );
+        if candidate.result_class == SurfaceVisualDeltaResultClass::Unsupported {
+            builder.warn(
+                Some(format!(
+                    "candidates.{}.result_class",
+                    candidate.candidate_id
+                )),
+                "surface_variant_unsupported",
+                "Surface variant is present as diagnostic evidence but cannot pass.",
+            );
+        }
+    }
+    builder.finish()
+}
+
 fn validate_surface_lab_package_inner(
     package: &SurfaceLabPackage,
     artifacts: SurfaceArtifactValidation<'_>,
@@ -525,6 +808,151 @@ fn validate_surface_lab_package_inner(
     validate_unsupported_outputs(&mut builder, &package.unsupported_outputs);
     validate_evidence(&mut builder, &package.evidence, artifacts);
     builder.finish()
+}
+
+fn base_color_delta(base: &SurfaceArtifact, candidate: &SurfaceArtifact) -> f32 {
+    let base_colors = recipe_base_colors(base);
+    let candidate_colors = recipe_base_colors(candidate);
+    let mut compared = 0_u32;
+    let mut total = 0.0_f32;
+    for (recipe_id, base_color) in base_colors {
+        if let Some(candidate_color) = candidate_colors.get(recipe_id) {
+            compared = compared.saturating_add(1);
+            total += color_distance(base_color, *candidate_color);
+        }
+    }
+    if compared == 0 {
+        0.0
+    } else {
+        (total / compared as f32).clamp(0.0, 1.0)
+    }
+}
+
+fn recipe_base_colors(artifact: &SurfaceArtifact) -> BTreeMap<&str, [u8; 3]> {
+    artifact
+        .texture_sets
+        .iter()
+        .filter_map(|set| {
+            let color = set
+                .files
+                .iter()
+                .find(|file| file.channel == TextureChannel::BaseColor)
+                .and_then(|file| base_color_hint_from_path(&file.path));
+            color.map(|color| (set.material_recipe_id.as_str(), color))
+        })
+        .collect()
+}
+
+fn base_color_hint_from_path(path: &str) -> Option<[u8; 3]> {
+    let lower = path.to_ascii_lowercase();
+    let color = if lower.contains("clean-lab-white") {
+        [218, 224, 218]
+    } else if lower.contains("worn-hazard-yellow") {
+        [204, 166, 42]
+    } else if lower.contains("dark-industrial-metal") {
+        [42, 47, 50]
+    } else if lower.contains("field-blue-utility") {
+        [55, 94, 140]
+    } else if lower.contains("graphite-cargo") {
+        [70, 76, 76]
+    } else if lower.contains("orange-warning-trim") {
+        [216, 102, 36]
+    } else {
+        return None;
+    };
+    Some(color)
+}
+
+fn color_distance(left: [u8; 3], right: [u8; 3]) -> f32 {
+    let dr = f32::from(left[0]) - f32::from(right[0]);
+    let dg = f32::from(left[1]) - f32::from(right[1]);
+    let db = f32::from(left[2]) - f32::from(right[2]);
+    ((dr * dr + dg * dg + db * db).sqrt() / (255.0 * 3.0_f32.sqrt())).clamp(0.0, 1.0)
+}
+
+fn material_slot_delta(base: &SurfaceArtifact, candidate: &SurfaceArtifact) -> f32 {
+    let base_slots = base
+        .material_slots
+        .iter()
+        .map(|slot| (slot.slot_id.as_str(), slot.recipe_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let candidate_slots = candidate
+        .material_slots
+        .iter()
+        .map(|slot| (slot.slot_id.as_str(), slot.recipe_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    if base_slots.is_empty() {
+        return 0.0;
+    }
+    let changed = base_slots
+        .iter()
+        .filter(|(slot_id, recipe_id)| candidate_slots.get(*slot_id).copied() != Some(**recipe_id))
+        .count();
+    (changed as f32 / base_slots.len() as f32).clamp(0.0, 1.0)
+}
+
+fn texture_channel_delta(base: &SurfaceArtifact, candidate: &SurfaceArtifact) -> f32 {
+    let base_channels = texture_channel_keys(base);
+    let candidate_channels = texture_channel_keys(candidate);
+    if base_channels.is_empty() {
+        return 0.0;
+    }
+    let changed = base_channels
+        .iter()
+        .filter(|key| !candidate_channels.contains(*key))
+        .count()
+        + candidate_channels
+            .iter()
+            .filter(|key| !base_channels.contains(*key))
+            .count();
+    (changed as f32 / (base_channels.len().max(candidate_channels.len()) as f32)).clamp(0.0, 1.0)
+}
+
+fn texture_channel_keys(artifact: &SurfaceArtifact) -> BTreeSet<(String, TextureChannel, String)> {
+    artifact
+        .texture_sets
+        .iter()
+        .flat_map(|set| {
+            set.files.iter().map(|file| {
+                (
+                    set.material_recipe_id.clone(),
+                    file.channel,
+                    file.path.clone(),
+                )
+            })
+        })
+        .collect()
+}
+
+fn wear_delta(base: &SurfaceArtifact, candidate: &SurfaceArtifact) -> f32 {
+    if base.texture_sets == candidate.texture_sets {
+        0.0
+    } else {
+        0.25
+    }
+}
+
+fn classify_surface_delta(
+    base_color_delta: f32,
+    material_slot_delta: f32,
+    texture_channel_delta: f32,
+    wear_delta: f32,
+    visible_surface_pixel_delta: f32,
+) -> SurfaceVisualDeltaResultClass {
+    let combined = (base_color_delta * 0.35)
+        + (material_slot_delta * 0.15)
+        + (texture_channel_delta * 0.15)
+        + (wear_delta * 0.1)
+        + (visible_surface_pixel_delta * 0.25);
+    if visible_surface_pixel_delta < 0.015 && combined < 0.035 {
+        SurfaceVisualDeltaResultClass::DuplicateLooking
+    } else if combined >= 0.32 || visible_surface_pixel_delta >= 0.28 {
+        SurfaceVisualDeltaResultClass::Strong
+    } else if combined >= 0.14 || visible_surface_pixel_delta >= 0.12 {
+        SurfaceVisualDeltaResultClass::Clear
+    } else {
+        SurfaceVisualDeltaResultClass::Subtle
+    }
 }
 
 fn validate_surface_uv_sets(
@@ -1584,6 +2012,19 @@ impl SurfaceLabValidationReportBuilder {
             message,
         });
     }
+
+    fn warn(
+        &mut self,
+        subject: Option<impl Into<String>>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        self.warnings.push(GameAssetValidationIssue {
+            subject: subject.map(Into::into),
+            code: code.into(),
+            message: message.into(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -1776,6 +2217,133 @@ mod tests {
                 .any(|issue| issue.code == "surface_manual_review_required"),
             "{report:#?}"
         );
+    }
+
+    #[test]
+    fn surface_delta_rejects_shape_delta_leak() {
+        let base = valid_surface_artifact();
+        let mut candidate = base.clone();
+        candidate.source_artifact_fingerprint = "artifact:changed".to_owned();
+
+        let report = surface_visual_delta_report(
+            &base,
+            &candidate,
+            "changed-shape",
+            SurfaceVisualDeltaEvidence {
+                base_frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                candidate_frozen_mesh_fingerprint: "mesh:b".to_owned(),
+                base_textured_preview_ref: Some("surface/textured-preview.png".to_owned()),
+                candidate_textured_preview_ref: Some(
+                    "surface/variants/changed/textured-preview.png".to_owned(),
+                ),
+                visible_surface_pixel_delta: Some(0.4),
+            },
+        );
+
+        assert!(report.shape_delta_leak_detected);
+        assert_eq!(
+            report.result_class,
+            SurfaceVisualDeltaResultClass::Unsupported
+        );
+        assert!(!report.can_pass_surface_delta());
+    }
+
+    #[test]
+    fn surface_delta_requires_textured_preview_evidence() {
+        let base = valid_surface_artifact();
+        let mut candidate = base.clone();
+        candidate.texture_sets[0].files[0].path =
+            "surface/variants/clean-lab-white/textures/worn-painted-sci-fi-metal-base_color.png"
+                .to_owned();
+
+        let report = surface_visual_delta_report(
+            &base,
+            &candidate,
+            "clean-lab-white",
+            SurfaceVisualDeltaEvidence {
+                base_frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                candidate_frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                base_textured_preview_ref: None,
+                candidate_textured_preview_ref: Some(
+                    "surface/variants/clean-lab-white/textured-preview.png".to_owned(),
+                ),
+                visible_surface_pixel_delta: None,
+            },
+        );
+
+        assert_eq!(
+            report.result_class,
+            SurfaceVisualDeltaResultClass::Unsupported
+        );
+        assert!(
+            report
+                .diagnostics
+                .contains(&"missing_textured_preview_evidence".to_owned())
+        );
+        assert!(!report.can_pass_surface_delta());
+    }
+
+    #[test]
+    fn surface_delta_classifies_material_only_variant() {
+        let base = valid_surface_artifact();
+        let mut candidate = base.clone();
+        candidate.texture_sets[0].files[0].path =
+            "surface/variants/worn-hazard-yellow/textures/worn-painted-sci-fi-metal-base_color.png"
+                .to_owned();
+
+        let report = surface_visual_delta_report(
+            &base,
+            &candidate,
+            "worn-hazard-yellow",
+            SurfaceVisualDeltaEvidence {
+                base_frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                candidate_frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                base_textured_preview_ref: Some("surface/textured-preview.png".to_owned()),
+                candidate_textured_preview_ref: Some(
+                    "surface/variants/worn-hazard-yellow/textured-preview.png".to_owned(),
+                ),
+                visible_surface_pixel_delta: Some(0.22),
+            },
+        );
+
+        assert!(!report.shape_delta_leak_detected);
+        assert!(matches!(
+            report.result_class,
+            SurfaceVisualDeltaResultClass::Clear | SurfaceVisualDeltaResultClass::Strong
+        ));
+        assert!(report.can_pass_surface_delta(), "{report:#?}");
+    }
+
+    #[test]
+    fn material_variant_candidate_set_validates_count_and_geometry_preservation() {
+        let candidates = (0..6)
+            .map(|index| SurfaceMaterialVariantCandidate {
+                candidate_id: format!("variant-{index}"),
+                display_name: format!("Variant {index}"),
+                variant_dir: format!("surface/variants/variant-{index}"),
+                surface_artifact_ref: format!(
+                    "surface/variants/variant-{index}/surface-artifact.json"
+                ),
+                material_pack_ref: format!("surface/variants/variant-{index}/material-pack.json"),
+                textured_preview_ref: format!(
+                    "surface/variants/variant-{index}/textured-preview.png"
+                ),
+                surface_delta_ref: format!("surface/variants/variant-{index}/surface-delta.json"),
+                frozen_mesh_fingerprint: "mesh:a".to_owned(),
+                preserves_frozen_geometry: true,
+                result_class: SurfaceVisualDeltaResultClass::Clear,
+                diagnostics: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let set = SurfaceMaterialVariantCandidateSet {
+            schema_version: SURFACE_MATERIAL_VARIANT_CANDIDATES_SCHEMA_VERSION,
+            profile_id: "sci-fi-crate".to_owned(),
+            base_surface_artifact_ref: "surface/surface-artifact.json".to_owned(),
+            base_textured_preview_ref: "surface/textured-preview.png".to_owned(),
+            candidates,
+        };
+
+        assert!(validate_surface_material_variant_candidate_set(&set).is_ready());
     }
 
     fn valid_surface_package() -> SurfaceLabPackage {

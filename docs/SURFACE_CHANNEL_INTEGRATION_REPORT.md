@@ -19,6 +19,9 @@ keeps Surface Lab as a headless static-prop artifact provider.
 - Is Surface visual variation still disabled unless evidence supports it? Yes.
   The current blocker is textured preview rendering plus material candidate
   support.
+- Does headless package evidence enable Visual Foundry Surface mode? No. A
+  later package path can emit textured preview evidence and material-only
+  Sci-Fi Crate variant diagnostics, but the app remains unchanged.
 - Are shape and surface deltas kept separate? Yes. Existing candidate metadata
   keeps shape and surface delta scores separate, and tests cover the boundary.
 - Does Export describe Surface Lab honestly? Yes. Export copy says surface

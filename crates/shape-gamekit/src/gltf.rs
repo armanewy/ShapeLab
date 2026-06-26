@@ -323,27 +323,7 @@ pub fn encode_static_prop_surface_glb(
                 "mode": 4
             }]
         }],
-        "materials": [surface.material_slots.first().map(|slot| {
-            json!({
-                "name": slot.display_name,
-                "extras": {
-                    "shapeLabMaterialSlotId": slot.slot_id,
-                    "shapeLabMaterialBinding": "surface-artifact-triangle-bindings"
-                },
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
-                    "metallicFactor": 0.0,
-                    "roughnessFactor": 0.72
-                }
-            })
-        }).unwrap_or_else(|| json!({
-            "name": "Surface Placeholder Material",
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.72
-            }
-        }))],
+        "materials": surface_material_definitions(surface, false),
         "buffers": [{
             "byteLength": bin_length
         }],
@@ -413,6 +393,229 @@ pub fn encode_static_prop_surface_glb(
     });
 
     encode_glb_json_and_bin(gltf, bin_length, bin)
+}
+
+/// Encode a surface-aware glTF 2.0 JSON document that references an external
+/// binary buffer and relative texture PNG sidecars. This does not create a GLB
+/// and does not embed texture bytes.
+pub fn encode_static_prop_surface_gltf_json(
+    mesh: &TriangleMesh,
+    surface: &SurfaceArtifact,
+    surface_artifact_ref: &str,
+    buffer_uri: &str,
+) -> Result<Value, StaticPropGlbError> {
+    validate_mesh_for_glb(mesh)?;
+    validate_surface_for_glb(mesh, surface, surface_artifact_ref)?;
+    if buffer_uri.trim().is_empty() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface glTF buffer URI is required".to_owned(),
+        ));
+    }
+
+    let uv_set = surface
+        .uv_sets
+        .iter()
+        .find(|set| set.channel_index == 0)
+        .or_else(|| surface.uv_sets.first())
+        .ok_or_else(|| {
+            StaticPropGlbError::InvalidMetadata("surface UV set is required".to_owned())
+        })?;
+    let positions_offset = 0_u32;
+    let positions_length = checked_byte_len(mesh.positions.len(), 12, "positions")?;
+    let normals_offset = align4(positions_offset + positions_length);
+    let normals_length = checked_byte_len(mesh.normals.len(), 12, "normals")?;
+    let texcoords_offset = align4(normals_offset + normals_length);
+    let texcoords_length = checked_byte_len(uv_set.coordinates.len(), 8, "texcoords")?;
+    let indices_offset = align4(texcoords_offset + texcoords_length);
+    let indices_length = checked_byte_len(mesh.indices.len(), 4, "indices")?;
+    let bin_length = align4(indices_offset + indices_length);
+    let min = mesh.bounds.min.to_array();
+    let max = mesh.bounds.max.to_array();
+    let material_slot_ids = surface
+        .material_slots
+        .iter()
+        .map(|slot| slot.slot_id.as_str())
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "Shape Lab static-prop surface glTF handoff v2"
+        },
+        "scene": 0,
+        "scenes": [{ "nodes": [0] }],
+        "nodes": [{
+            "name": surface.display_name,
+            "mesh": 0,
+            "extras": {
+                "shapeLab": {
+                    "schemaVersion": STATIC_PROP_GLB_HANDOFF_SCHEMA_VERSION,
+                    "profileId": surface.profile_id,
+                    "claim": "portable-static-mesh-gltf-with-texcoord0-and-relative-texture-refs",
+                    "surfaceArtifactRef": surface_artifact_ref,
+                    "textureBinding": "relative-png-sidecars-not-embedded",
+                    "materialSlotIds": material_slot_ids,
+                    "notIncluded": [
+                        "glb-texture-embedding",
+                        "skin",
+                        "animation",
+                        "engine-native-import"
+                    ]
+                }
+            }
+        }],
+        "meshes": [{
+            "name": format!("{} Surface Mesh", surface.display_name),
+            "primitives": [{
+                "attributes": {
+                    "POSITION": 0,
+                    "NORMAL": 1,
+                    "TEXCOORD_0": 2
+                },
+                "indices": 3,
+                "material": 0,
+                "mode": 4
+            }]
+        }],
+        "materials": surface_material_definitions(surface, true),
+        "images": surface_texture_images(surface),
+        "textures": surface_texture_indices(surface),
+        "buffers": [{
+            "uri": buffer_uri,
+            "byteLength": bin_length
+        }],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": positions_offset, "byteLength": positions_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": normals_offset, "byteLength": normals_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": texcoords_offset, "byteLength": texcoords_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": indices_offset, "byteLength": indices_length, "target": 34963 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": mesh.positions.len(), "type": "VEC3", "min": min, "max": max },
+            { "bufferView": 1, "componentType": 5126, "count": mesh.normals.len(), "type": "VEC3" },
+            { "bufferView": 2, "componentType": 5126, "count": uv_set.coordinates.len(), "type": "VEC2" },
+            { "bufferView": 3, "componentType": 5125, "count": mesh.indices.len(), "type": "SCALAR" }
+        ],
+        "extras": {
+            "shapeLabProfileId": surface.profile_id,
+            "shapeLabDisplayName": surface.display_name,
+            "shapeLabSurfaceArtifact": surface_artifact_ref,
+            "shapeLabTextureBinding": "relative-png-sidecars",
+            "shapeLabNoSkin": true,
+            "shapeLabNoAnimation": true
+        }
+    }))
+}
+
+fn surface_material_definitions(
+    surface: &SurfaceArtifact,
+    include_texture_refs: bool,
+) -> Vec<Value> {
+    if surface.material_slots.is_empty() {
+        return vec![json!({
+            "name": "Surface Placeholder Material",
+            "extras": {
+                "shapeLabMaterialBinding": "surface-artifact-triangle-bindings",
+                "shapeLabTextureEmbedding": "not-implemented"
+            },
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.72
+            }
+        })];
+    }
+    surface
+        .material_slots
+        .iter()
+        .map(|slot| {
+            let base_color_texture = include_texture_refs
+                .then(|| base_color_texture_index(surface, &slot.recipe_id))
+                .flatten()
+                .map(|index| json!({ "index": index }));
+            let mut pbr = json!({
+                "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.72
+            });
+            if let Some(texture) = base_color_texture {
+                pbr["baseColorTexture"] = texture;
+            }
+            json!({
+                "name": slot.display_name,
+                "extras": {
+                    "shapeLabMaterialSlotId": slot.slot_id,
+                    "shapeLabMaterialRecipeId": slot.recipe_id,
+                    "shapeLabMaterialBinding": "surface-artifact-triangle-bindings",
+                    "shapeLabTextureEmbedding": "not-implemented"
+                },
+                "pbrMetallicRoughness": pbr
+            })
+        })
+        .collect()
+}
+
+fn surface_texture_images(surface: &SurfaceArtifact) -> Vec<Value> {
+    surface
+        .texture_sets
+        .iter()
+        .flat_map(|set| {
+            set.files.iter().map(|file| {
+                json!({
+                    "name": format!("{} {:?}", set.material_recipe_id, file.channel),
+                    "uri": file.path,
+                    "extras": {
+                        "shapeLabMaterialRecipeId": set.material_recipe_id,
+                        "shapeLabTextureChannel": file.channel,
+                        "shapeLabTextureEmbedding": "not-implemented"
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+fn surface_texture_indices(surface: &SurfaceArtifact) -> Vec<Value> {
+    surface
+        .texture_sets
+        .iter()
+        .flat_map(|set| {
+            set.files.iter().enumerate().map(|(index, file)| {
+                json!({
+                    "source": flattened_texture_index(surface, &set.material_recipe_id, file.channel).unwrap_or(index),
+                    "extras": {
+                        "shapeLabMaterialRecipeId": set.material_recipe_id,
+                        "shapeLabTextureChannel": file.channel
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+fn base_color_texture_index(surface: &SurfaceArtifact, recipe_id: &str) -> Option<usize> {
+    flattened_texture_index(
+        surface,
+        recipe_id,
+        crate::surface::TextureChannel::BaseColor,
+    )
+}
+
+fn flattened_texture_index(
+    surface: &SurfaceArtifact,
+    recipe_id: &str,
+    channel: crate::surface::TextureChannel,
+) -> Option<usize> {
+    let mut index = 0_usize;
+    for set in &surface.texture_sets {
+        for file in &set.files {
+            if set.material_recipe_id == recipe_id && file.channel == channel {
+                return Some(index);
+            }
+            index = index.saturating_add(1);
+        }
+    }
+    None
 }
 
 fn encode_glb_json_and_bin(
@@ -1148,6 +1351,48 @@ mod tests {
         assert!(!text.contains("surface/surface-validation-report.json"));
         assert!(text.contains("painted_metal_body"));
         assert!(text.contains("sidecar-texture-files"));
+        assert!(text.contains("shapeLabTextureEmbedding"));
+        assert!(text.contains("not-implemented"));
+        assert!(!text.contains("\"skins\""));
+        assert!(!text.contains("\"animations\""));
+    }
+
+    #[test]
+    fn surface_gltf_json_references_relative_texture_pngs_without_embedding_claim() {
+        let mesh = triangle_mesh();
+        let mut surface = surface_artifact();
+        surface.texture_sets = vec![SurfaceTextureSet {
+            id: "worn-painted-sci-fi-metal-textures".to_owned(),
+            display_name: "Worn Painted Textures".to_owned(),
+            material_recipe_id: "worn-painted-sci-fi-metal".to_owned(),
+            files: vec![crate::surface::SurfaceTextureFile {
+                channel: crate::surface::TextureChannel::BaseColor,
+                path: "surface/textures/worn-painted-sci-fi-metal-base_color.png".to_owned(),
+                width: 256,
+                height: 256,
+                color_space: "sRGB".to_owned(),
+                required_for_texture_ready: true,
+            }],
+            procedural_source: "test".to_owned(),
+            payload_ready: true,
+        }];
+
+        let value = encode_static_prop_surface_gltf_json(
+            &mesh,
+            &surface,
+            "surface/surface-artifact.json",
+            "sci-fi-crate-surface-static-prop.bin",
+        )
+        .expect("surface gltf json");
+        let text = serde_json::to_string(&value).expect("json text");
+
+        assert_eq!(
+            value.pointer("/meshes/0/primitives/0/attributes/TEXCOORD_0"),
+            Some(&Value::from(2_u64))
+        );
+        assert!(text.contains("surface/textures/worn-painted-sci-fi-metal-base_color.png"));
+        assert!(text.contains("relative-png-sidecars"));
+        assert!(text.contains("glb-texture-embedding"));
         assert!(!text.contains("\"skins\""));
         assert!(!text.contains("\"animations\""));
     }
