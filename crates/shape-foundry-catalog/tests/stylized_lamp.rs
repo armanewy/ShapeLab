@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use shape_asset::{AssetRecipe, GeometrySource, PartInstanceId};
+use shape_asset::{AssetRecipe, GeometrySource, ModelingOperationSpec, PartInstanceId};
 use shape_family::AllowedOperationKind;
 use shape_family_compile::conformance::ConformanceStatus;
 use shape_foundry::{
-    ControlKind, ControlValue, FoundryCompilationOutput, compile_foundry_document,
+    CandidateLegibilityClass, ControlKind, ControlValue, FoundryCompilationOutput,
+    compile_foundry_document,
 };
 use shape_foundry_catalog::{FoundryFixtureCatalog, stylized_lamp};
+use shape_search::foundry::{
+    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+};
 
 #[test]
 fn stylized_lamp_exposes_product_part_groups() {
@@ -32,7 +36,10 @@ fn shade_style_provider_alternatives_preserve_attachment() {
     let fixture = stylized_lamp::fixture_catalog();
     let baseline = compile_with(&fixture, &[]);
     let choices = shade_style_choices(&baseline);
-    assert_eq!(choices, vec!["cone", "drum", "task", "wide", "minimal"]);
+    assert_eq!(
+        choices,
+        vec!["cone", "drum", "task", "wide", "minimal", "playful"]
+    );
 
     let mut fingerprints = BTreeSet::new();
     let mut part_counts = BTreeSet::new();
@@ -84,17 +91,17 @@ fn shade_style_provider_alternatives_preserve_attachment() {
 
     assert_eq!(
         fingerprints.len(),
-        5,
+        6,
         "shade options should change geometry"
     );
     assert_eq!(
         shade_source_signatures.len(),
-        5,
+        6,
         "shade options should keep distinct authored body silhouettes"
     );
     assert!(
-        shade_extents.len() >= 4,
-        "at least four shade styles should read as different whole-model shade extents"
+        shade_extents.len() >= 5,
+        "at least five shade styles should read as different whole-model shade extents"
     );
     assert!(
         part_counts.len() > 1,
@@ -263,7 +270,7 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
                 ("base_weight", ControlValue::Scalar(0.58)),
                 ("stem_curvature", ControlValue::Scalar(1.0)),
                 ("joint_size", ControlValue::Scalar(0.68)),
-                ("shade_style", ControlValue::Choice("task".to_owned())),
+                ("shade_style", ControlValue::Choice("playful".to_owned())),
                 ("shade_scale", ControlValue::Scalar(0.62)),
                 ("edge_softness", ControlValue::Scalar(0.9)),
             ],
@@ -413,6 +420,134 @@ fn primary_control_endpoints_change_geometry() {
     }
 }
 
+#[test]
+fn primary_control_endpoints_are_readable_from_clay_bounds() {
+    let fixture = stylized_lamp::fixture_catalog();
+
+    let short = compile_with(&fixture, &[("overall_height", ControlValue::Scalar(1.1))]);
+    let tall = compile_with(&fixture, &[("overall_height", ControlValue::Scalar(2.2))]);
+    let short_extent = whole_model_extent(&short);
+    let tall_extent = whole_model_extent(&tall);
+    assert!(
+        tall_extent[1] > short_extent[1] + 0.65,
+        "Overall Height should produce a visibly taller clay silhouette"
+    );
+
+    let small_joint = compile_with(&fixture, &[("joint_size", ControlValue::Scalar(0.0))]);
+    let large_joint = compile_with(&fixture, &[("joint_size", ControlValue::Scalar(1.0))]);
+    let small_joint_extent = role_extent(&small_joint, "joint");
+    let large_joint_extent = role_extent(&large_joint, "joint");
+    assert!(
+        large_joint_extent[2] > small_joint_extent[2] * 1.7,
+        "Joint Size should visibly enlarge the pivot discs: small {small_joint_extent:?}, large {large_joint_extent:?}"
+    );
+
+    let compact_shade = compile_with(&fixture, &[("shade_scale", ControlValue::Scalar(0.0))]);
+    let broad_shade = compile_with(&fixture, &[("shade_scale", ControlValue::Scalar(1.0))]);
+    let compact_shade_extent = role_extent(&compact_shade, "shade");
+    let broad_shade_extent = role_extent(&broad_shade, "shade");
+    assert!(
+        max_extent(broad_shade_extent) > max_extent(compact_shade_extent) * 1.9,
+        "Shade Scale should visibly change shade mass: compact {compact_shade_extent:?}, broad {broad_shade_extent:?}"
+    );
+
+    let crisp = compile_with(&fixture, &[("edge_softness", ControlValue::Scalar(0.0))]);
+    let soft = compile_with(&fixture, &[("edge_softness", ControlValue::Scalar(1.0))]);
+    assert!(
+        max_bevel_radius_for_role(&soft, "joint")
+            > max_bevel_radius_for_role(&crisp, "joint") + 0.025,
+        "Edge Softness should change joint bevel language enough to explain"
+    );
+    assert!(
+        max_bevel_radius_for_role(&soft, "shade")
+            > max_bevel_radius_for_role(&crisp, "shade") + 0.020,
+        "Edge Softness should change shade bevel language enough to explain"
+    );
+    assert!(
+        max_bevel_radius_for_role(&soft, "base")
+            > max_bevel_radius_for_role(&crisp, "base") + 0.014,
+        "Edge Softness should change base rim language enough to explain"
+    );
+}
+
+#[test]
+fn explore_generation_returns_readable_lamp_directions() {
+    let fixture = stylized_lamp::fixture_catalog();
+    let output = generate_foundry_candidate_plans(
+        &fixture.document,
+        &fixture,
+        &FoundryCandidateRequest {
+            seed: 101,
+            proposal_count: 72,
+            result_count: 6,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: Default::default(),
+        },
+    )
+    .expect("lamp Explore candidates should generate");
+
+    assert!(
+        output.candidates.len() >= 4,
+        "Explore should return at least four selectable lamp ideas"
+    );
+    let mut silhouettes = BTreeSet::new();
+    let mut changed_controls = BTreeSet::new();
+    for candidate in &output.candidates {
+        assert!(
+            candidate.changed_controls.len() >= 2,
+            "{} should combine visible lamp controls",
+            candidate.label
+        );
+        assert_ne!(
+            candidate.variation_metadata.visible_delta.legibility_class,
+            CandidateLegibilityClass::TooSubtle,
+            "{} should not survive as TooSubtle",
+            candidate.label
+        );
+        assert_ne!(
+            candidate.variation_metadata.visible_delta.legibility_class,
+            CandidateLegibilityClass::DuplicateLooking,
+            "{} should not survive as a duplicate-looking direction",
+            candidate.label
+        );
+        assert!(
+            candidate
+                .variation_metadata
+                .visible_delta
+                .legibility_class
+                .selectable(),
+            "{} should be selectable legibility evidence",
+            candidate.label
+        );
+        let compiled = compile_foundry_document(&candidate.document, &fixture)
+            .expect("candidate document should compile");
+        assert_model_valid(&compiled, &candidate.label);
+        silhouettes.insert(quantized_whole_model_extent(&compiled));
+        changed_controls.extend(candidate.changed_controls.iter().map(String::as_str));
+    }
+
+    assert!(
+        silhouettes.len() >= 4,
+        "Explore should produce at least four visibly distinct whole-model lamp silhouettes"
+    );
+    assert!(
+        [
+            "overall_height",
+            "base_weight",
+            "stem_curvature",
+            "shade_style",
+            "shade_scale"
+        ]
+        .iter()
+        .filter(|control| changed_controls.contains(*control))
+        .count()
+            >= 4,
+        "Explore should cover at least four macro lamp controls"
+    );
+}
+
 fn compile_with(
     fixture: &FoundryFixtureCatalog,
     overrides: &[(&str, ControlValue)],
@@ -463,6 +598,7 @@ fn provider_for_choice(choice: &str) -> &'static str {
         "task" => "angled_task_shade",
         "wide" => "wide_reading_shade",
         "minimal" => "minimal_shade",
+        "playful" => "playful_tilt_shade",
         _ => panic!("unexpected shade choice {choice}"),
     }
 }
@@ -544,12 +680,16 @@ fn shade_source_signature(output: &FoundryCompilationOutput) -> String {
 }
 
 fn quantized_whole_model_extent(output: &FoundryCompilationOutput) -> (i32, i32, i32) {
+    quantize_extent(whole_model_extent(output))
+}
+
+fn whole_model_extent(output: &FoundryCompilationOutput) -> [f32; 3] {
     let bounds = output.artifact.combined_preview.mesh.bounds;
-    quantize_extent([
+    [
         bounds.max[0] - bounds.min[0],
         bounds.max[1] - bounds.min[1],
         bounds.max[2] - bounds.min[2],
-    ])
+    ]
 }
 
 fn quantized_role_extent(output: &FoundryCompilationOutput, role: &str) -> (i32, i32, i32) {
@@ -590,4 +730,22 @@ fn quantize_extent(extent: [f32; 3]) -> (i32, i32, i32) {
         (extent[1] * 20.0).round() as i32,
         (extent[2] * 20.0).round() as i32,
     )
+}
+
+fn max_extent(extent: [f32; 3]) -> f32 {
+    extent.into_iter().fold(0.0, f32::max)
+}
+
+fn max_bevel_radius_for_role(output: &FoundryCompilationOutput, role: &str) -> f32 {
+    output
+        .recipe
+        .definitions
+        .values()
+        .filter(|definition| definition.tags.contains(&format!("role:{role}")))
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .filter_map(|operation| match operation {
+            ModelingOperationSpec::SetBevelProfile { radius, .. } => Some(*radius),
+            _ => None,
+        })
+        .fold(0.0, f32::max)
 }

@@ -37,6 +37,9 @@ const LOCAL_BRACKET_DEFINITION: PartDefinitionId = PartDefinitionId(95);
 const LOCAL_BRACKET_INSTANCE: PartInstanceId = PartInstanceId(96);
 const LOCAL_BASE_SLAB_DEFINITION: PartDefinitionId = PartDefinitionId(97);
 const LOCAL_BASE_SLAB_INSTANCE: PartInstanceId = PartInstanceId(98);
+const LOCAL_SHADE_BODY_DEFINITION: PartDefinitionId = PartDefinitionId(99);
+const LOCAL_SHADE_BODY_INSTANCE: PartInstanceId = PartInstanceId(100);
+const LOCAL_UPPER_TRIM_INSTANCE: PartInstanceId = PartInstanceId(101);
 
 const SOCKET_PRIMARY: SocketId = SocketId(7);
 const SOCKET_SECONDARY: SocketId = SocketId(8);
@@ -45,8 +48,9 @@ const SOCKET_TERTIARY: SocketId = SocketId(9);
 const OPERATION_BEVEL: OperationId = OperationId(1);
 const OPERATION_TRIM_BEVEL: OperationId = OperationId(2);
 const OPERATION_BRACKET_BEVEL: OperationId = OperationId(3);
+const OPERATION_SHADE_MOUNT_BEVEL: OperationId = OperationId(4);
 
-const SHADE_STYLE_VALUES: [&str; 5] = ["cone", "drum", "task", "wide", "minimal"];
+const SHADE_STYLE_VALUES: [&str; 6] = ["cone", "drum", "task", "wide", "minimal", "playful"];
 
 /// Build the stylized lamp fixture catalog.
 #[must_use]
@@ -131,6 +135,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("angled_task_shade", "Angled task shade", "shade"),
             ("wide_reading_shade", "Wide reading shade", "shade"),
             ("minimal_shade", "Minimal shade", "shade"),
+            ("playful_tilt_shade", "Playful tilted shade", "shade"),
         ],
         vec![
             "furniture".to_owned(),
@@ -149,8 +154,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "stem",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.1.origin.y"),
                 ScalarTransform::ScaleOffset {
-                    scale: 0.42,
-                    offset: 0.0,
+                    scale: 0.52,
+                    offset: -0.04,
                 },
             ),
             scalar_binding(
@@ -158,8 +163,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "stem",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.2.origin.y"),
                 ScalarTransform::ScaleOffset {
-                    scale: 0.82,
-                    offset: -0.02,
+                    scale: 1.02,
+                    offset: -0.25,
                 },
             ),
             scalar_binding(
@@ -167,17 +172,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "joint",
                 instance_scalar_path(LOCAL_SECOND_INSTANCE, "transform.translation.y"),
                 ScalarTransform::ScaleOffset {
-                    scale: 0.82,
-                    offset: -0.02,
-                },
-            ),
-            scalar_binding(
-                "overall_height",
-                "shade",
-                instance_scalar_path(LOCAL_INSTANCE, "transform.translation.y"),
-                ScalarTransform::ScaleOffset {
-                    scale: 0.82,
-                    offset: 0.03,
+                    scale: 1.02,
+                    offset: -0.25,
                 },
             ),
             scalar_binding(
@@ -185,8 +181,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_INSTANCE, "transform.scale.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.68,
-                    maximum: 1.52,
+                    minimum: 0.58,
+                    maximum: 1.72,
                 },
             ),
             scalar_binding(
@@ -194,8 +190,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_INSTANCE, "transform.scale.z"),
                 ScalarTransform::Ratio {
-                    minimum: 0.68,
-                    maximum: 1.20,
+                    minimum: 0.58,
+                    maximum: 1.32,
                 },
             ),
             scalar_binding(
@@ -203,8 +199,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_INSTANCE, "transform.scale.y"),
                 ScalarTransform::Ratio {
-                    minimum: 0.78,
-                    maximum: 1.18,
+                    minimum: 0.70,
+                    maximum: 1.05,
                 },
             ),
             scalar_binding(
@@ -212,8 +208,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.lathe.profile.1.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.48,
-                    maximum: 0.88,
+                    minimum: 0.42,
+                    maximum: 0.96,
                 },
             ),
             scalar_binding(
@@ -221,8 +217,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.lathe.profile.2.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.48,
-                    maximum: 0.88,
+                    minimum: 0.42,
+                    maximum: 0.96,
                 },
             ),
             scalar_binding(
@@ -230,8 +226,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.lathe.profile.3.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.38,
-                    maximum: 0.72,
+                    minimum: 0.32,
+                    maximum: 0.82,
                 },
             ),
             scalar_binding(
@@ -239,8 +235,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.55,
-                    maximum: 1.65,
+                    minimum: 0.40,
+                    maximum: 1.90,
                 },
             ),
             scalar_binding(
@@ -248,8 +244,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.z"),
                 ScalarTransform::Ratio {
-                    minimum: 0.55,
-                    maximum: 1.10,
+                    minimum: 0.42,
+                    maximum: 1.25,
                 },
             ),
             scalar_binding(
@@ -257,8 +253,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.y"),
                 ScalarTransform::Ratio {
-                    minimum: 0.55,
-                    maximum: 1.20,
+                    minimum: 0.42,
+                    maximum: 1.00,
                 },
             ),
             scalar_binding(
@@ -267,7 +263,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.1.origin.x"),
                 ScalarTransform::Ratio {
                     minimum: 0.0,
-                    maximum: 0.44,
+                    maximum: 0.48,
                 },
             ),
             scalar_binding(
@@ -275,8 +271,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "stem",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.2.origin.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.05,
-                    maximum: 0.62,
+                    minimum: 0.04,
+                    maximum: 0.68,
                 },
             ),
             scalar_binding(
@@ -284,17 +280,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "joint",
                 instance_scalar_path(LOCAL_SECOND_INSTANCE, "transform.translation.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.05,
-                    maximum: 0.62,
-                },
-            ),
-            scalar_binding(
-                "stem_curvature",
-                "shade",
-                instance_scalar_path(LOCAL_INSTANCE, "transform.translation.x"),
-                ScalarTransform::Ratio {
-                    minimum: 0.8,
-                    maximum: 1.35,
+                    minimum: 0.04,
+                    maximum: 0.68,
                 },
             ),
             scalar_binding(
@@ -302,8 +289,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "joint",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
                 ScalarTransform::Ratio {
-                    minimum: 0.075,
-                    maximum: 0.145,
+                    minimum: 0.055,
+                    maximum: 0.16,
                 },
             ),
             scalar_binding(
@@ -311,8 +298,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "joint",
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.height"),
                 ScalarTransform::Ratio {
-                    minimum: 0.14,
-                    maximum: 0.32,
+                    minimum: 0.11,
+                    maximum: 0.36,
                 },
             ),
             ParameterBinding::ChoiceToPrototype {
@@ -324,33 +311,34 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     ("task".to_owned(), "angled_task_shade".to_owned()),
                     ("wide".to_owned(), "wide_reading_shade".to_owned()),
                     ("minimal".to_owned(), "minimal_shade".to_owned()),
+                    ("playful".to_owned(), "playful_tilt_shade".to_owned()),
                 ]),
             },
             scalar_binding(
                 "shade_scale",
                 "shade",
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.x"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.x"),
                 ScalarTransform::Ratio {
-                    minimum: 0.72,
-                    maximum: 1.48,
+                    minimum: 0.70,
+                    maximum: 1.38,
                 },
             ),
             scalar_binding(
                 "shade_scale",
                 "shade",
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.z"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.z"),
                 ScalarTransform::Ratio {
-                    minimum: 0.72,
-                    maximum: 1.48,
+                    minimum: 0.70,
+                    maximum: 1.38,
                 },
             ),
             scalar_binding(
                 "shade_scale",
                 "shade",
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.y"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.y"),
                 ScalarTransform::Ratio {
-                    minimum: 0.82,
-                    maximum: 1.22,
+                    minimum: 0.80,
+                    maximum: 1.20,
                 },
             ),
             scalar_binding(
@@ -358,8 +346,17 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "base",
                 definition_scalar_path(LOCAL_BASE_SLAB_DEFINITION, "geometry.rounded_box.radius"),
                 ScalarTransform::Ratio {
-                    minimum: 0.012,
-                    maximum: 0.07,
+                    minimum: 0.006,
+                    maximum: 0.08,
+                },
+            ),
+            scalar_binding(
+                "edge_softness",
+                "base",
+                definition_scalar_path(LOCAL_BASE_SLAB_DEFINITION, "operation.1.bevel.radius"),
+                ScalarTransform::Ratio {
+                    minimum: 0.0,
+                    maximum: 0.03,
                 },
             ),
             scalar_binding(
@@ -367,8 +364,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "stem",
                 definition_scalar_path(LOCAL_DEFINITION, "operation.1.bevel.radius"),
                 ScalarTransform::Ratio {
-                    minimum: 0.002,
-                    maximum: 0.012,
+                    minimum: 0.0,
+                    maximum: 0.015,
                 },
             ),
             scalar_binding(
@@ -376,17 +373,17 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "joint",
                 definition_scalar_path(LOCAL_DEFINITION, "operation.1.bevel.radius"),
                 ScalarTransform::Ratio {
-                    minimum: 0.004,
-                    maximum: 0.028,
+                    minimum: 0.0,
+                    maximum: 0.035,
                 },
             ),
             scalar_binding(
                 "edge_softness",
                 "shade",
-                definition_scalar_path(LOCAL_DEFINITION, "operation.1.bevel.radius"),
+                definition_scalar_path(LOCAL_SHADE_BODY_DEFINITION, "operation.1.bevel.radius"),
                 ScalarTransform::Ratio {
-                    minimum: 0.003,
-                    maximum: 0.025,
+                    minimum: 0.0,
+                    maximum: 0.03,
                 },
             ),
         ],
@@ -411,6 +408,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             task_shade_fragment(),
             wide_shade_fragment(),
             minimal_shade_fragment(),
+            playful_shade_fragment(),
         ],
     );
     debug_assert_eq!(
@@ -587,6 +585,12 @@ fn tag_lamp_prototype_operations(style: &mut shape_family::StyleKit) {
                 AllowedOperationKind::Bevel,
                 AllowedOperationKind::Transform,
             ],
+            "playful_tilt_shade" => vec![
+                AllowedOperationKind::Primitive,
+                AllowedOperationKind::Sweep,
+                AllowedOperationKind::Bevel,
+                AllowedOperationKind::Transform,
+            ],
             "ribbed_cone_shade" | "banded_drum_shade" | "wide_reading_shade" | "minimal_shade" => {
                 vec![AllowedOperationKind::Primitive, AllowedOperationKind::Bevel]
             }
@@ -707,7 +711,7 @@ fn lathed_base_fragment() -> RecipeFragment {
                 half_extents: [0.56, 0.045, 0.34],
                 radius: 0.035,
             },
-            Vec::new(),
+            vec![bevel(OPERATION_BEVEL, 0.012, 1)],
             Vec::new(),
         ),
     );
@@ -751,14 +755,14 @@ fn lathed_base_fragment() -> RecipeFragment {
             (
                 instance_scalar_path(LOCAL_INSTANCE, "transform.scale.x"),
                 "Base X weight scale",
-                0.6,
+                0.55,
                 2.0,
                 0.01,
             ),
             (
                 instance_scalar_path(LOCAL_INSTANCE, "transform.scale.z"),
                 "Base Z weight scale",
-                0.6,
+                0.55,
                 2.0,
                 0.01,
             ),
@@ -772,21 +776,21 @@ fn lathed_base_fragment() -> RecipeFragment {
             (
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.x"),
                 "Slab foot width scale",
-                0.5,
-                1.8,
+                0.35,
+                2.0,
                 0.01,
             ),
             (
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.z"),
                 "Slab foot depth scale",
-                0.5,
+                0.35,
                 1.3,
                 0.01,
             ),
             (
                 instance_scalar_path(LOCAL_BASE_SLAB_INSTANCE, "transform.scale.y"),
                 "Slab foot thickness scale",
-                0.5,
+                0.35,
                 1.4,
                 0.01,
             ),
@@ -795,6 +799,13 @@ fn lathed_base_fragment() -> RecipeFragment {
                 "Slab corner softness",
                 0.005,
                 0.08,
+                0.001,
+            ),
+            (
+                definition_scalar_path(LOCAL_BASE_SLAB_DEFINITION, "operation.1.bevel.radius"),
+                "Slab edge bevel",
+                0.0,
+                0.035,
                 0.001,
             ),
         ],
@@ -836,14 +847,14 @@ fn swept_stem_fragment() -> RecipeFragment {
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.1.origin.y"),
                 "Stem midpoint height",
                 0.42,
-                0.96,
+                1.12,
                 0.01,
             ),
             (
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.sweep.path.2.origin.y"),
                 "Stem endpoint height",
-                0.88,
-                1.86,
+                0.84,
+                2.05,
                 0.01,
             ),
             (
@@ -934,14 +945,14 @@ fn joint_pair_fragment() -> RecipeFragment {
             (
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
                 "Joint radius",
-                0.06,
+                0.05,
                 0.16,
                 0.005,
             ),
             (
                 definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.height"),
                 "Joint barrel width",
-                0.12,
+                0.10,
                 0.36,
                 0.005,
             ),
@@ -955,8 +966,8 @@ fn joint_pair_fragment() -> RecipeFragment {
             (
                 instance_scalar_path(LOCAL_SECOND_INSTANCE, "transform.translation.y"),
                 "Upper joint height",
-                0.88,
-                1.86,
+                0.84,
+                2.05,
                 0.01,
             ),
             (
@@ -988,7 +999,6 @@ fn cone_shade_fragment() -> RecipeFragment {
             radial_segments: 48,
         },
         Transform3 {
-            translation: [1.03, 1.30, 0.0],
             rotation_degrees: [0.0, 0.0, -18.0],
             ..Transform3::default()
         },
@@ -1007,13 +1017,12 @@ fn drum_shade_fragment() -> RecipeFragment {
             radial_segments: 48,
         },
         Transform3 {
-            translation: [1.03, 1.30, 0.0],
             rotation_degrees: [0.0, 0.0, -8.0],
             ..Transform3::default()
         },
     );
     add_trim_ring(&mut recipe, 0.38, 0.38, -0.285);
-    add_trim_ring_instance(&mut recipe, LOCAL_SECOND_INSTANCE, [0.0, 0.285, 0.0]);
+    add_trim_ring_instance(&mut recipe, LOCAL_UPPER_TRIM_INSTANCE, [0.0, 0.285, 0.0]);
     shade_fragment("banded_drum_shade", recipe)
 }
 
@@ -1027,7 +1036,6 @@ fn task_shade_fragment() -> RecipeFragment {
             radial_segments: 40,
         },
         Transform3 {
-            translation: [1.03, 1.30, 0.0],
             rotation_degrees: [0.0, 0.0, -28.0],
             ..Transform3::default()
         },
@@ -1047,13 +1055,12 @@ fn wide_shade_fragment() -> RecipeFragment {
             radial_segments: 56,
         },
         Transform3 {
-            translation: [1.05, 1.30, 0.0],
             rotation_degrees: [0.0, 0.0, -10.0],
             ..Transform3::default()
         },
     );
     add_trim_ring(&mut recipe, 0.64, 0.42, -0.185);
-    add_trim_ring_instance(&mut recipe, LOCAL_SECOND_INSTANCE, [0.0, 0.185, 0.0]);
+    add_trim_ring_instance(&mut recipe, LOCAL_UPPER_TRIM_INSTANCE, [0.0, 0.185, 0.0]);
     shade_fragment("wide_reading_shade", recipe)
 }
 
@@ -1067,7 +1074,6 @@ fn minimal_shade_fragment() -> RecipeFragment {
             radial_segments: 32,
         },
         Transform3 {
-            translation: [1.0, 1.27, 0.0],
             rotation_degrees: [0.0, 0.0, -12.0],
             ..Transform3::default()
         },
@@ -1075,79 +1081,125 @@ fn minimal_shade_fragment() -> RecipeFragment {
     shade_fragment("minimal_shade", recipe)
 }
 
-fn shade_recipe(id: &str, source: GeometrySource, transform: Transform3) -> AssetRecipe {
-    let mut recipe = single_definition_recipe(
-        id,
-        "shade",
-        source,
-        vec![bevel(OPERATION_BEVEL, 0.012, 1)],
-        transform.translation,
-        vec![socket("stem mount", SOCKET_PRIMARY, [0.0, 0.0, 0.0])],
+fn playful_shade_fragment() -> RecipeFragment {
+    let mut recipe = shade_recipe(
+        "playful_tilt_shade",
+        GeometrySource::Frustum {
+            bottom_radius: 0.46,
+            top_radius: 0.22,
+            height: 0.38,
+            radial_segments: 36,
+        },
+        Transform3 {
+            rotation_degrees: [0.0, 0.0, -34.0],
+            ..Transform3::default()
+        },
     );
-    if let Some(instance) = recipe.instances.get_mut(&LOCAL_INSTANCE) {
-        instance.local_transform = transform;
-    }
+    add_trim_ring(&mut recipe, 0.50, 0.26, -0.235);
+    add_trim_ring_instance(&mut recipe, LOCAL_UPPER_TRIM_INSTANCE, [0.0, 0.215, 0.0]);
+    add_bracket(&mut recipe);
+    shade_fragment("playful_tilt_shade", recipe)
+}
+
+fn shade_recipe(id: &str, source: GeometrySource, transform: Transform3) -> AssetRecipe {
+    let mut recipe = AssetRecipe::new(AssetId(1), format!("{id} fragment"));
+    recipe.definitions.insert(
+        LOCAL_DEFINITION,
+        part_definition(
+            LOCAL_DEFINITION,
+            &format!("{id} mount collar definition"),
+            "shade",
+            GeometrySource::Cylinder {
+                radius: 0.055,
+                height: 0.10,
+                radial_segments: 24,
+            },
+            vec![bevel(OPERATION_SHADE_MOUNT_BEVEL, 0.006, 1)],
+            vec![socket("stem mount", SOCKET_PRIMARY, [0.0, 0.0, 0.0])],
+        ),
+    );
+    recipe.definitions.insert(
+        LOCAL_SHADE_BODY_DEFINITION,
+        part_definition(
+            LOCAL_SHADE_BODY_DEFINITION,
+            &format!("{id} body definition"),
+            "shade",
+            source,
+            vec![bevel(OPERATION_BEVEL, 0.012, 1)],
+            Vec::new(),
+        ),
+    );
+    recipe.instances.insert(
+        LOCAL_INSTANCE,
+        part_instance(
+            LOCAL_INSTANCE,
+            LOCAL_DEFINITION,
+            &format!("{id} shade mount collar"),
+            None,
+            Transform3::default(),
+        ),
+    );
+    recipe.instances.insert(
+        LOCAL_SHADE_BODY_INSTANCE,
+        part_instance(
+            LOCAL_SHADE_BODY_INSTANCE,
+            LOCAL_SHADE_BODY_DEFINITION,
+            &format!("{id} shade body"),
+            Some(LOCAL_INSTANCE),
+            transform,
+        ),
+    );
+    recipe.root_instances.push(LOCAL_INSTANCE);
     add_parameters(
         &mut recipe,
         &[
             (
-                instance_scalar_path(LOCAL_INSTANCE, "transform.translation.y"),
-                "Shade attachment height",
-                0.9,
-                1.9,
-                0.01,
-            ),
-            (
-                instance_scalar_path(LOCAL_INSTANCE, "transform.translation.x"),
-                "Shade reach",
-                0.72,
-                1.42,
-                0.01,
-            ),
-            (
-                definition_scalar_path(LOCAL_DEFINITION, "geometry.frustum.bottom_radius"),
+                definition_scalar_path(
+                    LOCAL_SHADE_BODY_DEFINITION,
+                    "geometry.frustum.bottom_radius",
+                ),
                 "Shade lower radius",
                 0.22,
                 0.72,
                 0.01,
             ),
             (
-                definition_scalar_path(LOCAL_DEFINITION, "geometry.frustum.top_radius"),
+                definition_scalar_path(LOCAL_SHADE_BODY_DEFINITION, "geometry.frustum.top_radius"),
                 "Shade upper radius",
                 0.16,
                 0.45,
                 0.01,
             ),
             (
-                definition_scalar_path(LOCAL_DEFINITION, "geometry.frustum.height"),
+                definition_scalar_path(LOCAL_SHADE_BODY_DEFINITION, "geometry.frustum.height"),
                 "Shade height",
                 0.24,
                 0.62,
                 0.01,
             ),
             (
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.x"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.x"),
                 "Shade width scale",
                 0.7,
                 1.6,
                 0.01,
             ),
             (
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.z"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.z"),
                 "Shade depth scale",
                 0.7,
                 1.6,
                 0.01,
             ),
             (
-                instance_scalar_path(LOCAL_INSTANCE, "transform.scale.y"),
+                instance_scalar_path(LOCAL_SHADE_BODY_INSTANCE, "transform.scale.y"),
                 "Shade height scale",
                 0.8,
                 1.35,
                 0.01,
             ),
             (
-                definition_scalar_path(LOCAL_DEFINITION, "operation.1.bevel.radius"),
+                definition_scalar_path(LOCAL_SHADE_BODY_DEFINITION, "operation.1.bevel.radius"),
                 "Shade edge softness",
                 0.0,
                 0.03,
@@ -1181,7 +1233,7 @@ fn add_trim_ring(recipe: &mut AssetRecipe, bottom_radius: f32, top_radius: f32, 
             LOCAL_TRIM_INSTANCE,
             LOCAL_TRIM_DEFINITION,
             "shade lower trim ring",
-            Some(LOCAL_INSTANCE),
+            Some(LOCAL_SHADE_BODY_INSTANCE),
             Transform3 {
                 translation: [0.0, y, 0.0],
                 ..Transform3::default()
@@ -1201,7 +1253,7 @@ fn add_trim_ring_instance(
             instance,
             LOCAL_TRIM_DEFINITION,
             "shade upper trim ring",
-            Some(LOCAL_INSTANCE),
+            Some(LOCAL_SHADE_BODY_INSTANCE),
             Transform3 {
                 translation,
                 ..Transform3::default()
@@ -1235,7 +1287,7 @@ fn add_bracket(recipe: &mut AssetRecipe) {
             LOCAL_BRACKET_INSTANCE,
             LOCAL_BRACKET_DEFINITION,
             "curved shade support bracket",
-            Some(LOCAL_INSTANCE),
+            Some(LOCAL_SHADE_BODY_INSTANCE),
             Transform3 {
                 translation: [0.0, 0.0, 0.49],
                 ..Transform3::default()
@@ -1370,9 +1422,11 @@ fn fragment(
     role_occurrence_roots: Vec<PartInstanceId>,
     socket_ports: Vec<FragmentSocketPort>,
 ) -> RecipeFragment {
+    let validation = validate_asset_recipe(&recipe);
     assert!(
-        validate_asset_recipe(&recipe).is_valid(),
-        "{id} fragment recipe should be valid"
+        validation.is_valid(),
+        "{id} fragment recipe should be valid: {:#?}",
+        validation.issues
     );
     RecipeFragment {
         schema_version: RECIPE_FRAGMENT_SCHEMA_VERSION,
