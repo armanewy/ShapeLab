@@ -227,6 +227,15 @@ pub struct FoundryCandidateGenerationDiagnostics {
     pub locked_targets_skipped: usize,
     /// Rejection counters.
     pub rejections: BTreeMap<FoundryCandidateRejectionReason, usize>,
+    /// Duplicate-looking visual rejections, including duplicate collapse.
+    #[serde(default)]
+    pub duplicate_looking_rejections: usize,
+    /// Hidden/internal or too-subtle visual rejections.
+    #[serde(default)]
+    pub hidden_internal_rejections: usize,
+    /// Focus or scoped requests rejected because the visible change was outside scope.
+    #[serde(default)]
+    pub wrong_scope_rejections: usize,
     /// Human-readable generation summary.
     pub human_summary: String,
 }
@@ -398,6 +407,9 @@ pub fn generate_foundry_candidate_plans(
         available_control_count: opportunities.len(),
         locked_targets_skipped,
         rejections: BTreeMap::new(),
+        duplicate_looking_rejections: 0,
+        hidden_internal_rejections: 0,
+        wrong_scope_rejections: 0,
         human_summary: String::new(),
     };
     let mut seen_programs = BTreeSet::new();
@@ -502,6 +514,9 @@ pub fn generate_foundry_candidate_plans(
             Some(&legibility_evidence),
         );
         if let Some(reason) = variation_rejection_reason(&variation_metadata) {
+            if metadata_is_wrong_scope_rejection(&variation_metadata) {
+                diagnostics.wrong_scope_rejections += 1;
+            }
             increment_rejection(&mut diagnostics, reason);
             if matches!(
                 reason,
@@ -543,6 +558,13 @@ pub fn generate_foundry_candidate_plans(
     };
     let scoring_report =
         score_and_select_asset_candidates_with_policy(&scoring_inputs, &scoring_policy);
+    let duplicate_collapses = accepted_duplicate_member_count(&scoring_report, &accepted_plans);
+    for _ in 0..duplicate_collapses {
+        increment_rejection(
+            &mut diagnostics,
+            FoundryCandidateRejectionReason::DuplicateLooking,
+        );
+    }
     let selected_ids = selected_candidate_ids(
         &scoring_report,
         &accepted_plans,
@@ -561,6 +583,7 @@ pub fn generate_foundry_candidate_plans(
         .filter_map(|candidate_id| accepted_plans.remove(candidate_id))
         .collect::<Vec<_>>();
     diagnostics.returned_candidates = candidates.len();
+    update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
 
     Ok(FoundryCandidateOutput {
@@ -631,6 +654,9 @@ pub fn generate_foundry_candidate_draft_plans(
         available_control_count: opportunities.len(),
         locked_targets_skipped,
         rejections: BTreeMap::new(),
+        duplicate_looking_rejections: 0,
+        hidden_internal_rejections: 0,
+        wrong_scope_rejections: 0,
         human_summary: String::new(),
     };
     let mut seen_programs = BTreeSet::new();
@@ -736,6 +762,7 @@ pub fn generate_foundry_candidate_draft_plans(
         .filter_map(|candidate_id| accepted_plans.remove(candidate_id))
         .collect::<Vec<_>>();
     diagnostics.returned_candidates = candidates.len();
+    update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
 
     Ok(FoundryCandidateOutput {
@@ -768,11 +795,35 @@ pub fn generate_foundry_control_endpoint_visibility_report(
     for control in profile.controls.iter().filter(|control| {
         control.visible && control.topology_behavior != ControlTopologyBehavior::RuntimeOnly
     }) {
-        let Ok(domain) = effective_control_domain(control, context) else {
+        let domain = effective_control_domain(control, context).unwrap_or_else(|_| {
+            let mut domain = control.domain.clone();
+            let unavailable = domain
+                .unavailable_options
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            domain
+                .discrete_values
+                .retain(|value| !unavailable.contains(&value.option_key()));
+            domain
+        });
+        if !domain.has_available_values() {
+            let row =
+                unsupported_endpoint_row(control, 0, "Control endpoint domain is unavailable.");
+            if let Some(warning) = &row.warning {
+                warnings.push(warning.clone());
+            }
+            rows.push(row);
             continue;
-        };
+        }
         let samples = endpoint_samples_for_control(control, &domain, context);
         if samples.is_empty() {
+            let row =
+                unsupported_endpoint_row(control, 0, "Control endpoint has no sample values.");
+            if let Some(warning) = &row.warning {
+                warnings.push(warning.clone());
+            }
+            rows.push(row);
             continue;
         }
 
@@ -825,6 +876,15 @@ pub fn generate_foundry_control_endpoint_visibility_report(
         }
 
         let Some((visible_delta, perceptual_report)) = best else {
+            let row = unsupported_endpoint_row(
+                control,
+                attempted,
+                "Control endpoint samples did not compile into valid preview evidence.",
+            );
+            if let Some(warning) = &row.warning {
+                warnings.push(warning.clone());
+            }
+            rows.push(row);
             continue;
         };
         let warning = endpoint_warning(control, visible_delta.legibility_class);
@@ -870,27 +930,34 @@ fn validate_request(request: &FoundryCandidateRequest) -> Result<(), FoundryCand
 fn candidate_generation_human_summary(
     diagnostics: &FoundryCandidateGenerationDiagnostics,
 ) -> String {
-    let visually_rejected = diagnostics
-        .rejections
-        .get(&FoundryCandidateRejectionReason::DuplicateLooking)
-        .copied()
-        .unwrap_or(0)
-        + diagnostics
-            .rejections
-            .get(&FoundryCandidateRejectionReason::TooSubtle)
-            .copied()
-            .unwrap_or(0);
-    if visually_rejected == 0 {
-        format!(
-            "Generated {} visually distinct ideas.",
-            diagnostics.returned_candidates
-        )
-    } else {
-        format!(
-            "Generated {} visually distinct ideas. Rejected {} that looked too similar.",
-            diagnostics.returned_candidates, visually_rejected
-        )
-    }
+    format!(
+        "Generated {} clear ideas. Rejected {} that looked too similar. Rejected {} because changes were hidden/internal. Rejected {} because changes were wrong scope.",
+        diagnostics.returned_candidates,
+        diagnostics.duplicate_looking_rejections,
+        diagnostics.hidden_internal_rejections,
+        diagnostics.wrong_scope_rejections
+    )
+}
+
+fn update_legibility_rejection_totals(diagnostics: &mut FoundryCandidateGenerationDiagnostics) {
+    diagnostics.duplicate_looking_rejections = rejection_count(
+        diagnostics,
+        FoundryCandidateRejectionReason::DuplicateLooking,
+    );
+    let subtle_or_hidden = rejection_count(diagnostics, FoundryCandidateRejectionReason::TooSubtle)
+        + rejection_count(
+            diagnostics,
+            FoundryCandidateRejectionReason::HiddenOnlyChange,
+        );
+    diagnostics.hidden_internal_rejections =
+        subtle_or_hidden.saturating_sub(diagnostics.wrong_scope_rejections);
+}
+
+fn rejection_count(
+    diagnostics: &FoundryCandidateGenerationDiagnostics,
+    reason: FoundryCandidateRejectionReason,
+) -> usize {
+    diagnostics.rejections.get(&reason).copied().unwrap_or(0)
 }
 
 fn empty_candidate_output(
@@ -915,6 +982,9 @@ fn empty_candidate_output(
         available_control_count: 0,
         locked_targets_skipped: 0,
         rejections,
+        duplicate_looking_rejections: 0,
+        hidden_internal_rejections: 0,
+        wrong_scope_rejections: 0,
         human_summary: String::new(),
     };
     let mut preference_report = preference_report(
@@ -926,6 +996,7 @@ fn empty_candidate_output(
     );
     preference_report.ignored_reason = Some(detail);
     let mut diagnostics = diagnostics;
+    update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
     FoundryCandidateOutput {
         candidates: Vec::new(),
@@ -1192,6 +1263,49 @@ fn endpoint_warning(
     })
 }
 
+fn unsupported_endpoint_row(
+    control: &CustomizerControl,
+    endpoint_sample_count: usize,
+    reason: &str,
+) -> FoundryControlEndpointVisibilityRow {
+    let visible_delta = CandidateVisibleDeltaReport::new(
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        CandidateLegibilityClass::Unsupported,
+        vec![reason.to_owned()],
+        false,
+    );
+    FoundryControlEndpointVisibilityRow {
+        control_id: control.id.clone(),
+        control_label: control.label.clone(),
+        legibility_class: CandidateLegibilityClass::Unsupported,
+        visible_delta,
+        perceptual_report: PerceptualCandidateReport::new(
+            format!("endpoint-{}", control.id),
+            Vec::new(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Vec::new(),
+            vec![control.id.clone()],
+            CandidateLegibilityClass::Unsupported,
+            Some(reason.to_owned()),
+            format!("{} endpoint unsupported: {reason}", control.label),
+        ),
+        endpoint_sample_count,
+        warning: Some(format!(
+            "{} endpoint is Unsupported and should not drive candidate generation.",
+            control.label
+        )),
+    }
+}
+
 fn variation_allows_control(
     document: &FoundryAssetDocument,
     intent: &VariationIntent,
@@ -1325,6 +1439,17 @@ fn variation_rejection_reason(
     }
 }
 
+fn metadata_is_wrong_scope_rejection(metadata: &CandidateVariationMetadata) -> bool {
+    !metadata.visible_delta.legibility_class.selectable()
+        && metadata
+            .visible_delta
+            .blocking_reasons
+            .iter()
+            .any(|reason| {
+                reason.contains("Focus Part") || reason.contains("outside the requested scope")
+            })
+}
+
 fn candidate_visible_delta_report(
     intent: &VariationIntent,
     proposal: &CandidateEditProposal,
@@ -1376,7 +1501,7 @@ fn candidate_visible_delta_report(
         shape_delta.max(structure_signal).max(detail_delta),
     );
     let surface_delta = 0.0;
-    let (mut class, mut reasons) = classify_candidate_delta(
+    let (class, reasons) = classify_candidate_delta(
         intent,
         shape_delta,
         silhouette_delta,
@@ -1387,14 +1512,6 @@ fn candidate_visible_delta_report(
         selected_part_delta,
         changed_part_groups,
     );
-    if matches!(
-        class,
-        CandidateLegibilityClass::TooSubtle | CandidateLegibilityClass::DuplicateLooking
-    ) && proposal_has_linked_macro_delta(proposal)
-    {
-        class = CandidateLegibilityClass::SubtleButExplainable;
-        reasons.clear();
-    }
     CandidateVisibleDeltaReport::new(
         shape_delta,
         silhouette_delta,
@@ -1407,21 +1524,6 @@ fn candidate_visible_delta_report(
         reasons,
         false,
     )
-}
-
-fn proposal_has_linked_macro_delta(proposal: &CandidateEditProposal) -> bool {
-    let [change] = proposal.changes.as_slice() else {
-        return false;
-    };
-    if change.topology_changing || change.kind != FoundryCandidateChangeKind::Numeric {
-        return false;
-    }
-    let changed_subjects = change
-        .details
-        .iter()
-        .map(|detail| detail.subject.as_str())
-        .collect::<BTreeSet<_>>();
-    changed_subjects.len() > 1
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1446,6 +1548,14 @@ fn classify_candidate_delta(
         reasons.push(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned());
         return (CandidateLegibilityClass::Unsupported, reasons);
     }
+    let detail_only_evidence = detail_delta > 0.0
+        && shape_delta <= 0.0
+        && silhouette_delta <= 0.0
+        && structure_delta <= 0.0;
+    if !wants_detail && detail_only_evidence {
+        reasons.push("Detail-only changes are shown only in Detail mode.".to_owned());
+        return (CandidateLegibilityClass::TooSubtle, reasons);
+    }
     if let VariationScope::SemanticPartGroup { group_id, .. } = &intent.scope {
         let selected_changed = changed_part_groups
             .iter()
@@ -1459,8 +1569,10 @@ fn classify_candidate_delta(
             return (CandidateLegibilityClass::TooSubtle, reasons);
         }
         if unrelated_changed {
-            reasons
-                .push("Focus Part rejected because another part group changed visibly.".to_owned());
+            reasons.push(
+                "Focus Part rejected because another part group changed outside the requested scope."
+                    .to_owned(),
+            );
             return (CandidateLegibilityClass::TooSubtle, reasons);
         }
     }
@@ -1474,6 +1586,11 @@ fn classify_candidate_delta(
     let perceptual_evidence = geometry_evidence
         .max(screen_space_delta)
         .max(focus_evidence);
+    let clear_threshold = if intent.scope.is_focus_part() {
+        LEGIBILITY_FOCUS_SELECTED_DELTA
+    } else {
+        LEGIBILITY_CLEAR_AVERAGE_DELTA
+    };
     if wants_detail {
         if detail_delta >= LEGIBILITY_SUBTLE_DETAIL_DELTA
             || perceptual_evidence >= LEGIBILITY_SUBTLE_DETAIL_DELTA
@@ -1490,7 +1607,7 @@ fn classify_candidate_delta(
         reasons.push("Candidate looks identical to the parent at preview size.".to_owned());
         return (CandidateLegibilityClass::DuplicateLooking, reasons);
     }
-    if wants_shape && perceptual_evidence < LEGIBILITY_CLEAR_AVERAGE_DELTA {
+    if wants_shape && perceptual_evidence < clear_threshold {
         reasons.push(
             "Shape directions need visible geometry, structure, or silhouette change.".to_owned(),
         );
@@ -1507,7 +1624,7 @@ fn classify_candidate_delta(
         || silhouette_delta >= LEGIBILITY_CLEAR_MAX_DELTA
     {
         (CandidateLegibilityClass::Strong, reasons)
-    } else if perceptual_evidence >= LEGIBILITY_CLEAR_AVERAGE_DELTA
+    } else if perceptual_evidence >= clear_threshold
         || silhouette_delta >= LEGIBILITY_CLEAR_MAX_DELTA
     {
         (CandidateLegibilityClass::Clear, reasons)
@@ -1830,10 +1947,25 @@ fn selected_part_delta_for_intent(
         .iter()
         .any(|group| group.group_id == *group_id && group.visible)
     {
-        visible_delta.max(0.20)
+        visible_delta.max(LEGIBILITY_FOCUS_SELECTED_DELTA)
     } else {
         0.0
     }
+}
+
+fn accepted_duplicate_member_count(
+    scoring_report: &AssetScoringReport,
+    accepted_plans: &BTreeMap<String, FoundryCandidatePlan>,
+) -> usize {
+    let mut duplicate_members = BTreeSet::new();
+    for group in &scoring_report.duplicate_groups {
+        for member_id in &group.member_ids {
+            if accepted_plans.contains_key(member_id) {
+                duplicate_members.insert(member_id.clone());
+            }
+        }
+    }
+    duplicate_members.len()
 }
 
 fn mask_delta_for_camera(left: Option<&Vec<u64>>, right: Option<&Vec<u64>>) -> f32 {
@@ -3328,7 +3460,7 @@ mod tests {
 
     use shape_family_compile::conformance::FamilyConformanceReport;
     use shape_foundry::{ClosedInterval, DomainCertification};
-    use shape_foundry_catalog::scifi_crate;
+    use shape_foundry_catalog::{roman_bridge, scifi_crate, stylized_lamp};
 
     #[test]
     fn silhouette_descriptor_views_are_distinct() {
@@ -3578,13 +3710,91 @@ mod tests {
             available_control_count: 7,
             locked_targets_skipped: 0,
             rejections: BTreeMap::from([(FoundryCandidateRejectionReason::TooSubtle, 5)]),
+            duplicate_looking_rejections: 0,
+            hidden_internal_rejections: 5,
+            wrong_scope_rejections: 0,
             human_summary: String::new(),
         };
 
         assert_eq!(
             candidate_generation_human_summary(&diagnostics),
-            "Generated 3 visually distinct ideas. Rejected 5 that looked too similar."
+            "Generated 3 clear ideas. Rejected 0 that looked too similar. Rejected 5 because changes were hidden/internal. Rejected 0 because changes were wrong scope."
         );
+    }
+
+    #[test]
+    fn visible_bridge_support_and_bracing_changes_are_accepted() {
+        let parent = test_candidate_input("parent", [4.0, 1.0, 1.0], 0);
+        let candidate = test_candidate_input("bridge", [4.4, 1.2, 1.4], u64::MAX);
+        let document = roman_bridge::fixture_catalog().document;
+
+        for control_id in ["support_rhythm", "bracing_style"] {
+            let proposal = numeric_proposal(control_id, FoundryCandidateChangeKind::Provider);
+            let evidence = CandidateLegibilityEvidence {
+                candidate_id: control_id.to_owned(),
+                parent: &parent,
+                candidate: &candidate,
+            };
+
+            let metadata = variation_metadata_for_proposal(
+                &document,
+                &VariationIntent::whole_asset_shape(),
+                &proposal,
+                Some(&evidence),
+            );
+
+            assert!(
+                matches!(
+                    metadata.visible_delta.legibility_class,
+                    CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
+                ),
+                "{control_id} should be accepted: {:?}",
+                metadata.visible_delta
+            );
+        }
+    }
+
+    #[test]
+    fn visible_lamp_shade_and_base_changes_are_accepted() {
+        let parent = test_candidate_input("parent", [1.0, 2.0, 1.0], 0);
+        let document = stylized_lamp::fixture_catalog().document;
+        let cases = [
+            (
+                "shade_style",
+                FoundryCandidateChangeKind::Choice,
+                test_candidate_input("shade", [1.4, 2.2, 1.4], u64::MAX),
+            ),
+            (
+                "base_weight",
+                FoundryCandidateChangeKind::Numeric,
+                test_candidate_input("base", [1.8, 1.8, 1.3], u64::MAX),
+            ),
+        ];
+
+        for (control_id, kind, candidate) in cases {
+            let proposal = numeric_proposal(control_id, kind);
+            let evidence = CandidateLegibilityEvidence {
+                candidate_id: control_id.to_owned(),
+                parent: &parent,
+                candidate: &candidate,
+            };
+
+            let metadata = variation_metadata_for_proposal(
+                &document,
+                &VariationIntent::whole_asset_shape(),
+                &proposal,
+                Some(&evidence),
+            );
+
+            assert!(
+                matches!(
+                    metadata.visible_delta.legibility_class,
+                    CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
+                ),
+                "{control_id} should be accepted: {:?}",
+                metadata.visible_delta
+            );
+        }
     }
 
     #[test]
@@ -3672,6 +3882,88 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_visibility_reports_generated_for_bridge_and_lamp() {
+        let bridge = roman_bridge::fixture_catalog();
+        let bridge_report =
+            generate_foundry_control_endpoint_visibility_report(&bridge.document, &bridge)
+                .expect("bridge endpoint visibility report should generate");
+        assert_endpoint_controls_clear(
+            &bridge_report,
+            &[
+                "span_length",
+                "deck_width",
+                "structural_heft",
+                "support_rhythm",
+                "bracing_style",
+                "railing",
+                "edge_finish",
+            ],
+            &[],
+        );
+
+        let lamp = stylized_lamp::fixture_catalog();
+        let lamp_report =
+            generate_foundry_control_endpoint_visibility_report(&lamp.document, &lamp)
+                .expect("lamp endpoint visibility report should generate");
+        assert_endpoint_controls_clear(
+            &lamp_report,
+            &[
+                "overall_height",
+                "base_weight",
+                "stem_curvature",
+                "joint_size",
+                "shade_style",
+                "shade_scale",
+            ],
+            &["edge_softness"],
+        );
+    }
+
+    fn assert_endpoint_controls_clear(
+        report: &FoundryControlEndpointVisibilityReport,
+        major_controls: &[&str],
+        subtle_allowed_controls: &[&str],
+    ) {
+        let rows = report
+            .controls
+            .iter()
+            .map(|row| (row.control_id.as_str(), row.legibility_class))
+            .collect::<BTreeMap<_, _>>();
+        for control_id in major_controls {
+            assert!(
+                matches!(
+                    rows.get(control_id),
+                    Some(CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong)
+                ),
+                "{} {control_id} should be at least Clear: {:?}",
+                report.profile_id,
+                report
+                    .controls
+                    .iter()
+                    .find(|row| row.control_id == *control_id)
+            );
+        }
+        for control_id in subtle_allowed_controls {
+            assert!(
+                matches!(
+                    rows.get(control_id),
+                    Some(
+                        CandidateLegibilityClass::SubtleButExplainable
+                            | CandidateLegibilityClass::Clear
+                            | CandidateLegibilityClass::Strong
+                    )
+                ),
+                "{} {control_id} should be visible or explicitly subtle: {:?}",
+                report.profile_id,
+                report
+                    .controls
+                    .iter()
+                    .find(|row| row.control_id == *control_id)
+            );
+        }
+    }
+
+    #[test]
     fn legibility_report_deterministic_across_repeated_runs() {
         let parent = test_candidate_input("parent", [1.0, 1.0, 1.0], 0);
         let candidate = test_candidate_input("body", [1.8, 1.0, 0.8], u64::MAX);
@@ -3697,6 +3989,20 @@ mod tests {
         );
 
         assert_eq!(first.perceptual_report, second.perceptual_report);
+    }
+
+    #[test]
+    fn endpoint_reports_are_deterministic_across_repeated_runs() {
+        let fixture = stylized_lamp::fixture_catalog();
+
+        let first =
+            generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
+                .expect("endpoint visibility report should generate");
+        let second =
+            generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
+                .expect("endpoint visibility report should generate");
+
+        assert_eq!(first, second);
     }
 
     #[test]

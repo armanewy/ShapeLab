@@ -45,18 +45,22 @@ evidence for focused shape candidates. Whole-asset and focused candidates are
 filtered again after CPU preview rendering so hidden/control-only changes do
 not count as shown directions.
 
-The product may report smaller boards, for example "Generated 4 visually
-distinct directions." and "Rejected 2 subtle candidates that looked too
-similar." Surface Focus remains unavailable until textured previews and
-material candidate support exist.
+The product may report smaller boards, for example "Generated 4 clear ideas"
+with separate duplicate-looking, hidden/internal, and wrong-scope rejection
+counts. Surface Focus remains unavailable until textured previews and material
+candidate support exist.
 
-## v1 Candidate Engine
+## v2 Candidate Engine
 
-Candidate Legibility Engine v1 adds a strict `PerceptualCandidateReport` before
-duplicate collapse and diversity selection. The report compares parent and
-candidate evidence across fixed cameras, records max and average preview delta,
-silhouette delta, bounding-box delta, changed semantic part groups, changed
-controls, a product legibility class, and a plain rejection reason.
+Candidate Legibility Engine v2 keeps the strict `PerceptualCandidateReport`
+before duplicate collapse and diversity selection. The report compares parent
+and candidate evidence across fixed cameras, records max and average preview
+delta, silhouette delta, bounding-box delta, changed semantic part groups,
+changed controls, a product legibility class, and a plain rejection reason.
+
+Rendered preview classification is also multi-view: single-camera evidence is
+`Unsupported`, and Clear/Strong classes require either sufficient average delta
+across views or a stronger max-camera delta.
 
 Whole-asset Shape and Complete Look candidates must be Clear or Strong. Detail
 candidates may be subtler only when Detail was explicitly requested. Surface
@@ -64,5 +68,9 @@ and Wear remain unavailable until real surface/material preview evidence
 exists.
 
 The generator must not pad to six. If only three candidates pass, the board
-returns three and diagnostics say how many visually weak candidates were
-rejected.
+returns three and diagnostics separately say how many candidates were
+duplicate-looking, hidden/internal, and wrong-scope.
+
+Endpoint visibility reports now cover Sci-Fi Crate, Roman Bridge, and Stylized
+Lamp starter controls. Unsupported endpoint samples are reported as explicit
+rows instead of disappearing from the report.

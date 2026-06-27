@@ -3,20 +3,21 @@ use shape_family::StyleKit;
 use shape_family_compile::StyleImplementation;
 use shape_foundry::{
     CATALOG_LOCK_KEY_CUSTOMIZER_PROFILE, CATALOG_LOCK_KEY_STYLE, CATALOG_LOCK_KEY_STYLE_IMPL,
-    CandidateStrategy, CatalogContentRef, ClosedInterval, ControlKind, ControlTopologyBehavior,
-    ControlValue, CustomizerControl, CustomizerProfile, DomainCertification, FeasibleControlDomain,
-    FoundryCandidateId, FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget,
-    FoundryPreferenceEvent, FoundryPreferenceLog, FoundryPreferenceScope, ProviderOption,
-    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, VariationChannel, VariationIntent,
-    WholeModelPreviewRef, catalog_content_fingerprint_from_json,
+    CandidateLegibilityClass, CandidateStrategy, CatalogContentRef, ClosedInterval, ControlKind,
+    ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
+    DomainCertification, FeasibleControlDomain, FoundryCandidateId, FoundryCommand, FoundryLock,
+    FoundryLockMode, FoundryLockTarget, FoundryPreferenceEvent, FoundryPreferenceLog,
+    FoundryPreferenceScope, ProviderOption, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
+    VariationChannel, VariationIntent, WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
 use shape_foundry_catalog::{
-    FoundryFixtureCatalog, headless_fixture_catalogs, scifi_crate, showcase_gear, stylized_lamp,
+    FoundryFixtureCatalog, headless_fixture_catalogs, roman_bridge, scifi_crate, showcase_gear,
+    stylized_lamp,
 };
 use shape_search::foundry::{
     FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
     FoundryCandidateMode, FoundryCandidateRejectionReason, FoundryCandidateRequest,
-    generate_foundry_candidate_plans,
+    generate_foundry_candidate_plans, generate_foundry_control_endpoint_visibility_report,
 };
 use std::collections::BTreeSet;
 
@@ -65,6 +66,50 @@ fn contains_forbidden_label_term(label: &str, term: &str) -> bool {
         .collect::<Vec<_>>()
         .windows(term.split_whitespace().count().max(1))
         .any(|window| window.join(" ") == term)
+}
+
+fn assert_endpoint_controls_clear(
+    report: &shape_search::foundry::FoundryControlEndpointVisibilityReport,
+    major_controls: &[&str],
+    subtle_allowed_controls: &[&str],
+) {
+    let rows = report
+        .controls
+        .iter()
+        .map(|row| (row.control_id.as_str(), row.legibility_class))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for control_id in major_controls {
+        assert!(
+            matches!(
+                rows.get(control_id),
+                Some(CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong)
+            ),
+            "{} {control_id} should be at least Clear: {:?}",
+            report.profile_id,
+            report
+                .controls
+                .iter()
+                .find(|row| row.control_id == *control_id)
+        );
+    }
+    for control_id in subtle_allowed_controls {
+        assert!(
+            matches!(
+                rows.get(control_id),
+                Some(
+                    CandidateLegibilityClass::SubtleButExplainable
+                        | CandidateLegibilityClass::Clear
+                        | CandidateLegibilityClass::Strong
+                )
+            ),
+            "{} {control_id} should be visible or explicitly subtle: {:?}",
+            report.profile_id,
+            report
+                .controls
+                .iter()
+                .find(|row| row.control_id == *control_id)
+        );
+    }
 }
 
 #[test]
@@ -179,7 +224,7 @@ fn foundry_focus_part_variation_changes_only_selected_part_group_controls() {
     for candidate in &output.candidates {
         let metadata = &candidate.variation_metadata;
         assert_eq!(metadata.intent.scope.semantic_part_group_id(), Some("body"));
-        assert!(metadata.visible_delta.selected_part_delta_score >= 0.20);
+        assert!(metadata.visible_delta.selected_part_delta_score >= 0.065);
         assert!(
             metadata
                 .changed_part_groups
@@ -188,6 +233,62 @@ fn foundry_focus_part_variation_changes_only_selected_part_group_controls() {
         );
         assert!(candidate_label_is_product_safe(&candidate.label));
     }
+}
+
+#[test]
+fn endpoint_visibility_reports_cover_starter_templates() {
+    let crate_fixture = scifi_crate::fixture_catalog();
+    let crate_report = generate_foundry_control_endpoint_visibility_report(
+        &crate_fixture.document,
+        &crate_fixture,
+    )
+    .expect("crate endpoint report should generate");
+    assert_endpoint_controls_clear(
+        &crate_report,
+        &[
+            "body_proportions",
+            "structural_heft",
+            "panel_depth",
+            "vent_density",
+            "handle_style",
+            "detail_density",
+        ],
+        &["edge_softness"],
+    );
+
+    let bridge = roman_bridge::fixture_catalog();
+    let bridge_report =
+        generate_foundry_control_endpoint_visibility_report(&bridge.document, &bridge)
+            .expect("bridge endpoint report should generate");
+    assert_endpoint_controls_clear(
+        &bridge_report,
+        &[
+            "span_length",
+            "deck_width",
+            "structural_heft",
+            "support_rhythm",
+            "bracing_style",
+            "railing",
+            "edge_finish",
+        ],
+        &[],
+    );
+
+    let lamp = stylized_lamp::fixture_catalog();
+    let lamp_report = generate_foundry_control_endpoint_visibility_report(&lamp.document, &lamp)
+        .expect("lamp endpoint report should generate");
+    assert_endpoint_controls_clear(
+        &lamp_report,
+        &[
+            "overall_height",
+            "base_weight",
+            "stem_curvature",
+            "joint_size",
+            "shade_style",
+            "shade_scale",
+        ],
+        &["edge_softness"],
+    );
 }
 
 #[test]

@@ -22,7 +22,9 @@ const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
 const RENDER_DUPLICATE_AVERAGE_DELTA: f32 = 0.018;
 const RENDER_DUPLICATE_MAX_DELTA: f32 = 0.035;
 const RENDER_CLEAR_AVERAGE_DELTA: f32 = 0.075;
+const RENDER_CLEAR_MAX_DELTA: f32 = 0.115;
 const RENDER_STRONG_AVERAGE_DELTA: f32 = 0.16;
+const RENDER_STRONG_MAX_DELTA: f32 = 0.24;
 
 /// Default bounded capacity for the in-memory Foundry preview cache.
 pub const FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY: usize = 64;
@@ -383,7 +385,12 @@ pub fn classify_foundry_rendered_perceptual_report(
         .map(|delta| delta.silhouette_delta)
         .fold(0.0, f32::max);
     let unavailable = deltas.iter().find_map(|delta| delta.unavailable_reason);
-    let (legibility_class, reject_reason) = if let Some(reason) = unavailable {
+    let (legibility_class, reject_reason) = if camera_pairs.len() < 2 {
+        (
+            CandidateLegibilityClass::Unsupported,
+            Some("Multi-camera preview evidence needs at least two fixed views.".to_owned()),
+        )
+    } else if let Some(reason) = unavailable {
         (
             CandidateLegibilityClass::Unsupported,
             Some(reason.to_owned()),
@@ -395,10 +402,9 @@ pub fn classify_foundry_rendered_perceptual_report(
             CandidateLegibilityClass::DuplicateLooking,
             Some("Candidate looks identical to the parent at preview size.".to_owned()),
         )
-    } else if average_delta >= RENDER_STRONG_AVERAGE_DELTA {
+    } else if average_delta >= RENDER_STRONG_AVERAGE_DELTA || max_delta >= RENDER_STRONG_MAX_DELTA {
         (CandidateLegibilityClass::Strong, None)
-    } else if average_delta >= RENDER_CLEAR_AVERAGE_DELTA || max_delta >= RENDER_CLEAR_AVERAGE_DELTA
-    {
+    } else if average_delta >= RENDER_CLEAR_AVERAGE_DELTA || max_delta >= RENDER_CLEAR_MAX_DELTA {
         (CandidateLegibilityClass::Clear, None)
     } else {
         (
@@ -1372,12 +1378,44 @@ mod tests {
             background,
             [180, 180, 180, 255],
         ]);
-        let report =
-            classify_foundry_rendered_perceptual_report("same", &[(&parent, &parent)], background);
+        let report = classify_foundry_rendered_perceptual_report(
+            "same",
+            &[(&parent, &parent), (&parent, &parent)],
+            background,
+        );
 
         assert_eq!(
             report.legibility_class,
             CandidateLegibilityClass::DuplicateLooking
+        );
+        assert!(report.reject_reason.is_some());
+    }
+
+    #[test]
+    fn rendered_perceptual_report_requires_multi_camera_evidence() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let candidate = image(&[
+            [200, 200, 200, 255],
+            background,
+            [220, 220, 220, 255],
+            background,
+        ]);
+
+        let report = classify_foundry_rendered_perceptual_report(
+            "single",
+            &[(&parent, &candidate)],
+            background,
+        );
+
+        assert_eq!(
+            report.legibility_class,
+            CandidateLegibilityClass::Unsupported
         );
         assert!(report.reject_reason.is_some());
     }
@@ -1429,12 +1467,12 @@ mod tests {
 
         let first = classify_foundry_rendered_perceptual_report(
             "changed",
-            &[(&parent, &candidate)],
+            &[(&parent, &candidate), (&parent, &candidate)],
             background,
         );
         let second = classify_foundry_rendered_perceptual_report(
             "changed",
-            &[(&parent, &candidate)],
+            &[(&parent, &candidate), (&parent, &candidate)],
             background,
         );
 
