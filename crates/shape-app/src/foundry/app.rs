@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -33,7 +34,7 @@ use shape_search::foundry::{FoundryCandidateMode, FoundryCandidateRequest};
 
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
-    FoundryPreviewImage,
+    FoundryJobSlot, FoundryPreviewImage,
     kit_view::built_in_kit_card_views,
     panels::{customize, directions, history, pack},
     run_foundry_job,
@@ -111,18 +112,24 @@ enum MakeCanvasMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MakeCanvasViewState {
     mode: MakeCanvasMode,
+    asset_name: String,
     primary_title: String,
     primary_action_label: String,
     primary_action_enabled: bool,
     primary_action_disabled_reason: Option<String>,
-    busy_label: Option<String>,
+    local_busy_label: Option<String>,
+    local_busy_visible: bool,
     focused_part_label: Option<String>,
+    focused_part_visible: bool,
     model_ready: bool,
     preview_ready: bool,
+    candidate_tray_visible: bool,
     candidate_count: usize,
     selected_candidate_present: bool,
+    selected_comparison_visible: bool,
     pack_drawer_visible: bool,
     export_drawer_visible: bool,
+    local_warning_message: Option<String>,
     local_error_message: Option<String>,
 }
 
@@ -176,23 +183,26 @@ const ACTION_LOAD: &str = "Load";
 const ACTION_SWITCH_TO_REVISION: &str = "Switch to revision";
 const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
-const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try 6 whole-asset ideas";
+const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_CHOOSE_TEMPLATE: &str = "Choose Template";
 const ACTION_SWITCH: &str = "Switch";
 const ACTION_BRANCH: &str = "Branch";
+const ACTION_ADD_TO_PACK: &str = "Add to Pack";
+const ACTION_OPEN_PACK: &str = "Open Pack";
+const ACTION_OPEN_EXPORT: &str = "Open Export";
 const ACTION_EXPORT_CURRENT_ASSET: &str = "Export Current Asset";
 const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_SELECT: &str = "Compare";
-const ACTION_CHOOSE_DIRECTION: &str = "Use This Idea";
+const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
 const ACTION_LOCK: &str = "Lock";
 const ACTION_FOCUS: &str = "Focus";
-const ACTION_APPLY: &str = "Use Option";
-const RENDERED_ACTION_LABELS: [&str; 30] = [
+const ACTION_APPLY: &str = "Use option";
+const RENDERED_ACTION_LABELS: [&str; 33] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -212,6 +222,9 @@ const RENDERED_ACTION_LABELS: [&str; 30] = [
     ACTION_CHOOSE_TEMPLATE,
     ACTION_SWITCH,
     ACTION_BRANCH,
+    ACTION_ADD_TO_PACK,
+    ACTION_OPEN_PACK,
+    ACTION_OPEN_EXPORT,
     ACTION_EXPORT_CURRENT_ASSET,
     ACTION_ADD_CURRENT_ASSET,
     ACTION_EXPORT_PACK,
@@ -355,8 +368,10 @@ impl FoundryDesktopApp {
     fn show_app_bar(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         ui.horizontal(|ui| {
+            let view_state = self.make_canvas_view_state();
             let has_document = self.state.document.is_some();
-            let has_output = self.state.current_output.is_some();
+            let build_dependent_actions_enabled =
+                make_canvas_build_dependent_actions_enabled(&view_state);
             ui.label(RichText::new("Shape Lab").size(16.0).strong());
             ui.separator();
             ui.label(
@@ -385,10 +400,10 @@ impl FoundryDesktopApp {
                 if action_button(
                     ui,
                     &action_spec(
-                        has_output,
+                        build_dependent_actions_enabled,
                         ACTION_EXPORT,
                         ButtonTone::Primary,
-                        NEED_MODEL_REASON,
+                        make_canvas_build_dependent_disabled_reason(&view_state),
                     ),
                 )
                 .clicked()
@@ -398,10 +413,10 @@ impl FoundryDesktopApp {
                 if action_button(
                     ui,
                     &action_spec(
-                        has_document,
-                        "Add to Pack",
+                        build_dependent_actions_enabled,
+                        ACTION_ADD_TO_PACK,
                         ButtonTone::Secondary,
-                        NEED_PROJECT_REASON,
+                        make_canvas_build_dependent_disabled_reason(&view_state),
                     ),
                 )
                 .clicked()
@@ -586,24 +601,38 @@ impl FoundryDesktopApp {
                 .iter()
                 .find(|candidate| &candidate.id == selected)
         });
-        let model_ready = self.state.current_output.is_some();
-        let preview_ready = self
-            .state
-            .current_preview
-            .as_ref()
-            .is_some_and(|preview| !preview.rgba8.is_empty());
-        let focused_part_label = active_group.as_ref().map(|group| group.label.clone());
-        let preparing = self.state.document.is_some() && (!model_ready || !preview_ready);
+        let asset_name = self.current_project_title();
         let generating = self.directions_are_generating();
-        let local_error_message = self.make_canvas_local_warning();
+        let current_asset_job_active = self.current_asset_job_active();
+        let model_ready = self.state.current_output.is_some()
+            && !self.state.active_jobs.values().any(|request| {
+                matches!(
+                    request.slot(),
+                    FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
+                )
+            });
+        let preview_ready = model_ready
+            && self
+                .state
+                .current_preview
+                .as_ref()
+                .is_some_and(|preview| !preview.rgba8.is_empty())
+            && !self
+                .state
+                .active_jobs
+                .values()
+                .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
+        let focused_part_label = active_group.as_ref().map(|group| group.label.clone());
+        let focused_part_visible = focused_part_label.is_some();
+        let preparing = self.state.document.is_some()
+            && (!model_ready || !preview_ready || current_asset_job_active);
+        let local_warning_message = self.make_canvas_local_warning();
+        let local_error_message = self.make_canvas_local_error();
         let mode = if self.drawer == Some(FoundryDrawer::Pack) {
             MakeCanvasMode::PackDrawerOpen
         } else if self.drawer == Some(FoundryDrawer::Export) {
             MakeCanvasMode::ExportDrawerOpen
-        } else if local_error_message.as_ref().is_some_and(|message| {
-            message.to_ascii_lowercase().contains("could not")
-                || message.to_ascii_lowercase().contains("failed")
-        }) {
+        } else if local_error_message.is_some() {
             MakeCanvasMode::Error
         } else if self.state.document.is_none() {
             MakeCanvasMode::NoAsset
@@ -620,28 +649,29 @@ impl FoundryDesktopApp {
         } else {
             MakeCanvasMode::Ready
         };
-        let busy_label = match mode {
-            MakeCanvasMode::PreparingAsset => {
-                Some(format!("Preparing {}...", self.current_project_title()))
-            }
+        let local_busy_label = match mode {
+            MakeCanvasMode::PreparingAsset => Some(format!("Preparing {}...", asset_name)),
             MakeCanvasMode::GeneratingFocusedPartIdeas => focused_part_label.as_ref().map(|part| {
                 format!(
-                    "Trying {} ideas from the current asset...",
-                    singular_part_copy(part).to_ascii_lowercase()
+                    "Trying {} ideas from the current {}...",
+                    singular_part_copy(part).to_ascii_lowercase(),
+                    make_busy_asset_noun(&asset_name)
                 )
             }),
-            MakeCanvasMode::GeneratingWholeAssetIdeas => {
-                Some("Trying 6 ideas from the current asset...".to_owned())
-            }
+            MakeCanvasMode::GeneratingWholeAssetIdeas => Some(format!(
+                "Trying ideas from the current {}...",
+                make_busy_asset_noun(&asset_name)
+            )),
             _ => None,
         };
+        let local_busy_visible = local_busy_label.is_some();
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
             (MakeCanvasMode::PreparingAsset, _) => {
-                format!("Preparing {}", self.current_project_title())
+                format!("Preparing {}", asset_name)
             }
             (_, Some(label)) => label.to_owned(),
-            _ => self.current_project_title(),
+            _ => asset_name.clone(),
         };
         let primary_action_label = match (&mode, focused_part_label.as_ref()) {
             (MakeCanvasMode::GeneratingWholeAssetIdeas, _)
@@ -659,8 +689,6 @@ impl FoundryDesktopApp {
                 | MakeCanvasMode::Ready
                 | MakeCanvasMode::FocusedPart
                 | MakeCanvasMode::ReviewingIdeas
-                | MakeCanvasMode::PackDrawerOpen
-                | MakeCanvasMode::ExportDrawerOpen
         ) && (self.state.document.is_none()
             || (model_ready && preview_ready && !generating));
         let primary_action_disabled_reason = (!primary_action_enabled).then(|| {
@@ -668,25 +696,44 @@ impl FoundryDesktopApp {
                 ASSET_PREPARING_REASON.to_owned()
             } else if generating {
                 ACTIVE_IDEA_JOB_REASON.to_owned()
+            } else if let Some(message) = &local_error_message {
+                message.clone()
             } else {
                 NEED_PROJECT_REASON.to_owned()
             }
         });
+        let candidate_tray_visible = generating || !self.state.candidates.is_empty();
+        let selected_candidate_present = selected_candidate.is_some();
+        let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
+            preview_ready
+                && !candidate.rgba8.is_empty()
+                && self
+                    .state
+                    .current_preview
+                    .as_ref()
+                    .is_some_and(|preview| !preview.rgba8.is_empty())
+        });
 
         MakeCanvasViewState {
+            asset_name,
             mode,
             primary_title,
             primary_action_label,
             primary_action_enabled,
             primary_action_disabled_reason,
-            busy_label,
+            local_busy_label,
+            local_busy_visible,
             focused_part_label,
+            focused_part_visible,
             model_ready,
             preview_ready,
+            candidate_tray_visible,
             candidate_count: self.state.candidates.len(),
-            selected_candidate_present: selected_candidate.is_some(),
+            selected_candidate_present,
+            selected_comparison_visible,
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
+            local_warning_message,
             local_error_message,
         }
     }
@@ -698,6 +745,37 @@ impl FoundryDesktopApp {
         } else {
             None
         }
+    }
+
+    fn make_canvas_local_error(&self) -> Option<String> {
+        let status = self.state.status.as_deref()?;
+        if status.starts_with("Ignored a background result") {
+            return None;
+        }
+        let lower = status.to_ascii_lowercase();
+        if lower.contains("failed")
+            || lower.contains("could not")
+            || lower.contains("missing")
+            || lower.contains("disconnected")
+        {
+            Some(product_panel_message(
+                status,
+                "The current asset needs attention.",
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn current_asset_job_active(&self) -> bool {
+        self.state.active_jobs.values().any(|request| {
+            matches!(
+                request.slot(),
+                FoundryJobSlot::CompileCurrent
+                    | FoundryJobSlot::RenderPreview
+                    | FoundryJobSlot::ApplyEdit
+            )
+        })
     }
 
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
@@ -870,8 +948,7 @@ impl FoundryDesktopApp {
             egui::vec2(ui.available_width(), tray_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                commands
-                    .extend(self.show_direction_board_panel(ui, self.directions_are_generating()));
+                commands.extend(self.show_direction_board_panel(ui, &view_state));
             },
         );
         commands
@@ -905,14 +982,8 @@ impl FoundryDesktopApp {
         let active_group = active_group_id
             .as_deref()
             .and_then(|group_id| part_groups.iter().find(|group| group.group_id == group_id));
-        let interactions_enabled = view_state.model_ready
-            && view_state.preview_ready
-            && !matches!(
-                view_state.mode,
-                MakeCanvasMode::PreparingAsset
-                    | MakeCanvasMode::GeneratingWholeAssetIdeas
-                    | MakeCanvasMode::GeneratingFocusedPartIdeas
-            );
+        let interactions_enabled =
+            view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible;
 
         let response = product_stage(ui, |ui| {
             ui.set_min_height(ui.available_height().max(320.0));
@@ -953,6 +1024,8 @@ impl FoundryDesktopApp {
                             .unavailable_reason
                             .as_deref()
                             .unwrap_or("This part has no focused variations yet.")
+                    } else if view_state.mode == MakeCanvasMode::PreparingAsset {
+                        ASSET_PREPARING_REASON
                     } else {
                         ACTIVE_IDEA_JOB_REASON
                     };
@@ -980,7 +1053,7 @@ impl FoundryDesktopApp {
         if let Some(group) = active_group {
             draw_focus_callout(ui, response.response.rect, &group.label);
         }
-        if let Some(label) = &view_state.busy_label {
+        if let Some(label) = &view_state.local_busy_label {
             draw_busy_overlay(ui, response.response.rect, label);
         }
         commands
@@ -1023,7 +1096,53 @@ impl FoundryDesktopApp {
                     commands.push(command);
                 }
             }
-            if let Some(message) = &view_state.local_error_message {
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                let build_actions_enabled = make_canvas_build_dependent_actions_enabled(view_state);
+                let build_actions_reason = make_canvas_build_dependent_disabled_reason(view_state);
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        ACTION_ADD_TO_PACK,
+                        ButtonTone::Secondary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                    && let Some(command) = self.add_current_to_pack_command()
+                {
+                    commands.push(command);
+                    self.drawer = Some(FoundryDrawer::Pack);
+                }
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        ACTION_OPEN_PACK,
+                        ButtonTone::Secondary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::Pack);
+                }
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        ACTION_OPEN_EXPORT,
+                        ButtonTone::Secondary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::Export);
+                }
+            });
+            if let Some(message) = &view_state.local_warning_message {
                 ui.add_space(10.0);
                 status_banner(
                     ui,
@@ -1031,6 +1150,17 @@ impl FoundryDesktopApp {
                         title: "Older result ignored",
                         message,
                         tone: BannerTone::Warning,
+                    },
+                );
+            }
+            if let Some(message) = &view_state.local_error_message {
+                ui.add_space(10.0);
+                status_banner(
+                    ui,
+                    StatusBannerSpec {
+                        title: "Asset needs attention",
+                        message,
+                        tone: BannerTone::Error,
                     },
                 );
             }
@@ -1070,7 +1200,10 @@ impl FoundryDesktopApp {
                                 view_state.primary_action_enabled,
                                 &lock_label,
                                 ButtonTone::Secondary,
-                                ACTIVE_IDEA_JOB_REASON,
+                                view_state
+                                    .primary_action_disabled_reason
+                                    .as_deref()
+                                    .unwrap_or(ACTIVE_IDEA_JOB_REASON),
                             ),
                         )
                         .clicked()
@@ -1094,7 +1227,10 @@ impl FoundryDesktopApp {
                                 view_state.primary_action_enabled,
                                 "Clear focus",
                                 ButtonTone::Secondary,
-                                ACTIVE_IDEA_JOB_REASON,
+                                view_state
+                                    .primary_action_disabled_reason
+                                    .as_deref()
+                                    .unwrap_or(ACTIVE_IDEA_JOB_REASON),
                             ),
                         )
                         .clicked()
@@ -1127,8 +1263,11 @@ impl FoundryDesktopApp {
                     } else {
                         let current_build = self.state.current_build.clone();
                         let texture_cache = &mut self.texture_cache;
-                        let actions_enabled = view_state.primary_action_enabled
-                            || matches!(view_state.mode, MakeCanvasMode::ReviewingIdeas);
+                        let actions_enabled = make_canvas_controls_enabled(view_state);
+                        let disabled_reason = view_state
+                            .primary_action_disabled_reason
+                            .as_deref()
+                            .unwrap_or(ACTIVE_IDEA_JOB_REASON);
                         for control in &controls {
                             commands.extend(show_customize_control_card(
                                 ui,
@@ -1136,7 +1275,7 @@ impl FoundryDesktopApp {
                                 current_build.as_ref(),
                                 control,
                                 actions_enabled,
-                                ACTIVE_IDEA_JOB_REASON,
+                                disabled_reason,
                             ));
                             ui.add_space(8.0);
                         }
@@ -1174,26 +1313,26 @@ impl FoundryDesktopApp {
     fn show_direction_board_panel(
         &mut self,
         ui: &mut egui::Ui,
-        generating: bool,
+        view_state: &MakeCanvasViewState,
     ) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
+        let generating = matches!(
+            view_state.mode,
+            MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas
+        );
         let active_group = self.active_make_part_group();
         let ideas_title = active_group.as_ref().map_or_else(
             || "Candidate tray".to_owned(),
             |group| format!("{} ideas", singular_title_case_part_label(&group.label)),
         );
-        let direction_count_label = if generating && self.state.candidates.is_empty() {
-            active_group.as_ref().map_or_else(
-                || "Preparing six whole-model options.".to_owned(),
-                |group| {
-                    format!(
-                        "Trying {} ideas.",
-                        singular_part_copy(&group.label).to_ascii_lowercase()
-                    )
-                },
-            )
+        let direction_count_label = if generating {
+            view_state
+                .local_busy_label
+                .as_deref()
+                .unwrap_or("Trying ideas from the current asset...")
+                .to_owned()
         } else {
-            direction_board_count_label(self.state.candidates.len())
+            direction_board_count_label(view_state.candidate_count)
         };
         section_header(
             ui,
@@ -1203,12 +1342,12 @@ impl FoundryDesktopApp {
                 subtitle: Some(direction_count_label.as_str()),
             },
         );
-        if let Some(message) = self.make_canvas_local_warning() {
+        if let Some(message) = &view_state.local_warning_message {
             status_banner(
                 ui,
                 StatusBannerSpec {
                     title: "Older result ignored",
-                    message: &message,
+                    message,
                     tone: BannerTone::Warning,
                 },
             );
@@ -1217,7 +1356,7 @@ impl FoundryDesktopApp {
             .state
             .status
             .as_deref()
-            .filter(|status| status.contains("Rejected"))
+            .filter(|status| status.contains("Rejected") || status.starts_with("Found "))
         {
             let message = product_panel_message(
                 status,
@@ -1226,9 +1365,27 @@ impl FoundryDesktopApp {
             status_banner(
                 ui,
                 StatusBannerSpec {
-                    title: "Idea search filtered",
+                    title: "Idea search result",
                     message: &message,
                     tone: BannerTone::Info,
+                },
+            );
+            ui.add_space(8.0);
+        } else if !view_state.candidate_tray_visible {
+            ui.label(
+                RichText::new("Try ideas when the asset is ready.")
+                    .color(VisualFoundryTokens::dark().colors.text_muted)
+                    .small(),
+            );
+            ui.add_space(8.0);
+        }
+        if let Some(message) = &view_state.local_error_message {
+            status_banner(
+                ui,
+                StatusBannerSpec {
+                    title: "Asset needs attention",
+                    message,
+                    tone: BannerTone::Error,
                 },
             );
             ui.add_space(8.0);
@@ -1264,6 +1421,11 @@ impl FoundryDesktopApp {
             current_build,
             current_preview,
             &self.state.candidates,
+            make_canvas_candidate_actions_enabled(view_state),
+            view_state
+                .primary_action_disabled_reason
+                .as_deref()
+                .unwrap_or(ACTIVE_IDEA_JOB_REASON),
         ));
         ui.add_space(10.0);
         commands.extend(show_direction_candidate_grid(
@@ -1271,6 +1433,11 @@ impl FoundryDesktopApp {
             texture_cache,
             current_build,
             &self.state.candidates,
+            make_canvas_candidate_actions_enabled(view_state),
+            view_state
+                .primary_action_disabled_reason
+                .as_deref()
+                .unwrap_or(ACTIVE_IDEA_JOB_REASON),
         ));
         commands
     }
@@ -1905,14 +2072,14 @@ impl FoundryDesktopApp {
                 ScreenshotScenario::GeneratingWholeAssetIdeas
                     if view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas =>
                 {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                     return commands;
                 }
                 ScreenshotScenario::GeneratingHandleIdeas
                     if view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas
                         && view_state.focused_part_label.as_deref() == Some("Handles") =>
                 {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                     return commands;
                 }
                 _ => {
@@ -1925,7 +2092,7 @@ impl FoundryDesktopApp {
         match scenario {
             ScreenshotScenario::MakeInitialCrate => {
                 if self.state.active_jobs.is_empty() {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                 }
             }
             ScreenshotScenario::GeneratingWholeAssetIdeas => {
@@ -1960,7 +2127,7 @@ impl FoundryDesktopApp {
                             && view_state.preview_ready
                             && view_state.selected_candidate_present
                         {
-                            self.screenshot_scenario_step = u8::MAX;
+                            self.complete_screenshot_scenario(scenario);
                         }
                     }
                 }
@@ -1968,7 +2135,7 @@ impl FoundryDesktopApp {
             ScreenshotScenario::FocusHandles => {
                 commands.extend(self.ensure_screenshot_focus("handles"));
                 if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Handles") {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                 }
             }
             ScreenshotScenario::GeneratingHandleIdeas => {
@@ -2011,14 +2178,14 @@ impl FoundryDesktopApp {
                     } else if self.make_canvas_view_state().focused_part_label.as_deref()
                         == Some("Handles")
                     {
-                        self.screenshot_scenario_step = u8::MAX;
+                        self.complete_screenshot_scenario(scenario);
                     }
                 }
             }
             ScreenshotScenario::FocusVents => {
                 commands.extend(self.ensure_screenshot_focus("vents"));
                 if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Vents") {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                 }
             }
             ScreenshotScenario::PackDrawer => {
@@ -2029,13 +2196,13 @@ impl FoundryDesktopApp {
                     }
                     self.screenshot_scenario_step = 1;
                 } else if self.make_canvas_view_state().pack_drawer_visible {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                 }
             }
             ScreenshotScenario::ExportDrawer => {
                 self.drawer = Some(FoundryDrawer::Export);
                 if self.make_canvas_view_state().export_drawer_visible {
-                    self.screenshot_scenario_step = u8::MAX;
+                    self.complete_screenshot_scenario(scenario);
                 }
             }
         }
@@ -2066,6 +2233,28 @@ impl FoundryDesktopApp {
             self.screenshot_scenario_step = 1;
         }
         commands
+    }
+
+    fn complete_screenshot_scenario(&mut self, scenario: ScreenshotScenario) {
+        let view_state = self.make_canvas_view_state();
+        let result = screenshot_scenario_assertion(scenario, &view_state);
+        record_screenshot_state_assertion(
+            scenario,
+            &view_state,
+            result.as_ref().err().map(String::as_str),
+        );
+        match result {
+            Ok(()) => {
+                self.screenshot_scenario_step = u8::MAX;
+            }
+            Err(message) => {
+                self.state.status = Some(format!(
+                    "Screenshot state assertion failed: {}",
+                    product_panel_message(&message, "Screenshot state assertion failed.")
+                ));
+                self.screenshot_scenario_step = u8::MAX;
+            }
+        }
     }
 
     fn save_project(&mut self, path: PathBuf, project: FoundryProject) {
@@ -2635,6 +2824,42 @@ fn action_spec<'a>(
     }
 }
 
+fn make_canvas_build_dependent_actions_enabled(view_state: &MakeCanvasViewState) -> bool {
+    view_state.model_ready
+        && view_state.preview_ready
+        && !view_state.local_busy_visible
+        && view_state.mode != MakeCanvasMode::Error
+}
+
+fn make_canvas_build_dependent_disabled_reason(view_state: &MakeCanvasViewState) -> &'static str {
+    if view_state.mode == MakeCanvasMode::NoAsset {
+        NEED_PROJECT_REASON
+    } else if matches!(
+        view_state.mode,
+        MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas
+    ) {
+        ACTIVE_IDEA_JOB_REASON
+    } else {
+        ASSET_PREPARING_REASON
+    }
+}
+
+fn make_canvas_controls_enabled(view_state: &MakeCanvasViewState) -> bool {
+    view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible
+}
+
+fn make_canvas_candidate_actions_enabled(view_state: &MakeCanvasViewState) -> bool {
+    view_state.model_ready
+        && view_state.preview_ready
+        && !matches!(
+            view_state.mode,
+            MakeCanvasMode::PreparingAsset
+                | MakeCanvasMode::GeneratingWholeAssetIdeas
+                | MakeCanvasMode::GeneratingFocusedPartIdeas
+                | MakeCanvasMode::Error
+        )
+}
+
 fn tab_for_workflow_step(index: usize) -> FoundryTab {
     match index {
         1 => FoundryTab::Home,
@@ -2659,6 +2884,104 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
         _ => None,
     }
+}
+
+fn screenshot_scenario_assertion(
+    scenario: ScreenshotScenario,
+    view_state: &MakeCanvasViewState,
+) -> Result<(), String> {
+    match scenario {
+        ScreenshotScenario::MakeInitialCrate => {
+            require_screenshot_state(view_state.mode == MakeCanvasMode::Ready, scenario, "Ready")?;
+            require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
+            require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")
+        }
+        ScreenshotScenario::GeneratingWholeAssetIdeas => require_screenshot_state(
+            view_state.local_busy_visible
+                && view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas,
+            scenario,
+            "local_busy_visible whole-asset generation",
+        ),
+        ScreenshotScenario::GeneratedWholeAssetIdeas => require_screenshot_state(
+            view_state.candidate_tray_visible,
+            scenario,
+            "candidate_tray_visible",
+        ),
+        ScreenshotScenario::SelectedComparison => require_screenshot_state(
+            view_state.selected_comparison_visible,
+            scenario,
+            "selected_comparison_visible",
+        ),
+        ScreenshotScenario::FocusHandles => require_screenshot_state(
+            view_state.focused_part_label.as_deref() == Some("Handles"),
+            scenario,
+            "focused_part_label Handles",
+        ),
+        ScreenshotScenario::GeneratingHandleIdeas => require_screenshot_state(
+            view_state.local_busy_visible
+                && view_state.focused_part_label.as_deref() == Some("Handles")
+                && view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas,
+            scenario,
+            "local_busy_visible Handles generation",
+        ),
+        ScreenshotScenario::HandleIdeas => require_screenshot_state(
+            view_state.candidate_tray_visible
+                && view_state.focused_part_label.as_deref() == Some("Handles"),
+            scenario,
+            "candidate_tray_visible with Handles focus",
+        ),
+        ScreenshotScenario::FocusVents => require_screenshot_state(
+            view_state.focused_part_label.as_deref() == Some("Vents"),
+            scenario,
+            "focused_part_label Vents",
+        ),
+        ScreenshotScenario::PackDrawer => require_screenshot_state(
+            view_state.pack_drawer_visible,
+            scenario,
+            "pack_drawer_visible",
+        ),
+        ScreenshotScenario::ExportDrawer => require_screenshot_state(
+            view_state.export_drawer_visible,
+            scenario,
+            "export_drawer_visible",
+        ),
+    }
+}
+
+fn require_screenshot_state(
+    passed: bool,
+    scenario: ScreenshotScenario,
+    requirement: &str,
+) -> Result<(), String> {
+    if passed {
+        Ok(())
+    } else {
+        Err(format!("{scenario:?} missing {requirement}"))
+    }
+}
+
+fn record_screenshot_state_assertion(
+    scenario: ScreenshotScenario,
+    view_state: &MakeCanvasViewState,
+    failure: Option<&str>,
+) {
+    let path = env::temp_dir().join("shape-lab-screenshot-state-assertions.txt");
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let result = failure.unwrap_or("PASS");
+    let _ = writeln!(
+        file,
+        "{scenario:?}: {result}; mode={:?}; asset={}; busy={}; tray={}; comparison={}; focus={}; pack={}; export={}",
+        view_state.mode,
+        view_state.asset_name,
+        view_state.local_busy_visible,
+        view_state.candidate_tray_visible,
+        view_state.selected_comparison_visible,
+        view_state.focused_part_label.as_deref().unwrap_or("None"),
+        view_state.pack_drawer_visible,
+        view_state.export_drawer_visible
+    );
 }
 
 fn screenshot_part_group(
@@ -2934,14 +3257,18 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "History",
         "Recent Projects",
         "Start",
-        "Try 6 whole-asset ideas",
+        "Try ideas",
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
         "Handles",
         "Handles is focused",
         "Try handle ideas",
+        "Try vent ideas",
         "Lock handles",
         "Clear focus",
+        "Add to Pack",
+        "Open Pack",
+        "Open Export",
         "Material looks are not previewable yet.",
         "This part has no focused variations yet.",
         "Trying ideas...",
@@ -3079,15 +3406,19 @@ pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static s
 pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'static>> {
     vec![
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled("Try handle ideas", ButtonTone::Primary),
+        ActionSpec::enabled("Try vent ideas", ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
         ActionSpec::enabled("Clear focus", ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_ADD_CURRENT_ASSET, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_ADD_TO_PACK, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_OPEN_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_EXPORT, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_OPEN_EXPORT, ButtonTone::Secondary),
     ]
 }
 
@@ -3353,11 +3684,22 @@ fn product_panel_message(message: &str, fallback: &str) -> String {
 
 fn direction_board_count_label(count: usize) -> String {
     if count == 0 {
-        "Try 6 whole-asset ideas.".to_owned()
-    } else if count < directions::VISIBLE_DIRECTION_CANDIDATE_CARDS {
-        format!("Found {count} clear ideas")
+        "Try ideas from the current asset.".to_owned()
     } else {
-        format!("{count} clear ideas")
+        format!("Found {count} clear ideas")
+    }
+}
+
+fn make_busy_asset_noun(asset_name: &str) -> &'static str {
+    let lower = asset_name.to_ascii_lowercase();
+    if lower.contains("crate") {
+        "crate"
+    } else if lower.contains("bridge") {
+        "bridge"
+    } else if lower.contains("lamp") {
+        "lamp"
+    } else {
+        "asset"
     }
 }
 
@@ -3843,6 +4185,8 @@ fn show_selected_candidate_comparison(
     current_build: Option<&FoundryBuildStamp>,
     current_preview: Option<&FoundryPreviewImage>,
     candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &str,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     let Some(candidate) = candidates
@@ -3948,10 +4292,14 @@ fn show_selected_candidate_comparison(
                     if action_button(
                         ui,
                         &action_spec(
-                            candidate.selectable,
+                            actions_enabled && candidate.selectable,
                             ACTION_CHOOSE_DIRECTION,
                             ButtonTone::Primary,
-                            choose_reason.as_str(),
+                            if actions_enabled {
+                                choose_reason.as_str()
+                            } else {
+                                disabled_reason
+                            },
                         ),
                     )
                     .clicked()
@@ -3960,7 +4308,12 @@ fn show_selected_candidate_comparison(
                     }
                     if action_button(
                         ui,
-                        &ActionSpec::enabled(ACTION_REJECT, ButtonTone::Secondary),
+                        &action_spec(
+                            actions_enabled,
+                            ACTION_REJECT,
+                            ButtonTone::Secondary,
+                            disabled_reason,
+                        ),
                     )
                     .clicked()
                     {
@@ -3979,6 +4332,8 @@ fn show_direction_candidate_grid(
     texture_cache: &mut FoundryTextureCache,
     current_build: Option<&FoundryBuildStamp>,
     candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &str,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     let columns = direction_grid_columns(ui.available_width());
@@ -3990,6 +4345,8 @@ fn show_direction_candidate_grid(
                     texture_cache,
                     current_build,
                     candidate,
+                    actions_enabled,
+                    disabled_reason,
                 ));
             }
         });
@@ -4046,6 +4403,8 @@ fn show_direction_candidate_card(
     texture_cache: &mut FoundryTextureCache,
     current_build: Option<&FoundryBuildStamp>,
     candidate: &crate::foundry::view_model::FoundryCandidateCard,
+    actions_enabled: bool,
+    disabled_reason: &str,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     product_card(ui, candidate.selected, |ui| {
@@ -4070,7 +4429,12 @@ fn show_direction_candidate_card(
         });
 
         ui.add_space(10.0);
-        commands.extend(show_direction_candidate_details(ui, candidate));
+        commands.extend(show_direction_candidate_details(
+            ui,
+            candidate,
+            actions_enabled,
+            disabled_reason,
+        ));
     });
     commands
 }
@@ -4078,6 +4442,8 @@ fn show_direction_candidate_card(
 fn show_direction_candidate_details(
     ui: &mut egui::Ui,
     candidate: &crate::foundry::view_model::FoundryCandidateCard,
+    actions_enabled: bool,
+    disabled_reason: &str,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     ui.label(RichText::new(candidate_display_title(candidate)).strong());
@@ -4130,10 +4496,14 @@ fn show_direction_candidate_details(
         if action_button(
             ui,
             &action_spec(
-                candidate.selectable,
+                actions_enabled && candidate.selectable,
                 ACTION_CHOOSE_DIRECTION,
                 ButtonTone::Primary,
-                choose_reason.as_str(),
+                if actions_enabled {
+                    choose_reason.as_str()
+                } else {
+                    disabled_reason
+                },
             ),
         )
         .clicked()
@@ -4142,7 +4512,12 @@ fn show_direction_candidate_details(
         }
         if action_button(
             ui,
-            &ActionSpec::enabled(ACTION_REJECT, ButtonTone::Secondary),
+            &action_spec(
+                actions_enabled,
+                ACTION_REJECT,
+                ButtonTone::Secondary,
+                disabled_reason,
+            ),
         )
         .clicked()
         {
@@ -5114,7 +5489,7 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
 
-        for _ in 0..200 {
+        for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if app.state.current_output.is_some() {
                 break;
@@ -5471,7 +5846,7 @@ mod tests {
             "Save Project As",
             "Start Another Asset",
             "History",
-            "Try 6 whole-asset ideas",
+            "Try ideas",
             "Choose Template",
             "Start",
         ] {
@@ -5509,9 +5884,9 @@ mod tests {
         }
 
         for required in [
-            "Try 6 whole-asset ideas",
+            "Try ideas",
             "Try handle ideas",
-            "Use This Idea",
+            "Use this idea",
             "Candidate tray",
             "Material looks are not previewable yet.",
         ] {
@@ -5541,7 +5916,9 @@ mod tests {
 
         assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
         assert_eq!(visible.candidate_count, 1);
+        assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
+        assert!(visible.selected_comparison_visible);
         assert_eq!(visible.primary_action_label, ACTION_TRY_WHOLE_ASSET_IDEAS);
     }
 
@@ -5562,7 +5939,9 @@ mod tests {
 
         assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
         assert_eq!(visible.candidate_count, 1);
+        assert!(visible.candidate_tray_visible);
         assert!(!visible.selected_candidate_present);
+        assert!(!visible.selected_comparison_visible);
     }
 
     #[test]
@@ -5583,7 +5962,30 @@ mod tests {
         assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
         assert_eq!(visible.primary_title, "Handles");
         assert_eq!(visible.focused_part_label.as_deref(), Some("Handles"));
+        assert!(visible.focused_part_visible);
         assert_eq!(visible.primary_action_label, "Try handle ideas");
+    }
+
+    #[test]
+    fn focus_vents_changes_visible_scope_and_action() {
+        let mut app = visible_state_test_app();
+        app.state.current_output = Some(Box::new(
+            compile_foundry_document(
+                app.state.document.as_ref().expect("document"),
+                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+            )
+            .expect("fixture compiles"),
+        ));
+        app.state.current_preview = Some(test_preview_image("current"));
+        set_test_focus_scope(&mut app, "vents", "Vents");
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
+        assert_eq!(visible.primary_title, "Vents");
+        assert_eq!(visible.focused_part_label.as_deref(), Some("Vents"));
+        assert!(visible.focused_part_visible);
+        assert_eq!(visible.primary_action_label, "Try vent ideas");
     }
 
     #[test]
@@ -5610,7 +6012,9 @@ mod tests {
 
         assert_eq!(visible.primary_title, "Handles");
         assert_eq!(visible.candidate_count, 1);
+        assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
+        assert!(visible.selected_comparison_visible);
         assert_ne!(visible.primary_title, "Whole asset");
     }
 
@@ -5653,6 +6057,86 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_state_assertions_cover_required_make_scenarios() {
+        let mut app = ready_visible_state_test_app();
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::MakeInitialCrate,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+
+        app.state
+            .request_candidates(FoundryCandidateRequest {
+                seed: 1,
+                proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
+                result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            })
+            .expect("candidate job schedules");
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::GeneratingWholeAssetIdeas,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+
+        app.state.active_jobs.clear();
+        let selected = shape_foundry::FoundryCandidateId("candidate-a".to_owned());
+        app.state.selected_candidate = Some(selected.clone());
+        app.state.candidates = vec![test_candidate_card(&selected.0, true, None)];
+        let view = app.make_canvas_view_state();
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::GeneratedWholeAssetIdeas, &view)
+                .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::SelectedComparison, &view).is_ok()
+        );
+
+        set_test_focus_scope(&mut app, "handles", "Handles");
+        app.state.candidates = vec![test_candidate_card(
+            &selected.0,
+            true,
+            Some("Handles".to_owned()),
+        )];
+        let view = app.make_canvas_view_state();
+        assert!(screenshot_scenario_assertion(ScreenshotScenario::FocusHandles, &view).is_ok());
+        assert!(screenshot_scenario_assertion(ScreenshotScenario::HandleIdeas, &view).is_ok());
+
+        set_test_focus_scope(&mut app, "vents", "Vents");
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FocusVents,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::PackDrawer,
+                &app.make_canvas_view_state()
+            )
+            .is_ok()
+        );
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::ExportDrawer,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn preparing_asset_disables_idea_generation_with_local_reason() {
         let app = visible_state_test_app();
 
@@ -5665,9 +6149,10 @@ mod tests {
             Some(ASSET_PREPARING_REASON)
         );
         assert_eq!(
-            visible.busy_label.as_deref(),
+            visible.local_busy_label.as_deref(),
             Some("Preparing Sci-Fi Industrial Crate...")
         );
+        assert!(visible.local_busy_visible);
     }
 
     #[test]
@@ -5725,7 +6210,30 @@ mod tests {
         assert_eq!(visible.mode, MakeCanvasMode::GeneratingWholeAssetIdeas);
         assert_eq!(visible.primary_action_label, ACTION_GENERATING_IDEAS);
         assert!(!visible.primary_action_enabled);
-        assert!(visible.busy_label.is_some());
+        assert!(!make_canvas_candidate_actions_enabled(&visible));
+        assert!(visible.local_busy_label.is_some());
+        assert!(visible.local_busy_visible);
+        assert!(visible.candidate_tray_visible);
+    }
+
+    #[test]
+    fn active_edit_job_marks_current_build_stale_for_pack_and_export() {
+        let mut app = ready_visible_state_test_app();
+
+        app.state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "edge_softness".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(0.4),
+            }))
+            .expect("edit schedules rebuild");
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
+        assert!(!visible.model_ready);
+        assert!(!visible.preview_ready);
+        assert!(visible.local_busy_visible);
+        assert!(!make_canvas_build_dependent_actions_enabled(&visible));
     }
 
     #[test]
@@ -5737,9 +6245,10 @@ mod tests {
         let visible = app.make_canvas_view_state();
 
         assert_eq!(
-            visible.local_error_message.as_deref(),
+            visible.local_warning_message.as_deref(),
             Some(STALE_RESULT_WARNING)
         );
+        assert!(visible.local_error_message.is_none());
     }
 
     #[test]
@@ -5850,7 +6359,7 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
 
-        for _ in 0..200 {
+        for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if !app.state.controls.is_empty() {
                 break;
@@ -6071,7 +6580,7 @@ mod tests {
             &ctx,
         );
 
-        for _ in 0..200 {
+        for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if app.state.current_output.is_some() {
                 break;
@@ -6144,6 +6653,19 @@ mod tests {
             .expect("fixture state"),
             ..FoundryDesktopApp::default()
         }
+    }
+
+    fn ready_visible_state_test_app() -> FoundryDesktopApp {
+        let mut app = visible_state_test_app();
+        app.state.current_output = Some(Box::new(
+            compile_foundry_document(
+                app.state.document.as_ref().expect("document"),
+                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+            )
+            .expect("fixture compiles"),
+        ));
+        app.state.current_preview = Some(test_preview_image("current"));
+        app
     }
 
     fn test_preview_image(preview_id: &str) -> FoundryPreviewImage {
