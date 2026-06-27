@@ -2460,7 +2460,13 @@ fn collect_control_opportunities(
             continue;
         }
         let class = classify_control(control, &kind);
-        if !mode_allows_control(mode, class, control.topology_behavior, &kind) {
+        if !mode_allows_control(
+            mode,
+            class,
+            control.topology_behavior,
+            &kind,
+            variation_intent,
+        ) {
             continue;
         }
         if !variation_allows_control(document, variation_intent, control, class) {
@@ -2606,10 +2612,12 @@ fn mode_allows_control(
     class: ControlClass,
     topology_behavior: ControlTopologyBehavior,
     kind: &ControlOpportunityKind,
+    variation_intent: &VariationIntent,
 ) -> bool {
     match mode {
         FoundryCandidateMode::Refine => {
-            topology_behavior == ControlTopologyBehavior::TopologyPreserving
+            (topology_behavior == ControlTopologyBehavior::TopologyPreserving
+                || variation_intent.scope.is_focus_part())
                 && !matches!(
                     kind,
                     ControlOpportunityKind::Provider { .. }
@@ -3649,6 +3657,35 @@ mod tests {
             metadata.visible_delta.legibility_class,
             CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
         ));
+    }
+
+    #[test]
+    fn focused_refine_handles_generate_scifi_crate_candidates() {
+        let fixture = scifi_crate::fixture_catalog();
+        let request = FoundryCandidateRequest {
+            seed: fixture.document.seed,
+            proposal_count: 12,
+            result_count: 3,
+            mode: FoundryCandidateMode::Refine,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::focus_part_shape("handles", "Handles"),
+        };
+
+        let output = generate_foundry_candidate_draft_plans(&fixture.document, &fixture, &request)
+            .expect("focused handles request should generate candidates");
+
+        assert_eq!(output.diagnostics.available_control_count, 1);
+        assert!(
+            !output.candidates.is_empty(),
+            "focused handles request should return visible candidate cards"
+        );
+        assert!(output.candidates.iter().all(|candidate| {
+            candidate
+                .changed_controls
+                .iter()
+                .any(|control| control == "handle_style")
+        }));
     }
 
     #[test]

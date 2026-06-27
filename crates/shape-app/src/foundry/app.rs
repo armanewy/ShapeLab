@@ -167,6 +167,8 @@ const ACTIVE_IDEA_JOB_REASON: &str = "Finish the current idea search before chan
 const STALE_RESULT_WARNING: &str = "An older result was ignored because you changed the asset.";
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
+const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
+const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = 1024;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const ACTION_EXPORT: &str = "Export";
@@ -908,8 +910,8 @@ impl FoundryDesktopApp {
         }
 
         let available = ui.available_size();
-        let tray_height = (available.y * 0.34).clamp(210.0, 390.0);
-        let top_height = (available.y - tray_height - 14.0).max(360.0);
+        let tray_height = (available.y * 0.42).clamp(260.0, 430.0);
+        let top_height = (available.y - tray_height - 14.0).max(320.0);
 
         ui.allocate_ui_with_layout(
             egui::vec2(available.x, top_height),
@@ -986,7 +988,7 @@ impl FoundryDesktopApp {
             view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible;
 
         let response = product_stage(ui, |ui| {
-            ui.set_min_height(ui.available_height().max(320.0));
+            ui.set_min_height(ui.available_height().max(260.0));
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new("Model workspace")
@@ -1013,7 +1015,7 @@ impl FoundryDesktopApp {
             ui.add_space(8.0);
             let preview_edge = (ui.available_height() - 116.0)
                 .min(ui.available_width() - 18.0)
-                .clamp(320.0, 760.0);
+                .clamp(220.0, 620.0);
             self.show_current_preview_sized(ui, preview_edge);
             ui.add_space(10.0);
             ui.horizontal_wrapped(|ui| {
@@ -1352,12 +1354,10 @@ impl FoundryDesktopApp {
                 },
             );
             ui.add_space(8.0);
-        } else if let Some(status) = self
-            .state
-            .status
-            .as_deref()
-            .filter(|status| status.contains("Rejected") || status.starts_with("Found "))
-        {
+        } else if let Some(status) = self.state.status.as_deref().filter(|status| {
+            status.contains("Rejected")
+                || (status.starts_with("Found ") && self.state.candidates.is_empty())
+        }) {
             let message = product_panel_message(
                 status,
                 "Some ideas were rejected because they looked too similar.",
@@ -4212,7 +4212,7 @@ fn show_selected_candidate_comparison(
                 .strong(),
         );
         ui.add_space(8.0);
-        let preview_edge = (ui.available_width() * 0.18).clamp(180.0, 280.0);
+        let preview_edge = (ui.available_width() * 0.08).clamp(72.0, 96.0);
         ui.horizontal_top(|ui| {
             ui.vertical_centered(|ui| {
                 ui.set_width(preview_edge + 18.0);
@@ -4707,67 +4707,64 @@ fn show_customize_control_card(
     let mut commands = Vec::new();
     product_card(ui, control.locked, |ui| {
         let colors = VisualFoundryTokens::dark().colors;
-        ui.horizontal(|ui| {
+        let header_width = ui.available_width();
+        if header_width < CONTROL_HEADER_STACK_BREAKPOINT {
             ui.vertical(|ui| {
-                ui.label(RichText::new(&control.label).strong());
-                ui.label(
-                    RichText::new(product_control_summary(control))
-                        .color(colors.text_muted)
-                        .small(),
+                ui.add(egui::Label::new(RichText::new(&control.label).strong()).wrap());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(product_control_summary(control))
+                            .color(colors.text_muted)
+                            .small(),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    show_customize_control_header_actions(
+                        ui,
+                        control,
+                        actions_enabled,
+                        disabled_reason,
+                        &mut commands,
+                    );
+                });
+            });
+        } else {
+            ui.horizontal(|ui| {
+                let actions_width = CONTROL_HEADER_ACTIONS_WIDTH.min(header_width * 0.58);
+                let text_width = (header_width - actions_width - 12.0).max(140.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(text_width, 44.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add(egui::Label::new(RichText::new(&control.label).strong()).wrap());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(product_control_summary(control))
+                                    .color(colors.text_muted)
+                                    .small(),
+                            )
+                            .wrap(),
+                        );
+                    },
+                );
+                ui.add_space(8.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(actions_width, 44.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        show_customize_control_header_actions(
+                            ui,
+                            control,
+                            actions_enabled,
+                            disabled_reason,
+                            &mut commands,
+                        );
+                    },
                 );
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if action_button(
-                    ui,
-                    &action_spec(
-                        actions_enabled && customize::control_can_reset(control),
-                        ACTION_RESET,
-                        ButtonTone::Secondary,
-                        if actions_enabled {
-                            NEED_RESET_REASON
-                        } else {
-                            disabled_reason
-                        },
-                    ),
-                )
-                .clicked()
-                {
-                    commands.extend(customize::reset_control_intents(control));
-                }
-                let lock_label = if control.locked {
-                    ACTION_UNLOCK
-                } else {
-                    ACTION_LOCK
-                };
-                if action_button(
-                    ui,
-                    &action_spec(
-                        actions_enabled,
-                        lock_label,
-                        ButtonTone::Secondary,
-                        disabled_reason,
-                    ),
-                )
-                .clicked()
-                    && let Some(command) = customize::control_lock_command(control, !control.locked)
-                {
-                    commands.push(command);
-                }
-                if action_button(
-                    ui,
-                    &action_spec(
-                        actions_enabled,
-                        ACTION_FOCUS,
-                        ButtonTone::Secondary,
-                        disabled_reason,
-                    ),
-                )
-                .clicked()
-                {
-                    commands.push(customize::select_control_command(Some(control.id.clone())));
-                }
-            });
-        });
+        }
         if let Some(reason) = &control.locked_reason {
             ui.label(
                 RichText::new(product_panel_message(reason, "This control is locked."))
@@ -4818,6 +4815,64 @@ fn show_customize_control_card(
         }
     });
     commands
+}
+
+fn show_customize_control_header_actions(
+    ui: &mut egui::Ui,
+    control: &crate::foundry::view_model::FoundryControlView,
+    actions_enabled: bool,
+    disabled_reason: &str,
+    commands: &mut Vec<FoundryAppCommand>,
+) {
+    if action_button(
+        ui,
+        &action_spec(
+            actions_enabled && customize::control_can_reset(control),
+            ACTION_RESET,
+            ButtonTone::Secondary,
+            if actions_enabled {
+                NEED_RESET_REASON
+            } else {
+                disabled_reason
+            },
+        ),
+    )
+    .clicked()
+    {
+        commands.extend(customize::reset_control_intents(control));
+    }
+    let lock_label = if control.locked {
+        ACTION_UNLOCK
+    } else {
+        ACTION_LOCK
+    };
+    if action_button(
+        ui,
+        &action_spec(
+            actions_enabled,
+            lock_label,
+            ButtonTone::Secondary,
+            disabled_reason,
+        ),
+    )
+    .clicked()
+        && let Some(command) = customize::control_lock_command(control, !control.locked)
+    {
+        commands.push(command);
+    }
+    if action_button(
+        ui,
+        &action_spec(
+            actions_enabled,
+            ACTION_FOCUS,
+            ButtonTone::Secondary,
+            disabled_reason,
+        ),
+    )
+    .clicked()
+    {
+        commands.push(customize::select_control_command(Some(control.id.clone())));
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
