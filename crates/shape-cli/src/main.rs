@@ -79,6 +79,7 @@ mod foundry_kit_cli;
 mod foundry_visual_benchmark;
 mod game_ready_static;
 mod hq_quality;
+mod starter_template_quality;
 
 const DEFAULT_PRESET: &str = "desk-lamp";
 const DEFAULT_SEED: u64 = 42;
@@ -140,6 +141,8 @@ enum Command {
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Emit an HQ asset quality report and contact-sheet evidence.
     HqQualityBenchmark(hq_quality::HqQualityBenchmarkArgs),
+    /// Emit starter-template quality benchmark evidence and pass/fail reports.
+    StarterTemplateQualityBenchmark(starter_template_quality::StarterTemplateQualityBenchmarkArgs),
     /// Emit a deterministic adversarial review over an HQ benchmark evidence directory.
     HqAdversarialReview(hq_quality::HqAdversarialReviewArgs),
     /// Emit the first static-prop game-readiness package with truthful blockers.
@@ -651,6 +654,9 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
+        Command::StarterTemplateQualityBenchmark(args) => {
+            starter_template_quality::run_starter_template_quality_benchmark(args)
+        }
         Command::HqAdversarialReview(args) => hq_quality::run_hq_adversarial_review(args),
         Command::GameReadyStaticProp(args) => game_ready_static::run_game_ready_static_prop(args),
         Command::Decompile(args) => run_decompile(args),

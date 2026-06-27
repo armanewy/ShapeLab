@@ -33,8 +33,8 @@ Showcase content is a stronger product claim. The report can record automatic
 evidence, but only a reviewer can mark human approval and adversarial visual
 review complete.
 
-As of the Visual Foundry catalog curation pass, the default novice catalog is
-limited to `roman-bridge-hq`, `sci-fi-crate`, and `stylized-lamp`. Older
-expansion profiles and automated gear profiles remain PreviewOnly until review
+As of the starter-template quality benchmark pass, the default novice catalog is
+limited to `sci-fi-crate` and `stylized-lamp`. `roman-bridge-hq`, older
+expansion profiles, and automated gear profiles remain PreviewOnly until review
 evidence is refreshed or approved. `moba-hero-clay` remains HiddenDraft and does
 not appear in the app catalog.

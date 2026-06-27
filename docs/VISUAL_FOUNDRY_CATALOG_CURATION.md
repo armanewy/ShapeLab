@@ -26,10 +26,10 @@ Rules:
 
 | Profile | State | Reason |
 | --- | --- | --- |
-| roman-bridge-hq | Usable | Current HQ bridge evidence covers authored directions and controls. |
 | sci-fi-crate | Usable | Current crate evidence covers whole-model clay directions and controls. |
 | stylized-lamp | Usable | Current lamp evidence covers legible directions and primary-control endpoints. |
-| roman-bridge | PreviewOnly | Legacy bridge remains available for testing, but the HQ profile is novice-facing. |
+| roman-bridge-hq | PreviewOnly | Current benchmark evidence reports a visibly disconnected default brace. |
+| roman-bridge | PreviewOnly | Legacy bridge remains available for testing while the HQ profile is under refreshed review. |
 | market-stall | PreviewOnly | Needs refreshed six-direction legibility evidence. |
 | sci-fi-door | PreviewOnly | Older evidence exists; refreshed review is required before novice exposure. |
 | storage-barrel | PreviewOnly | Needs refreshed direction and control evidence. |

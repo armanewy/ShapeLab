@@ -3,9 +3,10 @@
 use std::collections::BTreeSet;
 
 use shape_foundry_catalog::{
-    CatalogCurationState, built_in_catalog_curation_metadata,
+    CatalogCurationState, StarterTemplateQualityEvidence, built_in_catalog_curation_metadata,
     built_in_fixture_catalogs_with_labels, catalog_curation_metadata_for_slug,
     curated_fixture_catalogs_with_labels, moba_hero::MOBA_HERO_CLAY_SLUG,
+    starter_template_curation_state_from_quality,
 };
 
 #[test]
@@ -39,11 +40,7 @@ fn default_catalog_hides_preview_only_and_hidden_draft_profiles() {
 
     assert_eq!(
         default_slugs,
-        BTreeSet::from([
-            "roman-bridge-hq".to_owned(),
-            "sci-fi-crate".to_owned(),
-            "stylized-lamp".to_owned(),
-        ])
+        BTreeSet::from(["sci-fi-crate".to_owned(), "stylized-lamp".to_owned(),])
     );
     assert!(!default_slugs.contains("roman-bridge"));
     assert!(!default_slugs.contains("market-stall"));
@@ -66,8 +63,8 @@ fn preview_catalog_shows_preview_only_but_not_hidden_drafts() {
 }
 
 #[test]
-fn hq_crate_bridge_and_lamp_are_usable_but_not_showcase() {
-    for slug in ["sci-fi-crate", "roman-bridge-hq", "stylized-lamp"] {
+fn starter_templates_with_clean_benchmark_evidence_are_usable_but_not_showcase() {
+    for slug in ["sci-fi-crate", "stylized-lamp"] {
         let metadata = catalog_curation_metadata_for_slug(slug).expect("curation metadata");
         assert_eq!(metadata.state, CatalogCurationState::Usable);
         assert!(metadata.has_visual_direction_evidence);
@@ -75,6 +72,12 @@ fn hq_crate_bridge_and_lamp_are_usable_but_not_showcase() {
         assert!(!metadata.has_human_showcase_review);
     }
 
+    assert_eq!(
+        catalog_curation_metadata_for_slug("roman-bridge-hq")
+            .expect("HQ bridge metadata")
+            .state,
+        CatalogCurationState::PreviewOnly
+    );
     assert_eq!(
         catalog_curation_metadata_for_slug("roman-bridge")
             .expect("legacy bridge metadata")
@@ -110,5 +113,62 @@ fn weak_profiles_cannot_claim_usable_without_legibility_evidence() {
             .all(|metadata| {
                 metadata.has_visual_direction_evidence && metadata.has_readable_control_evidence
             })
+    );
+}
+
+fn passing_starter_template_quality_evidence() -> StarterTemplateQualityEvidence {
+    StarterTemplateQualityEvidence {
+        profile_slug: "sci-fi-crate",
+        visible_idea_count: 4,
+        distinct_visible_idea_count: 4,
+        primary_control_count: 7,
+        endpoint_reported_primary_control_count: 7,
+        endpoint_readable_primary_control_count: 7,
+        returned_too_subtle_candidate_count: 0,
+        broken_or_floating_part_count: 0,
+        export_conformance_clean: true,
+        advanced_recipe_required: false,
+        raw_technical_summary_count: 0,
+    }
+}
+
+#[test]
+fn starter_template_quality_passing_template_can_be_usable() {
+    let evidence = passing_starter_template_quality_evidence();
+
+    assert!(evidence.passes_benchmark());
+    assert_eq!(
+        starter_template_curation_state_from_quality(evidence),
+        CatalogCurationState::Usable
+    );
+}
+
+#[test]
+fn starter_template_quality_failing_template_cannot_be_usable() {
+    let mut evidence = passing_starter_template_quality_evidence();
+    evidence.visible_idea_count = 3;
+    evidence.distinct_visible_idea_count = 3;
+
+    assert!(!evidence.passes_benchmark());
+    assert_eq!(
+        starter_template_curation_state_from_quality(evidence),
+        CatalogCurationState::PreviewOnly
+    );
+    assert!(
+        !starter_template_curation_state_from_quality(evidence).default_novice_visible(),
+        "failed starters must stay out of the default novice catalog"
+    );
+}
+
+#[test]
+fn starter_template_quality_missing_endpoint_reports_stay_preview_only() {
+    let mut evidence = passing_starter_template_quality_evidence();
+    evidence.endpoint_reported_primary_control_count = 6;
+    evidence.endpoint_readable_primary_control_count = 6;
+
+    assert!(!evidence.passes_benchmark());
+    assert_eq!(
+        starter_template_curation_state_from_quality(evidence),
+        CatalogCurationState::PreviewOnly
     );
 }

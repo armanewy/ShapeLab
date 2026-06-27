@@ -2,8 +2,10 @@
 
 ## Automation Status
 
-The Wave 34 automated review evidence for `roman-bridge-hq` passes the Usable
-quality bar:
+The Wave 34 automated review evidence for `roman-bridge-hq` passed the earlier
+Usable quality bar. The starter-template quality benchmark now supersedes this
+for novice catalog exposure and keeps the bridge PreviewOnly until the visible
+disconnected-part gate is cleared:
 
 - clean compile and model validation
 - required roles covered, including connector details
@@ -38,4 +40,3 @@ This review intentionally excludes:
 - rigging
 - animation
 - marketplace packaging
-
