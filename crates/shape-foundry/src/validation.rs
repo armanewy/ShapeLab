@@ -12,7 +12,7 @@ use crate::{
     DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
     FOUNDRY_PACK_DOCUMENT_SCHEMA_VERSION, FoundryAssetDocument, FoundryCommand, FoundryLockTarget,
     FoundryPackDocument, PackCoherencePolicy, ProviderOption, ResponseCurve, SharedProviderPolicy,
-    document_catalog_refs,
+    VariationChannel, VariationIntent, VariationScope, document_catalog_refs,
 };
 
 /// One foundry contract validation issue.
@@ -342,6 +342,64 @@ pub fn validate_foundry_command(
                 "set_style.style_implementation_ref",
                 style_implementation_ref,
             );
+        }
+        FoundryCommand::SetVariationIntent { intent } => {
+            validate_variation_intent(&mut report, "set_variation_intent.intent", intent);
+        }
+        FoundryCommand::SetVariationScope { scope } => {
+            validate_variation_scope(&mut report, "set_variation_scope.scope", scope);
+        }
+        FoundryCommand::SetVariationChannels { channels } => {
+            if channels.is_empty() {
+                report.push(
+                    "set_variation_channels.channels",
+                    "empty_variation_channels",
+                    "Variation channels must include at least one channel.",
+                );
+            }
+            for (index, channel) in channels.iter().enumerate() {
+                validate_variation_channel(
+                    &mut report,
+                    &format!("set_variation_channels.channels.{index}"),
+                    channel,
+                );
+            }
+        }
+        FoundryCommand::ClearVariationFocus | FoundryCommand::ClearFocusPartGroup => {}
+        FoundryCommand::SetFocusPartGroup { group_id } => {
+            validate_identifier(&mut report, "set_focus_part_group.group_id", group_id);
+        }
+        FoundryCommand::GenerateFocusedPartCandidates {
+            group_id,
+            channels,
+            mode,
+        } => {
+            validate_identifier(
+                &mut report,
+                "generate_focused_part_candidates.group_id",
+                group_id,
+            );
+            if channels.is_empty() {
+                report.push(
+                    "generate_focused_part_candidates.channels",
+                    "empty_variation_channels",
+                    "Focused candidates need at least one variation channel.",
+                );
+            }
+            for (index, channel) in channels.iter().enumerate() {
+                validate_variation_channel(
+                    &mut report,
+                    &format!("generate_focused_part_candidates.channels.{index}"),
+                    channel,
+                );
+            }
+            if mode.trim().is_empty() {
+                report.push(
+                    "generate_focused_part_candidates.mode",
+                    "empty_generation_mode",
+                    "Focused candidates need a generation mode.",
+                );
+            }
         }
         FoundryCommand::GenerateCandidates(request) => {
             if request.count == 0 {
@@ -1135,6 +1193,116 @@ fn validate_control_value(
             subject,
             "non_finite_control_value",
             "Control scalar values must be finite.",
+        );
+    }
+}
+
+fn validate_variation_intent(
+    report: &mut FoundryValidationReport,
+    subject: &str,
+    intent: &VariationIntent,
+) {
+    validate_variation_scope(report, &format!("{subject}.scope"), &intent.scope);
+    if intent.channels.is_empty() {
+        report.push(
+            format!("{subject}.channels"),
+            "empty_variation_channels",
+            "Variation intent must include at least one channel.",
+        );
+    }
+    for (index, channel) in intent.channels.iter().enumerate() {
+        validate_variation_channel(report, &format!("{subject}.channels.{index}"), channel);
+    }
+    if intent.human_label.trim().is_empty() {
+        report.push(
+            format!("{subject}.human_label"),
+            "empty_variation_label",
+            "Variation intent label must not be empty.",
+        );
+    }
+    if intent.human_summary.trim().is_empty() {
+        report.push(
+            format!("{subject}.human_summary"),
+            "empty_variation_summary",
+            "Variation intent summary must not be empty.",
+        );
+    }
+}
+
+fn validate_variation_scope(
+    report: &mut FoundryValidationReport,
+    subject: &str,
+    scope: &VariationScope,
+) {
+    match scope {
+        VariationScope::WholeAsset => {}
+        VariationScope::SemanticPartGroup {
+            group_id,
+            display_name,
+        } => validate_variation_scoped_label(report, subject, "group_id", group_id, display_name),
+        VariationScope::MaterialSlot {
+            slot_id,
+            display_name,
+        } => validate_variation_scoped_label(report, subject, "slot_id", slot_id, display_name),
+        VariationScope::DetailZone {
+            zone_id,
+            display_name,
+        } => validate_variation_scoped_label(report, subject, "zone_id", zone_id, display_name),
+        VariationScope::RigRegion {
+            region_id,
+            display_name,
+        } => validate_variation_scoped_label(report, subject, "region_id", region_id, display_name),
+        VariationScope::MotionSet {
+            motion_set_id,
+            display_name,
+        } => validate_variation_scoped_label(
+            report,
+            subject,
+            "motion_set_id",
+            motion_set_id,
+            display_name,
+        ),
+        VariationScope::Custom {
+            scope_id,
+            display_name,
+        } => validate_variation_scoped_label(report, subject, "scope_id", scope_id, display_name),
+    }
+}
+
+fn validate_variation_channel(
+    report: &mut FoundryValidationReport,
+    subject: &str,
+    channel: &VariationChannel,
+) {
+    if let VariationChannel::Custom {
+        channel_id,
+        display_name,
+    } = channel
+    {
+        validate_identifier(report, format!("{subject}.channel_id"), channel_id);
+        if display_name.trim().is_empty() {
+            report.push(
+                format!("{subject}.display_name"),
+                "empty_variation_display_name",
+                "Variation channel display name must not be empty.",
+            );
+        }
+    }
+}
+
+fn validate_variation_scoped_label(
+    report: &mut FoundryValidationReport,
+    subject: &str,
+    id_field: &str,
+    id: &str,
+    display_name: &str,
+) {
+    validate_identifier(report, format!("{subject}.{id_field}"), id);
+    if display_name.trim().is_empty() {
+        report.push(
+            format!("{subject}.display_name"),
+            "empty_variation_display_name",
+            "Variation scope display name must not be empty.",
         );
     }
 }

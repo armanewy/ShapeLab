@@ -41,7 +41,7 @@ use shape_foundry::{
     FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, FoundryEdit, FoundryLock,
     FoundryLockMode, FoundryLockTarget, FoundryPackDocument, FoundryPackExportProfile,
     FoundryPreferenceEvent, FoundryProjectRevisionProgram, ProviderOverride, ResponseCurve,
-    document_catalog_refs,
+    VariationIntent, document_catalog_refs,
 };
 use shape_project::foundry::FoundryProjectFile;
 use shape_render::foundry::FoundryPreviewCache;
@@ -105,6 +105,7 @@ fn candidate_job_mode_comes_from_explicit_candidate_request() {
         mode: FoundryCandidateMode::Explore,
         strategy_id: Some("broad".to_owned()),
         preference_profile: None,
+        variation_intent: VariationIntent::default(),
     };
 
     let effects = state
@@ -129,6 +130,7 @@ fn direction_mode_command_preserves_requested_search_mode() {
                 mode: FoundryCandidateMode::Structure,
                 strategy_id: Some("macro".to_owned()),
                 preference_profile: None,
+                variation_intent: VariationIntent::default(),
             },
         ))
         .expect("mode request should schedule");
@@ -438,6 +440,7 @@ fn candidate_generation_job_returns_pending_cards_before_preview_rendering() {
             mode: FoundryCandidateMode::Refine,
             strategy_id: None,
             preference_profile: None,
+            variation_intent: VariationIntent::default(),
         },
     };
 
@@ -474,6 +477,7 @@ fn candidate_preview_job_renders_preview_images_for_cards() {
         mode: FoundryCandidateMode::Refine,
         strategy_id: None,
         preference_profile: None,
+        variation_intent: VariationIntent::default(),
     };
     let output = generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
         .expect("candidate generation should succeed");
@@ -522,6 +526,7 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
         mode: FoundryCandidateMode::Refine,
         strategy_id: None,
         preference_profile: None,
+        variation_intent: VariationIntent::default(),
     };
     let mut output =
         generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
@@ -849,6 +854,7 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,
             preference_profile: None,
+            variation_intent: VariationIntent::default(),
         })
         .expect("candidate generation should schedule");
     let event = run_fixture_job(start_job(effects), &fixture);
@@ -906,6 +912,7 @@ fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,
             preference_profile: None,
+            variation_intent: VariationIntent::default(),
         })
         .expect("preference-biased generation should schedule");
     let job = start_job(effects);
@@ -1414,6 +1421,7 @@ impl RuntimeFixture {
             control_state: BTreeMap::from([("radius".to_owned(), ControlValue::Scalar(0.15))]),
             provider_overrides: BTreeMap::new(),
             foundry_locks: Vec::new(),
+            variation_state: shape_foundry::FoundryVariationState::default(),
             local_recipe_overrides: Vec::new(),
             seed: 42,
             catalog_lock: None,

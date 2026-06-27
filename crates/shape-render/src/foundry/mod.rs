@@ -7,6 +7,7 @@ use std::thread;
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use shape_core::Aabb;
+use shape_foundry::{CandidateLegibilityClass, VariationChannel, VariationScope};
 use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
@@ -18,6 +19,10 @@ use crate::{
 const OVERLAY_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
 const OVERLAY_HASH_PRIME: u64 = 1_099_511_628_211;
 const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
+const RENDER_DUPLICATE_AVERAGE_DELTA: f32 = 0.018;
+const RENDER_DUPLICATE_MAX_DELTA: f32 = 0.035;
+const RENDER_CLEAR_AVERAGE_DELTA: f32 = 0.075;
+const RENDER_STRONG_AVERAGE_DELTA: f32 = 0.16;
 
 /// Default bounded capacity for the in-memory Foundry preview cache.
 pub const FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY: usize = 64;
@@ -266,6 +271,265 @@ pub struct FoundryChangedRoleOverlay {
     pub changed_controls: Vec<String>,
 }
 
+/// Product-safe variation metadata carried with a preview for future overlays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryPreviewVariationMetadata {
+    /// Scope represented by this preview.
+    #[serde(default)]
+    pub scope: VariationScope,
+    /// Channels represented by this preview.
+    #[serde(default)]
+    pub channels: Vec<VariationChannel>,
+    /// Selected part-group ID, when a Focus Part preview is requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_part_group: Option<String>,
+    /// Material slot ID, when a future surface preview is requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_slot_id: Option<String>,
+    /// Product legibility class assigned before/after preview comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legibility_class: Option<CandidateLegibilityClass>,
+}
+
+impl Default for FoundryPreviewVariationMetadata {
+    fn default() -> Self {
+        Self {
+            scope: VariationScope::WholeAsset,
+            channels: vec![VariationChannel::CompleteLook],
+            selected_part_group: None,
+            material_slot_id: None,
+            legibility_class: None,
+        }
+    }
+}
+
+/// Pixel-space visual delta between two rendered foundry previews.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct FoundryRenderedVisibleDelta {
+    /// Mean visible pixel difference in `0..1`.
+    pub mean_pixel_delta: f32,
+    /// Ratio of visibly changed foreground pixels in `0..1`.
+    pub changed_pixel_ratio: f32,
+    /// Ratio of silhouette foreground/background changes in `0..1`.
+    pub silhouette_delta: f32,
+    /// Weighted aggregate score in `0..1`.
+    pub score: f32,
+    /// Plain reason when the previews could not be compared.
+    pub unavailable_reason: Option<&'static str>,
+}
+
+/// Strict multi-camera report derived from rendered preview comparisons.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoundryRenderedPerceptualReport {
+    /// Stable candidate ID.
+    pub candidate_id: String,
+    /// Per-camera aggregate deltas in `0..1`.
+    pub render_delta_by_camera: Vec<f32>,
+    /// Maximum camera delta in `0..1`.
+    pub max_delta: f32,
+    /// Average camera delta in `0..1`.
+    pub average_delta: f32,
+    /// Maximum silhouette delta in `0..1`.
+    pub silhouette_delta: f32,
+    /// Product-visible classification.
+    pub legibility_class: CandidateLegibilityClass,
+    /// Rejection reason when the comparison is not selectable.
+    pub reject_reason: Option<String>,
+    /// Human-facing diagnostic summary.
+    pub human_summary: String,
+}
+
+impl FoundryRenderedVisibleDelta {
+    /// Return true when this comparison has usable finite evidence.
+    #[must_use]
+    pub fn available(self) -> bool {
+        self.unavailable_reason.is_none()
+    }
+
+    fn unavailable(reason: &'static str) -> Self {
+        Self {
+            mean_pixel_delta: 0.0,
+            changed_pixel_ratio: 0.0,
+            silhouette_delta: 0.0,
+            score: 0.0,
+            unavailable_reason: Some(reason),
+        }
+    }
+}
+
+/// Classify rendered parent/candidate comparisons from one or more fixed cameras.
+#[must_use]
+pub fn classify_foundry_rendered_perceptual_report(
+    candidate_id: impl Into<String>,
+    camera_pairs: &[(&RenderedImage, &RenderedImage)],
+    background: [u8; 4],
+) -> FoundryRenderedPerceptualReport {
+    let candidate_id = candidate_id.into();
+    let deltas = camera_pairs
+        .iter()
+        .map(|(parent, candidate)| {
+            compare_foundry_rendered_visible_delta(parent, candidate, background)
+        })
+        .collect::<Vec<_>>();
+    let render_delta_by_camera = deltas.iter().map(|delta| delta.score).collect::<Vec<_>>();
+    let max_delta = render_delta_by_camera.iter().copied().fold(0.0, f32::max);
+    let average_delta = if render_delta_by_camera.is_empty() {
+        0.0
+    } else {
+        render_delta_by_camera.iter().sum::<f32>() / render_delta_by_camera.len() as f32
+    };
+    let silhouette_delta = deltas
+        .iter()
+        .map(|delta| delta.silhouette_delta)
+        .fold(0.0, f32::max);
+    let unavailable = deltas.iter().find_map(|delta| delta.unavailable_reason);
+    let (legibility_class, reject_reason) = if let Some(reason) = unavailable {
+        (
+            CandidateLegibilityClass::Unsupported,
+            Some(reason.to_owned()),
+        )
+    } else if average_delta < RENDER_DUPLICATE_AVERAGE_DELTA
+        && max_delta < RENDER_DUPLICATE_MAX_DELTA
+    {
+        (
+            CandidateLegibilityClass::DuplicateLooking,
+            Some("Candidate looks identical to the parent at preview size.".to_owned()),
+        )
+    } else if average_delta >= RENDER_STRONG_AVERAGE_DELTA {
+        (CandidateLegibilityClass::Strong, None)
+    } else if average_delta >= RENDER_CLEAR_AVERAGE_DELTA || max_delta >= RENDER_CLEAR_AVERAGE_DELTA
+    {
+        (CandidateLegibilityClass::Clear, None)
+    } else {
+        (
+            CandidateLegibilityClass::TooSubtle,
+            Some("Visible change is too small for a normal direction card.".to_owned()),
+        )
+    };
+    let human_summary = if legibility_class.selectable() {
+        format!(
+            "{} rendered as {} with {:.0}% average preview delta.",
+            candidate_id,
+            legibility_class.display_label(),
+            average_delta * 100.0
+        )
+    } else {
+        format!(
+            "{} rejected: {}",
+            candidate_id,
+            reject_reason
+                .as_deref()
+                .unwrap_or("preview comparison is unavailable")
+        )
+    };
+    FoundryRenderedPerceptualReport {
+        candidate_id,
+        render_delta_by_camera,
+        max_delta,
+        average_delta,
+        silhouette_delta,
+        legibility_class,
+        reject_reason,
+        human_summary,
+    }
+}
+
+/// Compare two rendered previews while ignoring shared background pixels.
+///
+/// The comparison is deterministic, clamps every score to `0..1`, rejects
+/// mismatched or malformed image buffers, and treats the supplied background as
+/// non-evidence unless foreground appears on either side.
+#[must_use]
+pub fn compare_foundry_rendered_visible_delta(
+    parent: &RenderedImage,
+    candidate: &RenderedImage,
+    background: [u8; 4],
+) -> FoundryRenderedVisibleDelta {
+    if parent.width != candidate.width || parent.height != candidate.height {
+        return FoundryRenderedVisibleDelta::unavailable(
+            "Preview sizes do not match for visual comparison.",
+        );
+    }
+    if parent.width == 0 || parent.height == 0 {
+        return FoundryRenderedVisibleDelta::unavailable(
+            "Preview images are empty and cannot be compared.",
+        );
+    }
+    let expected_len = (parent.width as usize)
+        .checked_mul(parent.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if expected_len != Some(parent.rgba8.len()) || expected_len != Some(candidate.rgba8.len()) {
+        return FoundryRenderedVisibleDelta::unavailable(
+            "Preview pixels are incomplete and cannot be compared.",
+        );
+    }
+
+    let mut total_delta = 0.0_f32;
+    let mut changed_pixels = 0_usize;
+    let mut silhouette_pixels = 0_usize;
+    let mut evidence_pixels = 0_usize;
+    for (left, right) in parent
+        .rgba8
+        .chunks_exact(4)
+        .zip(candidate.rgba8.chunks_exact(4))
+    {
+        let left_foreground = pixel_is_foreground(left, background);
+        let right_foreground = pixel_is_foreground(right, background);
+        if !left_foreground && !right_foreground {
+            continue;
+        }
+        evidence_pixels += 1;
+        let left_alpha = left[3] as f32 / 255.0;
+        let right_alpha = right[3] as f32 / 255.0;
+        let alpha_delta = (left_alpha - right_alpha).abs();
+        let visible_weight = left_alpha.max(right_alpha);
+        let color_delta = ((left[0].abs_diff(right[0]) as f32
+            + left[1].abs_diff(right[1]) as f32
+            + left[2].abs_diff(right[2]) as f32)
+            / (3.0 * 255.0))
+            * visible_weight;
+        let pixel_delta = color_delta.max(alpha_delta).clamp(0.0, 1.0);
+        total_delta += pixel_delta;
+        if pixel_delta >= 0.08 {
+            changed_pixels += 1;
+        }
+        if left_foreground != right_foreground {
+            silhouette_pixels += 1;
+        }
+    }
+    if evidence_pixels == 0 {
+        return FoundryRenderedVisibleDelta::unavailable(
+            "Preview comparison has no visible foreground pixels.",
+        );
+    }
+    let evidence_pixels = evidence_pixels as f32;
+    let mean_pixel_delta = clamp_visible_score(total_delta / evidence_pixels);
+    let changed_pixel_ratio = clamp_visible_score(changed_pixels as f32 / evidence_pixels);
+    let silhouette_delta = clamp_visible_score(silhouette_pixels as f32 / evidence_pixels);
+    let score = clamp_visible_score(
+        mean_pixel_delta * 0.55 + changed_pixel_ratio * 0.35 + silhouette_delta * 0.75,
+    );
+    FoundryRenderedVisibleDelta {
+        mean_pixel_delta,
+        changed_pixel_ratio,
+        silhouette_delta,
+        score,
+        unavailable_reason: None,
+    }
+}
+
+fn pixel_is_foreground(pixel: &[u8], background: [u8; 4]) -> bool {
+    pixel[3] > 5 && pixel != background
+}
+
+fn clamp_visible_score(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 /// One complete-model preview request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FoundryPreviewRequest {
@@ -283,6 +547,8 @@ pub struct FoundryPreviewRequest {
     pub provider_choices: BTreeMap<String, String>,
     /// Changed-role overlays to draw above this preview.
     pub changed_role_overlays: Vec<FoundryChangedRoleOverlay>,
+    /// Product-safe variation metadata for future overlays.
+    pub variation_metadata: FoundryPreviewVariationMetadata,
 }
 
 impl FoundryPreviewRequest {
@@ -302,6 +568,7 @@ impl FoundryPreviewRequest {
             sampled_control_state: BTreeMap::new(),
             provider_choices: BTreeMap::new(),
             changed_role_overlays: Vec::new(),
+            variation_metadata: FoundryPreviewVariationMetadata::default(),
         }
     }
 }
@@ -376,6 +643,8 @@ pub struct FoundryRenderedPreview {
     pub comparison_bounds: Aabb,
     /// Changed-role overlay metadata to paint over this preview.
     pub changed_role_overlays: Vec<FoundryChangedRoleOverlay>,
+    /// Product-safe variation metadata copied from the request.
+    pub variation_metadata: FoundryPreviewVariationMetadata,
 }
 
 /// Rendered output for a foundry preview comparison set.
@@ -744,6 +1013,7 @@ fn preview_from_image(
         whole_model_bounds: item.mesh.bounds,
         comparison_bounds: context.comparison_bounds,
         changed_role_overlays: item.changed_role_overlays.clone(),
+        variation_metadata: item.variation_metadata.clone(),
     }
 }
 
@@ -1078,5 +1348,96 @@ impl OverlayHasher {
 
     fn finish(self) -> u64 {
         self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(pixels: &[[u8; 4]]) -> RenderedImage {
+        RenderedImage {
+            width: 2,
+            height: 2,
+            rgba8: pixels.iter().flatten().copied().collect(),
+        }
+    }
+
+    #[test]
+    fn rendered_perceptual_report_rejects_identical_preview() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let report =
+            classify_foundry_rendered_perceptual_report("same", &[(&parent, &parent)], background);
+
+        assert_eq!(
+            report.legibility_class,
+            CandidateLegibilityClass::DuplicateLooking
+        );
+        assert!(report.reject_reason.is_some());
+    }
+
+    #[test]
+    fn rendered_perceptual_report_accepts_obvious_delta() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let candidate = image(&[
+            [200, 200, 200, 255],
+            background,
+            [220, 220, 220, 255],
+            background,
+        ]);
+        let report = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate), (&parent, &candidate)],
+            background,
+        );
+
+        assert!(matches!(
+            report.legibility_class,
+            CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
+        ));
+        assert_eq!(report.render_delta_by_camera.len(), 2);
+        assert!(report.silhouette_delta > 0.0);
+    }
+
+    #[test]
+    fn rendered_perceptual_report_is_deterministic() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let candidate = image(&[
+            [200, 200, 200, 255],
+            background,
+            [220, 220, 220, 255],
+            background,
+        ]);
+
+        let first = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate)],
+            background,
+        );
+        let second = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate)],
+            background,
+        );
+
+        assert_eq!(first, second);
     }
 }

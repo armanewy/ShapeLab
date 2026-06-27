@@ -50,15 +50,30 @@ product-facing controls:
 - Railing Style
 - Detail Density
 
-The HQ support options are Squared Posts, Stone Piers, and Trestle Frames. Deck,
-brace, rail, and connector providers are authored as whole-model choices rather
-than isolated part toggles. The seven HQ direction strategies are Reinforced,
-Light Crossing, Wide Deck, Compact Span, Stone-Pier Outpost, Detailed
-Timberwork, and Minimal Clean Span.
+The HQ support options are Round Piles, Squared Posts, Stone Piers, and Trestle
+Frames. Deck, brace, rail, and connector providers are authored as whole-model
+choices rather than isolated part toggles. Bracing options are Minimal Ties, X
+Brace, K Brace, and Heavy Reinforced. The seven HQ direction strategies are
+Reinforced, Light Crossing, Wide Crossing, Compact Span, Stone-Pier Outpost,
+Detailed Timberwork, and Minimal Span.
+
+Prompt 4 reauthors the HQ fixture for card-size clay legibility:
+
+- support providers now separate pile rhythm, paired squared posts, masonry
+  piers, and trestle frames;
+- brace providers now produce distinct minimal, X, K, and heavy-reinforced
+  structures in a visible centered under-deck lane;
+- rail providers have clearer height/course differences;
+- connector/detail providers separate clean cross ties, bolted joinery, and
+  dense fasteners without colliding with the approach ramps;
+- Explore candidates are tested to return six selectable whole-asset directions
+  with model-valid geometry and at least four distinct rendered-signature
+  silhouettes.
 
 The HQ benchmark output is written to
-`target/hq-benchmark/roman-bridge-hq`. The automated gate currently reaches
-Usable evidence with clean model validation, export/reopen proof, visible
-control deltas for all seven primary controls, and six surviving deterministic
-Explore directions. Default novice-catalog exposure is still blocked until
-manual review is approved.
+`target/foundry-benchmark/roman-bridge-hq`. In this branch, Roman Bridge catalog
+tests pass, the HQ quality benchmark reaches `usable` with six surviving
+candidate directions, export/reopen is verified, and the visual benchmark writes
+Explore/control/option contact sheets under
+`target/foundry-benchmark/roman-bridge-hq/visual-benchmark`. Default
+novice-catalog exposure remains blocked until manual review is approved.

@@ -6,7 +6,7 @@ use shape_asset::RevisionId;
 use crate::{
     CatalogContentRef, ControlValue, FoundryAssetDocument, FoundryCandidateId,
     FoundryCandidateSummary, FoundryLock, FoundryLockTarget, FoundryValidationReport,
-    GenerateCandidatesRequest,
+    GenerateCandidatesRequest, VariationChannel, VariationIntent, VariationScope,
 };
 
 /// Serializable command API for foundry automation.
@@ -55,6 +55,39 @@ pub enum FoundryCommand {
     ClearLock {
         /// Lock target to clear.
         target: FoundryLockTarget,
+    },
+    /// Set the active variation intent.
+    SetVariationIntent {
+        /// Product-safe variation intent.
+        intent: VariationIntent,
+    },
+    /// Set only the active variation scope.
+    SetVariationScope {
+        /// Product-safe variation scope.
+        scope: VariationScope,
+    },
+    /// Set only the active variation channels.
+    SetVariationChannels {
+        /// Product-safe variation channels.
+        channels: Vec<VariationChannel>,
+    },
+    /// Clear part/material/detail focus and return to whole-asset variation.
+    ClearVariationFocus,
+    /// Clear semantic part focus and return to whole-asset variation.
+    ClearFocusPartGroup,
+    /// Focus a semantic part group.
+    SetFocusPartGroup {
+        /// Stable semantic part-group ID.
+        group_id: String,
+    },
+    /// Generate candidates for a focused semantic part group.
+    GenerateFocusedPartCandidates {
+        /// Stable semantic part-group ID.
+        group_id: String,
+        /// Product-safe variation channels.
+        channels: Vec<VariationChannel>,
+        /// Product-safe generation mode name.
+        mode: String,
     },
     /// Generate candidates.
     GenerateCandidates(GenerateCandidatesRequest),

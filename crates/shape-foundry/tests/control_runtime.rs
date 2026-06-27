@@ -544,6 +544,7 @@ fn document_fixture() -> FoundryAssetDocument {
         control_state: BTreeMap::new(),
         provider_overrides: BTreeMap::new(),
         foundry_locks: Vec::new(),
+        variation_state: shape_foundry::FoundryVariationState::default(),
         local_recipe_overrides: Vec::new(),
         seed: 0,
         catalog_lock: None,

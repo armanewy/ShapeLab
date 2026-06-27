@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use shape_mesh::TriangleMesh;
 
+use crate::surface::{SurfaceArtifact, SurfaceReviewStatus};
+
 /// GLB handoff schema version for Shape Lab static props.
 pub const STATIC_PROP_GLB_HANDOFF_SCHEMA_VERSION: u32 = 1;
 
@@ -85,6 +87,22 @@ pub fn write_static_prop_glb(
     let bytes = encode_static_prop_glb(mesh, metadata)?;
     fs::write(path, &bytes)?;
     Ok(validate_static_prop_glb(&bytes))
+}
+
+/// Write a deterministic surface-aware GLB file for one static prop mesh.
+///
+/// This handoff includes POSITION, NORMAL, and TEXCOORD_0. Texture files remain
+/// package sidecars referenced by the SurfaceArtifact; this function does not
+/// claim engine-native material import.
+pub fn write_static_prop_surface_glb(
+    mesh: &TriangleMesh,
+    surface: &SurfaceArtifact,
+    surface_artifact_ref: &str,
+    path: impl AsRef<Path>,
+) -> Result<StaticPropGlbValidationReport, StaticPropGlbError> {
+    let bytes = encode_static_prop_surface_glb(mesh, surface, surface_artifact_ref)?;
+    fs::write(path, &bytes)?;
+    Ok(validate_static_prop_surface_glb(&bytes))
 }
 
 /// Encode one static prop mesh as a deterministic GLB 2.0 payload.
@@ -214,6 +232,397 @@ pub fn encode_static_prop_glb(
         }
     });
 
+    encode_glb_json_and_bin(gltf, bin_length, bin)
+}
+
+/// Encode one static prop mesh and its primary UV set as GLB 2.0.
+pub fn encode_static_prop_surface_glb(
+    mesh: &TriangleMesh,
+    surface: &SurfaceArtifact,
+    surface_artifact_ref: &str,
+) -> Result<Vec<u8>, StaticPropGlbError> {
+    validate_mesh_for_glb(mesh)?;
+    validate_surface_for_glb(mesh, surface, surface_artifact_ref)?;
+
+    let uv_set = surface
+        .uv_sets
+        .iter()
+        .find(|set| set.channel_index == 0)
+        .or_else(|| surface.uv_sets.first())
+        .ok_or_else(|| {
+            StaticPropGlbError::InvalidMetadata("surface UV set is required".to_owned())
+        })?;
+    let positions_offset = 0_u32;
+    let positions_length = checked_byte_len(mesh.positions.len(), 12, "positions")?;
+    let normals_offset = align4(positions_offset + positions_length);
+    let normals_length = checked_byte_len(mesh.normals.len(), 12, "normals")?;
+    let texcoords_offset = align4(normals_offset + normals_length);
+    let texcoords_length = checked_byte_len(uv_set.coordinates.len(), 8, "texcoords")?;
+    let indices_offset = align4(texcoords_offset + texcoords_length);
+    let indices_length = checked_byte_len(mesh.indices.len(), 4, "indices")?;
+    let bin_length = align4(indices_offset + indices_length);
+
+    let mut bin = vec![0_u8; bin_length as usize];
+    write_f32_triplets(&mut bin, positions_offset as usize, &mesh.positions);
+    write_f32_triplets(&mut bin, normals_offset as usize, &mesh.normals);
+    write_f32_pairs(&mut bin, texcoords_offset as usize, &uv_set.coordinates);
+    write_u32_values(&mut bin, indices_offset as usize, &mesh.indices);
+
+    let min = mesh.bounds.min.to_array();
+    let max = mesh.bounds.max.to_array();
+    let material_slot_ids = surface
+        .material_slots
+        .iter()
+        .map(|slot| slot.slot_id.as_str())
+        .collect::<Vec<_>>();
+    let gltf = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "Shape Lab static-prop surface GLB handoff v1"
+        },
+        "scene": 0,
+        "scenes": [{ "nodes": [0] }],
+        "nodes": [{
+            "name": surface.display_name,
+            "mesh": 0,
+            "extras": {
+                "shapeLab": {
+                    "schemaVersion": STATIC_PROP_GLB_HANDOFF_SCHEMA_VERSION,
+                    "profileId": surface.profile_id,
+                    "claim": "portable-static-mesh-handoff-with-texcoord0",
+                    "surfaceArtifactRef": surface_artifact_ref,
+                    "surfaceReviewStatus": match surface.manual_review {
+                        SurfaceReviewStatus::NotReviewed => "not_reviewed",
+                        SurfaceReviewStatus::AutomatedReady => "automated_ready",
+                        SurfaceReviewStatus::ManualRequired => "manual_required",
+                        SurfaceReviewStatus::Approved => "approved",
+                        SurfaceReviewStatus::Rejected => "rejected",
+                    },
+                    "materialSlotBinding": "triangle-bindings-in-surface-artifact",
+                    "materialSlotIds": material_slot_ids,
+                    "textureBinding": "package-sidecars-not-embedded",
+                    "notIncluded": [
+                        "engine-native-import",
+                        "skin",
+                        "animation",
+                        "human-approved-material-art-quality"
+                    ]
+                }
+            }
+        }],
+        "meshes": [{
+            "name": format!("{} Surface Mesh", surface.display_name),
+            "primitives": [{
+                "attributes": {
+                    "POSITION": 0,
+                    "NORMAL": 1,
+                    "TEXCOORD_0": 2
+                },
+                "indices": 3,
+                "material": 0,
+                "mode": 4
+            }]
+        }],
+        "materials": surface_material_definitions(surface, false),
+        "buffers": [{
+            "byteLength": bin_length
+        }],
+        "bufferViews": [
+            {
+                "buffer": 0,
+                "byteOffset": positions_offset,
+                "byteLength": positions_length,
+                "target": 34962
+            },
+            {
+                "buffer": 0,
+                "byteOffset": normals_offset,
+                "byteLength": normals_length,
+                "target": 34962
+            },
+            {
+                "buffer": 0,
+                "byteOffset": texcoords_offset,
+                "byteLength": texcoords_length,
+                "target": 34962
+            },
+            {
+                "buffer": 0,
+                "byteOffset": indices_offset,
+                "byteLength": indices_length,
+                "target": 34963
+            }
+        ],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5126,
+                "count": mesh.positions.len(),
+                "type": "VEC3",
+                "min": min,
+                "max": max
+            },
+            {
+                "bufferView": 1,
+                "componentType": 5126,
+                "count": mesh.normals.len(),
+                "type": "VEC3"
+            },
+            {
+                "bufferView": 2,
+                "componentType": 5126,
+                "count": uv_set.coordinates.len(),
+                "type": "VEC2"
+            },
+            {
+                "bufferView": 3,
+                "componentType": 5125,
+                "count": mesh.indices.len(),
+                "type": "SCALAR"
+            }
+        ],
+        "extras": {
+            "shapeLabProfileId": surface.profile_id,
+            "shapeLabDisplayName": surface.display_name,
+            "shapeLabMaterialSlotIds": material_slot_ids,
+            "shapeLabSurfaceArtifact": surface_artifact_ref,
+            "shapeLabTextureBinding": "sidecar-texture-files",
+            "shapeLabNoSkin": true,
+            "shapeLabNoAnimation": true
+        }
+    });
+
+    encode_glb_json_and_bin(gltf, bin_length, bin)
+}
+
+/// Encode a surface-aware glTF 2.0 JSON document that references an external
+/// binary buffer and relative texture PNG sidecars. This does not create a GLB
+/// and does not embed texture bytes.
+pub fn encode_static_prop_surface_gltf_json(
+    mesh: &TriangleMesh,
+    surface: &SurfaceArtifact,
+    surface_artifact_ref: &str,
+    buffer_uri: &str,
+) -> Result<Value, StaticPropGlbError> {
+    validate_mesh_for_glb(mesh)?;
+    validate_surface_for_glb(mesh, surface, surface_artifact_ref)?;
+    if buffer_uri.trim().is_empty() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface glTF buffer URI is required".to_owned(),
+        ));
+    }
+
+    let uv_set = surface
+        .uv_sets
+        .iter()
+        .find(|set| set.channel_index == 0)
+        .or_else(|| surface.uv_sets.first())
+        .ok_or_else(|| {
+            StaticPropGlbError::InvalidMetadata("surface UV set is required".to_owned())
+        })?;
+    let positions_offset = 0_u32;
+    let positions_length = checked_byte_len(mesh.positions.len(), 12, "positions")?;
+    let normals_offset = align4(positions_offset + positions_length);
+    let normals_length = checked_byte_len(mesh.normals.len(), 12, "normals")?;
+    let texcoords_offset = align4(normals_offset + normals_length);
+    let texcoords_length = checked_byte_len(uv_set.coordinates.len(), 8, "texcoords")?;
+    let indices_offset = align4(texcoords_offset + texcoords_length);
+    let indices_length = checked_byte_len(mesh.indices.len(), 4, "indices")?;
+    let bin_length = align4(indices_offset + indices_length);
+    let min = mesh.bounds.min.to_array();
+    let max = mesh.bounds.max.to_array();
+    let material_slot_ids = surface
+        .material_slots
+        .iter()
+        .map(|slot| slot.slot_id.as_str())
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "Shape Lab static-prop surface glTF handoff v2"
+        },
+        "scene": 0,
+        "scenes": [{ "nodes": [0] }],
+        "nodes": [{
+            "name": surface.display_name,
+            "mesh": 0,
+            "extras": {
+                "shapeLab": {
+                    "schemaVersion": STATIC_PROP_GLB_HANDOFF_SCHEMA_VERSION,
+                    "profileId": surface.profile_id,
+                    "claim": "portable-static-mesh-gltf-with-texcoord0-and-relative-texture-refs",
+                    "surfaceArtifactRef": surface_artifact_ref,
+                    "textureBinding": "relative-png-sidecars-not-embedded",
+                    "materialSlotIds": material_slot_ids,
+                    "notIncluded": [
+                        "glb-texture-embedding",
+                        "skin",
+                        "animation",
+                        "engine-native-import"
+                    ]
+                }
+            }
+        }],
+        "meshes": [{
+            "name": format!("{} Surface Mesh", surface.display_name),
+            "primitives": [{
+                "attributes": {
+                    "POSITION": 0,
+                    "NORMAL": 1,
+                    "TEXCOORD_0": 2
+                },
+                "indices": 3,
+                "material": 0,
+                "mode": 4
+            }]
+        }],
+        "materials": surface_material_definitions(surface, true),
+        "images": surface_texture_images(surface),
+        "textures": surface_texture_indices(surface),
+        "buffers": [{
+            "uri": buffer_uri,
+            "byteLength": bin_length
+        }],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": positions_offset, "byteLength": positions_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": normals_offset, "byteLength": normals_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": texcoords_offset, "byteLength": texcoords_length, "target": 34962 },
+            { "buffer": 0, "byteOffset": indices_offset, "byteLength": indices_length, "target": 34963 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": mesh.positions.len(), "type": "VEC3", "min": min, "max": max },
+            { "bufferView": 1, "componentType": 5126, "count": mesh.normals.len(), "type": "VEC3" },
+            { "bufferView": 2, "componentType": 5126, "count": uv_set.coordinates.len(), "type": "VEC2" },
+            { "bufferView": 3, "componentType": 5125, "count": mesh.indices.len(), "type": "SCALAR" }
+        ],
+        "extras": {
+            "shapeLabProfileId": surface.profile_id,
+            "shapeLabDisplayName": surface.display_name,
+            "shapeLabSurfaceArtifact": surface_artifact_ref,
+            "shapeLabTextureBinding": "relative-png-sidecars",
+            "shapeLabNoSkin": true,
+            "shapeLabNoAnimation": true
+        }
+    }))
+}
+
+fn surface_material_definitions(
+    surface: &SurfaceArtifact,
+    include_texture_refs: bool,
+) -> Vec<Value> {
+    if surface.material_slots.is_empty() {
+        return vec![json!({
+            "name": "Surface Placeholder Material",
+            "extras": {
+                "shapeLabMaterialBinding": "surface-artifact-triangle-bindings",
+                "shapeLabTextureEmbedding": "not-implemented"
+            },
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.72
+            }
+        })];
+    }
+    surface
+        .material_slots
+        .iter()
+        .map(|slot| {
+            let base_color_texture = include_texture_refs
+                .then(|| base_color_texture_index(surface, &slot.recipe_id))
+                .flatten()
+                .map(|index| json!({ "index": index }));
+            let mut pbr = json!({
+                "baseColorFactor": [0.72, 0.74, 0.69, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.72
+            });
+            if let Some(texture) = base_color_texture {
+                pbr["baseColorTexture"] = texture;
+            }
+            json!({
+                "name": slot.display_name,
+                "extras": {
+                    "shapeLabMaterialSlotId": slot.slot_id,
+                    "shapeLabMaterialRecipeId": slot.recipe_id,
+                    "shapeLabMaterialBinding": "surface-artifact-triangle-bindings",
+                    "shapeLabTextureEmbedding": "not-implemented"
+                },
+                "pbrMetallicRoughness": pbr
+            })
+        })
+        .collect()
+}
+
+fn surface_texture_images(surface: &SurfaceArtifact) -> Vec<Value> {
+    surface
+        .texture_sets
+        .iter()
+        .flat_map(|set| {
+            set.files.iter().map(|file| {
+                json!({
+                    "name": format!("{} {:?}", set.material_recipe_id, file.channel),
+                    "uri": file.path,
+                    "extras": {
+                        "shapeLabMaterialRecipeId": set.material_recipe_id,
+                        "shapeLabTextureChannel": file.channel,
+                        "shapeLabTextureEmbedding": "not-implemented"
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+fn surface_texture_indices(surface: &SurfaceArtifact) -> Vec<Value> {
+    surface
+        .texture_sets
+        .iter()
+        .flat_map(|set| {
+            set.files.iter().enumerate().map(|(index, file)| {
+                json!({
+                    "source": flattened_texture_index(surface, &set.material_recipe_id, file.channel).unwrap_or(index),
+                    "extras": {
+                        "shapeLabMaterialRecipeId": set.material_recipe_id,
+                        "shapeLabTextureChannel": file.channel
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+fn base_color_texture_index(surface: &SurfaceArtifact, recipe_id: &str) -> Option<usize> {
+    flattened_texture_index(
+        surface,
+        recipe_id,
+        crate::surface::TextureChannel::BaseColor,
+    )
+}
+
+fn flattened_texture_index(
+    surface: &SurfaceArtifact,
+    recipe_id: &str,
+    channel: crate::surface::TextureChannel,
+) -> Option<usize> {
+    let mut index = 0_usize;
+    for set in &surface.texture_sets {
+        for file in &set.files {
+            if set.material_recipe_id == recipe_id && file.channel == channel {
+                return Some(index);
+            }
+            index = index.saturating_add(1);
+        }
+    }
+    None
+}
+
+fn encode_glb_json_and_bin(
+    gltf: Value,
+    bin_length: u32,
+    bin: Vec<u8>,
+) -> Result<Vec<u8>, StaticPropGlbError> {
     let mut json_bytes =
         serde_json::to_vec(&gltf).map_err(|error| StaticPropGlbError::Json(error.to_string()))?;
     pad_json(&mut json_bytes);
@@ -325,6 +734,190 @@ pub fn validate_static_prop_glb(bytes: &[u8]) -> StaticPropGlbValidationReport {
     }
 
     finish_validation_report(issue_codes, version, declared_length)
+}
+
+/// Validate a surface-aware static-prop GLB.
+#[must_use]
+pub fn validate_static_prop_surface_glb(bytes: &[u8]) -> StaticPropGlbValidationReport {
+    let base = validate_static_prop_glb(bytes);
+    let mut issue_codes = base.issue_codes;
+    if let Some(value) = parse_glb_json(bytes) {
+        let Some(attributes) = value
+            .pointer("/meshes/0/primitives/0/attributes")
+            .and_then(Value::as_object)
+        else {
+            issue_codes.push("gltf_surface_attributes_missing".to_owned());
+            return finish_validation_report(issue_codes, base.version, base.declared_length);
+        };
+        if !attributes.contains_key("TEXCOORD_0") {
+            issue_codes.push("gltf_texcoord0_missing".to_owned());
+        } else {
+            validate_texcoord0_accessor(&value, bytes, attributes, &mut issue_codes);
+        }
+        let text = value.to_string();
+        for forbidden in ["skins", "animations", "engine-native-import-ready"] {
+            if text.contains(forbidden) {
+                issue_codes.push(format!("gltf_forbidden_claim_{forbidden}"));
+            }
+        }
+        if value
+            .pointer("/extras/shapeLabTextureBinding")
+            .and_then(Value::as_str)
+            != Some("sidecar-texture-files")
+        {
+            issue_codes.push("gltf_surface_texture_binding_not_sidecar".to_owned());
+        }
+        if value
+            .pointer("/extras/shapeLabMaterialSlotIds")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+        {
+            issue_codes.push("gltf_surface_material_slot_ids_missing".to_owned());
+        }
+    } else {
+        issue_codes.push("glb_json_invalid".to_owned());
+    }
+    finish_validation_report(issue_codes, base.version, base.declared_length)
+}
+
+/// Validate a surface-aware static-prop GLB and require its metadata to point at
+/// the expected SurfaceArtifact sidecar.
+#[must_use]
+pub fn validate_static_prop_surface_glb_with_artifact_ref(
+    bytes: &[u8],
+    expected_surface_artifact_ref: &str,
+) -> StaticPropGlbValidationReport {
+    let base = validate_static_prop_surface_glb(bytes);
+    let mut issue_codes = base.issue_codes;
+    if expected_surface_artifact_ref.trim().is_empty() {
+        issue_codes.push("gltf_surface_artifact_ref_expected_missing".to_owned());
+        return finish_validation_report(issue_codes, base.version, base.declared_length);
+    }
+    if let Some(value) = parse_glb_json(bytes) {
+        if value
+            .pointer("/nodes/0/extras/shapeLab/surfaceArtifactRef")
+            .and_then(Value::as_str)
+            != Some(expected_surface_artifact_ref)
+        {
+            issue_codes.push("gltf_surface_artifact_ref_mismatch".to_owned());
+        }
+        if value
+            .pointer("/extras/shapeLabSurfaceArtifact")
+            .and_then(Value::as_str)
+            != Some(expected_surface_artifact_ref)
+        {
+            issue_codes.push("gltf_surface_artifact_extra_ref_mismatch".to_owned());
+        }
+    }
+    finish_validation_report(issue_codes, base.version, base.declared_length)
+}
+
+fn validate_texcoord0_accessor(
+    value: &Value,
+    bytes: &[u8],
+    attributes: &serde_json::Map<String, Value>,
+    issue_codes: &mut Vec<String>,
+) {
+    let Some(accessors) = value.get("accessors").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(buffer_views) = value.get("bufferViews").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(texcoord_index) = attributes.get("TEXCOORD_0").and_then(Value::as_u64) else {
+        issue_codes.push("gltf_texcoord0_accessor_invalid".to_owned());
+        return;
+    };
+    let Some(texcoord_accessor) = accessors.get(texcoord_index as usize) else {
+        issue_codes.push("gltf_texcoord0_accessor_out_of_range".to_owned());
+        return;
+    };
+    if texcoord_accessor
+        .get("componentType")
+        .and_then(Value::as_u64)
+        != Some(5126)
+    {
+        issue_codes.push("gltf_texcoord0_component_type_invalid".to_owned());
+    }
+    if texcoord_accessor.get("type").and_then(Value::as_str) != Some("VEC2") {
+        issue_codes.push("gltf_texcoord0_type_invalid".to_owned());
+    }
+    let texcoord_count = texcoord_accessor
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if texcoord_count == 0 {
+        issue_codes.push("gltf_texcoord0_count_invalid".to_owned());
+    }
+    let position_count = attributes
+        .get("POSITION")
+        .and_then(Value::as_u64)
+        .and_then(|index| accessors.get(index as usize))
+        .and_then(|accessor| accessor.get("count"))
+        .and_then(Value::as_u64);
+    if position_count.is_some_and(|count| count != texcoord_count) {
+        issue_codes.push("gltf_texcoord0_count_mismatch".to_owned());
+    }
+    let Some(buffer_view_index) = texcoord_accessor.get("bufferView").and_then(Value::as_u64)
+    else {
+        issue_codes.push("gltf_texcoord0_buffer_view_missing".to_owned());
+        return;
+    };
+    let Some(buffer_view) = buffer_views.get(buffer_view_index as usize) else {
+        issue_codes.push("gltf_texcoord0_buffer_view_out_of_range".to_owned());
+        return;
+    };
+    let view_offset = buffer_view
+        .get("byteOffset")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let accessor_offset = texcoord_accessor
+        .get("byteOffset")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let Some(view_length) = buffer_view.get("byteLength").and_then(Value::as_u64) else {
+        issue_codes.push("gltf_texcoord0_buffer_view_length_missing".to_owned());
+        return;
+    };
+    let Some(required_length) = (texcoord_count as usize).checked_mul(8) else {
+        issue_codes.push("gltf_texcoord0_byte_length_invalid".to_owned());
+        return;
+    };
+    if accessor_offset
+        .checked_add(required_length)
+        .is_none_or(|length| length > view_length as usize)
+    {
+        issue_codes.push("gltf_texcoord0_buffer_view_too_short".to_owned());
+        return;
+    }
+    let Some(bin) = parse_glb_bin(bytes) else {
+        issue_codes.push("gltf_texcoord0_bin_missing".to_owned());
+        return;
+    };
+    let Some(start) = view_offset.checked_add(accessor_offset) else {
+        issue_codes.push("gltf_texcoord0_byte_range_invalid".to_owned());
+        return;
+    };
+    let Some(end) = start.checked_add(required_length) else {
+        issue_codes.push("gltf_texcoord0_byte_range_invalid".to_owned());
+        return;
+    };
+    let Some(slice) = bin.get(start..end) else {
+        issue_codes.push("gltf_texcoord0_byte_range_out_of_bounds".to_owned());
+        return;
+    };
+    for pair in slice.chunks_exact(8) {
+        let u = f32::from_le_bytes(pair[0..4].try_into().expect("chunk size checked"));
+        let v = f32::from_le_bytes(pair[4..8].try_into().expect("chunk size checked"));
+        if !u.is_finite() || !v.is_finite() {
+            issue_codes.push("gltf_texcoord0_non_finite".to_owned());
+            return;
+        }
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            issue_codes.push("gltf_texcoord0_out_of_range".to_owned());
+            return;
+        }
+    }
 }
 
 fn finish_validation_report(
@@ -441,6 +1034,23 @@ fn validate_static_prop_gltf_json(value: &Value, bin_length: usize, issue_codes:
     }
 }
 
+fn parse_glb_json(bytes: &[u8]) -> Option<Value> {
+    let json_length = read_u32(bytes, 12)? as usize;
+    let json_start = 20_usize;
+    let json_end = json_start.checked_add(json_length)?;
+    let text = std::str::from_utf8(bytes.get(json_start..json_end)?).ok()?;
+    serde_json::from_str(text.trim_end()).ok()
+}
+
+fn parse_glb_bin(bytes: &[u8]) -> Option<&[u8]> {
+    let json_length = read_u32(bytes, 12)? as usize;
+    let bin_header = 20_usize.checked_add(json_length)?;
+    let bin_length = read_u32(bytes, bin_header)? as usize;
+    let bin_start = bin_header.checked_add(8)?;
+    let bin_end = bin_start.checked_add(bin_length)?;
+    bytes.get(bin_start..bin_end)
+}
+
 fn validate_mesh_for_glb(mesh: &TriangleMesh) -> Result<(), StaticPropGlbError> {
     if mesh.positions.is_empty() {
         return Err(StaticPropGlbError::InvalidMesh(
@@ -508,6 +1118,63 @@ fn validate_metadata(metadata: &StaticPropGlbMetadata) -> Result<(), StaticPropG
     Ok(())
 }
 
+fn validate_surface_for_glb(
+    mesh: &TriangleMesh,
+    surface: &SurfaceArtifact,
+    surface_artifact_ref: &str,
+) -> Result<(), StaticPropGlbError> {
+    if surface.profile_id.trim().is_empty() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface profile_id is required".to_owned(),
+        ));
+    }
+    if surface.display_name.trim().is_empty() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface display_name is required".to_owned(),
+        ));
+    }
+    if surface_artifact_ref.trim().is_empty() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface artifact reference is required".to_owned(),
+        ));
+    }
+    let Some(uv_set) = surface
+        .uv_sets
+        .iter()
+        .find(|set| set.channel_index == 0)
+        .or_else(|| surface.uv_sets.first())
+    else {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface UV set is required".to_owned(),
+        ));
+    };
+    if uv_set.coordinates.len() != mesh.positions.len() {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface UV coordinate count must match mesh position count".to_owned(),
+        ));
+    }
+    if uv_set
+        .coordinates
+        .iter()
+        .any(|coordinate| !coordinate[0].is_finite() || !coordinate[1].is_finite())
+    {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface UV coordinates must be finite".to_owned(),
+        ));
+    }
+    if surface.material_slots.is_empty()
+        || surface
+            .material_slots
+            .iter()
+            .any(|slot| slot.slot_id.trim().is_empty())
+    {
+        return Err(StaticPropGlbError::InvalidMetadata(
+            "surface material slot IDs are required".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn checked_byte_len(
     count: usize,
     stride: u32,
@@ -527,6 +1194,16 @@ fn write_f32_triplets(bytes: &mut [u8], offset: usize, values: &[[f32; 3]]) {
     let mut cursor = offset;
     for triplet in values {
         for value in triplet {
+            bytes[cursor..cursor + 4].copy_from_slice(&value.to_le_bytes());
+            cursor += 4;
+        }
+    }
+}
+
+fn write_f32_pairs(bytes: &mut [u8], offset: usize, values: &[[f32; 2]]) {
+    let mut cursor = offset;
+    for pair in values {
+        for value in pair {
             bytes[cursor..cursor + 4].copy_from_slice(&value.to_le_bytes());
             cursor += 4;
         }
@@ -557,6 +1234,12 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 mod tests {
     use glam::Vec3;
     use shape_core::Aabb;
+
+    use crate::surface::{
+        SURFACE_ARTIFACT_SCHEMA_VERSION, SurfaceArtifact, SurfaceArtifactEvidence,
+        SurfaceMaterialSlot, SurfaceReviewStatus, SurfaceTextureSet, SurfaceTriangleBinding,
+        SurfaceUvSet,
+    };
 
     use super::*;
 
@@ -622,6 +1305,142 @@ mod tests {
         );
     }
 
+    #[test]
+    fn geometry_glb_remains_geometry_only() {
+        let mesh = triangle_mesh();
+        let bytes = encode_static_prop_glb(&mesh, &metadata()).expect("geometry glb");
+        let text = String::from_utf8_lossy(&bytes);
+
+        assert!(text.contains("geometry-only-portable-static-mesh-handoff"));
+        assert!(text.contains("uv-layout"));
+        assert!(!text.contains("TEXCOORD_0"));
+        assert!(!text.contains("\"skins\""));
+        assert!(!text.contains("\"animations\""));
+    }
+
+    #[test]
+    fn surface_glb_validation_rejects_geometry_only_glb() {
+        let mesh = triangle_mesh();
+        let bytes = encode_static_prop_glb(&mesh, &metadata()).expect("geometry glb");
+
+        let report = validate_static_prop_surface_glb(&bytes);
+
+        assert!(!report.valid);
+        assert!(
+            report
+                .issue_codes
+                .contains(&"gltf_texcoord0_missing".to_owned()),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn surface_glb_includes_texcoord0_and_preserves_material_slot_ids() {
+        let mesh = triangle_mesh();
+        let surface = surface_artifact();
+
+        let bytes =
+            encode_static_prop_surface_glb(&mesh, &surface, "surface/surface-artifact.json")
+                .expect("surface glb");
+        let report = validate_static_prop_surface_glb(&bytes);
+        let text = String::from_utf8_lossy(&bytes);
+
+        assert!(report.valid, "{report:#?}");
+        assert!(text.contains("TEXCOORD_0"));
+        assert!(text.contains("surface/surface-artifact.json"));
+        assert!(!text.contains("surface/surface-validation-report.json"));
+        assert!(text.contains("painted_metal_body"));
+        assert!(text.contains("sidecar-texture-files"));
+        assert!(text.contains("shapeLabTextureEmbedding"));
+        assert!(text.contains("not-implemented"));
+        assert!(!text.contains("\"skins\""));
+        assert!(!text.contains("\"animations\""));
+    }
+
+    #[test]
+    fn surface_gltf_json_references_relative_texture_pngs_without_embedding_claim() {
+        let mesh = triangle_mesh();
+        let mut surface = surface_artifact();
+        surface.texture_sets = vec![SurfaceTextureSet {
+            id: "worn-painted-sci-fi-metal-textures".to_owned(),
+            display_name: "Worn Painted Textures".to_owned(),
+            material_recipe_id: "worn-painted-sci-fi-metal".to_owned(),
+            files: vec![crate::surface::SurfaceTextureFile {
+                channel: crate::surface::TextureChannel::BaseColor,
+                path: "surface/textures/worn-painted-sci-fi-metal-base_color.png".to_owned(),
+                width: 256,
+                height: 256,
+                color_space: "sRGB".to_owned(),
+                required_for_texture_ready: true,
+            }],
+            procedural_source: "test".to_owned(),
+            payload_ready: true,
+        }];
+
+        let value = encode_static_prop_surface_gltf_json(
+            &mesh,
+            &surface,
+            "surface/surface-artifact.json",
+            "sci-fi-crate-surface-static-prop.bin",
+        )
+        .expect("surface gltf json");
+        let text = serde_json::to_string(&value).expect("json text");
+
+        assert_eq!(
+            value.pointer("/meshes/0/primitives/0/attributes/TEXCOORD_0"),
+            Some(&Value::from(2_u64))
+        );
+        assert!(text.contains("surface/textures/worn-painted-sci-fi-metal-base_color.png"));
+        assert!(text.contains("relative-png-sidecars"));
+        assert!(text.contains("glb-texture-embedding"));
+        assert!(!text.contains("\"skins\""));
+        assert!(!text.contains("\"animations\""));
+    }
+
+    #[test]
+    fn surface_glb_validation_rejects_malformed_texcoord0_accessor() {
+        let mesh = triangle_mesh();
+        let surface = surface_artifact();
+        let bytes =
+            encode_static_prop_surface_glb(&mesh, &surface, "surface/surface-artifact.json")
+                .expect("surface glb");
+        let mut value = parse_glb_json(&bytes).expect("surface json");
+        value["accessors"][2]["count"] = Value::from(2_u64);
+        let bin = parse_glb_bin(&bytes).expect("bin").to_vec();
+        let malformed = encode_glb_json_and_bin(value, bin.len() as u32, bin).expect("malformed");
+
+        let report = validate_static_prop_surface_glb(&malformed);
+
+        assert!(!report.valid);
+        assert!(
+            report
+                .issue_codes
+                .contains(&"gltf_texcoord0_count_mismatch".to_owned()),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn surface_glb_validation_rejects_wrong_surface_artifact_ref() {
+        let mesh = triangle_mesh();
+        let surface = surface_artifact();
+        let bytes = encode_static_prop_surface_glb(&mesh, &surface, "surface/wrong.json")
+            .expect("surface glb");
+
+        let report = validate_static_prop_surface_glb_with_artifact_ref(
+            &bytes,
+            "surface/surface-artifact.json",
+        );
+
+        assert!(!report.valid);
+        assert!(
+            report
+                .issue_codes
+                .contains(&"gltf_surface_artifact_ref_mismatch".to_owned()),
+            "{report:#?}"
+        );
+    }
+
     fn metadata() -> StaticPropGlbMetadata {
         StaticPropGlbMetadata {
             profile_id: "sci-fi-crate".to_owned(),
@@ -639,6 +1458,52 @@ mod tests {
                 min: Vec3::ZERO,
                 max: Vec3::new(1.0, 1.0, 0.0),
             },
+        }
+    }
+
+    fn surface_artifact() -> SurfaceArtifact {
+        SurfaceArtifact {
+            schema_version: SURFACE_ARTIFACT_SCHEMA_VERSION,
+            profile_id: "sci-fi-crate".to_owned(),
+            display_name: "Sci-Fi Crate".to_owned(),
+            source_artifact_fingerprint: "artifact:abc".to_owned(),
+            source_recipe_hash: 42,
+            frozen_mesh_ref: "model-package".to_owned(),
+            uv_sets: vec![SurfaceUvSet {
+                id: "uv0".to_owned(),
+                display_name: "UV0".to_owned(),
+                channel_index: 0,
+                coordinate_count: 3,
+                coordinates: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                source_policy: "test projection".to_owned(),
+                readiness_status: crate::export::StaticPropFeatureStatus::Ready,
+                tiling_allowed: false,
+            }],
+            material_slots: vec![SurfaceMaterialSlot {
+                slot_id: "painted_metal_body".to_owned(),
+                display_name: "Painted Metal Body".to_owned(),
+                semantic_roles: vec!["body".to_owned()],
+                recipe_id: "worn-painted-sci-fi-metal".to_owned(),
+                coverage_triangle_count: 1,
+                coverage_fraction: 1.0,
+            }],
+            texture_sets: Vec::<SurfaceTextureSet>::new(),
+            triangle_bindings: vec![SurfaceTriangleBinding {
+                triangle_index: 0,
+                material_slot_id: "painted_metal_body".to_owned(),
+                uv_set_id: "uv0".to_owned(),
+                source_part: Some("compiled_part_001".to_owned()),
+                source_region: None,
+                source_operation: None,
+            }],
+            evidence: SurfaceArtifactEvidence {
+                uv_layout: "surface/uv-layout.png".to_owned(),
+                material_swatch_sheet: "surface/material-swatch-sheet.png".to_owned(),
+                texture_contact_sheet: "surface/texture-contact-sheet.png".to_owned(),
+                triangle_slot_coverage: "surface/triangle-slot-coverage.json".to_owned(),
+            },
+            validation_report_ref: "surface/surface-validation-report.json".to_owned(),
+            manual_review: SurfaceReviewStatus::AutomatedReady,
         }
     }
 }

@@ -337,6 +337,7 @@ fn candidate_acceptance_requires_current_proposed_candidate() {
         status: FoundryCandidateStatus::Proposed,
         changed_controls: vec!["span_length".to_owned()],
         preview_id: Some("preview-a".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let accepted = FoundryCandidateSummary {
         id: FoundryCandidateId("candidate-b".to_owned()),
@@ -344,6 +345,7 @@ fn candidate_acceptance_requires_current_proposed_candidate() {
         status: FoundryCandidateStatus::Accepted,
         changed_controls: vec!["span_length".to_owned()],
         preview_id: Some("preview-b".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let candidates = vec![proposed, accepted];
     let context = FoundryLlmAdapterContext::new(&document, &profile).with_candidates(&candidates);
@@ -402,6 +404,7 @@ fn candidate_generation_and_acceptance_stay_inside_visible_unlocked_controls() {
         status: FoundryCandidateStatus::Proposed,
         changed_controls: vec!["span_length".to_owned()],
         preview_id: Some("preview-locked".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let hidden_candidate = FoundryCandidateSummary {
         id: FoundryCandidateId("candidate-hidden".to_owned()),
@@ -409,6 +412,7 @@ fn candidate_generation_and_acceptance_stay_inside_visible_unlocked_controls() {
         status: FoundryCandidateStatus::Proposed,
         changed_controls: vec!["internal_scalar".to_owned()],
         preview_id: Some("preview-hidden".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let candidates = vec![locked_candidate, hidden_candidate];
     let context = FoundryLlmAdapterContext::new(&document, &profile).with_candidates(&candidates);
@@ -531,6 +535,7 @@ fn describe_state_and_generate_candidates_stay_on_typed_surfaces() {
         status: FoundryCandidateStatus::Proposed,
         changed_controls: vec!["internal_scalar".to_owned()],
         preview_id: Some("preview-hidden".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let visible_candidate = FoundryCandidateSummary {
         id: FoundryCandidateId("candidate-visible".to_owned()),
@@ -538,6 +543,7 @@ fn describe_state_and_generate_candidates_stay_on_typed_surfaces() {
         status: FoundryCandidateStatus::Proposed,
         changed_controls: vec!["span_length".to_owned()],
         preview_id: Some("preview-visible".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let accepted_visible_candidate = FoundryCandidateSummary {
         id: FoundryCandidateId("candidate-accepted".to_owned()),
@@ -545,6 +551,7 @@ fn describe_state_and_generate_candidates_stay_on_typed_surfaces() {
         status: FoundryCandidateStatus::Accepted,
         changed_controls: vec!["span_length".to_owned()],
         preview_id: Some("preview-accepted".to_owned()),
+        variation_metadata: shape_foundry::CandidateVariationMetadata::default(),
     };
     let candidates = vec![
         hidden_candidate,
@@ -584,6 +591,7 @@ fn describe_state_and_generate_candidates_stay_on_typed_surfaces() {
                 strategy_id: Some("refine".to_owned()),
                 count: 3,
                 seed: 11,
+                variation_intent: shape_foundry::VariationIntent::default(),
             })
         }
     );
@@ -799,6 +807,7 @@ fn document_fixture() -> FoundryAssetDocument {
         )]),
         provider_overrides: BTreeMap::new(),
         foundry_locks: Vec::new(),
+        variation_state: shape_foundry::FoundryVariationState::default(),
         local_recipe_overrides: Vec::new(),
         seed: 11,
         catalog_lock: None,

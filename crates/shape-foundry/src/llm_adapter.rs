@@ -526,6 +526,7 @@ pub fn plan_foundry_llm_intent(
                     strategy_id: Some(strategy_id),
                     count,
                     seed: seed.unwrap_or(context.document.seed),
+                    variation_intent: context.document.variation_state.intent.clone(),
                 }),
                 context,
                 format!("Generate {count} Foundry candidate directions."),

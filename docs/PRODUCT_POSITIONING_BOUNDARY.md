@@ -41,9 +41,13 @@ editability.
   instead of pretending automation can judge taste.
 - `game-ready-static-prop --profile sci-fi-crate` creates the first static-prop
   readiness package: frozen canonical model package, OBJ handoff, proxy LODs,
-  material-slot policy, collision proxy, and visual evidence. It must be
-  described as blocked until UV layout, direct GLB handoff, and manual
-  DCC/runtime review are complete.
+  collision proxy, visual evidence, geometry-only GLB, and Surface Lab v1
+  sidecars with deterministic UV/material/texture evidence. It must be
+  described as blocked until manual DCC/runtime review, engine import proof,
+  and engine-native package handoff are complete.
+- Surface package availability is not the same as visual Surface variation.
+  The Directions Surface mode remains disabled until textured previews and
+  material candidate support exist.
 - Foundry kits package curated authored content with review evidence and
   visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.
@@ -62,7 +66,9 @@ editability.
 - Proceduralizing any mesh.
 - Recovering semantics from noisy scans.
 - Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
-- UVs, materials, rigging, animation, marketplace workflows, or LLM modeling.
+- Broad UV/material coverage, rigging, animation, marketplace workflows, or LLM
+  modeling. The Sci-Fi Crate Surface Lab v1 package is a headless static-prop
+  exception, not a default Visual Foundry material workflow.
 - Photoreal output or textured reference parity from the current clay mesh
   pipeline.
 - Natural-language geometry generation or direct recipe mutation by an LLM.

@@ -10,6 +10,7 @@
 //! convenience function.
 
 pub mod foundry;
+pub mod surface_preview;
 
 use glam::{Mat4, Vec2, Vec3};
 use serde::{Deserialize, Serialize};

@@ -9,7 +9,10 @@
 
 pub mod export;
 pub mod gltf;
+pub mod lineage;
+pub mod motion;
 pub mod readability;
+pub mod rig;
 pub mod surface;
 pub mod validation;
 

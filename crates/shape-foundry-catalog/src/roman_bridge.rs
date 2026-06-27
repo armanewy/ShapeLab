@@ -21,8 +21,8 @@ use shape_family_compile::{
 use shape_foundry::{
     CandidateStrategy, ChoiceOption, ClosedInterval, ControlKind, ControlSlotBinding,
     ControlTopologyBehavior, ControlValue, CustomizerControl, CustomizerProfile,
-    DomainCertification, FeasibleControlDomain, ProviderOption, ResponseCurve,
-    WholeModelPreviewRef,
+    DomainCertification, FeasibleControlDomain, FoundryPartGroupDescriptor, ProviderOption,
+    ResponseCurve, WholeModelPreviewRef, built_in_part_group_descriptors_for_profile,
 };
 
 use crate::{
@@ -55,6 +55,12 @@ pub fn hq_fixture_catalog() -> FoundryFixtureCatalog {
     fixture_catalog_for(BridgeQuality::Hq)
 }
 
+/// Product-safe semantic part groups for Roman Timber Bridge profiles.
+#[must_use]
+pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
+    built_in_part_group_descriptors_for_profile("roman-bridge")
+}
+
 fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
     let family = bridge_family_schema(quality);
     let style = roman_bridge_style_kit(quality);
@@ -72,7 +78,7 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
             ("support".to_owned(), "stone_pier_blocks".to_owned()),
             ("span".to_owned(), "hewn_span_beam".to_owned()),
             ("deck".to_owned(), "segmented_deck_planks".to_owned()),
-            ("brace".to_owned(), "x_brace_beam".to_owned()),
+            ("brace".to_owned(), "minimal_under_ties".to_owned()),
             ("ramp".to_owned(), "bank_ramp_planks".to_owned()),
             ("rail".to_owned(), "guard_rail_courses".to_owned()),
             ("connector".to_owned(), "bolted_joinery_detail".to_owned()),
@@ -130,35 +136,47 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
     if quality == BridgeQuality::Hq {
         fragments.extend([
             support_box_fragment(
+                "round_pile_supports",
+                GeometrySource::RoundedBox {
+                    half_extents: [0.105, 0.3, 0.105],
+                    radius: 0.095,
+                },
+                vec![bevel(1, 0.018), linear_array(2, 8, [0.5, 0.0, 0.0])],
+            ),
+            support_box_fragment(
                 "squared_post_supports",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.16, 0.68, 0.16],
+                    half_extents: [0.15, 0.3, 0.15],
                     radius: 0.012,
                 },
-                vec![bevel(1, 0.018), linear_array(2, 4, [1.04, 0.0, 0.0])],
+                vec![
+                    bevel(1, 0.018),
+                    linear_array(2, 4, [1.04, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.78]),
+                ],
             ),
             support_box_fragment(
                 "stone_pier_blocks",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.24, 0.075, 0.24],
+                    half_extents: [0.26, 0.17, 0.26],
                     radius: 0.01,
                 },
                 vec![
                     bevel(1, 0.014),
-                    linear_array(2, 5, [0.0, 0.17, 0.0]),
-                    linear_array(3, 3, [1.35, 0.0, 0.0]),
+                    linear_array(2, 5, [0.0, -0.36, 0.0]),
+                    linear_array(3, 3, [1.55, 0.0, 0.0]),
                 ],
             ),
             support_box_fragment(
                 "trestle_frame_supports",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.11, 0.62, 0.12],
+                    half_extents: [0.095, 0.3, 0.1],
                     radius: 0.014,
                 },
                 vec![
                     bevel(1, 0.016),
-                    linear_array(2, 2, [0.0, 0.0, 0.72]),
-                    linear_array(3, 5, [0.72, 0.0, 0.0]),
+                    linear_array(2, 2, [0.0, 0.0, 0.82]),
+                    linear_array(3, 6, [0.62, 0.0, 0.0]),
                 ],
             ),
             deck_fragment(
@@ -180,48 +198,58 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
             brace_fragment(
                 "minimal_under_ties",
                 [1.35, 0.035, 0.04],
-                &[FragmentOccurrence::at([0.0, -0.04, 0.0])],
+                &[FragmentOccurrence::at([0.0, -0.05, 0.0])],
             ),
-            brace_fragment(
+            brace_fragment_with_operations(
                 "x_brace_beam",
-                [1.5, 0.058, 0.05],
-                &[FragmentOccurrence::rotated(
-                    [0.0, 0.0, -0.06],
-                    [0.0, 18.0, 0.0],
-                )],
+                [1.08, 0.052, 0.042],
+                vec![
+                    bevel(1, 0.014),
+                    transform_geometry(2, [0.0, 0.0, 0.0], [0.0, 18.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.16, 0.0]),
+                ],
+                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
             ),
-            brace_fragment(
+            brace_fragment_with_operations(
                 "k_brace_beam",
-                [1.25, 0.055, 0.05],
-                &[FragmentOccurrence::rotated(
-                    [-0.42, 0.0, -0.05],
-                    [0.0, 24.0, 0.0],
-                )],
+                [0.78, 0.052, 0.042],
+                vec![
+                    bevel(1, 0.014),
+                    transform_geometry(2, [0.18, 0.0, 0.0], [0.0, -24.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.16, 0.0]),
+                ],
+                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
             ),
-            rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.5, 0.56, 1),
-            rail_fragment("guard_rail_courses", [1.72, 0.042, 0.048], 0.86, 0.63, 3),
-            rail_fragment("lookout_rail_courses", [1.75, 0.048, 0.052], 1.02, 0.68, 4),
+            brace_fragment_with_operations(
+                "heavy_reinforced_brace",
+                [1.2, 0.062, 0.052],
+                vec![bevel(1, 0.014), linear_array(2, 3, [0.0, 0.15, 0.0])],
+                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+            ),
+            rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.46, 0.56, 1),
+            rail_fragment("guard_rail_courses", [1.72, 0.042, 0.048], 0.78, 0.65, 3),
+            rail_fragment("lookout_rail_courses", [1.75, 0.052, 0.056], 1.05, 0.72, 4),
             connector_fragment(
                 "clean_joinery_detail",
-                [0.05, 0.018, 0.035],
-                vec![bevel(1, 0.006), linear_array(2, 6, [0.62, 0.0, 0.0])],
+                [0.08, 0.018, 0.42],
+                vec![bevel(1, 0.006), linear_array(2, 4, [0.72, 0.0, 0.0])],
             ),
             connector_fragment(
                 "bolted_joinery_detail",
-                [0.055, 0.02, 0.04],
+                [0.055, 0.02, 0.045],
                 vec![
                     bevel(1, 0.007),
-                    linear_array(2, 7, [0.54, 0.0, 0.0]),
-                    linear_array(3, 2, [0.0, 0.0, 0.92]),
+                    linear_array(2, 7, [0.36, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.94]),
                 ],
             ),
             connector_fragment(
                 "dense_weathered_joinery",
-                [0.06, 0.022, 0.045],
+                [0.062, 0.024, 0.05],
                 vec![
                     bevel(1, 0.008),
-                    linear_array(2, 9, [0.42, 0.0, 0.0]),
-                    linear_array(3, 2, [0.0, 0.0, 0.92]),
+                    linear_array(2, 9, [0.27, 0.0, 0.0]),
+                    linear_array(3, 3, [0.0, 0.0, 0.46]),
                 ],
             ),
         ]);
@@ -272,7 +300,7 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
                 ),
                 (
                     "bracing_style".to_owned(),
-                    ControlValue::Choice("x_brace_beam".to_owned()),
+                    ControlValue::Choice("minimal_under_ties".to_owned()),
                 ),
                 (
                     "railing_style".to_owned(),
@@ -309,7 +337,7 @@ fn bridge_family_schema(quality: BridgeQuality) -> shape_family::AssetFamilySche
             "minimal_under_ties".to_owned(),
             "x_brace_beam".to_owned(),
             "k_brace_beam".to_owned(),
-            "trussed_brace_beam".to_owned(),
+            "heavy_reinforced_brace".to_owned(),
         ],
     };
     let connector_role = match quality {
@@ -517,6 +545,12 @@ fn roman_bridge_style_kit(quality: BridgeQuality) -> StyleKit {
     if quality == BridgeQuality::Hq {
         facet.part_prototypes.extend([
             prototype(
+                "round_pile_supports",
+                "Round pile supports",
+                "support",
+                &["timber", "foundation", "piles"],
+            ),
+            prototype(
                 "squared_post_supports",
                 "Squared post supports",
                 "support",
@@ -563,6 +597,12 @@ fn roman_bridge_style_kit(quality: BridgeQuality) -> StyleKit {
                 "K brace beam",
                 "brace",
                 &["timber", "k_brace", "reinforcement"],
+            ),
+            prototype(
+                "heavy_reinforced_brace",
+                "Heavy reinforced brace",
+                "brace",
+                &["timber", "heavy", "reinforcement"],
             ),
             prototype(
                 "low_curb_rail",
@@ -643,8 +683,8 @@ fn bridge_family_implementation(
             ("x_brace_beam".to_owned(), "x_brace_beam".to_owned()),
             ("k_brace_beam".to_owned(), "k_brace_beam".to_owned()),
             (
-                "trussed_brace_beam".to_owned(),
-                "trussed_brace_beam".to_owned(),
+                "heavy_reinforced_brace".to_owned(),
+                "heavy_reinforced_brace".to_owned(),
             ),
         ]),
     };
@@ -693,8 +733,8 @@ fn bridge_family_implementation(
                     "geometry.rounded_box.half_extents.x",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.09,
-                    maximum: 0.3,
+                    minimum: 0.08,
+                    maximum: 0.18,
                 },
             },
             ParameterBinding::Scalar {
@@ -705,8 +745,8 @@ fn bridge_family_implementation(
                     "geometry.rounded_box.half_extents.z",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.09,
-                    maximum: 0.3,
+                    minimum: 0.08,
+                    maximum: 0.18,
                 },
             },
         ]),
@@ -744,8 +784,8 @@ fn bridge_family_implementation(
                 "geometry.rounded_box.half_extents.y",
             ),
             transform: ScalarTransform::Ratio {
-                minimum: 0.035,
-                maximum: 0.09,
+                minimum: 0.032,
+                maximum: 0.052,
             },
         },
         ParameterBinding::Scalar {
@@ -767,11 +807,11 @@ fn bridge_family_implementation(
         family_implementation(BRIDGE_FAMILY_ID, "Roman bridge base", parameter_bindings);
     let support_offset = match quality {
         BridgeQuality::Standard => [-1.65, -0.76, -0.01],
-        BridgeQuality::Hq => [-1.65, -1.08, -0.01],
+        BridgeQuality::Hq => [-1.65, -0.5, -0.01],
     };
     let deck_offset = match quality {
         BridgeQuality::Standard => [0.0, 0.25, 0.45],
-        BridgeQuality::Hq => [0.0, 0.38, 0.45],
+        BridgeQuality::Hq => [0.0, 0.3, 0.45],
     };
     let rail_offset = match quality {
         BridgeQuality::Standard => [0.0, 0.37, -0.62],
@@ -779,7 +819,7 @@ fn bridge_family_implementation(
     };
     let brace_offset = match quality {
         BridgeQuality::Standard => [0.0, -0.32, 0.45],
-        BridgeQuality::Hq => [0.0, -0.58, -0.72],
+        BridgeQuality::Hq => [0.0, -0.62, 0.45],
     };
     family_impl.attachment_bindings = vec![
         attachment_binding(
@@ -836,7 +876,7 @@ fn bridge_family_implementation(
             "connector",
             "connector_joint",
             FragmentAttachmentPairing::AllPairs,
-            [-1.7, 0.34, -0.46],
+            [-1.08, 0.24, -0.46],
         ));
     }
     family_impl
@@ -1021,6 +1061,7 @@ fn customizer_profile(quality: BridgeQuality) -> CustomizerProfile {
                     "Support Style",
                     "support",
                     &[
+                        ("round_pile_supports", "Round Piles"),
                         ("squared_post_supports", "Squared Posts"),
                         ("stone_pier_blocks", "Stone Piers"),
                         ("trestle_frame_supports", "Trestle Frames"),
@@ -1034,7 +1075,7 @@ fn customizer_profile(quality: BridgeQuality) -> CustomizerProfile {
                         ("minimal_under_ties", "Minimal Ties"),
                         ("x_brace_beam", "X Brace"),
                         ("k_brace_beam", "K Brace"),
-                        ("trussed_brace_beam", "Truss Brace"),
+                        ("heavy_reinforced_brace", "Heavy Reinforced"),
                     ],
                 ),
                 provider_gallery_control(
@@ -1082,7 +1123,7 @@ fn customizer_profile(quality: BridgeQuality) -> CustomizerProfile {
                 ),
                 strategy(
                     "wide_deck",
-                    "Wide Deck",
+                    "Wide Crossing",
                     &["deck_width", "railing_style", "detail_density"],
                 ),
                 strategy(
@@ -1112,7 +1153,7 @@ fn customizer_profile(quality: BridgeQuality) -> CustomizerProfile {
                 ),
                 strategy(
                     "minimal_clean_span",
-                    "Minimal Clean Span",
+                    "Minimal Span",
                     &["span_length", "bracing_style", "railing_style"],
                 ),
             ],
@@ -1272,13 +1313,6 @@ impl FragmentOccurrence {
             rotation_degrees: [0.0, 0.0, 0.0],
         }
     }
-
-    fn rotated(translation: [f32; 3], rotation_degrees: [f32; 3]) -> Self {
-        Self {
-            translation,
-            rotation_degrees,
-        }
-    }
 }
 
 fn support_fragment(id: &str, radius: f32, count: u32, spacing: f32) -> RecipeFragment {
@@ -1371,6 +1405,20 @@ fn brace_fragment(
     half_extents: [f32; 3],
     occurrences: &[FragmentOccurrence],
 ) -> RecipeFragment {
+    brace_fragment_with_operations(
+        id,
+        half_extents,
+        vec![bevel(1, 0.014), linear_array(2, 2, [0.0, 0.0, 0.16])],
+        occurrences,
+    )
+}
+
+fn brace_fragment_with_operations(
+    id: &str,
+    half_extents: [f32; 3],
+    operations: Vec<ModelingOperationSpec>,
+    occurrences: &[FragmentOccurrence],
+) -> RecipeFragment {
     bridge_fragment(FragmentSpec {
         id,
         role: "brace",
@@ -1378,7 +1426,7 @@ fn brace_fragment(
             half_extents,
             radius: 0.018,
         },
-        operations: vec![bevel(1, 0.014), linear_array(2, 2, [0.0, 0.0, 0.16])],
+        operations,
         occurrences: occurrences.to_vec(),
         port_id: "brace_joint",
         compatibility_tags: vec!["brace_mount"],
@@ -1597,7 +1645,7 @@ fn connector_scalar_paths() -> Vec<(&'static str, f32, f32, f32)> {
     vec![
         ("geometry.rounded_box.half_extents.x", 0.01, 0.25, 0.005),
         ("geometry.rounded_box.half_extents.y", 0.005, 0.1, 0.005),
-        ("geometry.rounded_box.half_extents.z", 0.01, 0.2, 0.005),
+        ("geometry.rounded_box.half_extents.z", 0.01, 0.5, 0.005),
         ("geometry.rounded_box.radius", 0.0, 0.05, 0.005),
     ]
 }
@@ -1607,6 +1655,21 @@ fn bevel(operation: u64, radius: f32) -> ModelingOperationSpec {
         operation: OperationId(operation),
         radius,
         segments: 1,
+    }
+}
+
+fn transform_geometry(
+    operation: u64,
+    translation: [f32; 3],
+    rotation_degrees: [f32; 3],
+) -> ModelingOperationSpec {
+    ModelingOperationSpec::TransformGeometry {
+        operation: OperationId(operation),
+        transform: Transform3 {
+            translation,
+            rotation_degrees,
+            ..Transform3::default()
+        },
     }
 }
 

@@ -10,6 +10,10 @@ cargo run -p shape-cli -- release-readiness --verify-product-ui-gate
 The automated gate proves the headless shell contract. This manual gate checks
 whether the app actually looks and behaves like a usable product.
 
+Unified Make Canvas evidence is tracked in
+[`docs/MAKE_CANVAS_SCREENSHOT_GATE.md`](MAKE_CANVAS_SCREENSHOT_GATE.md). That
+gate is required whenever the Make canvas is changed.
+
 ## Setup
 
 Run from a clean release build:
@@ -28,11 +32,14 @@ additional observations and cannot replace the required screenshots.
 
 - Clean launch home screen.
 - Profile selection from the ten Visual Foundry profiles.
-- Roman Timber Bridge direction board.
-- Sci-Fi Industrial Crate customize panel.
+- Roman Timber Bridge Make canvas with generated ideas.
+- Sci-Fi Industrial Crate Make canvas with contextual controls.
 - Stylized Furniture Lamp option gallery.
-- Pack workspace.
-- Export screen.
+- Pack drawer.
+- Export drawer.
+- Focus Handles active on Sci-Fi Industrial Crate.
+- Focused handle candidate generation and selected A/B comparison.
+- Make canvas showing a focused control card.
 - One disabled-control or disabled-action reason.
 - One stale, building, or working status message.
 - 1280x800 layout.
@@ -48,9 +55,13 @@ additional observations and cannot replace the required screenshots.
 - A novice can identify the next action within five seconds.
 - Roman bridge, sci-fi crate, and stylized lamp tasks complete without docs.
 - Whole-model direction cards are understandable.
-- Customize controls are meaningful and not raw IDs.
+- Make controls are meaningful and not raw IDs.
 - Disabled reasons are plain English.
-- Pack and export readiness are plain English.
+- Pack and export drawers use plain English readiness.
+- Part chips are semantic nouns only and show plain unavailable reasons.
+- Selected candidates show larger parent/candidate comparison previews and an
+  exact what-changed summary.
+- Surface options say they need textured previews before they can be shown.
 
 ## Fail Criteria
 
@@ -71,11 +82,15 @@ Platform:
 
 Launch home screenshot:
 Profile selection screenshot:
-Roman bridge direction board screenshot:
-Sci-fi crate customize screenshot:
+Roman bridge Make canvas screenshot:
+Sci-fi crate Make canvas screenshot:
 Stylized lamp option gallery screenshot:
-Pack workspace screenshot:
-Export screen screenshot:
+Pack drawer screenshot:
+Export drawer screenshot:
+Focus Handles screenshot:
+Focused handle candidates screenshot:
+Selected candidate comparison screenshot:
+Focused Make control screenshot:
 Disabled reason screenshot:
 Status message screenshot:
 1280x800 screenshot:

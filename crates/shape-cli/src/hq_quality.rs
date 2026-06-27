@@ -1148,6 +1148,7 @@ fn write_candidate_mode_contact_sheet(
         mode,
         strategy_id: Some(strategy_id.to_owned()),
         preference_profile: None,
+        variation_intent: shape_foundry::VariationIntent::default(),
     };
     let output = generate_foundry_candidate_plans(&fixture.document, fixture, &request)
         .map_err(|error| anyhow::anyhow!("{strategy_id} candidates failed: {error}"))?;
@@ -1881,6 +1882,7 @@ fn candidate_report(fixture: &FoundryFixtureCatalog) -> HqCandidateReport {
         mode: FoundryCandidateMode::Explore,
         strategy_id: None,
         preference_profile: None,
+        variation_intent: shape_foundry::VariationIntent::default(),
     };
     match generate_foundry_candidate_plans(&fixture.document, fixture, &request) {
         Ok(output) => {
@@ -2944,6 +2946,7 @@ mod tests {
             mode: FoundryCandidateMode::Explore,
             strategy_id: None,
             preference_profile: None,
+            variation_intent: shape_foundry::VariationIntent::default(),
         };
         let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &request)
             .unwrap_or_else(|error| panic!("{slug} candidates should generate: {error:#?}"));

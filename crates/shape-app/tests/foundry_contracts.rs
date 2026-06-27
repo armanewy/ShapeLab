@@ -9,7 +9,7 @@ use foundry::{
 };
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryCommand, FoundryDocumentId,
-    GenerateCandidatesRequest,
+    GenerateCandidatesRequest, VariationIntent,
 };
 use shape_render::OrbitCamera;
 use shape_search::foundry::{FoundryCandidateMode, FoundryCandidateRequest};
@@ -27,6 +27,7 @@ fn foundry_app_command_wraps_generic_foundry_command() {
         strategy_id: Some("novice_bridge".to_string()),
         count: 6,
         seed: 9,
+        variation_intent: VariationIntent::default(),
     });
     let program = FoundryAppCommand::RunFoundryCommandProgram {
         label: "generate".to_string(),
@@ -106,6 +107,7 @@ fn foundry_candidate_job_mode_comes_from_request() {
         mode: FoundryCandidateMode::Explore,
         strategy_id: Some("default".to_string()),
         preference_profile: None,
+        variation_intent: VariationIntent::default(),
     };
     let job = FoundryJobRequest::GenerateCandidates {
         job_id: 46,

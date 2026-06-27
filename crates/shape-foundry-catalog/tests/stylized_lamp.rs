@@ -9,15 +9,36 @@ use shape_foundry::{
 use shape_foundry_catalog::{FoundryFixtureCatalog, stylized_lamp};
 
 #[test]
+fn stylized_lamp_exposes_product_part_groups() {
+    let groups = stylized_lamp::part_group_descriptors();
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.display_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Base", "Stem", "Joints", "Shade", "Trim"]
+    );
+    let shade = groups
+        .iter()
+        .find(|group| group.group_id == "shade")
+        .expect("shade group");
+    assert!(shade.bound_control_ids.contains(&"shade_style".to_owned()));
+    assert!(shade.focusable);
+}
+
+#[test]
 fn shade_style_provider_alternatives_preserve_attachment() {
     let fixture = stylized_lamp::fixture_catalog();
     let baseline = compile_with(&fixture, &[]);
     let choices = shade_style_choices(&baseline);
-    assert_eq!(choices, vec!["cone", "drum", "task", "minimal"]);
+    assert_eq!(choices, vec!["cone", "drum", "task", "wide", "minimal"]);
 
     let mut fingerprints = BTreeSet::new();
     let mut part_counts = BTreeSet::new();
     let mut shade_endpoints = BTreeSet::new();
+    let mut shade_source_signatures = BTreeSet::new();
+    let mut shade_extents = BTreeSet::new();
 
     for choice in choices {
         let output = compile_with(
@@ -57,12 +78,23 @@ fn shade_style_provider_alternatives_preserve_attachment() {
             output.build_stamp.geometry_input_fingerprint
         ));
         part_counts.insert(output.artifact.statistics.part_count);
+        shade_source_signatures.insert(shade_source_signature(&output));
+        shade_extents.insert(quantized_role_extent(&output, "shade"));
     }
 
     assert_eq!(
         fingerprints.len(),
-        4,
+        5,
         "shade options should change geometry"
+    );
+    assert_eq!(
+        shade_source_signatures.len(),
+        5,
+        "shade options should keep distinct authored body silhouettes"
+    );
+    assert!(
+        shade_extents.len() >= 4,
+        "at least four shade styles should read as different whole-model shade extents"
     );
     assert!(
         part_counts.len() > 1,
@@ -183,8 +215,19 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
             "Tall Reading Lamp",
             "Playful Curved Lamp",
             "Heavy Base",
-            "Minimal"
+            "Minimal Studio Lamp",
+            "Wide Shade Lamp"
         ]
+    );
+    assert!(
+        strategy_labels
+            .iter()
+            .all(|label| !label.contains("TooSubtle"))
+    );
+    assert!(
+        strategy_labels
+            .iter()
+            .all(|label| label.split_whitespace().count() >= 2)
     );
 
     let candidates: Vec<(&str, Vec<(&str, ControlValue)>)> = vec![
@@ -249,9 +292,22 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
                 ("edge_softness", ControlValue::Scalar(0.18)),
             ],
         ),
+        (
+            "wide_shade",
+            vec![
+                ("overall_height", ControlValue::Scalar(1.75)),
+                ("base_weight", ControlValue::Scalar(0.72)),
+                ("stem_curvature", ControlValue::Scalar(0.48)),
+                ("joint_size", ControlValue::Scalar(0.52)),
+                ("shade_style", ControlValue::Choice("wide".to_owned())),
+                ("shade_scale", ControlValue::Scalar(1.0)),
+                ("edge_softness", ControlValue::Scalar(0.55)),
+            ],
+        ),
     ];
 
     let mut fingerprints = BTreeSet::new();
+    let mut silhouettes = BTreeSet::new();
     for (name, overrides) in candidates {
         let output = compile_with(&fixture, &overrides);
         assert!(
@@ -267,8 +323,40 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
             "{:?}",
             output.build_stamp.geometry_input_fingerprint
         ));
+        silhouettes.insert(quantized_whole_model_extent(&output));
     }
-    assert_eq!(fingerprints.len(), 6);
+    assert_eq!(fingerprints.len(), 7);
+    assert!(
+        silhouettes.len() >= 4,
+        "at least four authored candidate states should have visibly distinct whole-model proportions"
+    );
+}
+
+#[test]
+fn base_weight_and_curvature_are_readable_from_role_bounds() {
+    let fixture = stylized_lamp::fixture_catalog();
+
+    let light = compile_with(&fixture, &[("base_weight", ControlValue::Scalar(0.0))]);
+    let heavy = compile_with(&fixture, &[("base_weight", ControlValue::Scalar(1.0))]);
+    let light_base = role_extent(&light, "base");
+    let heavy_base = role_extent(&heavy, "base");
+    assert!(
+        heavy_base[0] > light_base[0] * 1.75,
+        "Base Weight should create a much wider support footprint"
+    );
+    assert!(
+        heavy_base[1] > light_base[1] * 1.2,
+        "Base Weight should create a thicker weighted foot"
+    );
+
+    let straight = compile_with(&fixture, &[("stem_curvature", ControlValue::Scalar(0.0))]);
+    let curved = compile_with(&fixture, &[("stem_curvature", ControlValue::Scalar(1.0))]);
+    let straight_stem = role_extent(&straight, "stem");
+    let curved_stem = role_extent(&curved, "stem");
+    assert!(
+        curved_stem[0] > straight_stem[0] * 3.0,
+        "Stem Curvature should visibly sweep the stem sideways"
+    );
 }
 
 #[test]
@@ -298,7 +386,7 @@ fn primary_control_endpoints_change_geometry() {
         (
             "shade_style",
             ControlValue::Choice("cone".to_owned()),
-            ControlValue::Choice("minimal".to_owned()),
+            ControlValue::Choice("wide".to_owned()),
         ),
         (
             "shade_scale",
@@ -335,8 +423,9 @@ fn compile_with(
             .control_state
             .insert((*control).to_owned(), value.clone());
     }
-    compile_foundry_document(&document, fixture)
-        .unwrap_or_else(|error| panic!("stylized lamp should compile: {error:#?}"))
+    compile_foundry_document(&document, fixture).unwrap_or_else(|error| {
+        panic!("stylized lamp should compile for {overrides:?}: {error:#?}")
+    })
 }
 
 fn assert_model_valid(output: &FoundryCompilationOutput, context: &str) {
@@ -372,6 +461,7 @@ fn provider_for_choice(choice: &str) -> &'static str {
         "cone" => "ribbed_cone_shade",
         "drum" => "banded_drum_shade",
         "task" => "angled_task_shade",
+        "wide" => "wide_reading_shade",
         "minimal" => "minimal_shade",
         _ => panic!("unexpected shade choice {choice}"),
     }
@@ -428,4 +518,76 @@ fn reaches_root(
             .and_then(|instance| instance.parent);
     }
     false
+}
+
+fn shade_source_signature(output: &FoundryCompilationOutput) -> String {
+    output
+        .recipe
+        .definitions
+        .values()
+        .filter(|definition| definition.tags.contains("role:shade"))
+        .map(|definition| match &definition.geometry.source {
+            GeometrySource::Frustum {
+                bottom_radius,
+                top_radius,
+                height,
+                radial_segments,
+            } => format!(
+                "frustum:{:.2}:{:.2}:{:.2}:{radial_segments}",
+                bottom_radius, top_radius, height
+            ),
+            GeometrySource::Sweep { .. } => "sweep".to_owned(),
+            source => format!("{source:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn quantized_whole_model_extent(output: &FoundryCompilationOutput) -> (i32, i32, i32) {
+    let bounds = output.artifact.combined_preview.mesh.bounds;
+    quantize_extent([
+        bounds.max[0] - bounds.min[0],
+        bounds.max[1] - bounds.min[1],
+        bounds.max[2] - bounds.min[2],
+    ])
+}
+
+fn quantized_role_extent(output: &FoundryCompilationOutput, role: &str) -> (i32, i32, i32) {
+    quantize_extent(role_extent(output, role))
+}
+
+fn role_extent(output: &FoundryCompilationOutput, role: &str) -> [f32; 3] {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for part in &output.artifact.compiled_parts {
+        let definition = output
+            .recipe
+            .definitions
+            .get(&part.definition_id)
+            .expect("compiled part definition exists");
+        if !definition.tags.contains(&format!("role:{role}")) || part.world_mesh.bounds.is_empty() {
+            continue;
+        }
+        for axis in 0..3 {
+            min[axis] = min[axis].min(part.world_mesh.bounds.min[axis]);
+            max[axis] = max[axis].max(part.world_mesh.bounds.max[axis]);
+        }
+    }
+    assert!(
+        min[0].is_finite(),
+        "role {role} should have compiled bounds"
+    );
+    [
+        (max[0] - min[0]).max(0.0),
+        (max[1] - min[1]).max(0.0),
+        (max[2] - min[2]).max(0.0),
+    ]
+}
+
+fn quantize_extent(extent: [f32; 3]) -> (i32, i32, i32) {
+    (
+        (extent[0] * 20.0).round() as i32,
+        (extent[1] * 20.0).round() as i32,
+        (extent[2] * 20.0).round() as i32,
+    )
 }

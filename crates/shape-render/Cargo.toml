@@ -9,5 +9,6 @@ rust-version.workspace = true
 glam.workspace = true
 serde.workspace = true
 shape-core.workspace = true
+shape-foundry.workspace = true
 shape-mesh.workspace = true
 thiserror.workspace = true

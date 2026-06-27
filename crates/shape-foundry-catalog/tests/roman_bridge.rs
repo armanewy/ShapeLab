@@ -1,10 +1,45 @@
+use std::collections::BTreeSet;
+
 use shape_asset::GeometrySource;
+use shape_compile::export::{verify_model_package, write_model_package};
 use shape_compile::validation::{
     ValidationLimits, validate_model, validation_config_from_recipe_with_limits,
 };
 use shape_family_compile::conformance::ConformanceStatus;
-use shape_foundry::{ControlKind, ControlValue};
+use shape_foundry::{CandidateLegibilityClass, ControlKind, ControlValue, VariationIntent};
 use shape_foundry_catalog::roman_bridge;
+use shape_search::foundry::{
+    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+};
+
+#[test]
+fn roman_bridge_exposes_product_part_groups() {
+    let groups = roman_bridge::part_group_descriptors();
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.display_name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Deck",
+            "Supports",
+            "Bracing",
+            "Railing",
+            "Ramps",
+            "Fasteners"
+        ]
+    );
+    let ramps = groups
+        .iter()
+        .find(|group| group.group_id == "ramps")
+        .expect("ramps group");
+    assert!(!ramps.focusable);
+    assert_eq!(
+        ramps.capability.unavailable_reasons,
+        vec!["This part has no focused variations yet."]
+    );
+}
 
 #[test]
 fn roman_bridge_profile_declares_required_controls_and_strategies() {
@@ -195,11 +230,11 @@ fn roman_bridge_hq_profile_declares_required_controls_and_direction_strategies()
         vec![
             "Reinforced",
             "Light Crossing",
-            "Wide Deck",
+            "Wide Crossing",
             "Compact Span",
             "Stone-Pier Outpost",
             "Detailed Timberwork",
-            "Minimal Clean Span"
+            "Minimal Span"
         ]
     );
 }
@@ -350,6 +385,166 @@ fn roman_bridge_hq_compiles_with_connector_details_and_valid_model() {
 }
 
 #[test]
+fn roman_bridge_hq_support_options_are_connected_and_structurally_distinct() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let support_options = provider_options(&fixture, "support_style");
+    assert_eq!(
+        support_options,
+        vec![
+            "round_pile_supports",
+            "squared_post_supports",
+            "stone_pier_blocks",
+            "trestle_frame_supports"
+        ]
+    );
+
+    let mut signatures = BTreeSet::new();
+    for provider in support_options {
+        let output = compile_with_control(
+            &fixture,
+            "support_style",
+            ControlValue::Provider(provider.to_owned()),
+        );
+        assert_required_attachments_connected(&output);
+        let support = role_bounds(&output.recipe, &output.artifact, "support");
+        let span = role_bounds(&output.recipe, &output.artifact, "span");
+        assert!(
+            support.max_y >= span.min_y - 0.2,
+            "{provider} should visibly reach the span: support={support:?} span={span:?}"
+        );
+        signatures.insert(role_signature(&output, "support"));
+    }
+
+    assert_eq!(
+        signatures.len(),
+        4,
+        "round piles, squared posts, stone piers, and trestle frames should not collapse visually"
+    );
+}
+
+#[test]
+fn roman_bridge_hq_bracing_options_are_structurally_distinct() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let brace_options = choice_options(&fixture, "bracing_style");
+    assert_eq!(
+        brace_options,
+        vec![
+            "minimal_under_ties",
+            "x_brace_beam",
+            "k_brace_beam",
+            "heavy_reinforced_brace"
+        ]
+    );
+
+    let mut signatures = BTreeSet::new();
+    for choice in brace_options {
+        let output = compile_with_control(
+            &fixture,
+            "bracing_style",
+            ControlValue::Choice(choice.to_owned()),
+        );
+        assert_required_attachments_connected(&output);
+        signatures.insert(role_signature(&output, "brace"));
+    }
+
+    assert_eq!(
+        signatures.len(),
+        4,
+        "minimal, X, K, and heavy reinforced braces should produce different brace structures"
+    );
+}
+
+#[test]
+fn roman_bridge_hq_deck_width_lock_changes_walkable_width_without_breaking_export() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let narrow = compile_with_control(&fixture, "deck_width", ControlValue::Scalar(0.86));
+    let wide = compile_with_control(&fixture, "deck_width", ControlValue::Scalar(1.58));
+
+    let narrow_deck = role_bounds(&narrow.recipe, &narrow.artifact, "deck");
+    let wide_deck = role_bounds(&wide.recipe, &wide.artifact, "deck");
+    assert!(
+        wide_deck.depth() > narrow_deck.depth() + 0.5,
+        "deck width should visibly widen the deck: narrow={narrow_deck:?} wide={wide_deck:?}"
+    );
+    assert_required_attachments_connected(&wide);
+
+    let package_dir = tempfile::tempdir().expect("temporary package directory");
+    write_model_package(&wide.recipe, &wide.artifact, package_dir.path())
+        .expect("HQ bridge package should export");
+    let verification =
+        verify_model_package(package_dir.path()).expect("HQ bridge package should reopen");
+    assert!(verification.checksums_match);
+    assert!(verification.topology_matches_manifest);
+    assert!(verification.finite_numeric_payloads);
+}
+
+#[test]
+fn roman_bridge_hq_explore_returns_clear_distinct_whole_asset_directions() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let output = generate_foundry_candidate_plans(
+        &fixture.document,
+        &fixture,
+        &FoundryCandidateRequest {
+            seed: 101,
+            proposal_count: 72,
+            result_count: 6,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::default(),
+        },
+    )
+    .expect("HQ roman bridge Explore candidates should generate");
+
+    assert_eq!(output.candidates.len(), 6);
+    let mut visual_signatures = BTreeSet::new();
+    for candidate in &output.candidates {
+        assert!(
+            candidate.changed_controls.len() >= 2,
+            "direction should combine controls: {candidate:#?}"
+        );
+        assert_ne!(
+            candidate.variation_metadata.visible_delta.legibility_class,
+            CandidateLegibilityClass::TooSubtle,
+            "TooSubtle candidates must not be returned as normal whole-asset ideas"
+        );
+        assert!(
+            candidate
+                .variation_metadata
+                .visible_delta
+                .legibility_class
+                .selectable(),
+            "candidate should be selectable: {:#?}",
+            candidate.variation_metadata.visible_delta
+        );
+        let compiled = shape_foundry::compile_foundry_document(&candidate.document, &fixture)
+            .expect("candidate document should compile");
+        let model_config = validation_config_from_recipe_with_limits(
+            &compiled.recipe,
+            &compiled.artifact,
+            ValidationLimits::default(),
+        );
+        let model_report = validate_model(&compiled.artifact, &model_config);
+        assert!(
+            model_report.is_valid(),
+            "candidate {} should survive model validation; controls={:?}; instances={:#?}; compiled_parts={:#?}; issues={:#?}",
+            candidate.id.0,
+            candidate.changed_controls,
+            instance_names(&compiled.recipe),
+            compiled_part_names(&compiled.artifact),
+            model_report.issues
+        );
+        visual_signatures.insert(camera_signature(&compiled.artifact));
+    }
+
+    assert!(
+        visual_signatures.len() >= 4,
+        "at least four Explore directions should be visually distinct; got {}",
+        visual_signatures.len()
+    );
+}
+
+#[test]
 fn every_primary_control_has_visible_endpoint_difference() {
     let fixture = roman_bridge::fixture_catalog();
     let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)
@@ -478,6 +673,57 @@ fn endpoint_values(control: &shape_foundry::CustomizerControl) -> (ControlValue,
     }
 }
 
+fn provider_options(
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    control_id: &str,
+) -> Vec<String> {
+    let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, fixture)
+        .expect("catalog should resolve");
+    let control = catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .find(|control| control.id == control_id)
+        .expect("provider control");
+    match &control.kind {
+        ControlKind::ProviderGallery { options, .. } => options
+            .iter()
+            .map(|option| option.provider_id.clone())
+            .collect(),
+        _ => panic!("{control_id} should be a provider gallery"),
+    }
+}
+
+fn choice_options(
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    control_id: &str,
+) -> Vec<String> {
+    let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, fixture)
+        .expect("catalog should resolve");
+    let control = catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .find(|control| control.id == control_id)
+        .expect("choice control");
+    match &control.kind {
+        ControlKind::ChoiceGallery { options } => {
+            options.iter().map(|option| option.value.clone()).collect()
+        }
+        _ => panic!("{control_id} should be a choice gallery"),
+    }
+}
+
+fn assert_required_attachments_connected(output: &shape_foundry::FoundryCompilationOutput) {
+    assert!(output.final_conformance.is_accepted());
+    for row in &output.final_conformance.attachments {
+        assert_eq!(row.status, ConformanceStatus::Passed, "{row:#?}");
+        assert!(row.coverage.produced_pairs);
+        assert!(row.pairs.iter().all(|pair| pair.connected));
+        assert!(row.pairs.iter().all(|pair| pair.socket_compatible));
+    }
+}
+
 fn role_instances(
     recipe: &shape_asset::AssetRecipe,
     role: &str,
@@ -509,7 +755,126 @@ fn compiled_role_count(
         .count()
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+fn instance_names(recipe: &shape_asset::AssetRecipe) -> Vec<(u64, String)> {
+    recipe
+        .instances
+        .iter()
+        .map(|(id, instance)| (id.0, instance.name.clone()))
+        .collect()
+}
+
+fn compiled_part_names(artifact: &shape_compile::AssetArtifact) -> Vec<(u64, String)> {
+    artifact
+        .compiled_parts
+        .iter()
+        .map(|part| (part.instance_id.0, part.instance_name.clone()))
+        .collect()
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RoleSignature {
+    part_count: u64,
+    triangle_count: u64,
+    width: i32,
+    height: i32,
+    depth: i32,
+    checksum: i64,
+}
+
+fn role_signature(output: &shape_foundry::FoundryCompilationOutput, role: &str) -> RoleSignature {
+    let bounds = role_bounds(&output.recipe, &output.artifact, role);
+    let role_tag = format!("role:{role}");
+    let mut part_count = 0;
+    let mut triangle_count = 0;
+    let mut checksum = 0_i64;
+    for part in &output.artifact.compiled_parts {
+        if output
+            .recipe
+            .definitions
+            .get(&part.definition_id)
+            .is_some_and(|definition| definition.tags.contains(&role_tag))
+        {
+            part_count += 1;
+            triangle_count += part.world_mesh.faces.len() as u64;
+            for point in &part.world_mesh.positions {
+                checksum += i64::from(quantize(point[0] + point[1] * 3.0 + point[2] * 7.0));
+            }
+        }
+    }
+    RoleSignature {
+        part_count,
+        triangle_count,
+        width: quantize(bounds.width()),
+        height: quantize(bounds.height()),
+        depth: quantize(bounds.depth()),
+        checksum,
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct RoleBounds {
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+    min_z: f32,
+    max_z: f32,
+}
+
+impl RoleBounds {
+    fn width(self) -> f32 {
+        self.max_x - self.min_x
+    }
+
+    fn height(self) -> f32 {
+        self.max_y - self.min_y
+    }
+
+    fn depth(self) -> f32 {
+        self.max_z - self.min_z
+    }
+}
+
+fn role_bounds(
+    recipe: &shape_asset::AssetRecipe,
+    artifact: &shape_compile::AssetArtifact,
+    role: &str,
+) -> RoleBounds {
+    let role_tag = format!("role:{role}");
+    let mut bounds = RoleBounds {
+        min_x: f32::INFINITY,
+        max_x: f32::NEG_INFINITY,
+        min_y: f32::INFINITY,
+        max_y: f32::NEG_INFINITY,
+        min_z: f32::INFINITY,
+        max_z: f32::NEG_INFINITY,
+    };
+
+    for part in &artifact.compiled_parts {
+        if recipe
+            .definitions
+            .get(&part.definition_id)
+            .is_some_and(|definition| definition.tags.contains(&role_tag))
+        {
+            for point in &part.world_mesh.positions {
+                bounds.min_x = bounds.min_x.min(point[0]);
+                bounds.max_x = bounds.max_x.max(point[0]);
+                bounds.min_y = bounds.min_y.min(point[1]);
+                bounds.max_y = bounds.max_y.max(point[1]);
+                bounds.min_z = bounds.min_z.min(point[2]);
+                bounds.max_z = bounds.max_z.max(point[2]);
+            }
+        }
+    }
+
+    assert!(
+        bounds.min_x.is_finite(),
+        "{role} should have compiled geometry"
+    );
+    bounds
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CameraSignature {
     min_x: i32,
     max_x: i32,
@@ -536,6 +901,10 @@ fn camera_signature(artifact: &shape_compile::AssetArtifact) -> CameraSignature 
             min_y = min_y.min(screen_y);
             max_y = max_y.max(screen_y);
             projection_checksum += i64::from(quantize(screen_x.abs() + screen_y.abs()));
+            projection_checksum += i64::from(quantize(point[0] + point[1] * 2.0 + point[2] * 3.0));
+            projection_checksum += i64::from(quantize(
+                point[0] * point[0] + point[1] * point[1] + point[2] * point[2],
+            ));
         }
     }
 

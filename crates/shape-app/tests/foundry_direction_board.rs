@@ -12,11 +12,15 @@ use foundry::panels::directions::{
     DirectionComparisonRole, DirectionImageScope, DirectionValidationState,
     VISIBLE_DIRECTION_CANDIDATE_CARDS, ab_flip_comparison, accept_candidate_command,
     candidate_request_for_mode, direction_board_view, direction_mode_actions,
-    hover_candidate_intent, no_isolated_part_option_cards, reject_candidate_command,
-    select_candidate_intent,
+    direction_variation_mode_actions, hover_candidate_intent, no_isolated_part_option_cards,
+    reject_candidate_command, select_candidate_intent,
 };
 use foundry::{FoundryAppCommand, FoundryCandidateCard};
-use shape_foundry::{FoundryCandidateId, FoundryCommand};
+use shape_foundry::{
+    CandidateLegibilityClass, FoundryCandidateId, FoundryCommand, FoundrySurfaceCapabilityView,
+    SURFACE_PACKAGE_UNAVAILABLE_REASON, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
+    VariationChannel, VariationIntent,
+};
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
     FoundryCandidateChangeKind, FoundryCandidateControlChange, FoundryCandidateMode,
@@ -117,6 +121,10 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
     assert_eq!(request.mode, FoundryCandidateMode::Detail);
     assert_eq!(request.seed, 23);
     assert_eq!(request.result_count, VISIBLE_DIRECTION_CANDIDATE_CARDS);
+    assert_eq!(
+        request.variation_intent.channels,
+        vec![VariationChannel::Detail]
+    );
 
     let explore_action = actions
         .iter()
@@ -127,6 +135,154 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
         FoundryAppCommand::RequestCandidates(request)
             if request.mode == FoundryCandidateMode::Explore
     ));
+}
+
+#[test]
+fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
+    let actions = direction_variation_mode_actions(
+        &VariationIntent::default(),
+        29,
+        Some("novice_crate".to_owned()),
+        None,
+        &[],
+    );
+
+    assert_eq!(
+        actions
+            .iter()
+            .map(|action| action.label)
+            .collect::<Vec<_>>(),
+        vec!["Complete Looks", "Shape", "Surface", "Focus Part"]
+    );
+    assert!(actions[0].selected);
+    assert!(actions[0].enabled);
+    assert_eq!(
+        actions[0]
+            .request
+            .as_ref()
+            .unwrap()
+            .variation_intent
+            .channels,
+        vec![VariationChannel::CompleteLook]
+    );
+    assert!(actions[1].enabled);
+    assert_eq!(
+        actions[1]
+            .request
+            .as_ref()
+            .unwrap()
+            .variation_intent
+            .channels,
+        vec![VariationChannel::Shape]
+    );
+    assert!(!actions[2].enabled);
+    assert_eq!(
+        actions[2].unavailable_reason,
+        Some(SURFACE_PACKAGE_UNAVAILABLE_REASON)
+    );
+    assert!(!actions[3].enabled);
+    assert_eq!(
+        actions[3].unavailable_reason,
+        Some("Focus Part is available when this asset exposes editable part groups.")
+    );
+}
+
+#[test]
+fn surface_package_capability_does_not_enable_visual_surface_mode() {
+    let capability = FoundrySurfaceCapabilityView::sci_fi_crate_static_prop();
+    let actions = direction_variation_mode_actions(
+        &VariationIntent::default(),
+        31,
+        Some("novice_crate".to_owned()),
+        Some(&capability),
+        &[],
+    );
+    let surface = actions
+        .iter()
+        .find(|action| action.label == "Surface")
+        .expect("Surface action exists");
+
+    assert!(!surface.enabled);
+    assert_eq!(
+        surface.unavailable_reason,
+        Some(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON)
+    );
+    assert!(surface.request.is_none());
+}
+
+#[test]
+fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let groups = foundry::panels::directions::direction_part_groups_for_document(&fixture.document);
+    let handles = groups
+        .iter()
+        .find(|group| group.group_id == "handles")
+        .expect("crate exposes handles focus group");
+
+    assert_eq!(handles.label, "Handles");
+    assert!(handles.focusable);
+    assert_eq!(
+        foundry::panels::directions::focus_part_chip_label(handles),
+        "Handles"
+    );
+    assert_eq!(
+        foundry::panels::directions::focus_part_status_label(handles),
+        "Handles is focused"
+    );
+    assert_eq!(
+        foundry::panels::directions::generate_focused_part_label(handles),
+        "Try handle ideas"
+    );
+    assert_eq!(
+        foundry::panels::directions::lock_focused_part_label(handles),
+        "Lock handles"
+    );
+
+    let command = foundry::panels::directions::set_focus_part_group_command(handles);
+    assert!(matches!(
+        command.single_foundry_command(),
+        Some(FoundryCommand::SetFocusPartGroup { group_id }) if group_id == "handles"
+    ));
+    let clear = foundry::panels::directions::clear_focus_part_group_command();
+    assert!(matches!(
+        clear.single_foundry_command(),
+        Some(FoundryCommand::ClearFocusPartGroup)
+    ));
+}
+
+#[test]
+fn focus_part_mode_targets_active_group_when_selected() {
+    let intent = VariationIntent::focus_part_shape("handles", "Handles");
+    let groups = vec![
+        foundry::panels::directions::DirectionPartGroup {
+            group_id: "body".to_owned(),
+            label: "Body".to_owned(),
+            focusable: true,
+            unavailable_reason: None,
+        },
+        foundry::panels::directions::DirectionPartGroup {
+            group_id: "handles".to_owned(),
+            label: "Handles".to_owned(),
+            focusable: true,
+            unavailable_reason: None,
+        },
+    ];
+
+    let actions = direction_variation_mode_actions(&intent, 73, None, None, &groups);
+    let focus = actions
+        .iter()
+        .find(|action| action.label == "Focus Part")
+        .expect("focus action exists");
+
+    assert!(focus.selected);
+    assert!(focus.enabled);
+    assert_eq!(
+        focus
+            .request
+            .as_ref()
+            .and_then(|request| request.variation_intent.scope.semantic_part_group_id()),
+        Some("handles")
+    );
 }
 
 #[test]
@@ -386,7 +542,7 @@ fn board_guard_truncates_to_six_candidates_and_emits_no_isolated_part_options() 
 }
 
 #[test]
-fn board_validation_requires_six_filled_candidate_images() {
+fn board_validation_accepts_fewer_clear_candidate_images() {
     let camera = OrbitCamera::default();
     let parent = parent_card(camera.clone());
 
@@ -394,6 +550,16 @@ fn board_validation_requires_six_filled_candidate_images() {
     assert_eq!(empty_board.validation.filled_candidate_count, 0);
     assert!(empty_board.validation.preview_images_present);
     assert!(!empty_board.validation.is_valid());
+
+    let two_candidates = six_candidates(&camera)
+        .into_iter()
+        .take(2)
+        .collect::<Vec<_>>();
+    let partial_board =
+        direction_board_view(&parent, &two_candidates, DirectionBoardState::default());
+    assert_eq!(partial_board.validation.filled_candidate_count, 2);
+    assert!(partial_board.validation.preview_images_present);
+    assert!(partial_board.validation.is_valid());
 
     let mut candidates = six_candidates(&camera);
     candidates[3].rgba8 = vec![1, 2, 3];
@@ -477,6 +643,14 @@ fn candidate_card(
         validation_detail: None,
         selectable: true,
         selected: false,
+        variation_intent_label: "Complete Looks".to_owned(),
+        variation_scope_label: "Whole Asset".to_owned(),
+        variation_channel_labels: vec!["Complete Look".to_owned()],
+        visible_delta_label: "Clear change".to_owned(),
+        what_changed_summary: "Whole Asset: Clear change".to_owned(),
+        legibility_class: CandidateLegibilityClass::Clear,
+        focus_part_label: None,
+        surface_unavailable_reason: None,
     }
 }
 

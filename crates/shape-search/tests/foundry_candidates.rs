@@ -7,6 +7,7 @@ use shape_foundry::{
     ControlValue, CustomizerControl, CustomizerProfile, DomainCertification, FeasibleControlDomain,
     FoundryCandidateId, FoundryCommand, FoundryLock, FoundryLockMode, FoundryLockTarget,
     FoundryPreferenceEvent, FoundryPreferenceLog, FoundryPreferenceScope, ProviderOption,
+    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, VariationChannel, VariationIntent,
     WholeModelPreviewRef, catalog_content_fingerprint_from_json,
 };
 use shape_foundry_catalog::{
@@ -20,6 +21,11 @@ use shape_search::foundry::{
 use std::collections::BTreeSet;
 
 fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
+    let variation_intent = if mode == FoundryCandidateMode::Detail {
+        VariationIntent::whole_asset_detail()
+    } else {
+        VariationIntent::default()
+    };
     FoundryCandidateRequest {
         seed,
         proposal_count: 72,
@@ -27,7 +33,38 @@ fn request(seed: u64, mode: FoundryCandidateMode) -> FoundryCandidateRequest {
         mode,
         strategy_id: None,
         preference_profile: None,
+        variation_intent,
     }
+}
+
+fn candidate_label_is_product_safe(label: &str) -> bool {
+    let lower = label.to_ascii_lowercase();
+    let forbidden_phrases = [
+        "provider",
+        "provider id",
+        "scalar path",
+        "semantic id",
+        "operation id",
+        "compiler",
+        "decompiler",
+        "fragment",
+        "remap",
+        "conformance",
+        "socket",
+        "port",
+        "raw recipe",
+    ]
+    .iter()
+    .any(|term| contains_forbidden_label_term(&lower, term));
+    !forbidden_phrases && !label.contains('#')
+}
+
+fn contains_forbidden_label_term(label: &str, term: &str) -> bool {
+    label
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .collect::<Vec<_>>()
+        .windows(term.split_whitespace().count().max(1))
+        .any(|window| window.join(" ") == term)
 }
 
 #[test]
@@ -80,6 +117,80 @@ fn release_candidate_budget_rejects_unbounded_proposals_and_caps_results() {
 }
 
 #[test]
+fn foundry_surface_variation_is_unavailable_without_surface_payloads() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut search_request = request(21, FoundryCandidateMode::Explore);
+    search_request.variation_intent = VariationIntent::whole_asset_surface();
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("unsupported variation mode should return diagnostics");
+
+    assert!(output.candidates.is_empty());
+    assert_eq!(output.diagnostics.returned_candidates, 0);
+    assert!(
+        output
+            .diagnostics
+            .rejections
+            .get(&FoundryCandidateRejectionReason::UnsupportedChannel)
+            .copied()
+            .unwrap_or(0)
+            > 0
+    );
+    assert!(
+        output
+            .preference_report
+            .ignored_reason
+            .as_deref()
+            .is_some_and(|reason| reason == SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON)
+    );
+}
+
+#[test]
+fn foundry_shape_variation_metadata_excludes_surface_claims() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut search_request = request(22, FoundryCandidateMode::Explore);
+    search_request.variation_intent = VariationIntent::whole_asset_shape();
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("shape candidates should generate");
+
+    assert!(!output.candidates.is_empty());
+    for candidate in &output.candidates {
+        let metadata = &candidate.variation_metadata;
+        assert_eq!(metadata.intent.channels, vec![VariationChannel::Shape]);
+        assert!(metadata.changed_material_slots.is_empty());
+        assert_eq!(metadata.visible_delta.surface_delta_score, 0.0);
+        assert!(metadata.visible_delta.shape_delta_score > 0.0);
+        assert!(candidate_label_is_product_safe(&candidate.label));
+    }
+}
+
+#[test]
+fn foundry_focus_part_variation_changes_only_selected_part_group_controls() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut search_request = request(23, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("body", "Body");
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("focus part candidates should generate");
+
+    assert!(!output.candidates.is_empty());
+    assert!(output.candidates.len() <= 6);
+    for candidate in &output.candidates {
+        let metadata = &candidate.variation_metadata;
+        assert_eq!(metadata.intent.scope.semantic_part_group_id(), Some("body"));
+        assert!(metadata.visible_delta.selected_part_delta_score >= 0.20);
+        assert!(
+            metadata
+                .changed_part_groups
+                .iter()
+                .all(|group| group.group_id == "body")
+        );
+        assert!(candidate_label_is_product_safe(&candidate.label));
+    }
+}
+
+#[test]
 fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
     for fixture in headless_fixture_catalogs().into_iter().filter(|fixture| {
         !matches!(
@@ -97,6 +208,7 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
                 mode: FoundryCandidateMode::Explore,
                 strategy_id: None,
                 preference_profile: None,
+                variation_intent: VariationIntent::default(),
             },
         )
         .unwrap_or_else(|error| panic!("{} candidates should generate: {error:#?}", fixture.slug));

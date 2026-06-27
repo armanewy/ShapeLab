@@ -74,7 +74,7 @@ impl ProductUiGateReport {
             && self.product_home_profiles > 0
             && self.product_home_profiles < self.installed_kit_count
             && self.installed_kit_count == 17
-            && self.developer_preview_kit_count == 17
+            && self.developer_preview_kit_count == 16
             && self.directions_board_gate
             && self.customize_deck_gate
             && self.pack_gate
@@ -176,10 +176,10 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         && visible_strings.contains(&"Add at least one asset before exporting a pack.");
     let export_gate = visible_strings.contains(&"Export ready")
         && visible_strings.contains(&"Current asset ready")
-        && visible_strings.contains(&"Build the current asset before exporting.");
+        && visible_strings.contains(&"Prepare the current asset before exporting.");
     let disabled_states_have_reasons = [
         "Choose a template or open a project first.",
-        "Build the current model first.",
+        "Prepare the current model first.",
         "Add at least one asset before exporting a pack.",
         "This option is not available right now.",
     ]
@@ -213,7 +213,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
 
 fn core_profile_fixtures() -> Vec<(&'static str, FoundryFixtureCatalog)> {
     vec![
-        ("Roman Timber Bridge", roman_bridge::fixture_catalog()),
+        ("Roman Timber Bridge HQ", roman_bridge::hq_fixture_catalog()),
         ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
         ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
     ]
@@ -271,7 +271,7 @@ mod tests {
         assert!(report.product_home_profiles > 0);
         assert!(report.product_home_profiles < report.installed_kit_count);
         assert_eq!(report.installed_kit_count, 17);
-        assert_eq!(report.developer_preview_kit_count, 17);
+        assert_eq!(report.developer_preview_kit_count, 16);
         assert_eq!(report.direction_candidate_slots, 6);
         assert_eq!(
             report.direction_modes,

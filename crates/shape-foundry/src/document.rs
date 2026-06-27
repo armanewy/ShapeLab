@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CatalogContentRef, ControlValue, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION, FoundryBuildStamp,
-    FoundryCatalogLock, LocalRecipeOverride,
+    FoundryCatalogLock, FoundryVariationState, LocalRecipeOverride, VariationChannel,
+    VariationScope,
 };
 
 /// Stable foundry document ID.
@@ -26,6 +27,14 @@ pub enum FoundryLockTarget {
     Override(String),
     /// Export profile.
     ExportProfile(String),
+    /// Variation scope.
+    VariationScope(VariationScope),
+    /// Variation channel.
+    VariationChannel(VariationChannel),
+    /// Focused semantic part group.
+    FocusPartGroup(String),
+    /// Material slot.
+    MaterialSlot(String),
     /// Pack-authored target.
     Custom(String),
 }
@@ -82,6 +91,9 @@ pub struct FoundryAssetDocument {
     pub provider_overrides: BTreeMap<String, ProviderOverride>,
     /// Foundry locks.
     pub foundry_locks: Vec<FoundryLock>,
+    /// Product variation focus and channels.
+    #[serde(default)]
+    pub variation_state: FoundryVariationState,
     /// Local recipe overrides applied after base instantiation.
     pub local_recipe_overrides: Vec<LocalRecipeOverride>,
     /// Deterministic seed for candidate and preview workflows.
@@ -114,6 +126,7 @@ impl FoundryAssetDocument {
             control_state: BTreeMap::new(),
             provider_overrides: BTreeMap::new(),
             foundry_locks: Vec::new(),
+            variation_state: FoundryVariationState::default(),
             local_recipe_overrides: Vec::new(),
             seed: 0,
             catalog_lock: None,

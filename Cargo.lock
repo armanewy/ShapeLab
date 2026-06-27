@@ -3967,6 +3967,7 @@ dependencies = [
  "glam",
  "serde",
  "shape-core",
+ "shape-foundry",
  "shape-mesh",
  "thiserror 2.0.18",
 ]

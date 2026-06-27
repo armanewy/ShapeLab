@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::{CandidateVariationMetadata, VariationIntent};
+
 /// Stable candidate ID.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FoundryCandidateId(pub String);
@@ -15,6 +17,9 @@ pub struct GenerateCandidatesRequest {
     pub count: u32,
     /// Deterministic seed.
     pub seed: u64,
+    /// Product-safe variation intent.
+    #[serde(default)]
+    pub variation_intent: VariationIntent,
 }
 
 /// Status of a candidate in the foundry session.
@@ -31,7 +36,7 @@ pub enum FoundryCandidateStatus {
 }
 
 /// Candidate summary row.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FoundryCandidateSummary {
     /// Candidate ID.
     pub id: FoundryCandidateId,
@@ -43,4 +48,7 @@ pub struct FoundryCandidateSummary {
     pub changed_controls: Vec<String>,
     /// Optional preview ID.
     pub preview_id: Option<String>,
+    /// Product-safe variation metadata.
+    #[serde(default)]
+    pub variation_metadata: CandidateVariationMetadata,
 }

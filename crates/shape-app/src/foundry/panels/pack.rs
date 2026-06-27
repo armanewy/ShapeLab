@@ -651,6 +651,12 @@ fn lock_target_label(target: &FoundryLockTarget) -> String {
         FoundryLockTarget::Provider(role) => format!("provider:{role}"),
         FoundryLockTarget::Override(override_id) => format!("override:{override_id}"),
         FoundryLockTarget::ExportProfile(profile) => format!("export:{profile}"),
+        FoundryLockTarget::VariationScope(scope) => format!("variation:{}", scope.display_label()),
+        FoundryLockTarget::VariationChannel(channel) => {
+            format!("channel:{}", channel.display_label())
+        }
+        FoundryLockTarget::FocusPartGroup(group_id) => format!("focus:{group_id}"),
+        FoundryLockTarget::MaterialSlot(slot_id) => format!("material:{slot_id}"),
         FoundryLockTarget::Custom(key) => format!("custom:{key}"),
     }
 }
