@@ -16,5 +16,6 @@ Layers:
 fingerprint, topology fingerprint, and optional parent artifact. Surface binds
 to frozen mesh. Rig binds to frozen mesh and topology. Motion binds to a rig
 artifact. Frozen topology changes invalidate surface, rig, motion, and export
-layers. Material-only variants preserve rig and motion lineage when mesh and
-topology fingerprints are unchanged.
+layers because rig and clip evidence were authored against a specific topology.
+Material-only variants preserve rig and motion lineage when mesh and topology
+fingerprints are unchanged.

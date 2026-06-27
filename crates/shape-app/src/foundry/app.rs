@@ -19,7 +19,8 @@ use shape_foundry::{
     built_in_surface_capability_for_profile, compile_foundry_document,
 };
 use shape_foundry_catalog::{
-    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, headless_fixture_catalogs,
+    FoundryFixtureCatalog, catalog_curation_metadata_for_slug,
+    curated_fixture_catalogs_with_labels, headless_fixture_catalogs,
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{
@@ -2838,33 +2839,24 @@ struct ProductHomeProfileGroup {
 
 fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProfile> {
     let cards = built_in_kit_card_views();
-    built_in_fixture_catalogs_with_labels()
+    curated_fixture_catalogs_with_labels(developer_preview_enabled)
         .into_iter()
         .filter_map(|(_label, fixture)| {
             let card = cards
                 .iter()
                 .find(|card| card.source_profile_slug.as_deref() == Some(fixture.slug.as_str()))?;
-            if !product_home_profile_visible(card, developer_preview_enabled) {
-                return None;
-            }
+            let curation = catalog_curation_metadata_for_slug(&fixture.slug)?;
             Some(ProductHomeProfile {
                 label: card.display_name.clone(),
                 fixture,
                 family_id: card.family_id.clone(),
                 family_name: card.family_name.clone(),
-                quality_badge: card.quality_badge.clone(),
+                quality_badge: curation.state.label().to_owned(),
                 style_name: card.style_name.clone(),
                 category_chips: card.category_chips.clone(),
             })
         })
         .collect()
-}
-
-fn product_home_profile_visible(
-    card: &crate::foundry::kit_view::FoundryKitCardView,
-    developer_preview_enabled: bool,
-) -> bool {
-    developer_preview_enabled || !card.hidden_by_default || card.quality_badge == "Usable"
 }
 
 #[cfg(test)]
@@ -5192,10 +5184,9 @@ mod tests {
     }
 
     #[test]
-    fn product_home_shows_usable_kits_by_default_and_preview_mode_lists_seventeen() {
+    fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
         assert_eq!(installed_product_kit_count(), 17);
-        assert!(default_product_home_profile_count() > 0);
-        assert!(default_product_home_profile_count() < 17);
+        assert_eq!(default_product_home_profile_count(), 3);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -5204,7 +5195,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(default_labels.contains(&"Roman Timber Bridge HQ"));
+        assert!(default_labels.contains(&"Stylized Furniture Lamp"));
         assert!(!default_labels.contains(&"Roman Timber Bridge"));
+        assert!(!default_labels.contains(&"Sci-Fi Door Panel"));
 
         let profiles = product_home_profiles(true);
         let labels = profiles
@@ -5212,7 +5205,7 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 17);
+        assert_eq!(profiles.len(), 16);
         assert!(labels.contains(&"Roman Timber Bridge"));
         assert!(labels.contains(&"Roman Timber Bridge HQ"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
@@ -5229,7 +5222,7 @@ mod tests {
         assert!(labels.contains(&"Hero Helmet"));
         assert!(labels.contains(&"Pauldron Pair"));
         assert!(labels.contains(&"Chest Armor"));
-        assert!(labels.contains(&"Hero Character"));
+        assert!(!labels.contains(&"Hero Character"));
         assert!(!labels.iter().any(|label| label.contains("MVP")));
     }
 
@@ -5248,7 +5241,7 @@ mod tests {
         assert!(family_names.contains(&"Bridge"));
         assert!(family_names.contains(&"Crate"));
         assert!(family_names.contains(&"Lamp"));
-        assert!(family_names.contains(&"Hero Character"));
+        assert!(!family_names.contains(&"Hero Character"));
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
         assert!(
             groups
@@ -5291,9 +5284,9 @@ mod tests {
     fn home_template_search_defaults_to_first_matching_profile() {
         let profiles = product_home_profiles(false);
         let selected_slug =
-            default_filtered_home_profile_slug(&profiles, "door", HomeTemplateFilter::All);
+            default_filtered_home_profile_slug(&profiles, "lamp", HomeTemplateFilter::All);
 
-        assert_eq!(selected_slug.as_deref(), Some("sci-fi-door"));
+        assert_eq!(selected_slug.as_deref(), Some("stylized-lamp"));
     }
 
     #[test]

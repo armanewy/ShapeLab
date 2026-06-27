@@ -78,6 +78,9 @@ pub struct PreparedHeroTemplate {
     pub review_manifest: HeroTemplateReviewManifest,
     /// Unsupported operations reported honestly.
     pub unsupported_operations: Vec<HeroUnsupportedOperation>,
+    /// Hidden rig-readiness evidence descriptor.
+    #[serde(default)]
+    pub rig_readiness: PreparedHeroRigReadiness,
     /// Explicit external mesh claim, if a bad author tries to make one.
     pub external_mesh_claim: Option<String>,
     /// Embedded prepared character contract used by customization.
@@ -127,6 +130,8 @@ impl PreparedHeroTemplate {
             &hero_cages,
             &semantic_regions,
         )?;
+        self.rig_readiness
+            .validate(&prepared_weights, &hero_weight_ids(&self.weight_sets))?;
         validate_hero_provider_slots(&self.provider_slots, &semantic_regions)?;
         self.control_profile.validate(
             &prepared_controls,
@@ -558,6 +563,63 @@ pub enum HeroUnsupportedOperation {
     RiggingAnimation,
     /// Dota/IP reconstruction is not supported.
     DotaIpReconstruction,
+}
+
+/// Hidden prepared hero rig-readiness evidence descriptor.
+///
+/// This is not novice UI metadata. It only records whether a prepared humanoid
+/// template has enough authored skeleton and skin-weight evidence to make a
+/// future rig-ready claim.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedHeroRigReadiness {
+    /// True only when the template attempts to claim rig readiness.
+    pub rig_ready_claim: bool,
+    /// Package-relative skeleton evidence reference.
+    #[serde(default)]
+    pub skeleton_evidence_ref: Option<String>,
+    /// Prepared skin-weight evidence used by the claim.
+    #[serde(default)]
+    pub skin_weight_evidence: Vec<PreparedWeightSetId>,
+}
+
+impl PreparedHeroRigReadiness {
+    fn validate(
+        &self,
+        prepared_weight_ids: &BTreeSet<String>,
+        hero_weight_ids: &BTreeSet<String>,
+    ) -> PreparedHeroResult<()> {
+        if !self.rig_ready_claim {
+            return Ok(());
+        }
+        if self
+            .skeleton_evidence_ref
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(PreparedHeroError::RigReadyClaimMissingSkeletonEvidence);
+        }
+        if self.skin_weight_evidence.is_empty() {
+            return Err(PreparedHeroError::RigReadyClaimMissingSkinWeightEvidence);
+        }
+        let evidence_ids = self
+            .skin_weight_evidence
+            .iter()
+            .map(|weight| weight.0.clone())
+            .collect::<BTreeSet<_>>();
+        for weight in &evidence_ids {
+            if !prepared_weight_ids.contains(weight) || !hero_weight_ids.contains(weight) {
+                return Err(PreparedHeroError::UnknownReference {
+                    field: "hero rig skin weight evidence",
+                    id: weight.clone(),
+                });
+            }
+        }
+        if hero_weight_ids.difference(&evidence_ids).next().is_some() {
+            return Err(PreparedHeroError::RigReadyClaimMissingSkinWeightEvidence);
+        }
+        Ok(())
+    }
 }
 
 /// Prepared known-base character template.
@@ -1879,6 +1941,7 @@ pub fn prepared_hero_template_v1() -> PreparedHeroTemplate {
             HeroUnsupportedOperation::RiggingAnimation,
             HeroUnsupportedOperation::DotaIpReconstruction,
         ],
+        rig_readiness: PreparedHeroRigReadiness::default(),
         external_mesh_claim: None,
         prepared_character: prepared,
     }
@@ -2109,6 +2172,13 @@ fn prepared_weight_ids(template: &PreparedCharacterTemplate) -> BTreeSet<String>
         .weight_sets
         .iter()
         .map(|weights| weights.id.0.clone())
+        .collect()
+}
+
+fn hero_weight_ids(weights: &[HeroWeightSet]) -> BTreeSet<String> {
+    weights
+        .iter()
+        .map(|weights| weights.weight_set_id.0.clone())
         .collect()
 }
 
@@ -2460,6 +2530,12 @@ pub enum PreparedHeroError {
     /// Unsupported operation inventory is incomplete.
     #[error("prepared hero unsupported operation inventory is incomplete")]
     MissingUnsupportedOperation,
+    /// Rig-ready claim lacks skeleton evidence.
+    #[error("prepared hero rig-ready claim requires skeleton evidence")]
+    RigReadyClaimMissingSkeletonEvidence,
+    /// Rig-ready claim lacks complete skin-weight evidence.
+    #[error("prepared hero rig-ready claim requires complete skin-weight evidence")]
+    RigReadyClaimMissingSkinWeightEvidence,
     /// External mesh claim is not allowed.
     #[error("prepared hero template must not claim arbitrary external mesh reconstruction")]
     ExternalMeshClaim,
@@ -2900,6 +2976,38 @@ mod tests {
                 id: "prepared.cage.head".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn prepared_hero_rig_ready_claim_requires_skin_weight_evidence() {
+        let mut missing_skeleton = prepared_hero_template_v1();
+        missing_skeleton.rig_readiness.rig_ready_claim = true;
+        assert_eq!(
+            missing_skeleton.validate(),
+            Err(PreparedHeroError::RigReadyClaimMissingSkeletonEvidence)
+        );
+
+        let mut missing_weights = prepared_hero_template_v1();
+        missing_weights.rig_readiness.rig_ready_claim = true;
+        missing_weights.rig_readiness.skeleton_evidence_ref =
+            Some("rig/skeleton-template.json".to_owned());
+        assert_eq!(
+            missing_weights.validate(),
+            Err(PreparedHeroError::RigReadyClaimMissingSkinWeightEvidence)
+        );
+
+        let mut complete_evidence = prepared_hero_template_v1();
+        complete_evidence.rig_readiness.rig_ready_claim = true;
+        complete_evidence.rig_readiness.skeleton_evidence_ref =
+            Some("rig/skeleton-template.json".to_owned());
+        complete_evidence.rig_readiness.skin_weight_evidence = complete_evidence
+            .weight_sets
+            .iter()
+            .map(|weights| weights.weight_set_id.clone())
+            .collect();
+        complete_evidence
+            .validate()
+            .expect("complete hidden rig evidence descriptor should validate");
     }
 
     #[test]

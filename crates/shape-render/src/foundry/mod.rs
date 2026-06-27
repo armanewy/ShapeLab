@@ -19,6 +19,10 @@ use crate::{
 const OVERLAY_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
 const OVERLAY_HASH_PRIME: u64 = 1_099_511_628_211;
 const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
+const RENDER_DUPLICATE_AVERAGE_DELTA: f32 = 0.018;
+const RENDER_DUPLICATE_MAX_DELTA: f32 = 0.035;
+const RENDER_CLEAR_AVERAGE_DELTA: f32 = 0.075;
+const RENDER_STRONG_AVERAGE_DELTA: f32 = 0.16;
 
 /// Default bounded capacity for the in-memory Foundry preview cache.
 pub const FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY: usize = 64;
@@ -314,6 +318,27 @@ pub struct FoundryRenderedVisibleDelta {
     pub unavailable_reason: Option<&'static str>,
 }
 
+/// Strict multi-camera report derived from rendered preview comparisons.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoundryRenderedPerceptualReport {
+    /// Stable candidate ID.
+    pub candidate_id: String,
+    /// Per-camera aggregate deltas in `0..1`.
+    pub render_delta_by_camera: Vec<f32>,
+    /// Maximum camera delta in `0..1`.
+    pub max_delta: f32,
+    /// Average camera delta in `0..1`.
+    pub average_delta: f32,
+    /// Maximum silhouette delta in `0..1`.
+    pub silhouette_delta: f32,
+    /// Product-visible classification.
+    pub legibility_class: CandidateLegibilityClass,
+    /// Rejection reason when the comparison is not selectable.
+    pub reject_reason: Option<String>,
+    /// Human-facing diagnostic summary.
+    pub human_summary: String,
+}
+
 impl FoundryRenderedVisibleDelta {
     /// Return true when this comparison has usable finite evidence.
     #[must_use]
@@ -329,6 +354,83 @@ impl FoundryRenderedVisibleDelta {
             score: 0.0,
             unavailable_reason: Some(reason),
         }
+    }
+}
+
+/// Classify rendered parent/candidate comparisons from one or more fixed cameras.
+#[must_use]
+pub fn classify_foundry_rendered_perceptual_report(
+    candidate_id: impl Into<String>,
+    camera_pairs: &[(&RenderedImage, &RenderedImage)],
+    background: [u8; 4],
+) -> FoundryRenderedPerceptualReport {
+    let candidate_id = candidate_id.into();
+    let deltas = camera_pairs
+        .iter()
+        .map(|(parent, candidate)| {
+            compare_foundry_rendered_visible_delta(parent, candidate, background)
+        })
+        .collect::<Vec<_>>();
+    let render_delta_by_camera = deltas.iter().map(|delta| delta.score).collect::<Vec<_>>();
+    let max_delta = render_delta_by_camera.iter().copied().fold(0.0, f32::max);
+    let average_delta = if render_delta_by_camera.is_empty() {
+        0.0
+    } else {
+        render_delta_by_camera.iter().sum::<f32>() / render_delta_by_camera.len() as f32
+    };
+    let silhouette_delta = deltas
+        .iter()
+        .map(|delta| delta.silhouette_delta)
+        .fold(0.0, f32::max);
+    let unavailable = deltas.iter().find_map(|delta| delta.unavailable_reason);
+    let (legibility_class, reject_reason) = if let Some(reason) = unavailable {
+        (
+            CandidateLegibilityClass::Unsupported,
+            Some(reason.to_owned()),
+        )
+    } else if average_delta < RENDER_DUPLICATE_AVERAGE_DELTA
+        && max_delta < RENDER_DUPLICATE_MAX_DELTA
+    {
+        (
+            CandidateLegibilityClass::DuplicateLooking,
+            Some("Candidate looks identical to the parent at preview size.".to_owned()),
+        )
+    } else if average_delta >= RENDER_STRONG_AVERAGE_DELTA {
+        (CandidateLegibilityClass::Strong, None)
+    } else if average_delta >= RENDER_CLEAR_AVERAGE_DELTA || max_delta >= RENDER_CLEAR_AVERAGE_DELTA
+    {
+        (CandidateLegibilityClass::Clear, None)
+    } else {
+        (
+            CandidateLegibilityClass::TooSubtle,
+            Some("Visible change is too small for a normal direction card.".to_owned()),
+        )
+    };
+    let human_summary = if legibility_class.selectable() {
+        format!(
+            "{} rendered as {} with {:.0}% average preview delta.",
+            candidate_id,
+            legibility_class.display_label(),
+            average_delta * 100.0
+        )
+    } else {
+        format!(
+            "{} rejected: {}",
+            candidate_id,
+            reject_reason
+                .as_deref()
+                .unwrap_or("preview comparison is unavailable")
+        )
+    };
+    FoundryRenderedPerceptualReport {
+        candidate_id,
+        render_delta_by_camera,
+        max_delta,
+        average_delta,
+        silhouette_delta,
+        legibility_class,
+        reject_reason,
+        human_summary,
     }
 }
 
@@ -1246,5 +1348,96 @@ impl OverlayHasher {
 
     fn finish(self) -> u64 {
         self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(pixels: &[[u8; 4]]) -> RenderedImage {
+        RenderedImage {
+            width: 2,
+            height: 2,
+            rgba8: pixels.iter().flatten().copied().collect(),
+        }
+    }
+
+    #[test]
+    fn rendered_perceptual_report_rejects_identical_preview() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let report =
+            classify_foundry_rendered_perceptual_report("same", &[(&parent, &parent)], background);
+
+        assert_eq!(
+            report.legibility_class,
+            CandidateLegibilityClass::DuplicateLooking
+        );
+        assert!(report.reject_reason.is_some());
+    }
+
+    #[test]
+    fn rendered_perceptual_report_accepts_obvious_delta() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let candidate = image(&[
+            [200, 200, 200, 255],
+            background,
+            [220, 220, 220, 255],
+            background,
+        ]);
+        let report = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate), (&parent, &candidate)],
+            background,
+        );
+
+        assert!(matches!(
+            report.legibility_class,
+            CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
+        ));
+        assert_eq!(report.render_delta_by_camera.len(), 2);
+        assert!(report.silhouette_delta > 0.0);
+    }
+
+    #[test]
+    fn rendered_perceptual_report_is_deterministic() {
+        let background = [0, 0, 0, 255];
+        let parent = image(&[
+            background,
+            [200, 200, 200, 255],
+            background,
+            [180, 180, 180, 255],
+        ]);
+        let candidate = image(&[
+            [200, 200, 200, 255],
+            background,
+            [220, 220, 220, 255],
+            background,
+        ]);
+
+        let first = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate)],
+            background,
+        );
+        let second = classify_foundry_rendered_perceptual_report(
+            "changed",
+            &[(&parent, &candidate)],
+            background,
+        );
+
+        assert_eq!(first, second);
     }
 }

@@ -26,6 +26,17 @@ pub enum MotionClipEvidenceStatus {
     AuthoredClipEvidence,
 }
 
+/// Type of asset the motion artifact describes.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionTargetKind {
+    /// Static props do not require motion.
+    StaticProp,
+    /// Assets with authored rig and clip evidence.
+    #[default]
+    RiggedAsset,
+}
+
 /// Overall motion readiness.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +80,9 @@ pub struct MotionArtifact {
     pub artifact_id: String,
     /// Product-facing label.
     pub display_name: String,
+    /// Asset kind this motion describes.
+    #[serde(default)]
+    pub target_kind: MotionTargetKind,
     /// Motion layer lineage.
     pub motion_layer: GameAssetLayerRef,
     /// Rig artifact reference this motion is authored against.
@@ -86,6 +100,9 @@ pub struct MotionArtifact {
     /// Whether this artifact attempts a motion-ready claim.
     #[serde(default)]
     pub motion_ready_claim: bool,
+    /// Whether this artifact attempts an animation-ready claim.
+    #[serde(default)]
+    pub animation_ready_claim: bool,
 }
 
 /// Motion validation report.
@@ -128,23 +145,36 @@ pub fn validate_motion_artifact(artifact: &MotionArtifact) -> MotionValidationRe
         "missing_motion_display_name",
         &mut blockers,
     );
-    require_non_empty(
-        &artifact.rig_artifact_ref,
-        "missing_motion_rig_artifact_ref",
-        &mut blockers,
-    );
-
-    let lineage_report = validate_game_asset_layer_ref(&artifact.motion_layer);
-    if !lineage_report.valid {
-        blockers.extend(lineage_report.issue_codes);
-    } else if artifact.motion_layer.layer != GameAssetLayerKind::Motion {
-        blockers.push("motion_layer_kind_invalid".to_owned());
-    } else if !motion_binds_to_rig(&artifact.motion_layer, &artifact.rig_artifact_ref) {
-        blockers.push("motion_layer_not_bound_to_rig".to_owned());
-    } else {
-        passed_checks.push("motion_rig_lineage_valid".to_owned());
+    let readiness_claim = artifact.motion_ready_claim || artifact.animation_ready_claim;
+    let motion_applies = artifact.target_kind != MotionTargetKind::StaticProp
+        || readiness_claim
+        || artifact.rig_evidence_ready
+        || !artifact.clips.is_empty()
+        || !artifact.rig_artifact_ref.trim().is_empty();
+    if motion_applies {
+        require_non_empty(
+            &artifact.rig_artifact_ref,
+            "missing_motion_rig_artifact_ref",
+            &mut blockers,
+        );
     }
 
+    if motion_applies {
+        let lineage_report = validate_game_asset_layer_ref(&artifact.motion_layer);
+        if !lineage_report.valid {
+            blockers.extend(lineage_report.issue_codes);
+        } else if artifact.motion_layer.layer != GameAssetLayerKind::Motion {
+            blockers.push("motion_layer_kind_invalid".to_owned());
+        } else if !motion_binds_to_rig(&artifact.motion_layer, &artifact.rig_artifact_ref) {
+            blockers.push("motion_layer_not_bound_to_rig".to_owned());
+        } else {
+            passed_checks.push("motion_rig_lineage_valid".to_owned());
+        }
+    }
+
+    if artifact.target_kind == MotionTargetKind::StaticProp && motion_applies {
+        blockers.push("static_prop_motion_must_be_not_applicable".to_owned());
+    }
     if artifact.generated_animation_curve_claim {
         blockers.push("animation_curve_generation_not_supported".to_owned());
     }
@@ -154,10 +184,13 @@ pub fn validate_motion_artifact(artifact: &MotionArtifact) -> MotionValidationRe
     if artifact.motion_ready_claim && !artifact.rig_evidence_ready {
         blockers.push("motion_ready_requires_rig_evidence".to_owned());
     }
+    if artifact.animation_ready_claim && !artifact.rig_evidence_ready {
+        blockers.push("animation_ready_requires_rig_evidence".to_owned());
+    }
 
     validate_clips(
         &artifact.clips,
-        artifact.motion_ready_claim,
+        readiness_claim,
         &mut passed_checks,
         &mut blockers,
     );
@@ -166,11 +199,10 @@ pub fn validate_motion_artifact(artifact: &MotionArtifact) -> MotionValidationRe
         .clips
         .iter()
         .any(|clip| clip.evidence_status == MotionClipEvidenceStatus::AuthoredClipEvidence);
-    let status = if !artifact.motion_ready_claim && artifact.clips.is_empty() && blockers.is_empty()
-    {
+    let status = if !readiness_claim && artifact.clips.is_empty() && blockers.is_empty() {
         MotionReadinessStatus::NotApplicable
     } else if blockers.is_empty()
-        && artifact.motion_ready_claim
+        && readiness_claim
         && artifact.rig_evidence_ready
         && has_authored_clip
     {
@@ -247,6 +279,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn static_prop_motion_is_not_applicable() {
+        let report = validate_motion_artifact(&MotionArtifact {
+            schema_version: MOTION_ARTIFACT_SCHEMA_VERSION,
+            artifact_id: "motion:crate".to_owned(),
+            display_name: "Crate Motion".to_owned(),
+            target_kind: MotionTargetKind::StaticProp,
+            motion_layer: GameAssetLayerRef {
+                schema_version: GAME_ASSET_LAYER_REF_SCHEMA_VERSION,
+                layer: GameAssetLayerKind::Motion,
+                artifact_ref: "motion/not-applicable.json".to_owned(),
+                frozen_mesh_fingerprint: "mesh:abc".to_owned(),
+                topology_fingerprint: "topology:abc".to_owned(),
+                parent_artifact_ref: None,
+            },
+            rig_artifact_ref: String::new(),
+            rig_evidence_ready: false,
+            clips: Vec::new(),
+            generated_animation_curve_claim: false,
+            humanoid_retargeter_claim: false,
+            motion_ready_claim: false,
+            animation_ready_claim: false,
+        });
+
+        assert_eq!(report.status, MotionReadinessStatus::NotApplicable);
+        assert!(!report.is_motion_ready());
+    }
+
+    #[test]
     fn motion_ready_requires_rig_and_clip_evidence() {
         let mut artifact = valid_motion_artifact();
         artifact.rig_evidence_ready = false;
@@ -275,6 +335,30 @@ mod tests {
 
         assert_eq!(report.status, MotionReadinessStatus::DescriptorOnly);
         assert!(!report.is_motion_ready());
+    }
+
+    #[test]
+    fn animation_ready_requires_rig_and_clip_evidence() {
+        let mut artifact = valid_motion_artifact();
+        artifact.motion_ready_claim = false;
+        artifact.animation_ready_claim = true;
+        artifact.rig_evidence_ready = false;
+        artifact.clips[0].evidence_status = MotionClipEvidenceStatus::DescriptorOnly;
+        artifact.clips[0].evidence_ref = None;
+
+        let report = validate_motion_artifact(&artifact);
+
+        assert_eq!(report.status, MotionReadinessStatus::Blocked);
+        assert!(
+            report
+                .blockers
+                .contains(&"animation_ready_requires_rig_evidence".to_owned())
+        );
+        assert!(
+            report
+                .blockers
+                .contains(&"motion_ready_requires_clip_evidence".to_owned())
+        );
     }
 
     #[test]
@@ -316,6 +400,7 @@ mod tests {
             schema_version: MOTION_ARTIFACT_SCHEMA_VERSION,
             artifact_id: "motion:idle".to_owned(),
             display_name: "Idle Motion".to_owned(),
+            target_kind: MotionTargetKind::RiggedAsset,
             motion_layer: GameAssetLayerRef {
                 schema_version: GAME_ASSET_LAYER_REF_SCHEMA_VERSION,
                 layer: GameAssetLayerKind::Motion,
@@ -338,6 +423,7 @@ mod tests {
             generated_animation_curve_claim: false,
             humanoid_retargeter_claim: false,
             motion_ready_claim: true,
+            animation_ready_claim: false,
         }
     }
 }

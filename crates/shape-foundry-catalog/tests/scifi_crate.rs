@@ -1,17 +1,22 @@
 use std::collections::BTreeSet;
 
 use serde::de::DeserializeOwned;
-use shape_asset::{CutGroupRole, ModelingOperationSpec, OperationId};
+use shape_asset::{
+    CutGroupRole, GeometrySource, ModelingOperationSpec, OperationId, PartInstanceId,
+};
 use shape_compile::validation::{
     ValidationLimits, validate_model, validation_config_from_recipe_with_limits,
 };
 use shape_family::AssetFamilySchema;
 use shape_foundry::{
-    ControlEvaluationContext, ControlKind, ControlValue, CustomizerProfile,
-    FoundryCompilationOutput, compile_foundry_document,
-    whole_model_preview_sample_requests_with_count,
+    ControlEvaluationContext, ControlKind, ControlValue, CustomizerProfile, FoundryCommand,
+    FoundryCompilationOutput, FoundryLock, FoundryLockMode, FoundryLockTarget, VariationIntent,
+    compile_foundry_document, whole_model_preview_sample_requests_with_count,
 };
 use shape_foundry_catalog::{FoundryFixtureCatalog, scifi_crate};
+use shape_search::foundry::{
+    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+};
 
 fn payload<T: DeserializeOwned>(fixture: &FoundryFixtureCatalog, id: &str) -> T {
     serde_json::from_str(&fixture.entries[id].canonical_json).expect("catalog payload decodes")
@@ -172,6 +177,40 @@ fn compiled_crate_has_no_accidental_intersections() {
 }
 
 #[test]
+fn authored_strategy_labels_match_hq_intents() {
+    let fixture = scifi_crate::fixture_catalog();
+    let profile = profile(&fixture);
+
+    assert_eq!(
+        profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Compact Vented",
+            "Reinforced Cargo",
+            "Clean Lab Crate",
+            "Heavy Utility",
+            "Deep Panel Equipment",
+            "Minimal Industrial",
+        ]
+    );
+    for strategy in &profile.candidate_strategies {
+        assert!(
+            strategy.control_ids.len() >= 3,
+            "{} should combine whole-asset controls",
+            strategy.label
+        );
+        assert!(
+            !strategy.label.contains("Provider") && !strategy.label.contains("Scalar"),
+            "{} should be an intent label",
+            strategy.label
+        );
+    }
+}
+
+#[test]
 fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
     let candidates = [
         (
@@ -179,20 +218,19 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
             vec![("handle_style", ControlValue::Choice("side_rail".to_owned()))],
         ),
         (
-            "compact",
+            "compact-vented",
             vec![
                 ("body_proportions", ControlValue::Scalar(0.0)),
                 ("structural_heft", ControlValue::Scalar(0.15)),
                 ("panel_depth", ControlValue::Scalar(0.25)),
-                ("vent_density", ControlValue::Choice("sparse".to_owned())),
+                ("vent_density", ControlValue::Choice("dense".to_owned())),
                 ("handle_style", ControlValue::Choice("flush".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.2)),
-                ("detail_density", ControlValue::Integer(4)),
-                ("has_trim", ControlValue::Toggle(false)),
+                ("detail_density", ControlValue::Integer(8)),
             ],
         ),
         (
-            "reinforced",
+            "reinforced-cargo",
             vec![
                 ("body_proportions", ControlValue::Scalar(0.82)),
                 ("structural_heft", ControlValue::Scalar(0.95)),
@@ -204,23 +242,48 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
             ],
         ),
         (
-            "vented",
+            "clean-lab-crate",
             vec![
-                ("body_proportions", ControlValue::Scalar(0.45)),
-                ("structural_heft", ControlValue::Scalar(0.45)),
-                ("panel_depth", ControlValue::Scalar(0.55)),
-                ("vent_density", ControlValue::Choice("dense".to_owned())),
-                ("handle_style", ControlValue::Choice("side_rail".to_owned())),
-                ("edge_softness", ControlValue::Scalar(0.35)),
-                ("detail_density", ControlValue::Integer(8)),
+                ("body_proportions", ControlValue::Scalar(0.35)),
+                ("structural_heft", ControlValue::Scalar(0.35)),
+                ("panel_depth", ControlValue::Scalar(0.15)),
+                ("vent_density", ControlValue::Choice("sparse".to_owned())),
+                ("handle_style", ControlValue::Choice("flush".to_owned())),
+                ("edge_softness", ControlValue::Scalar(0.8)),
+                ("detail_density", ControlValue::Integer(4)),
+                ("has_trim", ControlValue::Toggle(false)),
             ],
         ),
         (
-            "minimal",
+            "heavy-utility",
+            vec![
+                ("body_proportions", ControlValue::Scalar(1.0)),
+                ("structural_heft", ControlValue::Scalar(1.0)),
+                ("panel_depth", ControlValue::Scalar(0.65)),
+                ("vent_density", ControlValue::Choice("standard".to_owned())),
+                ("handle_style", ControlValue::Choice("cargo_bar".to_owned())),
+                ("edge_softness", ControlValue::Scalar(0.35)),
+                ("detail_density", ControlValue::Integer(12)),
+            ],
+        ),
+        (
+            "deep-panel-equipment",
+            vec![
+                ("body_proportions", ControlValue::Scalar(0.55)),
+                ("structural_heft", ControlValue::Scalar(0.65)),
+                ("panel_depth", ControlValue::Scalar(1.0)),
+                ("vent_density", ControlValue::Choice("dense".to_owned())),
+                ("handle_style", ControlValue::Choice("side_rail".to_owned())),
+                ("edge_softness", ControlValue::Scalar(0.55)),
+                ("detail_density", ControlValue::Integer(10)),
+            ],
+        ),
+        (
+            "minimal-industrial",
             vec![
                 ("body_proportions", ControlValue::Scalar(0.1)),
-                ("structural_heft", ControlValue::Scalar(0.35)),
-                ("panel_depth", ControlValue::Scalar(0.2)),
+                ("structural_heft", ControlValue::Scalar(0.25)),
+                ("panel_depth", ControlValue::Scalar(0.0)),
                 ("vent_density", ControlValue::Choice("sparse".to_owned())),
                 ("handle_style", ControlValue::Choice("flush".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.1)),
@@ -228,20 +291,9 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("has_trim", ControlValue::Toggle(false)),
             ],
         ),
-        (
-            "hero",
-            vec![
-                ("body_proportions", ControlValue::Scalar(1.0)),
-                ("structural_heft", ControlValue::Scalar(0.8)),
-                ("panel_depth", ControlValue::Scalar(1.0)),
-                ("vent_density", ControlValue::Choice("dense".to_owned())),
-                ("handle_style", ControlValue::Choice("cargo_bar".to_owned())),
-                ("edge_softness", ControlValue::Scalar(1.0)),
-                ("detail_density", ControlValue::Integer(12)),
-            ],
-        ),
     ];
 
+    let expected_count = candidates.len();
     let mut fingerprints = BTreeSet::new();
     for (label, overrides) in candidates {
         let output = compile_with(&overrides);
@@ -254,7 +306,137 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
             "{label} should have a unique geometry input fingerprint"
         );
     }
-    assert_eq!(fingerprints.len(), 6);
+    assert_eq!(fingerprints.len(), expected_count);
+}
+
+#[test]
+fn vent_variants_are_structurally_distinct() {
+    let sparse = compile_with(&[("vent_density", ControlValue::Choice("sparse".to_owned()))]);
+    let standard = compile_with(&[("vent_density", ControlValue::Choice("standard".to_owned()))]);
+    let dense = compile_with(&[("vent_density", ControlValue::Choice("dense".to_owned()))]);
+
+    let sparse_vents = vent_operations(&sparse);
+    let standard_vents = vent_operations(&standard);
+    let dense_vents = vent_operations(&dense);
+
+    assert_eq!(sparse_vents.len(), 2);
+    assert_eq!(standard_vents.len(), 3);
+    assert_eq!(dense_vents.len(), 5);
+    assert!(
+        sparse_vents.iter().any(|(_, size, _)| size[0] > 0.25),
+        "sparse vents should read as large paired slots"
+    );
+    assert!(
+        dense_vents.iter().all(|(_, size, _)| size[0] < 0.16),
+        "dense vents should read as a tight bank of smaller slots"
+    );
+}
+
+#[test]
+fn handle_options_validate_and_are_attached_assemblies() {
+    for style in ["flush", "side_rail", "cargo_bar"] {
+        let output = compile_with(&[("handle_style", ControlValue::Choice(style.to_owned()))]);
+        assert_valid_model(&output);
+        let handle_instances = role_instances(&output, "handle");
+        assert!(
+            handle_instances.len() >= 3,
+            "{style} handle should include grip plus authored mounts"
+        );
+        assert!(
+            handle_instances
+                .iter()
+                .all(|instance| instance_sits_near_body_front(&output, instance)),
+            "{style} handle parts should physically overlap the front body shell"
+        );
+    }
+}
+
+#[test]
+fn body_panel_heft_detail_and_edge_endpoints_are_visible_descriptors() {
+    let compact = compile_with(&[("body_proportions", ControlValue::Scalar(0.0))]);
+    let broad = compile_with(&[("body_proportions", ControlValue::Scalar(1.0))]);
+    let compact_half = role_rounded_box_half_extents(&compact, "body");
+    let broad_half = role_rounded_box_half_extents(&broad, "body");
+    assert!(broad_half[0] - compact_half[0] > 0.65);
+    assert!(broad_half[2] - compact_half[2] > 0.2);
+
+    let light = compile_with(&[("structural_heft", ControlValue::Scalar(0.0))]);
+    let heavy = compile_with(&[("structural_heft", ControlValue::Scalar(1.0))]);
+    assert!(
+        role_rounded_box_half_extents(&heavy, "body")[1]
+            > role_rounded_box_half_extents(&light, "body")[1] + 0.2
+    );
+
+    let shallow = compile_with(&[("panel_depth", ControlValue::Scalar(0.0))]);
+    let deep = compile_with(&[("panel_depth", ControlValue::Scalar(1.0))]);
+    assert!(panel_depth(&deep) > panel_depth(&shallow) + 0.08);
+
+    let low_detail = compile_with(&[("detail_density", ControlValue::Integer(4))]);
+    let high_detail = compile_with(&[("detail_density", ControlValue::Integer(12))]);
+    assert!(fastener_count(&high_detail) > fastener_count(&low_detail));
+
+    let crisp = compile_with(&[("edge_softness", ControlValue::Scalar(0.0))]);
+    let soft = compile_with(&[("edge_softness", ControlValue::Scalar(1.0))]);
+    assert!(body_radius(&soft) > body_radius(&crisp) + 0.09);
+}
+
+#[test]
+fn explore_candidates_survive_as_intent_labeled_whole_asset_ideas() {
+    let fixture = scifi_crate::fixture_catalog();
+    let output =
+        generate_foundry_candidate_plans(&fixture.document, &fixture, &candidate_request(41))
+            .expect("crate candidates should generate");
+
+    assert!(
+        output.candidates.len() >= 4,
+        "expected at least four visibly distinct whole-asset candidates"
+    );
+    assert!(
+        output
+            .candidates
+            .iter()
+            .all(|candidate| candidate.changed_controls.len() >= 2),
+        "whole-asset ideas should combine multiple visible controls"
+    );
+    assert!(
+        output.candidates.iter().all(|candidate| {
+            candidate.variation_metadata.visible_delta.shape_delta_score > 0.0
+                && candidate.conformance.accepted
+        }),
+        "returned candidates should have visible shape evidence and conformance"
+    );
+    for candidate in &output.candidates {
+        assert!(candidate_label_is_intent(&candidate.label));
+    }
+}
+
+#[test]
+fn foundry_locks_are_respected_for_crate_hq_candidates() {
+    let mut fixture = scifi_crate::fixture_catalog();
+    fixture.document.foundry_locks.push(FoundryLock {
+        target: FoundryLockTarget::Control("handle_style".to_owned()),
+        mode: FoundryLockMode::SearchProtected,
+        reason: Some("handle is user locked".to_owned()),
+    });
+    fixture.document.foundry_locks.push(FoundryLock {
+        target: FoundryLockTarget::Control("vent_density".to_owned()),
+        mode: FoundryLockMode::SearchProtected,
+        reason: Some("vents are user locked".to_owned()),
+    });
+
+    let output =
+        generate_foundry_candidate_plans(&fixture.document, &fixture, &candidate_request(43))
+            .expect("locked crate candidates should generate");
+
+    assert!(output.diagnostics.locked_targets_skipped >= 2);
+    for candidate in &output.candidates {
+        for command in &candidate.edit.commands {
+            if let FoundryCommand::SetControl { control_id, .. } = command {
+                assert_ne!(control_id, "handle_style");
+                assert_ne!(control_id, "vent_density");
+            }
+        }
+    }
 }
 
 #[test]
@@ -360,6 +542,174 @@ fn group_operations_match(
             .find(|operation| operation.operation_id() == *operation_id)
             .is_some_and(&predicate)
     })
+}
+
+fn vent_operations(output: &FoundryCompilationOutput) -> Vec<(OperationId, [f32; 2], [f32; 2])> {
+    let groups = &output.recipe.variation.semantic_cut_groups;
+    let body_definition = groups["vent_slots"].definition;
+    let operations = &output.recipe.definitions[&body_definition]
+        .geometry
+        .operations;
+    groups["vent_slots"]
+        .operations
+        .iter()
+        .filter_map(|operation_id| {
+            operations
+                .iter()
+                .find(|operation| operation.operation_id() == *operation_id)
+                .and_then(|operation| match operation {
+                    ModelingOperationSpec::RectangularThroughCut {
+                        operation,
+                        size,
+                        center,
+                        ..
+                    } => Some((*operation, *size, *center)),
+                    _ => None,
+                })
+        })
+        .collect()
+}
+
+fn role_instances(output: &FoundryCompilationOutput, role: &str) -> Vec<PartInstanceId> {
+    let tag = format!("role:{role}");
+    output
+        .recipe
+        .instances
+        .iter()
+        .filter(|(_, instance)| instance.tags.contains(&tag))
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+fn role_rounded_box_half_extents(output: &FoundryCompilationOutput, role: &str) -> [f32; 3] {
+    let tag = format!("role:{role}");
+    let instance = output
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.tags.contains(&tag))
+        .expect("role instance exists");
+    match output.recipe.definitions[&instance.definition]
+        .geometry
+        .source
+    {
+        GeometrySource::RoundedBox { half_extents, .. } => half_extents,
+        _ => panic!("{role} should be a rounded box"),
+    }
+}
+
+fn instance_sits_near_body_front(
+    output: &FoundryCompilationOutput,
+    instance: &PartInstanceId,
+) -> bool {
+    let body_half_y = role_rounded_box_half_extents(output, "body")[1];
+    let Some((_, half_y)) = instance_world_y_extent(output, *instance) else {
+        return false;
+    };
+    let center_y = instance_world_translation(output, *instance)[1];
+    let gap = center_y - half_y - body_half_y;
+    (-0.01..=0.28).contains(&gap)
+}
+
+fn instance_world_y_extent(
+    output: &FoundryCompilationOutput,
+    instance: PartInstanceId,
+) -> Option<([f32; 3], f32)> {
+    let instance = &output.recipe.instances[&instance];
+    let half_y = match output.recipe.definitions[&instance.definition]
+        .geometry
+        .source
+    {
+        GeometrySource::RoundedBox { half_extents, .. } => half_extents[1],
+        GeometrySource::Cylinder { height, .. } | GeometrySource::Frustum { height, .. } => {
+            height * 0.5
+        }
+        GeometrySource::Plate { thickness, .. } => thickness * 0.5,
+        _ => return None,
+    };
+    Some((instance_world_translation(output, instance.id), half_y))
+}
+
+fn instance_world_translation(
+    output: &FoundryCompilationOutput,
+    instance: PartInstanceId,
+) -> [f32; 3] {
+    let current = &output.recipe.instances[&instance];
+    let mut translation = current.local_transform.translation;
+    if let Some(parent) = current.parent {
+        let parent_translation = instance_world_translation(output, parent);
+        translation[0] += parent_translation[0];
+        translation[1] += parent_translation[1];
+        translation[2] += parent_translation[2];
+    }
+    translation
+}
+
+fn panel_depth(output: &FoundryCompilationOutput) -> f32 {
+    output
+        .recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .find_map(|operation| match operation {
+            ModelingOperationSpec::RecessedPanelCut { depth, .. } => Some(*depth),
+            _ => None,
+        })
+        .expect("panel cut")
+}
+
+fn fastener_count(output: &FoundryCompilationOutput) -> u32 {
+    output
+        .recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .find_map(|operation| match operation {
+            ModelingOperationSpec::LinearArray { count, .. } => Some(*count),
+            _ => None,
+        })
+        .expect("fastener linear array")
+}
+fn body_radius(output: &FoundryCompilationOutput) -> f32 {
+    let tag = "role:body";
+    let body = output
+        .recipe
+        .instances
+        .values()
+        .find(|instance| instance.tags.contains(tag))
+        .expect("body instance");
+    match output.recipe.definitions[&body.definition].geometry.source {
+        GeometrySource::RoundedBox { radius, .. } => radius,
+        _ => panic!("body should be a rounded box"),
+    }
+}
+
+fn candidate_request(seed: u64) -> FoundryCandidateRequest {
+    FoundryCandidateRequest {
+        seed,
+        proposal_count: 72,
+        result_count: 6,
+        mode: FoundryCandidateMode::Explore,
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: VariationIntent::whole_asset_shape(),
+    }
+}
+
+fn candidate_label_is_intent(label: &str) -> bool {
+    let lower = label.to_ascii_lowercase();
+    ![
+        "provider",
+        "scalar",
+        "operation",
+        "compiler",
+        "fragment",
+        "recipe",
+        "fingerprint",
+        "semantic",
+    ]
+    .iter()
+    .any(|forbidden| lower.contains(forbidden))
 }
 
 fn assert_endpoint_difference(control_id: &str, first: ControlValue, second: ControlValue) {

@@ -1135,6 +1135,89 @@ impl CandidateVisibleDeltaReport {
     }
 }
 
+/// Multi-camera perceptual report used to reject unreadable candidates before
+/// selection or UI presentation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerceptualCandidateReport {
+    /// Stable candidate ID.
+    pub candidate_id: String,
+    /// Per fixed-camera visible delta in `0..1`.
+    pub render_delta_by_camera: Vec<f32>,
+    /// Maximum fixed-camera delta in `0..1`.
+    pub max_delta: f32,
+    /// Average fixed-camera delta in `0..1`.
+    pub average_delta: f32,
+    /// Projected silhouette delta in `0..1`.
+    pub silhouette_delta: f32,
+    /// Projected/world bounding-box delta in `0..1`.
+    pub bbox_delta: f32,
+    /// Product-visible part groups changed by this candidate.
+    pub changed_part_groups: Vec<String>,
+    /// Product-visible controls changed by this candidate.
+    pub changed_controls: Vec<String>,
+    /// Product-visible classification.
+    pub legibility_class: CandidateLegibilityClass,
+    /// Product-safe rejection reason, when the candidate was rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reject_reason: Option<String>,
+    /// Plain-language summary for diagnostics.
+    pub human_summary: String,
+}
+
+impl Default for PerceptualCandidateReport {
+    fn default() -> Self {
+        Self {
+            candidate_id: String::new(),
+            render_delta_by_camera: Vec::new(),
+            max_delta: 0.0,
+            average_delta: 0.0,
+            silhouette_delta: 0.0,
+            bbox_delta: 0.0,
+            changed_part_groups: Vec::new(),
+            changed_controls: Vec::new(),
+            legibility_class: CandidateLegibilityClass::Unsupported,
+            reject_reason: None,
+            human_summary: "No perceptual evidence was generated.".to_owned(),
+        }
+    }
+}
+
+impl PerceptualCandidateReport {
+    /// Build a report while clamping every score to `0..1`.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        candidate_id: impl Into<String>,
+        render_delta_by_camera: Vec<f32>,
+        max_delta: f32,
+        average_delta: f32,
+        silhouette_delta: f32,
+        bbox_delta: f32,
+        changed_part_groups: Vec<String>,
+        changed_controls: Vec<String>,
+        legibility_class: CandidateLegibilityClass,
+        reject_reason: Option<String>,
+        human_summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            candidate_id: candidate_id.into(),
+            render_delta_by_camera: render_delta_by_camera
+                .into_iter()
+                .map(clamp_score)
+                .collect(),
+            max_delta: clamp_score(max_delta),
+            average_delta: clamp_score(average_delta),
+            silhouette_delta: clamp_score(silhouette_delta),
+            bbox_delta: clamp_score(bbox_delta),
+            changed_part_groups,
+            changed_controls,
+            legibility_class,
+            reject_reason,
+            human_summary: human_summary.into(),
+        }
+    }
+}
+
 /// Candidate explanation consistency checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateExplanationQuality {
@@ -1179,6 +1262,9 @@ pub struct CandidateVariationMetadata {
     /// Visible delta evidence.
     #[serde(default)]
     pub visible_delta: CandidateVisibleDeltaReport,
+    /// Strict multi-camera legibility evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perceptual_report: Option<PerceptualCandidateReport>,
     /// Explanation quality.
     #[serde(default)]
     pub explanation_quality: CandidateExplanationQuality,
@@ -1194,6 +1280,7 @@ impl Default for CandidateVariationMetadata {
             changed_roles: Vec::new(),
             respects_locks: true,
             visible_delta: CandidateVisibleDeltaReport::default(),
+            perceptual_report: None,
             explanation_quality: CandidateExplanationQuality::default(),
         }
     }
