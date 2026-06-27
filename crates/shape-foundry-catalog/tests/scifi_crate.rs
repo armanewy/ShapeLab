@@ -1,21 +1,24 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fs};
 
 use serde::de::DeserializeOwned;
 use shape_asset::{
     CutGroupRole, GeometrySource, ModelingOperationSpec, OperationId, PartInstanceId,
 };
-use shape_compile::validation::{
-    ValidationLimits, validate_model, validation_config_from_recipe_with_limits,
+use shape_compile::{
+    export::{verify_model_package, write_model_package},
+    validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
 };
 use shape_family::AssetFamilySchema;
 use shape_foundry::{
-    ControlEvaluationContext, ControlKind, ControlValue, CustomizerProfile, FoundryCommand,
-    FoundryCompilationOutput, FoundryLock, FoundryLockMode, FoundryLockTarget, VariationIntent,
-    compile_foundry_document, whole_model_preview_sample_requests_with_count,
+    CandidateLegibilityClass, ControlEvaluationContext, ControlKind, ControlValue,
+    CustomizerProfile, FoundryCommand, FoundryCompilationOutput, FoundryLock, FoundryLockMode,
+    FoundryLockTarget, VariationIntent, compile_foundry_document,
+    whole_model_preview_sample_requests_with_count,
 };
 use shape_foundry_catalog::{FoundryFixtureCatalog, scifi_crate};
 use shape_search::foundry::{
-    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+    FoundryCandidateMode, FoundryCandidateRejectionReason, FoundryCandidateRequest,
+    generate_foundry_candidate_plans,
 };
 
 fn payload<T: DeserializeOwned>(fixture: &FoundryFixtureCatalog, id: &str) -> T {
@@ -177,6 +180,27 @@ fn compiled_crate_has_no_accidental_intersections() {
 }
 
 #[test]
+fn compiled_crate_exports_clean_model_package() {
+    let output = compile_with(&[]);
+    assert_valid_model(&output);
+
+    let package_dir = std::env::temp_dir().join(format!(
+        "shape-lab-scifi-crate-export-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&package_dir);
+    write_model_package(&output.recipe, &output.artifact, &package_dir).expect("write package");
+    let verification = verify_model_package(&package_dir).expect("verify package");
+    assert!(
+        verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads,
+        "package verification should pass: {verification:#?}"
+    );
+    fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
 fn authored_strategy_labels_match_hq_intents() {
     let fixture = scifi_crate::fixture_catalog();
     let profile = profile(&fixture);
@@ -226,7 +250,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("vent_density", ControlValue::Choice("dense".to_owned())),
                 ("handle_style", ControlValue::Choice("flush".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.2)),
-                ("detail_density", ControlValue::Integer(8)),
+                ("detail_density", ControlValue::Integer(10)),
             ],
         ),
         (
@@ -238,7 +262,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("vent_density", ControlValue::Choice("standard".to_owned())),
                 ("handle_style", ControlValue::Choice("cargo_bar".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.75)),
-                ("detail_density", ControlValue::Integer(12)),
+                ("detail_density", ControlValue::Integer(16)),
             ],
         ),
         (
@@ -263,7 +287,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("vent_density", ControlValue::Choice("standard".to_owned())),
                 ("handle_style", ControlValue::Choice("cargo_bar".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.35)),
-                ("detail_density", ControlValue::Integer(12)),
+                ("detail_density", ControlValue::Integer(16)),
             ],
         ),
         (
@@ -275,7 +299,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("vent_density", ControlValue::Choice("dense".to_owned())),
                 ("handle_style", ControlValue::Choice("side_rail".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.55)),
-                ("detail_density", ControlValue::Integer(10)),
+                ("detail_density", ControlValue::Integer(14)),
             ],
         ),
         (
@@ -321,14 +345,24 @@ fn vent_variants_are_structurally_distinct() {
 
     assert_eq!(sparse_vents.len(), 2);
     assert_eq!(standard_vents.len(), 3);
-    assert_eq!(dense_vents.len(), 5);
+    assert_eq!(dense_vents.len(), 6);
     assert!(
-        sparse_vents.iter().any(|(_, size, _)| size[0] > 0.25),
+        sparse_vents
+            .iter()
+            .any(|(_, size, _, rim)| size[0] > 0.3 && *rim > 0.04),
         "sparse vents should read as large paired slots"
     );
     assert!(
-        dense_vents.iter().all(|(_, size, _)| size[0] < 0.16),
+        dense_vents
+            .iter()
+            .all(|(_, size, _, rim)| size[0] <= 0.16 && *rim < 0.02),
         "dense vents should read as a tight bank of smaller slots"
+    );
+    assert!(
+        dense_vents
+            .iter()
+            .any(|(_, _, center, _)| center[1] < -0.45),
+        "dense vents should use a second row that reads at card size"
     );
 }
 
@@ -357,8 +391,8 @@ fn body_panel_heft_detail_and_edge_endpoints_are_visible_descriptors() {
     let broad = compile_with(&[("body_proportions", ControlValue::Scalar(1.0))]);
     let compact_half = role_rounded_box_half_extents(&compact, "body");
     let broad_half = role_rounded_box_half_extents(&broad, "body");
-    assert!(broad_half[0] - compact_half[0] > 0.65);
-    assert!(broad_half[2] - compact_half[2] > 0.2);
+    assert!(broad_half[0] - compact_half[0] > 1.0);
+    assert!(broad_half[2] - compact_half[2] > 0.35);
 
     let light = compile_with(&[("structural_heft", ControlValue::Scalar(0.0))]);
     let heavy = compile_with(&[("structural_heft", ControlValue::Scalar(1.0))]);
@@ -369,15 +403,30 @@ fn body_panel_heft_detail_and_edge_endpoints_are_visible_descriptors() {
 
     let shallow = compile_with(&[("panel_depth", ControlValue::Scalar(0.0))]);
     let deep = compile_with(&[("panel_depth", ControlValue::Scalar(1.0))]);
-    assert!(panel_depth(&deep) > panel_depth(&shallow) + 0.08);
+    let shallow_depths = panel_depths(&shallow);
+    let deep_depths = panel_depths(&deep);
+    assert_eq!(shallow_depths.len(), 2);
+    assert_eq!(deep_depths.len(), 2);
+    assert!(
+        deep_depths
+            .iter()
+            .zip(shallow_depths.iter())
+            .all(|(deep, shallow)| *deep > *shallow + 0.11),
+        "both front panel cuts should get a card-visible depth delta"
+    );
 
     let low_detail = compile_with(&[("detail_density", ControlValue::Integer(4))]);
-    let high_detail = compile_with(&[("detail_density", ControlValue::Integer(12))]);
-    assert!(fastener_count(&high_detail) > fastener_count(&low_detail));
+    let high_detail = compile_with(&[("detail_density", ControlValue::Integer(16))]);
+    assert_eq!(fastener_count(&low_detail), 4);
+    assert_eq!(fastener_count(&high_detail), 16);
+    assert!(
+        mesh_triangle_count(&high_detail) > mesh_triangle_count(&low_detail),
+        "high detail should add visible fastener geometry, not metadata-only noise"
+    );
 
     let crisp = compile_with(&[("edge_softness", ControlValue::Scalar(0.0))]);
     let soft = compile_with(&[("edge_softness", ControlValue::Scalar(1.0))]);
-    assert!(body_radius(&soft) > body_radius(&crisp) + 0.09);
+    assert!(body_radius(&soft) > body_radius(&crisp) + 0.11);
 }
 
 #[test]
@@ -391,6 +440,15 @@ fn explore_candidates_survive_as_intent_labeled_whole_asset_ideas() {
         output.candidates.len() >= 4,
         "expected at least four visibly distinct whole-asset candidates"
     );
+    let unique_change_signatures = output
+        .candidates
+        .iter()
+        .map(|candidate| candidate.changed_controls.join("|"))
+        .collect::<BTreeSet<_>>();
+    assert!(
+        unique_change_signatures.len() >= 4,
+        "at least four Explore candidates should be structurally distinct"
+    );
     assert!(
         output
             .candidates
@@ -401,13 +459,42 @@ fn explore_candidates_survive_as_intent_labeled_whole_asset_ideas() {
     assert!(
         output.candidates.iter().all(|candidate| {
             candidate.variation_metadata.visible_delta.shape_delta_score > 0.0
+                && candidate.variation_metadata.visible_delta.legibility_class
+                    != CandidateLegibilityClass::TooSubtle
                 && candidate.conformance.accepted
         }),
-        "returned candidates should have visible shape evidence and conformance"
+        "returned candidates should have visible shape evidence, no TooSubtle class, and conformance"
+    );
+    assert!(
+        output.candidates.iter().all(|candidate| candidate
+            .variation_metadata
+            .visible_delta
+            .legibility_class
+            .selectable()),
+        "normal whole-asset ideas should be selectable legibility classes"
     );
     for candidate in &output.candidates {
         assert!(candidate_label_is_intent(&candidate.label));
+        assert!(!candidate.label.contains("TooSubtle"));
     }
+    let rejected_too_subtle = output
+        .diagnostics
+        .rejections
+        .get(&FoundryCandidateRejectionReason::TooSubtle)
+        .copied()
+        .unwrap_or_default();
+    let returned_too_subtle = output
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.variation_metadata.visible_delta.legibility_class
+                == CandidateLegibilityClass::TooSubtle
+        })
+        .count();
+    assert_eq!(
+        returned_too_subtle, 0,
+        "TooSubtle proposals may be rejected ({rejected_too_subtle}), but must not be returned"
+    );
 }
 
 #[test]
@@ -544,7 +631,9 @@ fn group_operations_match(
     })
 }
 
-fn vent_operations(output: &FoundryCompilationOutput) -> Vec<(OperationId, [f32; 2], [f32; 2])> {
+fn vent_operations(
+    output: &FoundryCompilationOutput,
+) -> Vec<(OperationId, [f32; 2], [f32; 2], f32)> {
     let groups = &output.recipe.variation.semantic_cut_groups;
     let body_definition = groups["vent_slots"].definition;
     let operations = &output.recipe.definitions[&body_definition]
@@ -562,8 +651,9 @@ fn vent_operations(output: &FoundryCompilationOutput) -> Vec<(OperationId, [f32;
                         operation,
                         size,
                         center,
+                        rim_width,
                         ..
-                    } => Some((*operation, *size, *center)),
+                    } => Some((*operation, *size, *center, *rim_width)),
                     _ => None,
                 })
         })
@@ -645,17 +735,17 @@ fn instance_world_translation(
     translation
 }
 
-fn panel_depth(output: &FoundryCompilationOutput) -> f32 {
+fn panel_depths(output: &FoundryCompilationOutput) -> Vec<f32> {
     output
         .recipe
         .definitions
         .values()
         .flat_map(|definition| &definition.geometry.operations)
-        .find_map(|operation| match operation {
+        .filter_map(|operation| match operation {
             ModelingOperationSpec::RecessedPanelCut { depth, .. } => Some(*depth),
             _ => None,
         })
-        .expect("panel cut")
+        .collect()
 }
 
 fn fastener_count(output: &FoundryCompilationOutput) -> u32 {
@@ -670,6 +760,11 @@ fn fastener_count(output: &FoundryCompilationOutput) -> u32 {
         })
         .expect("fastener linear array")
 }
+
+fn mesh_triangle_count(output: &FoundryCompilationOutput) -> usize {
+    output.artifact.combined_preview.mesh.indices.len() / 3
+}
+
 fn body_radius(output: &FoundryCompilationOutput) -> f32 {
     let tag = "role:body";
     let body = output
