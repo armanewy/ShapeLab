@@ -93,11 +93,13 @@ Promoted Wave 38 gear benchmarks verify export/reopen by default because their
 kit metadata targets the Usable tier. `--verify-export` remains accepted and is
 still required for older profiles when making Usable claims.
 
-`roman-bridge-hq` was the first built-in profile authored to satisfy the Usable
-automation bar. Wave 38 extends that bar to the promoted gear kits: Fantasy
-Sword, Round Shield, Hero Helmet, Pauldron Pair, and Chest Armor. They remain
-hidden from the default novice catalog until manual review is approved.
-Adversarial review remains required before Showcase claims.
+`roman-bridge-hq` was the first built-in profile authored to satisfy the earlier
+Usable automation bar, but the starter-template benchmark now keeps it
+PreviewOnly until the visible disconnected-part gate is cleared. Wave 38
+extends the HQ bar to the promoted gear kits: Fantasy Sword, Round Shield, Hero
+Helmet, Pauldron Pair, and Chest Armor. They remain hidden from the default
+novice catalog until manual review is approved. Adversarial review remains
+required before Showcase claims.
 
 `prepared-hero-template-v1` is a contract-only prepared hero benchmark. Its
 expected automated report is Draft because it has no rendered clay mesh,

@@ -529,7 +529,7 @@ fn provider_slot_id(role_id: &str) -> String {
 
 fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
-        "roman-bridge-hq" | "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
+        "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
             FoundryKitQualityTier::Usable
         }
         slug if is_showcase_gear_slug(slug) => FoundryKitQualityTier::Usable,
@@ -645,7 +645,7 @@ mod tests {
         assert!(decision.reason.unwrap().contains("Manual review"));
 
         let hq_bridge = built_in_foundry_kit_package("roman-bridge-hq").expect("hq bridge kit");
-        assert_eq!(hq_bridge.kit.quality_tier, FoundryKitQualityTier::Usable);
+        assert_eq!(hq_bridge.kit.quality_tier, FoundryKitQualityTier::Prototype);
         assert_eq!(
             hq_bridge.kit.source_profile_slug.as_deref(),
             Some("roman-bridge-hq")
@@ -653,7 +653,7 @@ mod tests {
         let decision =
             foundry_kit_visibility_decision(&hq_bridge.kit, &hq_bridge.review_manifest, false);
         assert!(!decision.visible);
-        assert!(decision.reason.unwrap().contains("Manual review"));
+        assert!(decision.reason.unwrap().contains("preview catalog"));
     }
 
     #[test]

@@ -167,6 +167,65 @@ impl CatalogCurationMetadata {
     }
 }
 
+/// Minimal starter-template benchmark evidence used to gate novice catalog exposure.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct StarterTemplateQualityEvidence {
+    /// Built-in fixture slug.
+    pub profile_slug: &'static str,
+    /// Count of returned selectable whole-asset ideas.
+    pub visible_idea_count: usize,
+    /// Count of distinct selectable whole-asset ideas.
+    pub distinct_visible_idea_count: usize,
+    /// Count of primary controls in the novice profile.
+    pub primary_control_count: usize,
+    /// Count of primary controls with endpoint report rows.
+    pub endpoint_reported_primary_control_count: usize,
+    /// Count of primary controls whose endpoint report is readable.
+    pub endpoint_readable_primary_control_count: usize,
+    /// Count of returned whole-asset candidates classified TooSubtle.
+    pub returned_too_subtle_candidate_count: usize,
+    /// Count of candidates with broken, floating, invalid, or non-conformant parts.
+    pub broken_or_floating_part_count: usize,
+    /// Whether package export and conformance checks passed.
+    pub export_conformance_clean: bool,
+    /// Whether the benchmark needed Advanced Recipe or another authoring lane.
+    pub advanced_recipe_required: bool,
+    /// Count of candidate summaries exposing raw technical terms.
+    pub raw_technical_summary_count: usize,
+}
+
+impl StarterTemplateQualityEvidence {
+    /// Return true when the evidence satisfies the starter-template quality bar.
+    #[must_use]
+    pub const fn passes_benchmark(self) -> bool {
+        self.visible_idea_count >= 4
+            && self.distinct_visible_idea_count >= 4
+            && self.primary_control_count > 0
+            && self.endpoint_reported_primary_control_count == self.primary_control_count
+            && self.endpoint_readable_primary_control_count == self.primary_control_count
+            && self.returned_too_subtle_candidate_count == 0
+            && self.broken_or_floating_part_count == 0
+            && self.export_conformance_clean
+            && !self.advanced_recipe_required
+            && self.raw_technical_summary_count == 0
+    }
+}
+
+/// Convert starter-template benchmark evidence into catalog curation state.
+///
+/// Failed starters remain available for preview/developer review, but they may
+/// not claim Usable or appear in the default novice catalog.
+#[must_use]
+pub const fn starter_template_curation_state_from_quality(
+    evidence: StarterTemplateQualityEvidence,
+) -> CatalogCurationState {
+    if evidence.passes_benchmark() {
+        CatalogCurationState::Usable
+    } else {
+        CatalogCurationState::PreviewOnly
+    }
+}
+
 /// One JSON catalog payload with its exact content reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FoundryCatalogSerializedEntry {
@@ -323,11 +382,11 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
         },
         CatalogCurationMetadata {
             profile_slug: "roman-bridge-hq",
-            state: CatalogCurationState::Usable,
+            state: CatalogCurationState::PreviewOnly,
             has_visual_direction_evidence: true,
             has_readable_control_evidence: true,
             has_human_showcase_review: false,
-            note: "HQ Roman Bridge has authored visual direction and primary-control evidence.",
+            note: "HQ Roman Bridge remains preview-only until refreshed benchmark evidence clears the visible disconnected-part gate.",
         },
         CatalogCurationMetadata {
             profile_slug: "sci-fi-crate",
@@ -1481,7 +1540,6 @@ mod tests {
     #[test]
     fn choose_visible_fixtures_keep_default_parts_visually_connected() {
         let visible_slugs = BTreeSet::from([
-            "roman-bridge-hq",
             "sci-fi-crate",
             "stylized-lamp",
             "sci-fi-door",
