@@ -6,10 +6,10 @@ use super::directions::DirectionPartGroup;
 pub(crate) const MAKE_WORKFLOW_STEPS: [&str; 2] = ["Choose", "Make"];
 
 /// Default whole-asset generation action.
-pub(crate) const TRY_WHOLE_ASSET_IDEAS: &str = "Try 6 whole-asset ideas";
+pub(crate) const TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 
 /// Product-visible selected candidate actions.
-pub(crate) const SELECTED_COMPARISON_ACTIONS: [&str; 2] = ["Use This Idea", "Reject"];
+pub(crate) const SELECTED_COMPARISON_ACTIONS: [&str; 2] = ["Use this idea", "Reject"];
 
 /// Return the active Make scope label.
 #[must_use]

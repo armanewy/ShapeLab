@@ -21,9 +21,9 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
 ];
 
 pub(crate) const PRIMARY_ACTION_LABELS: [&str; 12] = [
-    "Try 6 whole-asset ideas",
+    "Try ideas",
     "Try handle ideas",
-    "Use This Idea",
+    "Use this idea",
     "Add to Pack",
     "Add Current Asset",
     "Export Pack",
