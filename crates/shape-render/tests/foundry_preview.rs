@@ -6,7 +6,8 @@ use shape_render::foundry::{
     FoundryChangedRoleOverlay, FoundryPreviewBatchRequest, FoundryPreviewCache,
     FoundryPreviewCacheStatus, FoundryPreviewControlValue, FoundryPreviewError, FoundryPreviewKind,
     FoundryPreviewRequest, FoundryPreviewResolution, FoundryPreviewVariationMetadata,
-    compare_foundry_rendered_visible_delta, render_foundry_previews,
+    classify_foundry_rendered_perceptual_report, compare_foundry_rendered_visible_delta,
+    render_foundry_previews,
 };
 use shape_render::{OrbitCamera, RenderError, RenderSettings, RenderedImage};
 
@@ -658,6 +659,41 @@ fn foundry_rendered_visible_delta_reports_unavailable_for_hidden_or_mismatched_p
     assert_eq!(hidden_delta.score, 0.0);
     assert!(!mismatch_delta.available());
     assert_eq!(mismatch_delta.score, 0.0);
+}
+
+#[test]
+fn foundry_rendered_perceptual_report_requires_multiple_views() {
+    let background = [7, 9, 11, 255];
+    let parent = RenderedImage {
+        width: 1,
+        height: 2,
+        rgba8: vec![7, 9, 11, 255, 200, 200, 200, 255],
+    };
+    let candidate = RenderedImage {
+        width: 1,
+        height: 2,
+        rgba8: vec![200, 200, 200, 255, 7, 9, 11, 255],
+    };
+
+    let single_view = classify_foundry_rendered_perceptual_report(
+        "single-view",
+        &[(&parent, &candidate)],
+        background,
+    );
+    let multi_view = classify_foundry_rendered_perceptual_report(
+        "multi-view",
+        &[(&parent, &candidate), (&parent, &candidate)],
+        background,
+    );
+
+    assert_eq!(
+        single_view.legibility_class,
+        CandidateLegibilityClass::Unsupported
+    );
+    assert!(matches!(
+        multi_view.legibility_class,
+        CandidateLegibilityClass::Clear | CandidateLegibilityClass::Strong
+    ));
 }
 
 fn batch(
