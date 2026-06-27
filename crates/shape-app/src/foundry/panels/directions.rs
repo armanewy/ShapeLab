@@ -429,7 +429,8 @@ impl DirectionBoardValidation {
     #[must_use]
     pub(crate) fn is_valid(&self) -> bool {
         self.candidate_slot_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
-            && self.filled_candidate_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
+            && self.filled_candidate_count > 0
+            && self.filled_candidate_count <= VISIBLE_DIRECTION_CANDIDATE_CARDS
             && self.preview_images_present
             && self.fixed_camera
             && self.whole_model_only

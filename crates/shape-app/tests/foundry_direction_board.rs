@@ -542,7 +542,7 @@ fn board_guard_truncates_to_six_candidates_and_emits_no_isolated_part_options() 
 }
 
 #[test]
-fn board_validation_requires_six_filled_candidate_images() {
+fn board_validation_accepts_fewer_clear_candidate_images() {
     let camera = OrbitCamera::default();
     let parent = parent_card(camera.clone());
 
@@ -550,6 +550,16 @@ fn board_validation_requires_six_filled_candidate_images() {
     assert_eq!(empty_board.validation.filled_candidate_count, 0);
     assert!(empty_board.validation.preview_images_present);
     assert!(!empty_board.validation.is_valid());
+
+    let two_candidates = six_candidates(&camera)
+        .into_iter()
+        .take(2)
+        .collect::<Vec<_>>();
+    let partial_board =
+        direction_board_view(&parent, &two_candidates, DirectionBoardState::default());
+    assert_eq!(partial_board.validation.filled_candidate_count, 2);
+    assert!(partial_board.validation.preview_images_present);
+    assert!(partial_board.validation.is_valid());
 
     let mut candidates = six_candidates(&camera);
     candidates[3].rgba8 = vec![1, 2, 3];

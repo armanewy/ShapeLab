@@ -679,7 +679,7 @@ mod tests {
             secondary: Some(ActionSpec::disabled(
                 "Export",
                 ButtonTone::Secondary,
-                "Build the current model before exporting.",
+                "Prepare the current model before exporting.",
             )),
         };
         assert!(footer.validate().is_ok());

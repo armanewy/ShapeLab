@@ -39,7 +39,7 @@ pub(crate) const STATUS_LABELS: [&str; 8] = [
     "Ready",
     "Saved",
     "Unsaved",
-    "Build complete",
+    "Model prepared",
     "Preview building",
     "Export ready",
     "Needs a model first",

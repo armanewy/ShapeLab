@@ -12,14 +12,16 @@ Add-Type -AssemblyName System.Drawing
 
 $required = @(
     "01_choose.png",
-    "02_make_initial_crate.png",
-    "03_make_generated_whole_asset_ideas.png",
-    "04_make_selected_comparison.png",
-    "05_make_focus_handles.png",
-    "06_make_handle_ideas.png",
-    "07_make_focus_vents.png",
-    "08_make_pack_drawer.png",
-    "09_make_export_drawer.png"
+    "02_make_ready.png",
+    "03_generating_ideas.png",
+    "04_generated_ideas.png",
+    "05_selected_comparison.png",
+    "06_focus_handles.png",
+    "07_generating_handle_ideas.png",
+    "08_handle_ideas.png",
+    "09_focus_vents.png",
+    "10_pack_drawer.png",
+    "11_export_drawer.png"
 )
 
 $records = @{}
@@ -49,12 +51,15 @@ foreach ($name in $required) {
 }
 
 $differentPairs = @(
-    @("03_make_generated_whole_asset_ideas.png", "02_make_initial_crate.png"),
-    @("04_make_selected_comparison.png", "03_make_generated_whole_asset_ideas.png"),
-    @("06_make_handle_ideas.png", "05_make_focus_handles.png"),
-    @("07_make_focus_vents.png", "06_make_handle_ideas.png"),
-    @("08_make_pack_drawer.png", "07_make_focus_vents.png"),
-    @("09_make_export_drawer.png", "08_make_pack_drawer.png")
+    @("03_generating_ideas.png", "02_make_ready.png"),
+    @("04_generated_ideas.png", "03_generating_ideas.png"),
+    @("05_selected_comparison.png", "04_generated_ideas.png"),
+    @("06_focus_handles.png", "05_selected_comparison.png"),
+    @("07_generating_handle_ideas.png", "06_focus_handles.png"),
+    @("08_handle_ideas.png", "06_focus_handles.png"),
+    @("09_focus_vents.png", "08_handle_ideas.png"),
+    @("10_pack_drawer.png", "09_focus_vents.png"),
+    @("11_export_drawer.png", "10_pack_drawer.png")
 )
 
 foreach ($pair in $differentPairs) {

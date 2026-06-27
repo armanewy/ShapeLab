@@ -176,10 +176,10 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         && visible_strings.contains(&"Add at least one asset before exporting a pack.");
     let export_gate = visible_strings.contains(&"Export ready")
         && visible_strings.contains(&"Current asset ready")
-        && visible_strings.contains(&"Build the current asset before exporting.");
+        && visible_strings.contains(&"Prepare the current asset before exporting.");
     let disabled_states_have_reasons = [
         "Choose a template or open a project first.",
-        "Build the current model first.",
+        "Prepare the current model first.",
         "Add at least one asset before exporting a pack.",
         "This option is not available right now.",
     ]
