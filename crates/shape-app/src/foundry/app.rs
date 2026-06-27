@@ -5561,7 +5561,7 @@ mod tests {
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
         assert_eq!(installed_product_kit_count(), 17);
-        assert_eq!(default_product_home_profile_count(), 3);
+        assert_eq!(default_product_home_profile_count(), 2);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -5569,8 +5569,8 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
         assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
-        assert!(default_labels.contains(&"Roman Timber Bridge HQ"));
         assert!(default_labels.contains(&"Stylized Furniture Lamp"));
+        assert!(!default_labels.contains(&"Roman Timber Bridge HQ"));
         assert!(!default_labels.contains(&"Roman Timber Bridge"));
         assert!(!default_labels.contains(&"Sci-Fi Door Panel"));
 
@@ -5676,7 +5676,7 @@ mod tests {
             &mut selected_slug,
         );
 
-        assert_eq!(selected_slug.as_deref(), Some("roman-bridge-hq"));
+        assert_eq!(selected_slug.as_deref(), None);
         assert!(
             filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::Props)
                 .iter()
