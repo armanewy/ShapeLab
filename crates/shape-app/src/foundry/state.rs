@@ -786,6 +786,19 @@ impl FoundryAppState {
                 })
                 .collect()
         };
+        if self
+            .selected_candidate
+            .as_ref()
+            .is_none_or(|selected| !self.candidates.iter().any(|card| &card.id == selected))
+        {
+            self.selected_candidate = self.candidates.first().map(|card| card.id.clone());
+        }
+        let selected = self.selected_candidate.clone();
+        for card in &mut self.candidates {
+            card.selected = selected
+                .as_ref()
+                .is_some_and(|selected| selected == &card.id);
+        }
         self.candidate_output = Some(Box::new(output));
     }
 
@@ -816,6 +829,15 @@ impl FoundryAppState {
             .is_some_and(|selected| !visible_candidate_ids.contains(selected))
         {
             self.selected_candidate = None;
+        }
+        if self.selected_candidate.is_none() {
+            self.selected_candidate = self.candidates.first().map(|card| card.id.clone());
+        }
+        let selected = self.selected_candidate.clone();
+        for card in &mut self.candidates {
+            card.selected = selected
+                .as_ref()
+                .is_some_and(|selected| selected == &card.id);
         }
         if rejected_count > 0 {
             self.status = Some(format!(
