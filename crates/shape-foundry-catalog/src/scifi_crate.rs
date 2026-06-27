@@ -28,9 +28,9 @@ use crate::{
 };
 
 const FRONT_REGION: RegionId = RegionId(0);
-const BODY_HALF_EXTENTS: [f32; 3] = [1.25, 0.54, 0.78];
-const BODY_RADIUS: f32 = 0.075;
-const FRONT_DETAIL_Y: f32 = 0.63;
+const BODY_HALF_EXTENTS: [f32; 3] = [1.28, 0.5, 0.88];
+const BODY_RADIUS: f32 = 0.065;
+const FRONT_DETAIL_Y: f32 = 0.67;
 
 /// Build the sci-fi crate fixture catalog.
 #[must_use]
@@ -107,9 +107,9 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "Detail Density",
                 "fastener",
                 4.0,
-                12.0,
+                16.0,
                 1.0,
-                8,
+                10,
             ),
             toggle_slot("has_trim", "Has Trim", "trim", true),
             runtime_ratio_slot("runtime_wear", "Runtime Wear", "body", 0.2),
@@ -167,7 +167,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 ),
                 transform: ScalarTransform::Ratio {
                     minimum: 0.92,
-                    maximum: 1.68,
+                    maximum: 1.95,
                 },
             },
             ParameterBinding::Scalar {
@@ -178,8 +178,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "geometry.rounded_box.half_extents.z",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.64,
-                    maximum: 0.9,
+                    minimum: 0.88,
+                    maximum: 1.24,
                 },
             },
             ParameterBinding::Scalar {
@@ -190,8 +190,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "geometry.rounded_box.half_extents.y",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.34,
-                    maximum: 0.56,
+                    minimum: 0.36,
+                    maximum: 0.6,
                 },
             },
             ParameterBinding::Scalar {
@@ -202,8 +202,20 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "operation.1.recessed_panel_cut.depth",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.035,
-                    maximum: 0.13,
+                    minimum: 0.045,
+                    maximum: 0.17,
+                },
+            },
+            ParameterBinding::Scalar {
+                slot: "panel_depth".to_owned(),
+                role: "body".to_owned(),
+                local_path: shape_asset::definition_scalar_path(
+                    crate::LOCAL_DEFINITION,
+                    "operation.2.recessed_panel_cut.depth",
+                ),
+                transform: ScalarTransform::Ratio {
+                    minimum: 0.045,
+                    maximum: 0.17,
                 },
             },
             ParameterBinding::ChoiceToPrototype {
@@ -232,8 +244,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "geometry.rounded_box.radius",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.035,
-                    maximum: 0.13,
+                    minimum: 0.025,
+                    maximum: 0.145,
                 },
             },
             ParameterBinding::Scalar {
@@ -264,34 +276,35 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             body_fragment(
                 "sparse_vent_body",
                 &[
-                    VentSpec::new([-0.32, -0.26], [0.28, 0.065], 0.024),
-                    VentSpec::new([0.32, -0.26], [0.28, 0.065], 0.024),
+                    VentSpec::new([-0.43, -0.36], [0.36, 0.12], 0.05),
+                    VentSpec::new([0.43, -0.36], [0.36, 0.12], 0.05),
                 ],
             ),
             body_fragment(
                 "standard_vent_body",
                 &[
-                    VentSpec::new([-0.34, -0.27], [0.22, 0.055], 0.019),
-                    VentSpec::new([0.0, -0.27], [0.22, 0.055], 0.019),
-                    VentSpec::new([0.34, -0.27], [0.22, 0.055], 0.019),
+                    VentSpec::new([-0.48, -0.39], [0.26, 0.09], 0.032),
+                    VentSpec::new([0.0, -0.39], [0.26, 0.09], 0.032),
+                    VentSpec::new([0.48, -0.39], [0.26, 0.09], 0.032),
                 ],
             ),
             body_fragment(
                 "dense_vent_body",
                 &[
-                    VentSpec::new([-0.48, -0.28], [0.135, 0.043], 0.014),
-                    VentSpec::new([-0.24, -0.28], [0.135, 0.043], 0.014),
-                    VentSpec::new([0.0, -0.28], [0.135, 0.043], 0.014),
-                    VentSpec::new([0.24, -0.28], [0.135, 0.043], 0.014),
-                    VentSpec::new([0.48, -0.28], [0.135, 0.043], 0.014),
+                    VentSpec::new([-0.48, -0.3], [0.16, 0.055], 0.018),
+                    VentSpec::new([0.0, -0.3], [0.16, 0.055], 0.018),
+                    VentSpec::new([0.48, -0.3], [0.16, 0.055], 0.018),
+                    VentSpec::new([-0.48, -0.52], [0.16, 0.055], 0.018),
+                    VentSpec::new([0.0, -0.52], [0.16, 0.055], 0.018),
+                    VentSpec::new([0.48, -0.52], [0.16, 0.055], 0.018),
                 ],
             ),
             rounded_box_fragment(
                 "front_access_plate",
                 "panel",
-                [0.78, 0.055, 0.08],
-                0.018,
-                [0.0, FRONT_DETAIL_Y, 0.58],
+                [0.96, 0.07, 0.105],
+                0.022,
+                [0.0, FRONT_DETAIL_Y, 0.47],
                 Vec::new(),
             ),
             fastener_fragment(),
@@ -301,10 +314,10 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             plate_fragment(
                 "edge_trim",
                 "trim",
-                [2.2, 0.11],
-                0.05,
-                [0.0, FRONT_DETAIL_Y, 0.72],
-                vec![linear_array(1, 2, [0.0, 0.0, -1.41])],
+                [1.55, 0.13],
+                0.075,
+                [0.0, FRONT_DETAIL_Y, 0.74],
+                vec![linear_array(1, 2, [0.0, 0.0, -1.52])],
             ),
         ],
     );
@@ -356,9 +369,9 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "detail_density",
                 "Detail Density",
                 "detail_density",
-                8,
+                10,
                 4,
-                12,
+                16,
             ),
             trim_control,
             runtime_control("runtime_wear", "Runtime Wear", "runtime_wear", 0.2),
@@ -456,7 +469,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 ControlValue::Choice("side_rail".to_owned()),
             ),
             ("edge_softness".to_owned(), ControlValue::Scalar(0.45)),
-            ("detail_density".to_owned(), ControlValue::Integer(8)),
+            ("detail_density".to_owned(), ControlValue::Integer(10)),
             ("has_trim".to_owned(), ControlValue::Toggle(true)),
             ("runtime_wear".to_owned(), ControlValue::Scalar(0.2)),
             ("advisory_weathering".to_owned(), ControlValue::Scalar(0.25)),
@@ -615,7 +628,7 @@ fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
             ),
             "Body half depth",
             0.45,
-            1.2,
+            1.3,
             0.05,
             false,
         ),
@@ -645,12 +658,27 @@ fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
             ),
             "Main panel depth",
             0.02,
-            0.14,
+            0.18,
             0.005,
             false,
         ),
     );
-    recipe.next_ids.parameter = 6;
+    recipe.parameters.insert(
+        ParameterId(6),
+        scalar_parameter(
+            6,
+            shape_asset::definition_scalar_path(
+                crate::LOCAL_DEFINITION,
+                "operation.2.recessed_panel_cut.depth",
+            ),
+            "Secondary panel depth",
+            0.02,
+            0.18,
+            0.005,
+            false,
+        ),
+    );
+    recipe.next_ids.parameter = 7;
     recipe.next_ids.region = 120;
     recipe.next_ids.boundary_loop = 120;
     recipe.next_ids.operation = recipe
@@ -690,8 +718,8 @@ fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
 
 fn body_operations(vents: &[VentSpec]) -> Vec<ModelingOperationSpec> {
     let mut operations = vec![
-        recessed_panel(1, [-0.38, 0.22], 1, 2, 10, 11, 12),
-        recessed_panel(2, [0.38, 0.22], 3, 4, 13, 14, 15),
+        recessed_panel(1, [-0.46, 0.28], 1, 2, 10, 11, 12),
+        recessed_panel(2, [0.46, 0.28], 3, 4, 13, 14, 15),
     ];
     for (index, vent) in vents.iter().enumerate() {
         let operation = 3 + index as u64;
@@ -711,7 +739,7 @@ fn body_operations(vents: &[VentSpec]) -> Vec<ModelingOperationSpec> {
     let region_start = 30 + vents.len() as u64 * 2;
     operations.push(mount_hole(
         hole_start,
-        [-0.72, -0.45],
+        [-0.68, -0.57],
         loop_start,
         loop_start + 1,
         region_start,
@@ -719,7 +747,7 @@ fn body_operations(vents: &[VentSpec]) -> Vec<ModelingOperationSpec> {
     ));
     operations.push(mount_hole(
         hole_start + 1,
-        [0.72, -0.45],
+        [0.68, -0.57],
         loop_start + 2,
         loop_start + 3,
         region_start + 2,
@@ -749,10 +777,10 @@ fn recessed_panel(
         region: FRONT_REGION,
         face: PlanarCutFace::PositiveY,
         center,
-        size: [0.44, 0.32],
-        depth: 0.058,
-        corner_radius: 0.035,
-        rim_width: 0.036,
+        size: [0.54, 0.4],
+        depth: 0.095,
+        corner_radius: 0.045,
+        rim_width: 0.045,
         corner_segments: 3,
         entry_loop: BoundaryLoopId(entry_loop),
         floor_loop: BoundaryLoopId(floor_loop),
@@ -803,9 +831,9 @@ fn mount_hole(
         region: FRONT_REGION,
         face: PlanarCutFace::PositiveY,
         center,
-        radius: 0.04,
+        radius: 0.05,
         radial_segments: 14,
-        rim_width: 0.016,
+        rim_width: 0.022,
         entry_loop: BoundaryLoopId(entry_loop),
         exit_loop: BoundaryLoopId(exit_loop),
         outer_region: FRONT_REGION,
@@ -856,11 +884,11 @@ fn fastener_fragment() -> RecipeFragment {
     let mut fragment = cylinder_fragment(
         "corner_fastener",
         "fastener",
-        0.03,
-        0.08,
+        0.042,
+        0.105,
         20,
-        [-0.82, FRONT_DETAIL_Y, -0.82],
-        vec![linear_array(1, 8, [0.15, 0.0, 0.0])],
+        [-0.72, FRONT_DETAIL_Y, -0.67],
+        vec![linear_array(1, 10, [0.096, 0.0, 0.0])],
     );
     let recipe = &mut fragment.recipe;
     recipe.parameters.insert(
@@ -873,7 +901,7 @@ fn fastener_fragment() -> RecipeFragment {
             ),
             "Fastener count",
             4.0,
-            12.0,
+            16.0,
             1.0,
             true,
         ),
@@ -882,7 +910,7 @@ fn fastener_fragment() -> RecipeFragment {
         OperationId(1),
         CountRangeHint {
             minimum: 4,
-            maximum: 12,
+            maximum: 16,
         },
     );
     recipe.next_ids.parameter = 5;
@@ -911,27 +939,27 @@ fn flush_handle_fragment() -> RecipeFragment {
                 instance: PartInstanceId(91),
                 parent: None,
                 name: "flush inset grip back plate",
-                half_extents: [0.48, 0.065, 0.13],
+                half_extents: [0.54, 0.075, 0.145],
                 radius: 0.026,
-                translation: [0.0, FRONT_DETAIL_Y, -0.47],
+                translation: [0.0, FRONT_DETAIL_Y, -0.43],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(92),
                 instance: PartInstanceId(93),
                 parent: Some(PartInstanceId(91)),
                 name: "left flush grip cheek",
-                half_extents: [0.055, 0.055, 0.19],
+                half_extents: [0.065, 0.058, 0.22],
                 radius: 0.018,
-                translation: [-0.39, 0.13, 0.0],
+                translation: [-0.43, 0.14, 0.0],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(94),
                 instance: PartInstanceId(95),
                 parent: Some(PartInstanceId(91)),
                 name: "right flush grip cheek",
-                half_extents: [0.055, 0.055, 0.19],
+                half_extents: [0.065, 0.058, 0.22],
                 radius: 0.018,
-                translation: [0.39, 0.13, 0.0],
+                translation: [0.43, 0.14, 0.0],
             },
         ],
     )
@@ -947,36 +975,36 @@ fn side_rail_handle_fragment() -> RecipeFragment {
                 instance: PartInstanceId(91),
                 parent: None,
                 name: "left side rail handle",
-                half_extents: [0.055, 0.065, 0.38],
+                half_extents: [0.07, 0.075, 0.42],
                 radius: 0.024,
-                translation: [-0.72, FRONT_DETAIL_Y, -0.16],
+                translation: [-0.68, FRONT_DETAIL_Y, -0.16],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(92),
                 instance: PartInstanceId(93),
                 parent: Some(PartInstanceId(91)),
                 name: "right side rail handle",
-                half_extents: [0.055, 0.065, 0.38],
+                half_extents: [0.07, 0.075, 0.42],
                 radius: 0.024,
-                translation: [1.44, 0.0, 0.0],
+                translation: [1.36, 0.0, 0.0],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(94),
                 instance: PartInstanceId(95),
                 parent: Some(PartInstanceId(91)),
                 name: "upper side rail bracket",
-                half_extents: [0.82, 0.05, 0.055],
+                half_extents: [0.74, 0.055, 0.065],
                 radius: 0.018,
-                translation: [0.72, 0.14, 0.33],
+                translation: [0.68, 0.14, 0.36],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(96),
                 instance: PartInstanceId(97),
                 parent: Some(PartInstanceId(91)),
                 name: "lower side rail bracket",
-                half_extents: [0.82, 0.05, 0.055],
+                half_extents: [0.74, 0.055, 0.065],
                 radius: 0.018,
-                translation: [0.72, 0.14, -0.33],
+                translation: [0.68, 0.14, -0.36],
             },
         ],
     )
@@ -992,27 +1020,27 @@ fn cargo_bar_handle_fragment() -> RecipeFragment {
                 instance: PartInstanceId(91),
                 parent: None,
                 name: "cargo bar grip",
-                half_extents: [0.72, 0.055, 0.06],
+                half_extents: [0.78, 0.065, 0.075],
                 radius: 0.024,
-                translation: [0.0, FRONT_DETAIL_Y, -0.50],
+                translation: [0.0, FRONT_DETAIL_Y, -0.52],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(92),
                 instance: PartInstanceId(93),
                 parent: Some(PartInstanceId(91)),
                 name: "left cargo bar mount",
-                half_extents: [0.11, 0.055, 0.14],
+                half_extents: [0.12, 0.06, 0.16],
                 radius: 0.022,
-                translation: [-0.58, 0.115, 0.0],
+                translation: [-0.62, 0.135, 0.0],
             },
             BoxAssemblyPart {
                 definition: PartDefinitionId(94),
                 instance: PartInstanceId(95),
                 parent: Some(PartInstanceId(91)),
                 name: "right cargo bar mount",
-                half_extents: [0.11, 0.055, 0.14],
+                half_extents: [0.12, 0.06, 0.16],
                 radius: 0.022,
-                translation: [0.58, 0.115, 0.0],
+                translation: [0.62, 0.135, 0.0],
             },
         ],
     )
