@@ -1254,14 +1254,14 @@ impl FoundryDesktopApp {
             return commands;
         }
 
-        let current_preview = self.state.current_preview.clone();
+        let current_preview = self.state.current_preview.as_ref();
         let current_build = self.state.current_build.as_ref();
         let texture_cache = &mut self.texture_cache;
         commands.extend(show_selected_candidate_comparison(
             ui,
             texture_cache,
             current_build,
-            current_preview.as_ref(),
+            current_preview,
             &self.state.candidates,
         ));
         ui.add_space(10.0);
@@ -1671,7 +1671,7 @@ impl FoundryDesktopApp {
             return commands;
         }
         ui.columns(2, |columns| {
-            let current_preview = self.state.current_preview.clone();
+            let current_preview = self.state.current_preview.as_ref();
             let current_build = self.state.current_build.as_ref();
             let texture_cache = &mut self.texture_cache;
             product_card(&mut columns[0], false, |ui| {
@@ -1688,7 +1688,7 @@ impl FoundryDesktopApp {
                 show_pack_contact_sheet(
                     ui,
                     texture_cache,
-                    current_preview.as_ref(),
+                    current_preview,
                     current_build,
                     &view.contact_sheet,
                 );
@@ -1728,7 +1728,7 @@ impl FoundryDesktopApp {
     }
 
     fn show_current_preview_sized(&mut self, ui: &mut egui::Ui, max_edge: f32) {
-        let preview = self.state.current_preview.clone();
+        let preview = self.state.current_preview.as_ref();
         let has_output = self.state.current_output.is_some();
         let rendering_preview = self
             .state
@@ -1791,11 +1791,18 @@ impl FoundryDesktopApp {
     }
 
     fn apply_commands(&mut self, commands: Vec<FoundryAppCommand>, ctx: &egui::Context) {
+        let mut state_changed = false;
         for command in commands {
             match self.state.handle_command(command) {
-                Ok(effects) => self.apply_effects(effects, ctx),
+                Ok(effects) => {
+                    state_changed = true;
+                    self.apply_effects(effects, ctx);
+                }
                 Err(error) => self.state.status = Some(error.to_string()),
             }
+        }
+        if state_changed {
+            self.texture_cache.clear();
         }
     }
 
@@ -1862,6 +1869,7 @@ impl FoundryDesktopApp {
             }
         }
         if affected {
+            self.texture_cache.clear();
             ctx.request_repaint();
         }
     }
@@ -2079,6 +2087,7 @@ impl FoundryDesktopApp {
             Ok(project_file) => match self.state.replace_loaded_project(project_file) {
                 Ok(effects) => {
                     self.jobs.reset();
+                    self.texture_cache.clear();
                     self.state.status = Some(format!("Loaded {}", path.display()));
                     self.tab = FoundryTab::Make;
                     self.drawer = None;
@@ -2093,6 +2102,7 @@ impl FoundryDesktopApp {
 
     fn load_fixture(&mut self, fixture: FoundryFixtureCatalog, ctx: &egui::Context) {
         self.jobs.reset();
+        self.texture_cache.clear();
         match FoundryAppState::new(fixture.document) {
             Ok(mut state) => match state.request_build() {
                 Ok(effects) => {
@@ -4955,39 +4965,34 @@ struct FoundryTextureIdentity {
     build_fingerprint: Option<String>,
     width: u32,
     height: u32,
-    rgba_fingerprint: u64,
 }
 
 impl FoundryTextureIdentity {
-    fn new(
-        preview_id: &str,
-        build: Option<&FoundryBuildStamp>,
-        width: u32,
-        height: u32,
-        rgba8: &[u8],
-    ) -> Self {
+    fn new(preview_id: &str, build: Option<&FoundryBuildStamp>, width: u32, height: u32) -> Self {
         Self {
             preview_id: preview_id.to_owned(),
             build_fingerprint: build.map(|build| build.build_fingerprint.0.to_hex()),
             width,
             height,
-            rgba_fingerprint: preview_image_fingerprint(rgba8),
         }
     }
 
     fn texture_name(&self) -> String {
         format!(
-            "foundry-preview-{}-{}x{}-{}-{:016x}",
+            "foundry-preview-{}-{}x{}-{}",
             self.preview_id,
             self.width,
             self.height,
-            self.build_fingerprint.as_deref().unwrap_or("no-build"),
-            self.rgba_fingerprint
+            self.build_fingerprint.as_deref().unwrap_or("no-build")
         )
     }
 }
 
 impl FoundryTextureCache {
+    fn clear(&mut self) {
+        self.textures.clear();
+    }
+
     fn texture(
         &mut self,
         ctx: &egui::Context,
@@ -4997,7 +5002,7 @@ impl FoundryTextureCache {
         width: u32,
         height: u32,
     ) -> egui::TextureHandle {
-        let identity = FoundryTextureIdentity::new(preview_id, build, width, height, rgba8);
+        let identity = FoundryTextureIdentity::new(preview_id, build, width, height);
         if let Some(cached) = self
             .textures
             .get(preview_id)
@@ -5045,14 +5050,6 @@ fn preview_pixels_with_transparent_matte(rgba8: &[u8], width: u32, height: u32) 
         }
     }
     pixels
-}
-
-fn preview_image_fingerprint(rgba8: &[u8]) -> u64 {
-    const OFFSET: u64 = 14_695_981_039_346_656_037;
-    const PRIME: u64 = 1_099_511_628_211;
-    rgba8.iter().fold(OFFSET, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
-    })
 }
 
 struct FoundryPreviewDraw<'a> {
@@ -6039,7 +6036,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_texture_identity_tracks_preview_id_build_and_pixels() {
+    fn preview_texture_identity_tracks_render_metadata_without_pixel_scan() {
         let bridge = shape_foundry_catalog::roman_bridge::fixture_catalog();
         let crate_fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
         let build_a = compile_foundry_document(&bridge.document, &bridge)
@@ -6049,53 +6046,23 @@ mod tests {
             .expect("crate fixture compiles")
             .build_stamp;
 
-        let identity = FoundryTextureIdentity::new(
-            "option-a",
-            Some(&build_a),
-            2,
-            1,
-            &[0, 0, 0, 255, 255, 255, 255, 255],
-        );
+        let identity = FoundryTextureIdentity::new("option-a", Some(&build_a), 2, 1);
 
         assert_eq!(
             identity,
-            FoundryTextureIdentity::new(
-                "option-a",
-                Some(&build_a),
-                2,
-                1,
-                &[0, 0, 0, 255, 255, 255, 255, 255],
-            )
+            FoundryTextureIdentity::new("option-a", Some(&build_a), 2, 1)
         );
         assert_ne!(
             identity,
-            FoundryTextureIdentity::new(
-                "option-b",
-                Some(&build_a),
-                2,
-                1,
-                &[0, 0, 0, 255, 255, 255, 255, 255],
-            )
+            FoundryTextureIdentity::new("option-b", Some(&build_a), 2, 1)
         );
         assert_ne!(
             identity,
-            FoundryTextureIdentity::new(
-                "option-a",
-                Some(&build_b),
-                2,
-                1,
-                &[0, 0, 0, 255, 255, 255, 255, 255],
-            )
+            FoundryTextureIdentity::new("option-a", Some(&build_b), 2, 1)
         );
         assert_ne!(
             identity,
-            FoundryTextureIdentity::new(
-                "option-a",
-                Some(&build_a),
-                2,
-                1,
-                &[0, 0, 0, 255, 255, 255, 254, 255],
-            )
+            FoundryTextureIdentity::new("option-a", Some(&build_a), 1, 2)
         );
     }
 
