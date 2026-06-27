@@ -79,10 +79,15 @@ Candidate survival means more than receiving six candidate records: each
 survivor must compile, pass model validation, and render a non-placeholder
 whole-model preview.
 
-Candidate survival also means passing Candidate Legibility Engine v1. Six weak
+Candidate survival also means passing Candidate Legibility Engine v2. Six weak
 candidates are not acceptable; fewer honest candidates are acceptable when the
-diagnostics report how many duplicate-looking or too-subtle proposals were
-rejected. Diversity selection happens only after legibility rejection.
+diagnostics separately report duplicate-looking, hidden/internal, and wrong-scope
+rejections. Diversity selection happens only after legibility rejection.
+
+Starter-template primary controls must also pass endpoint visibility reporting.
+Sci-Fi Crate, Roman Bridge, and Stylized Lamp major controls must be at least
+Clear. Edge and softness controls may be SubtleButExplainable only when the
+report labels them that way.
 
 Promoted Wave 38 gear benchmarks verify export/reopen by default because their
 kit metadata targets the Usable tier. `--verify-export` remains accepted and is
