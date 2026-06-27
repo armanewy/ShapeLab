@@ -138,101 +138,112 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
             support_box_fragment(
                 "round_pile_supports",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.105, 0.3, 0.105],
-                    radius: 0.095,
+                    half_extents: [0.085, 0.28, 0.085],
+                    radius: 0.08,
                 },
-                vec![bevel(1, 0.018), linear_array(2, 8, [0.5, 0.0, 0.0])],
+                vec![
+                    bevel(1, 0.012),
+                    linear_array(2, 7, [0.55, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.82]),
+                ],
             ),
             support_box_fragment(
                 "squared_post_supports",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.15, 0.3, 0.15],
+                    half_extents: [0.13, 0.28, 0.13],
                     radius: 0.012,
                 },
                 vec![
                     bevel(1, 0.018),
-                    linear_array(2, 4, [1.04, 0.0, 0.0]),
-                    linear_array(3, 2, [0.0, 0.0, 0.78]),
+                    linear_array(2, 4, [1.18, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.9]),
                 ],
             ),
             support_box_fragment(
                 "stone_pier_blocks",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.26, 0.17, 0.26],
-                    radius: 0.01,
+                    half_extents: [0.34, 0.2, 0.34],
+                    radius: 0.012,
                 },
                 vec![
                     bevel(1, 0.014),
-                    linear_array(2, 5, [0.0, -0.36, 0.0]),
-                    linear_array(3, 3, [1.55, 0.0, 0.0]),
+                    linear_array(2, 4, [0.0, -0.44, 0.0]),
+                    linear_array(3, 3, [1.7, 0.0, 0.0]),
                 ],
             ),
             support_box_fragment(
                 "trestle_frame_supports",
                 GeometrySource::RoundedBox {
-                    half_extents: [0.095, 0.3, 0.1],
+                    half_extents: [0.105, 0.28, 0.105],
                     radius: 0.014,
                 },
                 vec![
                     bevel(1, 0.016),
-                    linear_array(2, 2, [0.0, 0.0, 0.82]),
-                    linear_array(3, 6, [0.62, 0.0, 0.0]),
+                    linear_array(2, 5, [0.78, 0.0, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.9]),
                 ],
             ),
             deck_fragment(
                 "segmented_deck_planks",
-                [3.65, 1.08],
+                [3.65, 0.18],
                 0.082,
                 0.014,
                 [0.0, 0.255, 0.0],
-                1,
+                6,
             ),
             deck_fragment(
                 "wide_plank_deck",
-                [3.8, 1.34],
-                0.095,
+                [3.8, 0.2],
+                0.1,
                 0.018,
                 [0.0, 0.26, 0.0],
-                1,
+                7,
             ),
-            brace_fragment(
+            brace_fragment_with_operations(
                 "minimal_under_ties",
-                [1.35, 0.035, 0.04],
-                &[FragmentOccurrence::at([0.0, -0.05, 0.0])],
+                [1.55, 0.034, 0.036],
+                vec![bevel(1, 0.012), linear_array(2, 2, [0.0, 0.0, 0.72])],
+                &[FragmentOccurrence::at([0.0, -0.05, -0.36])],
             ),
             brace_fragment_with_operations(
                 "x_brace_beam",
-                [1.08, 0.052, 0.042],
+                [1.12, 0.052, 0.042],
                 vec![
                     bevel(1, 0.014),
-                    transform_geometry(2, [0.0, 0.0, 0.0], [0.0, 18.0, 0.0]),
-                    linear_array(3, 2, [0.0, 0.16, 0.0]),
+                    transform_geometry(2, [0.0, 0.0, 0.0], [0.0, 0.0, 24.0]),
+                    linear_array(3, 2, [0.0, 0.18, 0.0]),
+                    linear_array(4, 2, [0.0, 0.0, 0.68]),
                 ],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+                &[FragmentOccurrence::at([0.0, 0.0, -0.34])],
             ),
             brace_fragment_with_operations(
                 "k_brace_beam",
-                [0.78, 0.052, 0.042],
+                [0.82, 0.052, 0.042],
                 vec![
                     bevel(1, 0.014),
-                    transform_geometry(2, [0.18, 0.0, 0.0], [0.0, -24.0, 0.0]),
-                    linear_array(3, 2, [0.0, 0.16, 0.0]),
+                    transform_geometry(2, [0.18, 0.0, 0.0], [0.0, 0.0, -30.0]),
+                    linear_array(3, 2, [0.0, 0.18, 0.0]),
+                    linear_array(4, 2, [0.0, 0.0, 0.68]),
                 ],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+                &[FragmentOccurrence::at([0.0, 0.0, -0.34])],
             ),
             brace_fragment_with_operations(
                 "heavy_reinforced_brace",
-                [1.2, 0.062, 0.052],
-                vec![bevel(1, 0.014), linear_array(2, 3, [0.0, 0.15, 0.0])],
-                &[FragmentOccurrence::at([0.0, 0.0, 0.0])],
+                [1.35, 0.07, 0.055],
+                vec![
+                    bevel(1, 0.014),
+                    linear_array(2, 3, [0.0, 0.18, 0.0]),
+                    linear_array(3, 2, [0.0, 0.0, 0.72]),
+                ],
+                &[FragmentOccurrence::at([0.0, 0.0, -0.36])],
             ),
-            rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.46, 0.56, 1),
-            rail_fragment("guard_rail_courses", [1.72, 0.042, 0.048], 0.78, 0.65, 3),
-            rail_fragment("lookout_rail_courses", [1.75, 0.052, 0.056], 1.05, 0.72, 4),
+            rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.38, 0.64, 1),
+            rail_fragment("guard_rail_courses", [1.75, 0.044, 0.05], 0.78, 0.73, 3),
+            rail_fragment("lookout_rail_courses", [1.8, 0.056, 0.06], 1.18, 0.82, 4),
             connector_fragment(
                 "clean_joinery_detail",
-                [0.08, 0.018, 0.42],
-                vec![bevel(1, 0.006), linear_array(2, 4, [0.72, 0.0, 0.0])],
+                [0.09, 0.018, 0.44],
+                vec![bevel(1, 0.006), linear_array(2, 3, [0.95, 0.0, 0.0])],
             ),
             connector_fragment(
                 "bolted_joinery_detail",
@@ -245,11 +256,11 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
             ),
             connector_fragment(
                 "dense_weathered_joinery",
-                [0.062, 0.024, 0.05],
+                [0.064, 0.024, 0.052],
                 vec![
                     bevel(1, 0.008),
-                    linear_array(2, 9, [0.27, 0.0, 0.0]),
-                    linear_array(3, 3, [0.0, 0.0, 0.46]),
+                    linear_array(2, 11, [0.22, 0.0, 0.0]),
+                    linear_array(3, 3, [0.0, 0.0, 0.43]),
                 ],
             ),
         ]);
@@ -707,24 +718,47 @@ fn bridge_family_implementation(
             local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.x"),
             transform: ScalarTransform::Direct,
         },
-        ParameterBinding::Scalar {
-            slot: "deck_width".to_owned(),
-            role: "deck".to_owned(),
-            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.y"),
-            transform: ScalarTransform::Direct,
-        },
     ];
     match quality {
-        BridgeQuality::Standard => parameter_bindings.push(ParameterBinding::Scalar {
-            slot: "support_heft".to_owned(),
-            role: "support".to_owned(),
-            local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
-            transform: ScalarTransform::Ratio {
-                minimum: 0.105,
-                maximum: 0.21,
+        BridgeQuality::Standard => parameter_bindings.extend([
+            ParameterBinding::Scalar {
+                slot: "deck_width".to_owned(),
+                role: "deck".to_owned(),
+                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.y"),
+                transform: ScalarTransform::Direct,
             },
-        }),
+            ParameterBinding::Scalar {
+                slot: "support_heft".to_owned(),
+                role: "support".to_owned(),
+                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.cylinder.radius"),
+                transform: ScalarTransform::Ratio {
+                    minimum: 0.105,
+                    maximum: 0.21,
+                },
+            },
+        ]),
         BridgeQuality::Hq => parameter_bindings.extend([
+            ParameterBinding::Scalar {
+                slot: "deck_width".to_owned(),
+                role: "deck".to_owned(),
+                local_path: definition_scalar_path(LOCAL_DEFINITION, "geometry.plate.size.y"),
+                transform: ScalarTransform::ScaleOffset {
+                    scale: 0.16,
+                    offset: 0.0,
+                },
+            },
+            ParameterBinding::Scalar {
+                slot: "deck_width".to_owned(),
+                role: "deck".to_owned(),
+                local_path: definition_scalar_path(
+                    LOCAL_DEFINITION,
+                    "operation.2.linear_array.offset.z",
+                ),
+                transform: ScalarTransform::ScaleOffset {
+                    scale: 0.18,
+                    offset: 0.02,
+                },
+            },
             ParameterBinding::Scalar {
                 slot: "support_heft".to_owned(),
                 role: "support".to_owned(),
@@ -733,8 +767,8 @@ fn bridge_family_implementation(
                     "geometry.rounded_box.half_extents.x",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.08,
-                    maximum: 0.18,
+                    minimum: 0.07,
+                    maximum: 0.22,
                 },
             },
             ParameterBinding::Scalar {
@@ -745,8 +779,8 @@ fn bridge_family_implementation(
                     "geometry.rounded_box.half_extents.z",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.08,
-                    maximum: 0.18,
+                    minimum: 0.07,
+                    maximum: 0.22,
                 },
             },
         ]),
@@ -1367,6 +1401,14 @@ fn deck_fragment(
     if courses > 1 {
         operations.push(linear_array(2, courses, [0.0, 0.0, size[1] * 1.12]));
     }
+    let mut scalar_paths = vec![
+        ("geometry.plate.size.x", 2.0, 5.8, 0.05),
+        ("geometry.plate.size.y", 0.05, 1.7, 0.05),
+        ("geometry.plate.thickness", 0.04, 0.22, 0.01),
+    ];
+    if courses > 1 {
+        scalar_paths.push(("operation.2.linear_array.offset.z", 0.05, 0.4, 0.01));
+    }
     bridge_fragment(FragmentSpec {
         id,
         role: "deck",
@@ -1375,11 +1417,7 @@ fn deck_fragment(
         occurrences: vec![FragmentOccurrence::at(translation)],
         port_id: "deck_joint",
         compatibility_tags: vec!["deck_mount", "walkway", "rail_mount", "deck_detail"],
-        scalar_paths: vec![
-            ("geometry.plate.size.x", 2.0, 5.8, 0.05),
-            ("geometry.plate.size.y", 0.65, 1.7, 0.05),
-            ("geometry.plate.thickness", 0.04, 0.22, 0.01),
-        ],
+        scalar_paths,
     })
 }
 

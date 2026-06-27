@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use shape_asset::GeometrySource;
+use shape_asset::{GeometrySource, ModelingOperationSpec};
 use shape_compile::export::{verify_model_package, write_model_package};
 use shape_compile::validation::{
     ValidationLimits, validate_model, validation_config_from_recipe_with_limits,
@@ -237,6 +237,44 @@ fn roman_bridge_hq_profile_declares_required_controls_and_direction_strategies()
             "Minimal Span"
         ]
     );
+    let strategy_controls = |id: &str| {
+        catalog
+            .customizer_profile
+            .candidate_strategies
+            .iter()
+            .find(|strategy| strategy.id == id)
+            .unwrap_or_else(|| panic!("{id} strategy"))
+            .control_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        strategy_controls("light_crossing"),
+        vec![
+            "span_length",
+            "structural_heft",
+            "support_style",
+            "bracing_style"
+        ]
+    );
+    assert_eq!(
+        strategy_controls("wide_deck"),
+        vec!["deck_width", "railing_style", "detail_density"]
+    );
+    assert_eq!(
+        strategy_controls("stone_pier_outpost"),
+        vec!["support_style", "railing_style", "detail_density"]
+    );
+    assert_eq!(
+        strategy_controls("detailed_timberwork"),
+        vec![
+            "structural_heft",
+            "bracing_style",
+            "railing_style",
+            "detail_density"
+        ]
+    );
 }
 
 #[test]
@@ -382,6 +420,25 @@ fn roman_bridge_hq_compiles_with_connector_details_and_valid_model() {
     assert!(compiled_role_count(&output.recipe, &output.artifact, "connector") >= 6);
     assert!(compiled_role_count(&output.recipe, &output.artifact, "support") >= 6);
     assert!(output.artifact.statistics.triangle_count > 2_000);
+
+    assert!(
+        role_linear_arrays(&output.recipe, "deck")
+            .iter()
+            .any(|(count, offset)| *count >= 6 && offset[2].abs() > 0.2),
+        "HQ deck should compile as visibly separated plank courses"
+    );
+    assert!(
+        role_linear_arrays(&output.recipe, "span")
+            .iter()
+            .any(|(count, offset)| *count >= 2 && offset[2].abs() >= 0.9),
+        "HQ span should keep visible paired main beams"
+    );
+    assert!(
+        role_linear_arrays(&output.recipe, "connector")
+            .iter()
+            .any(|(count, offset)| *count >= 7 && offset[0].abs() > 0.2),
+        "HQ connector details should read as repeated secondary beams/fasteners"
+    );
 }
 
 #[test]
@@ -406,6 +463,17 @@ fn roman_bridge_hq_support_options_are_connected_and_structurally_distinct() {
             ControlValue::Provider(provider.to_owned()),
         );
         assert_required_attachments_connected(&output);
+        let model_config = validation_config_from_recipe_with_limits(
+            &output.recipe,
+            &output.artifact,
+            ValidationLimits::default(),
+        );
+        let model_report = validate_model(&output.artifact, &model_config);
+        assert!(
+            model_report.is_valid(),
+            "{provider} should not introduce floating or intersecting supports: {:#?}",
+            model_report.issues
+        );
         let support = role_bounds(&output.recipe, &output.artifact, "support");
         let span = role_bounds(&output.recipe, &output.artifact, "span");
         assert!(
@@ -444,6 +512,17 @@ fn roman_bridge_hq_bracing_options_are_structurally_distinct() {
             ControlValue::Choice(choice.to_owned()),
         );
         assert_required_attachments_connected(&output);
+        let model_config = validation_config_from_recipe_with_limits(
+            &output.recipe,
+            &output.artifact,
+            ValidationLimits::default(),
+        );
+        let model_report = validate_model(&output.artifact, &model_config);
+        assert!(
+            model_report.is_valid(),
+            "{choice} should not introduce broken or intersecting bracing: {:#?}",
+            model_report.issues
+        );
         signatures.insert(role_signature(&output, "brace"));
     }
 
@@ -476,6 +555,73 @@ fn roman_bridge_hq_deck_width_lock_changes_walkable_width_without_breaking_expor
     assert!(verification.checksums_match);
     assert!(verification.topology_matches_manifest);
     assert!(verification.finite_numeric_payloads);
+}
+
+#[test]
+fn roman_bridge_hq_span_heft_rail_and_detail_controls_are_readable() {
+    let fixture = roman_bridge::hq_fixture_catalog();
+
+    let short = compile_with_control(&fixture, "span_length", ControlValue::Scalar(2.8));
+    let long = compile_with_control(&fixture, "span_length", ControlValue::Scalar(5.4));
+    let short_span = role_bounds(&short.recipe, &short.artifact, "span");
+    let long_span = role_bounds(&long.recipe, &long.artifact, "span");
+    assert!(
+        long_span.width() > short_span.width() + 2.0,
+        "span length should visibly change bridge reach: short={short_span:?} long={long_span:?}"
+    );
+
+    let light = compile_with_control(&fixture, "structural_heft", ControlValue::Scalar(0.18));
+    let heavy = compile_with_control(&fixture, "structural_heft", ControlValue::Scalar(0.82));
+    let light_span = role_bounds(&light.recipe, &light.artifact, "span");
+    let heavy_span = role_bounds(&heavy.recipe, &heavy.artifact, "span");
+    let light_support = role_bounds(&light.recipe, &light.artifact, "support");
+    let heavy_support = role_bounds(&heavy.recipe, &heavy.artifact, "support");
+    assert!(
+        heavy_span.height() > light_span.height() + 0.12,
+        "structural heft should deepen the main beams: light={light_span:?} heavy={heavy_span:?}"
+    );
+    assert!(
+        heavy_support.width() > light_support.width() + 0.15,
+        "structural heft should thicken support posts/piers: light={light_support:?} heavy={heavy_support:?}"
+    );
+
+    let curb = compile_with_control(
+        &fixture,
+        "railing_style",
+        ControlValue::Provider("low_curb_rail".to_owned()),
+    );
+    let lookout = compile_with_control(
+        &fixture,
+        "railing_style",
+        ControlValue::Provider("lookout_rail_courses".to_owned()),
+    );
+    let curb_rail = role_bounds(&curb.recipe, &curb.artifact, "rail");
+    let lookout_rail = role_bounds(&lookout.recipe, &lookout.artifact, "rail");
+    assert!(
+        lookout_rail.height() > curb_rail.height() + 0.5,
+        "railing style should read as a taller multi-course system: curb={curb_rail:?} lookout={lookout_rail:?}"
+    );
+    assert!(
+        lookout_rail.depth() > curb_rail.depth() + 0.25,
+        "railing style should widen the guarded side courses: curb={curb_rail:?} lookout={lookout_rail:?}"
+    );
+
+    let clean = compile_with_control(
+        &fixture,
+        "detail_density",
+        ControlValue::Provider("clean_joinery_detail".to_owned()),
+    );
+    let dense = compile_with_control(
+        &fixture,
+        "detail_density",
+        ControlValue::Provider("dense_weathered_joinery".to_owned()),
+    );
+    let clean_detail = role_signature(&clean, "connector");
+    let dense_detail = role_signature(&dense, "connector");
+    assert!(
+        dense_detail.triangle_count > clean_detail.triangle_count * 2,
+        "detail density should add clearly more fastener geometry: clean={clean_detail:?} dense={dense_detail:?}"
+    );
 }
 
 #[test]
@@ -753,6 +899,27 @@ fn compiled_role_count(
                 .is_some_and(|definition| definition.tags.contains(&role_tag))
         })
         .count()
+}
+
+fn role_linear_arrays(recipe: &shape_asset::AssetRecipe, role: &str) -> Vec<(u32, [f32; 3])> {
+    let role_tag = format!("role:{role}");
+    recipe
+        .definitions
+        .values()
+        .filter(|definition| definition.tags.contains(&role_tag))
+        .flat_map(|definition| {
+            definition
+                .geometry
+                .operations
+                .iter()
+                .filter_map(|operation| match operation {
+                    ModelingOperationSpec::LinearArray { count, offset, .. } => {
+                        Some((*count, *offset))
+                    }
+                    _ => None,
+                })
+        })
+        .collect()
 }
 
 fn instance_names(recipe: &shape_asset::AssetRecipe) -> Vec<(u64, String)> {

@@ -59,21 +59,32 @@ Detailed Timberwork, and Minimal Span.
 
 Prompt 4 reauthors the HQ fixture for card-size clay legibility:
 
-- support providers now separate pile rhythm, paired squared posts, masonry
-  piers, and trestle frames;
-- brace providers now produce distinct minimal, X, K, and heavy-reinforced
-  structures in a visible centered under-deck lane;
-- rail providers have clearer height/course differences;
+- the default deck is six parameterized plank courses, so deck width changes
+  widen separated boards rather than a single clay slab;
+- support providers now separate round pile rows, paired squared posts, stacked
+  masonry piers, and trestle frames while keeping supports attached and
+  model-valid;
+- brace providers now produce distinct minimal ties, angled X/K brace lanes,
+  and heavy stacked bracing without broken sockets;
+- rail providers have clearer vertical-course and side-offset differences;
 - connector/detail providers separate clean cross ties, bolted joinery, and
   dense fasteners without colliding with the approach ramps;
 - Explore candidates are tested to return six selectable whole-asset directions
-  with model-valid geometry and at least four distinct rendered-signature
+  with no `TooSubtle` candidates and at least four distinct rendered-signature
   silhouettes.
 
-The HQ benchmark output is written to
-`target/foundry-benchmark/roman-bridge-hq`. In this branch, Roman Bridge catalog
-tests pass, the HQ quality benchmark reaches `usable` with six surviving
-candidate directions, export/reopen is verified, and the visual benchmark writes
-Explore/control/option contact sheets under
-`target/foundry-benchmark/roman-bridge-hq/visual-benchmark`. Default
-novice-catalog exposure remains blocked until manual review is approved.
+Contact-sheet evidence can be regenerated with:
+
+```bash
+cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export
+cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/roman-bridge-hq --out target/hq-benchmark/roman-bridge-hq/adversarial-review.json
+```
+
+This branch generated `target/hq-benchmark/roman-bridge-hq/contact-sheet.png`.
+The benchmark reports clay/contact-sheet output, clean model validation,
+verified export/reopen, and visible geometry deltas for all seven primary
+controls. Its broader Usable-tier gate still reports `Prototype` because the HQ
+benchmark requires six surviving direction candidates or an approved exception;
+the generated candidate report records four survivors, which satisfies Prompt 4
+but not that broader release gate. Default novice-catalog exposure remains
+blocked until manual review is approved.
