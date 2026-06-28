@@ -15,8 +15,8 @@ for the Roman Timber Engineering style kit.
 - Added a required HQ connector/detail role and `connector_to_deck` attachment.
 - Added seven product-facing controls and seven whole-model direction
   strategies.
-- Marked `roman-bridge-hq` as a Usable kit candidate that stays hidden from the
-  default catalog until manual review.
+- Marked `roman-bridge-hq` as a Usable kit candidate; later starter-template
+  benchmark evidence cleared it for default catalog exposure.
 - Added tests for HQ controls, strategy labels, conformance, model validation,
   and deterministic Explore candidate survival.
 
@@ -44,7 +44,6 @@ Result:
 
 ## Remaining Gate
 
-Manual review is still pending. The kit remains hidden from the default novice
-catalog until that review is approved. Adversarial review remains required
-before any Showcase claim.
-
+Manual review is still pending for Showcase status. Later starter-template
+benchmark evidence cleared the kit for default novice catalog exposure as
+Usable. Adversarial review remains required before any Showcase claim.

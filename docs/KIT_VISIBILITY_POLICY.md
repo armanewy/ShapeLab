@@ -49,6 +49,5 @@ profiles remain direct-test content and do not appear in the app catalog.
 
 The current built-in kit metadata records Usable automated evidence where
 available. Catalog curation narrows novice exposure to the current evidence set:
-`sci-fi-crate` and `stylized-lamp`. `roman-bridge-hq` remains PreviewOnly until
-refreshed benchmark evidence clears the visible disconnected-part gate.
-PreviewOnly profiles are available only with the preview catalog switch.
+`sci-fi-crate`, `roman-bridge-hq`, and `stylized-lamp`. PreviewOnly profiles are
+available only with the preview catalog switch.

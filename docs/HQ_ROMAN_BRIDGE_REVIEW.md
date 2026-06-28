@@ -4,8 +4,7 @@
 
 The Wave 34 automated review evidence for `roman-bridge-hq` passed the earlier
 Usable quality bar. The starter-template quality benchmark now supersedes this
-for novice catalog exposure and keeps the bridge PreviewOnly until the visible
-disconnected-part gate is cleared:
+for novice catalog exposure and currently passes the bridge as Usable:
 
 - clean compile and model validation
 - required roles covered, including connector details
@@ -17,8 +16,9 @@ disconnected-part gate is cleared:
 
 ## Manual Status
 
-Manual approval is still pending. The kit must remain hidden from the default
-novice catalog until the release reviewer approves:
+Manual approval is still pending for Showcase status. The kit may appear in the
+default novice catalog as Usable, but must not claim Showcase until a release
+reviewer approves:
 
 - whole-model visual quality
 - bridge silhouette readability

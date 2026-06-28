@@ -77,7 +77,6 @@ The catalog helper
 future release integration. `PreviewOnly` starters must not be deleted just
 because they fail the benchmark.
 
-At the time this benchmark was added, `roman-bridge-hq` is kept `PreviewOnly`
-because the visible disconnected-part gate reports a separated default brace.
-`sci-fi-crate` and `stylized-lamp` remain eligible for `Usable` when their local
-benchmark reports pass.
+Current benchmark evidence passes all three starter templates:
+`sci-fi-crate`, `roman-bridge-hq`, and `stylized-lamp`. A future regression in
+any starter must downgrade only that starter to `PreviewOnly`.

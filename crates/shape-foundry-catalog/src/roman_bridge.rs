@@ -239,7 +239,7 @@ fn fixture_catalog_for(quality: BridgeQuality) -> FoundryFixtureCatalog {
             ),
             rail_fragment("low_curb_rail", [1.7, 0.038, 0.046], 0.38, 0.64, 1),
             rail_fragment("guard_rail_courses", [1.75, 0.044, 0.05], 0.78, 0.73, 3),
-            rail_fragment("lookout_rail_courses", [1.8, 0.056, 0.06], 1.18, 0.82, 4),
+            rail_fragment("lookout_rail_courses", [1.8, 0.056, 0.06], 1.18, 0.755, 4),
             connector_fragment(
                 "clean_joinery_detail",
                 [0.09, 0.018, 0.44],
@@ -853,7 +853,7 @@ fn bridge_family_implementation(
     };
     let brace_offset = match quality {
         BridgeQuality::Standard => [0.0, -0.32, 0.45],
-        BridgeQuality::Hq => [0.0, -0.62, 0.45],
+        BridgeQuality::Hq => [0.0, -0.45, 0.45],
     };
     family_impl.attachment_bindings = vec![
         attachment_binding(

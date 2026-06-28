@@ -1462,6 +1462,12 @@ mod tests {
             } else {
                 assert_eq!(report["catalog_recommendation"], "PreviewOnly");
             }
+            assert!(
+                report["passed"].as_bool().unwrap(),
+                "{} starter benchmark should pass: {}",
+                template.slug(),
+                report["blockers"]
+            );
         }
 
         assert!(temp_dir.path().join("summary.json").exists());

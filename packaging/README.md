@@ -43,9 +43,19 @@ cargo build -p shape-cli --release
 cargo run -p shape-cli --release -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 ```
 
-For now, package the raw executable in a `.tar.gz` or `.zip` archive with the common contents. A future `.app` bundle should include a finalized icon, `Info.plist`, signing, and notarization steps after those have been tested on macOS.
+For local macOS app-bundle smoke tests, create `target/release/Shape Lab.app`:
 
-This branch does not claim notarized or signed macOS output.
+```bash
+scripts/package_macos_app.sh
+```
+
+The script wraps the release `shape-app` binary with
+`packaging/macos/Info.plist`, giving Shape Lab a stable LaunchServices identity
+for local launch, screenshot, and Computer Use checks.
+
+This branch does not claim notarized or signed macOS output. Public
+distribution still needs a finalized `.icns`, code signing, notarization, and
+installer/archive validation.
 
 ## Linux
 

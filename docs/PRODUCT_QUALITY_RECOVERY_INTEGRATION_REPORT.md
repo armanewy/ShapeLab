@@ -2,7 +2,7 @@
 
 ## Status
 
-`PASS WITH PACKAGING FOLLOW-UP`
+`PASS WITH DISTRIBUTION PACKAGING FOLLOW-UP`
 
 The integration branch merges the Make recovery, candidate legibility, starter
 template hardening, and starter-template benchmark work. Automated Rust gates
@@ -10,12 +10,12 @@ pass, the starter-template benchmark emits all required evidence, and the
 mandatory Make Canvas screenshot gate now captures and passes image sanity
 checks.
 
-Retry note: the raw `target/release/shape-app` process still does not expose a
-normal macOS bundle identity to Computer Use. A temporary `.app` wrapper under
-`target/visual-retry/Shape Lab.app` made the release binary visible to
-LaunchServices, after which window-id `screencapture` captured the visual gate.
-Before external release packaging, Shape Lab should ship a first-class macOS app
-bundle instead of relying on a raw binary process.
+Retry note: the original visual gate used a temporary `.app` wrapper because
+the raw `target/release/shape-app` process did not expose a normal macOS bundle
+identity to Computer Use. The repository now includes
+`scripts/package_macos_app.sh` and `packaging/macos/Info.plist`, which create
+`target/release/Shape Lab.app` for local macOS smoke tests and screenshot
+capture.
 
 ## Branches Merged
 
@@ -26,9 +26,8 @@ bundle instead of relying on a raw binary process.
 - `codex/harden-stylized-lamp-template`
 - `codex/starter-template-quality-benchmark`
 
-Integration note: app home-screen tests were updated after Prompt 6 because
-`roman-bridge-hq` is now intentionally `PreviewOnly`, so the default novice
-home catalog contains two usable starters: Sci-Fi Crate and Stylized Lamp.
+Integration note: app home-screen tests now expect three usable default novice
+starters: Sci-Fi Crate, Roman Timber Bridge HQ, and Stylized Lamp.
 
 ## Automated Gates
 
@@ -60,8 +59,7 @@ Command:
 cargo run -p shape-cli -- starter-template-quality-benchmark --out-dir target/starter-template-quality
 ```
 
-Result: command passed; benchmark summary `all_passed = false` because Roman
-Bridge HQ is correctly recommended as `PreviewOnly`.
+Result: command passed; benchmark summary `all_passed = true`.
 
 Output:
 
@@ -72,7 +70,7 @@ target/starter-template-quality/
 | Template | Benchmark Result | Catalog Recommendation | Blocker |
 | --- | --- | --- | --- |
 | Sci-Fi Industrial Crate | Pass | Usable | None |
-| Roman Timber Bridge HQ | Fail | PreviewOnly | Six parent/candidate outputs failed conformance, model validation, or the visible disconnected-part check. |
+| Roman Timber Bridge HQ | Pass | Usable | None |
 | Stylized Furniture Lamp | Pass | Usable | None |
 
 Each template directory contains:
@@ -144,7 +142,7 @@ Retry fixes made after the first visual attempt:
 | Buttons look clickable. | Pass | Primary and secondary actions render as filled buttons; disabled actions show muted state. |
 | Running actions are visible locally. | Pass | Generating whole-asset and Handles states show local busy treatment. |
 | I can tell what changed in at least four crate ideas. | Pass | Benchmark passes Sci-Fi Crate as Usable. |
-| I can tell what changed in at least four bridge ideas. | PreviewOnly | Roman Bridge HQ remains hidden from the default novice catalog due disconnected-part validation. |
+| I can tell what changed in at least four bridge ideas. | Pass | Benchmark passes Roman Bridge HQ as Usable. |
 | I can tell what changed in at least four lamp ideas. | Pass | Benchmark passes Stylized Lamp as Usable. |
 | Focus Part visibly changes the workspace. | Pass | Handles and Vents focus screenshots show focused chip/callout and local tray copy. |
 | Candidate comparison is readable. | Pass | Selected comparison screenshot shows current vs candidate previews and visible change copy. |
@@ -159,23 +157,19 @@ Retry fixes made after the first visual attempt:
   and drawer control rows.
 - Sci-Fi Crate: benchmark and adversarial report pass; candidate and endpoint
   evidence are usable for the novice catalog.
-- Roman Bridge HQ: authored hardening tests pass, but the new starter benchmark
-  keeps it out of the default novice catalog because the visible
-  disconnected-part gate fails generated outputs.
+- Roman Bridge HQ: starter benchmark and adversarial report pass; candidate and
+  endpoint evidence are usable for the novice catalog.
 - Stylized Lamp: benchmark and adversarial report pass; candidate and endpoint
   evidence are usable for the novice catalog.
 
 ## Recommendation
 
-Mergeable as a product-quality recovery candidate, with one packaging follow-up.
+Mergeable as a product-quality recovery candidate, with release-distribution
+packaging follow-up. The local macOS `.app` bundle path is checked in; public
+distribution still needs signing, notarization, final icon packaging, and
+installer/archive validation.
 
-Keep Roman Bridge HQ out of the default novice catalog until it passes the
-starter-template benchmark. Before external release packaging, add a real macOS
-app bundle so the release app has a stable LaunchServices/Computer Use identity.
+Current release-distribution caveats:
 
-Current release-readiness caveats:
-
-1. The screenshot gate used a temporary `target/visual-retry/Shape Lab.app`
-   bundle, not a checked-in packaging artifact.
-2. Roman Bridge HQ remains `PreviewOnly`, which is intentional for this
-   integration branch.
+1. macOS public distribution still needs signing, notarization, final icon
+   packaging, and installer/archive validation.

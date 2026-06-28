@@ -27,9 +27,9 @@ Rules:
 | Profile | State | Reason |
 | --- | --- | --- |
 | sci-fi-crate | Usable | Current crate evidence covers whole-model clay directions and controls. |
+| roman-bridge-hq | Usable | Current bridge evidence covers legible directions, primary-control endpoints, and connected generated outputs. |
 | stylized-lamp | Usable | Current lamp evidence covers legible directions and primary-control endpoints. |
-| roman-bridge-hq | PreviewOnly | Current benchmark evidence reports a visibly disconnected default brace. |
-| roman-bridge | PreviewOnly | Legacy bridge remains available for testing while the HQ profile is under refreshed review. |
+| roman-bridge | PreviewOnly | Legacy bridge remains available for testing while the HQ profile carries current novice evidence. |
 | market-stall | PreviewOnly | Needs refreshed six-direction legibility evidence. |
 | sci-fi-door | PreviewOnly | Older evidence exists; refreshed review is required before novice exposure. |
 | storage-barrel | PreviewOnly | Needs refreshed direction and control evidence. |
