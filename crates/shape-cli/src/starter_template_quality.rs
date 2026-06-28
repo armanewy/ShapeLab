@@ -27,7 +27,7 @@ use shape_search::foundry::{
     generate_foundry_candidate_plans, generate_foundry_control_endpoint_visibility_report,
 };
 
-use crate::{render_mesh_from_triangles, save_contact_sheet, save_png, write_json};
+use crate::{render_mesh_from_triangles, save_png, write_json};
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
 const REQUIRED_VISIBLE_IDEAS: usize = 4;
@@ -36,7 +36,9 @@ const STARTER_RESULT_COUNT: usize = 6;
 const PREVIEW_CACHE_CAPACITY: usize = 256;
 const PREVIEW_PARALLELISM: usize = 4;
 const FULL_PREVIEW_SIZE: u32 = 512;
-const GRID_CARD_SIZE: u32 = 176;
+const APP_DECISION_PREVIEW_SIZE: u32 = 512;
+const DOGFOOD_PREVIEW_SIZE: u32 = 512;
+const GRID_CARD_SIZE: u32 = DOGFOOD_PREVIEW_SIZE;
 const GRID_PADDING: u32 = 12;
 
 #[derive(Debug, clap::Args)]
@@ -44,6 +46,35 @@ pub struct StarterTemplateQualityBenchmarkArgs {
     /// Output directory for all starter-template quality evidence.
     #[arg(long)]
     pub out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct StarterTemplateDogfoodBenchmarkArgs {
+    /// Output directory for all starter-template dogfood evidence.
+    #[arg(long)]
+    pub out_dir: PathBuf,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum BenchmarkCommandKind {
+    Quality,
+    Dogfood,
+}
+
+impl BenchmarkCommandKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Quality => "quality",
+            Self::Dogfood => "dogfood",
+        }
+    }
+
+    fn root_summary_filename(self) -> &'static str {
+        match self {
+            Self::Quality => "summary.json",
+            Self::Dogfood => "dogfood-summary.json",
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -98,7 +129,12 @@ impl StarterTemplate {
 #[derive(Debug, Serialize)]
 struct StarterTemplateQualitySuiteReport {
     schema_version: u32,
+    benchmark_name: String,
     required_visible_ideas: usize,
+    benchmark_preview_resolution_px: u32,
+    app_decision_preview_resolution_px: u32,
+    evidence_matches_actual_app_camera_scale: bool,
+    manual_review_required_for_showcase: bool,
     all_passed: bool,
     output_dir: String,
     templates: Vec<StarterTemplateQualitySummary>,
@@ -113,17 +149,22 @@ struct StarterTemplateQualitySummary {
     blockers: Vec<String>,
     legibility_report: String,
     adversarial_review: String,
+    dogfood_summary: String,
 }
 
 #[derive(Debug, Serialize)]
 struct StarterTemplateQualityReport {
     schema_version: u32,
+    benchmark_name: String,
     profile_slug: String,
     display_name: String,
     seed: u64,
     required_visible_ideas: usize,
+    benchmark_preview_resolution_px: u32,
+    app_decision_preview_resolution_px: u32,
     passed: bool,
     catalog_recommendation: CatalogRecommendation,
+    manual_review_required_for_showcase: bool,
     pass_criteria: TemplatePassCriteria,
     signals: QualitySignalReport,
     blockers: Vec<String>,
@@ -150,6 +191,8 @@ struct TemplatePassCriteria {
     export_conformance_clean: bool,
     no_advanced_recipe_needed: bool,
     candidate_summaries_plain_language: bool,
+    evidence_matches_actual_app_camera_scale: bool,
+    manual_review_field_required_for_showcase: bool,
 }
 
 impl TemplatePassCriteria {
@@ -161,6 +204,8 @@ impl TemplatePassCriteria {
             && self.export_conformance_clean
             && self.no_advanced_recipe_needed
             && self.candidate_summaries_plain_language
+            && self.evidence_matches_actual_app_camera_scale
+            && self.manual_review_field_required_for_showcase
     }
 }
 
@@ -176,6 +221,7 @@ struct QualitySignalReport {
     raw_technical_summary_count: usize,
     advanced_recipe_required: bool,
     export_verified: bool,
+    evidence_matches_actual_app_camera_scale: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +236,7 @@ struct QualitySignals {
     raw_technical_summary_count: usize,
     advanced_recipe_required: bool,
     export_verified: bool,
+    evidence_matches_actual_app_camera_scale: bool,
 }
 
 impl QualitySignals {
@@ -205,6 +252,7 @@ impl QualitySignals {
             raw_technical_summary_count: self.raw_technical_summary_count,
             advanced_recipe_required: self.advanced_recipe_required,
             export_verified: self.export_verified,
+            evidence_matches_actual_app_camera_scale: self.evidence_matches_actual_app_camera_scale,
         }
     }
 }
@@ -274,6 +322,7 @@ struct AdversarialQuestionReport {
     no_broken_procedural_toy: bool,
     controls_are_meaningful: bool,
     user_would_continue_after_two_minutes: bool,
+    evidence_matches_actual_app_camera_scale: bool,
 }
 
 #[derive(Debug)]
@@ -284,15 +333,54 @@ struct CompiledBenchmarkCandidate {
     model_validation_valid: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct EvidenceFileReport {
+    required_files: Vec<String>,
+    missing_files: Vec<String>,
+    complete: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct StarterTemplateDogfoodSummary {
+    schema_version: u32,
+    benchmark_name: String,
+    profile_slug: String,
+    display_name: String,
+    passed: bool,
+    catalog_recommendation: CatalogRecommendation,
+    manual_review_required_for_showcase: bool,
+    required_visible_ideas: usize,
+    visible_idea_count: usize,
+    distinct_visible_idea_count: usize,
+    benchmark_preview_resolution_px: u32,
+    app_decision_preview_resolution_px: u32,
+    evidence_matches_actual_app_camera_scale: bool,
+    evidence_files: EvidenceFileReport,
+    blockers: Vec<String>,
+    legibility_report: String,
+    adversarial_review: String,
+}
+
 pub fn run_starter_template_quality_benchmark(
     args: StarterTemplateQualityBenchmarkArgs,
 ) -> anyhow::Result<()> {
-    fs::create_dir_all(&args.out_dir)
-        .with_context(|| format!("creating {}", args.out_dir.display()))?;
+    run_starter_template_benchmark(args.out_dir, BenchmarkCommandKind::Quality)
+}
 
+pub fn run_starter_template_dogfood_benchmark(
+    args: StarterTemplateDogfoodBenchmarkArgs,
+) -> anyhow::Result<()> {
+    run_starter_template_benchmark(args.out_dir, BenchmarkCommandKind::Dogfood)
+}
+
+fn run_starter_template_benchmark(
+    out_dir: PathBuf,
+    kind: BenchmarkCommandKind,
+) -> anyhow::Result<()> {
+    fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
     let mut summaries = Vec::new();
     for template in StarterTemplate::ALL {
-        let report = benchmark_template(template, &args.out_dir)?;
+        let report = benchmark_template(template, &out_dir)?;
         let summary = StarterTemplateQualitySummary {
             profile_slug: report.profile_slug.clone(),
             display_name: report.display_name.clone(),
@@ -301,6 +389,7 @@ pub fn run_starter_template_quality_benchmark(
             blockers: report.blockers.clone(),
             legibility_report: format!("{}/legibility-report.json", report.profile_slug),
             adversarial_review: format!("{}/adversarial-review.md", report.profile_slug),
+            dogfood_summary: format!("{}/dogfood-summary.json", report.profile_slug),
         };
         summaries.push(summary);
     }
@@ -308,12 +397,17 @@ pub fn run_starter_template_quality_benchmark(
     let all_passed = summaries.iter().all(|summary| summary.passed);
     let suite_report = StarterTemplateQualitySuiteReport {
         schema_version: REPORT_SCHEMA_VERSION,
+        benchmark_name: format!("starter-template-{}-benchmark-v2", kind.label()),
         required_visible_ideas: REQUIRED_VISIBLE_IDEAS,
+        benchmark_preview_resolution_px: DOGFOOD_PREVIEW_SIZE,
+        app_decision_preview_resolution_px: APP_DECISION_PREVIEW_SIZE,
+        evidence_matches_actual_app_camera_scale: evidence_matches_actual_app_camera_scale(),
+        manual_review_required_for_showcase: true,
         all_passed,
-        output_dir: args.out_dir.display().to_string(),
+        output_dir: out_dir.display().to_string(),
         templates: summaries.clone(),
     };
-    write_json(args.out_dir.join("summary.json"), &suite_report)?;
+    write_json(out_dir.join(kind.root_summary_filename()), &suite_report)?;
 
     if !all_passed {
         let failures = summaries
@@ -322,15 +416,17 @@ pub fn run_starter_template_quality_benchmark(
             .map(|summary| summary.profile_slug.as_str())
             .collect::<Vec<_>>();
         eprintln!(
-            "Starter template quality benchmark downgraded {} to PreviewOnly; evidence written to {}",
+            "Starter template {} benchmark downgraded {} to PreviewOnly; evidence written to {}",
+            kind.label(),
             failures.join(", "),
-            args.out_dir.display()
+            out_dir.display()
         );
     } else {
         println!(
-            "Starter template quality benchmark passed for {} templates; evidence written to {}",
+            "Starter template {} benchmark passed for {} templates; evidence written to {}",
+            kind.label(),
             summaries.len(),
-            args.out_dir.display()
+            out_dir.display()
         );
     }
     Ok(())
@@ -389,9 +485,13 @@ fn benchmark_template(
         .iter()
         .map(|preview| &preview.image)
         .collect::<Vec<_>>();
-    save_contact_sheet(
-        parent_preview,
-        &candidate_images,
+    let generated_sheet_images = generated_batch
+        .previews
+        .iter()
+        .map(|preview| &preview.image)
+        .collect::<Vec<_>>();
+    save_rendered_grid(
+        &generated_sheet_images,
         template_dir.join("generated-ideas-contact-sheet.png"),
     )?;
     let selected = candidate_images
@@ -399,9 +499,10 @@ fn benchmark_template(
         .copied()
         .into_iter()
         .collect::<Vec<_>>();
-    save_contact_sheet(
-        parent_preview,
-        &selected,
+    let mut selected_comparison = vec![parent_preview];
+    selected_comparison.extend(selected);
+    save_rendered_grid(
+        &selected_comparison,
         template_dir.join("selected-comparison-sheet.png"),
     )?;
 
@@ -437,21 +538,21 @@ fn benchmark_template(
     let pass_criteria = evaluate_pass_criteria(&signals);
     let blockers = blockers_for_criteria(&pass_criteria, &signals);
     let passed = pass_criteria.passed();
-    let catalog_recommendation = if passed {
-        CatalogRecommendation::Usable
-    } else {
-        CatalogRecommendation::PreviewOnly
-    };
+    let catalog_recommendation = catalog_recommendation_for_pass(passed);
     let adversarial_questions = adversarial_question_report(&pass_criteria, &signals);
 
     let report = StarterTemplateQualityReport {
         schema_version: REPORT_SCHEMA_VERSION,
+        benchmark_name: "starter-template-dogfood-benchmark-v2".to_owned(),
         profile_slug: template.slug().to_owned(),
         display_name: template.display_name().to_owned(),
         seed: template.seed(),
         required_visible_ideas: REQUIRED_VISIBLE_IDEAS,
+        benchmark_preview_resolution_px: DOGFOOD_PREVIEW_SIZE,
+        app_decision_preview_resolution_px: APP_DECISION_PREVIEW_SIZE,
         passed,
         catalog_recommendation,
+        manual_review_required_for_showcase: true,
         pass_criteria,
         signals: signals.report(),
         blockers,
@@ -490,6 +591,8 @@ fn benchmark_template(
             template_dir.join("adversarial-review.md").display()
         )
     })?;
+    let dogfood_summary = dogfood_summary_from_report(&report, &template_dir);
+    write_json(template_dir.join("dogfood-summary.json"), &dogfood_summary)?;
     Ok(report)
 }
 
@@ -661,7 +764,7 @@ fn render_preview_batch(
     let mut request = FoundryPreviewBatchRequest::new(
         comparison_id.to_owned(),
         items,
-        FoundryPreviewResolution::Px128,
+        dogfood_preview_resolution(),
     );
     request.max_parallel_jobs = PREVIEW_PARALLELISM;
     cache.render_batch(request).map_err(|error| {
@@ -954,6 +1057,7 @@ fn quality_signals(
             && export_report.checksums_match
             && export_report.topology_matches_manifest
             && export_report.finite_numeric_payloads,
+        evidence_matches_actual_app_camera_scale: evidence_matches_actual_app_camera_scale(),
     }
 }
 
@@ -969,6 +1073,16 @@ fn evaluate_pass_criteria(signals: &QualitySignals) -> TemplatePassCriteria {
         export_conformance_clean: signals.export_verified,
         no_advanced_recipe_needed: !signals.advanced_recipe_required,
         candidate_summaries_plain_language: signals.raw_technical_summary_count == 0,
+        evidence_matches_actual_app_camera_scale: signals.evidence_matches_actual_app_camera_scale,
+        manual_review_field_required_for_showcase: true,
+    }
+}
+
+fn catalog_recommendation_for_pass(passed: bool) -> CatalogRecommendation {
+    if passed {
+        CatalogRecommendation::Usable
+    } else {
+        CatalogRecommendation::PreviewOnly
     }
 }
 
@@ -1012,6 +1126,15 @@ fn blockers_for_criteria(criteria: &TemplatePassCriteria, signals: &QualitySigna
             signals.raw_technical_summary_count
         ));
     }
+    if !criteria.evidence_matches_actual_app_camera_scale {
+        blockers.push(format!(
+            "Benchmark preview evidence is {}px, below the app decision preview size of {}px.",
+            DOGFOOD_PREVIEW_SIZE, APP_DECISION_PREVIEW_SIZE
+        ));
+    }
+    if !criteria.manual_review_field_required_for_showcase {
+        blockers.push("Showcase promotion is missing the required manual-review field.".to_owned());
+    }
     blockers
 }
 
@@ -1029,6 +1152,7 @@ fn adversarial_question_report(
         user_would_continue_after_two_minutes: signals.visible_idea_count >= REQUIRED_VISIBLE_IDEAS
             && criteria.export_conformance_clean
             && criteria.no_advanced_recipe_needed,
+        evidence_matches_actual_app_camera_scale: criteria.evidence_matches_actual_app_camera_scale,
     }
 }
 
@@ -1305,10 +1429,70 @@ fn expected_template_files() -> Vec<String> {
         "option-gallery-sheet.png",
         "legibility-report.json",
         "adversarial-review.md",
+        "dogfood-summary.json",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect()
+}
+
+fn required_evidence_files_for_pass() -> Vec<String> {
+    expected_template_files()
+        .into_iter()
+        .filter(|name| name != "dogfood-summary.json")
+        .collect()
+}
+
+fn evidence_file_report(template_dir: &Path) -> EvidenceFileReport {
+    let required_files = required_evidence_files_for_pass();
+    let missing_files = required_files
+        .iter()
+        .filter(|name| !template_dir.join(name).is_file())
+        .cloned()
+        .collect::<Vec<_>>();
+    EvidenceFileReport {
+        required_files,
+        complete: missing_files.is_empty(),
+        missing_files,
+    }
+}
+
+fn dogfood_summary_from_report(
+    report: &StarterTemplateQualityReport,
+    template_dir: &Path,
+) -> StarterTemplateDogfoodSummary {
+    let evidence_files = evidence_file_report(template_dir);
+    let passed = report.passed && evidence_files.complete;
+    StarterTemplateDogfoodSummary {
+        schema_version: REPORT_SCHEMA_VERSION,
+        benchmark_name: "starter-template-dogfood-benchmark-v2".to_owned(),
+        profile_slug: report.profile_slug.clone(),
+        display_name: report.display_name.clone(),
+        passed,
+        catalog_recommendation: catalog_recommendation_for_pass(passed),
+        manual_review_required_for_showcase: true,
+        required_visible_ideas: report.required_visible_ideas,
+        visible_idea_count: report.signals.visible_idea_count,
+        distinct_visible_idea_count: report.signals.distinct_visible_idea_count,
+        benchmark_preview_resolution_px: report.benchmark_preview_resolution_px,
+        app_decision_preview_resolution_px: report.app_decision_preview_resolution_px,
+        evidence_matches_actual_app_camera_scale: report
+            .pass_criteria
+            .evidence_matches_actual_app_camera_scale,
+        evidence_files,
+        blockers: report.blockers.clone(),
+        legibility_report: "legibility-report.json".to_owned(),
+        adversarial_review: "adversarial-review.md".to_owned(),
+    }
+}
+
+fn dogfood_preview_resolution() -> FoundryPreviewResolution {
+    FoundryPreviewResolution::Px512
+}
+
+fn evidence_matches_actual_app_camera_scale() -> bool {
+    dogfood_preview_resolution().pixels() >= APP_DECISION_PREVIEW_SIZE
+        && DOGFOOD_PREVIEW_SIZE >= APP_DECISION_PREVIEW_SIZE
 }
 
 fn adversarial_review_markdown(report: &StarterTemplateQualityReport) -> String {
@@ -1330,13 +1514,17 @@ Overall: {verdict}\n\n\
 - Do candidates look like real authored alternatives? {}\n\
 - Does any candidate look like a broken procedural toy? {}\n\
 - Are the controls meaningful? {}\n\
-- Would the user continue after two minutes? {}\n\n\
+- Would the user continue after two minutes? {}\n\
+- Does the benchmark evidence match the actual app camera/scale? {}\n\n\
 ## Evidence\n\n\
 - Visible ideas: {}\n\
 - Distinct visible ideas: {}\n\
 - Primary controls with readable endpoint reports: {}/{}\n\
 - Returned TooSubtle whole-asset candidates: {}\n\
 - Raw technical candidate summaries: {}\n\
+- Benchmark preview resolution: {}px\n\
+- App decision preview resolution: {}px\n\
+- Manual review required for Showcase: {}\n\
 - Catalog recommendation: {:?}\n\n\
 ## Blockers\n\n{}",
         report.display_name,
@@ -1349,12 +1537,20 @@ Overall: {verdict}\n\n\
                 .adversarial_questions
                 .user_would_continue_after_two_minutes
         ),
+        pass_label(
+            report
+                .adversarial_questions
+                .evidence_matches_actual_app_camera_scale
+        ),
         report.signals.visible_idea_count,
         report.signals.distinct_visible_idea_count,
         report.signals.endpoint_readable_primary_control_count,
         report.signals.primary_control_count,
         report.signals.returned_too_subtle_candidate_count,
         report.signals.raw_technical_summary_count,
+        report.benchmark_preview_resolution_px,
+        report.app_decision_preview_resolution_px,
+        pass_label(report.manual_review_required_for_showcase),
         report.catalog_recommendation,
         blocker_lines
     )
@@ -1380,6 +1576,7 @@ mod tests {
             raw_technical_summary_count: 0,
             advanced_recipe_required: false,
             export_verified: true,
+            evidence_matches_actual_app_camera_scale: true,
         }
     }
 
@@ -1471,5 +1668,103 @@ mod tests {
         }
 
         assert!(temp_dir.path().join("summary.json").exists());
+    }
+
+    #[test]
+    fn starter_template_dogfood_at_least_four_visible_ideas_required() {
+        let mut signals = passing_signals();
+        signals.visible_idea_count = 3;
+        signals.distinct_visible_idea_count = 3;
+
+        let criteria = evaluate_pass_criteria(&signals);
+        let passed = criteria.passed();
+
+        assert!(!criteria.at_least_four_visible_ideas);
+        assert_eq!(
+            catalog_recommendation_for_pass(passed),
+            CatalogRecommendation::PreviewOnly
+        );
+    }
+
+    #[test]
+    fn starter_template_dogfood_failing_template_cannot_be_usable() {
+        let mut signals = passing_signals();
+        signals.export_verified = false;
+
+        let criteria = evaluate_pass_criteria(&signals);
+
+        assert!(!criteria.passed());
+        assert_eq!(
+            catalog_recommendation_for_pass(criteria.passed()),
+            CatalogRecommendation::PreviewOnly
+        );
+    }
+
+    #[test]
+    fn starter_template_dogfood_passing_template_can_be_usable() {
+        let criteria = evaluate_pass_criteria(&passing_signals());
+
+        assert!(criteria.passed());
+        assert_eq!(
+            catalog_recommendation_for_pass(criteria.passed()),
+            CatalogRecommendation::Usable
+        );
+    }
+
+    #[test]
+    fn starter_template_dogfood_no_missing_report_is_treated_as_pass() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        fs::write(temp_dir.path().join("parent.png"), [1_u8]).expect("parent");
+        fs::write(
+            temp_dir.path().join("generated-ideas-contact-sheet.png"),
+            [1_u8],
+        )
+        .expect("ideas");
+        fs::write(
+            temp_dir.path().join("selected-comparison-sheet.png"),
+            [1_u8],
+        )
+        .expect("comparison");
+        fs::write(temp_dir.path().join("control-endpoint-sheet.png"), [1_u8]).expect("endpoints");
+        fs::write(temp_dir.path().join("option-gallery-sheet.png"), [1_u8]).expect("options");
+        fs::write(temp_dir.path().join("adversarial-review.md"), "review").expect("review");
+
+        let evidence = evidence_file_report(temp_dir.path());
+
+        assert!(!evidence.complete);
+        assert!(
+            evidence
+                .missing_files
+                .contains(&"legibility-report.json".to_owned())
+        );
+    }
+
+    #[test]
+    fn starter_template_dogfood_uses_same_or_stricter_preview_size_as_app() {
+        assert_eq!(APP_DECISION_PREVIEW_SIZE, 512);
+        assert_eq!(
+            dogfood_preview_resolution(),
+            FoundryPreviewResolution::Px512
+        );
+        assert!(evidence_matches_actual_app_camera_scale());
+        assert!(dogfood_preview_resolution().pixels() >= APP_DECISION_PREVIEW_SIZE);
+    }
+
+    #[test]
+    fn starter_template_dogfood_benchmark_declares_all_expected_files() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let template_dir = temp_dir.path().join(StarterTemplate::ScifiCrate.slug());
+        fs::create_dir_all(&template_dir).expect("template dir");
+
+        for name in expected_template_files() {
+            fs::write(template_dir.join(name), [1_u8]).expect("placeholder evidence");
+        }
+
+        let evidence = evidence_file_report(&template_dir);
+
+        assert!(evidence.complete);
+        assert!(expected_template_files().contains(&"dogfood-summary.json".to_owned()));
+        assert!(expected_template_files().contains(&"legibility-report.json".to_owned()));
+        assert!(expected_template_files().contains(&"adversarial-review.md".to_owned()));
     }
 }
