@@ -1,6 +1,9 @@
 # Sci-Fi Crate Template Hardening Report
 
-Status: PASS for authored Sci-Fi Crate template hardening. Visual benchmark evidence was generated under `target/foundry-benchmark/scifi-crate-hq/`.
+Status: PASS for authored Sci-Fi Crate template hardening. Prompt 3A v2
+re-verified the existing authored crate geometry and candidate strategy gates.
+Visual benchmark evidence was generated under
+`target/foundry-benchmark/scifi-crate-hq/`.
 
 ## Art Direction Target
 
