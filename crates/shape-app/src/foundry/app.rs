@@ -7851,6 +7851,7 @@ mod tests {
                 wrong_scope_rejections,
                 human_summary: "Generated 0 clear ideas.".to_owned(),
             },
+            reliability_report: shape_search::foundry::FoundryCandidateReliabilityReport::default(),
             scoring_report: shape_search::asset::scoring::AssetScoringReport {
                 rejected_candidates: Vec::new(),
                 scored_candidates: Vec::new(),

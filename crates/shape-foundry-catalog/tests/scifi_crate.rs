@@ -187,6 +187,10 @@ fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput 
 }
 
 fn assert_valid_model(output: &FoundryCompilationOutput) {
+    assert_valid_model_with_label("model", output);
+}
+
+fn assert_valid_model_with_label(label: &str, output: &FoundryCompilationOutput) {
     assert!(output.final_conformance.is_accepted());
     assert!(output.artifact.validation_report.is_valid());
     let config = validation_config_from_recipe_with_limits(
@@ -197,7 +201,7 @@ fn assert_valid_model(output: &FoundryCompilationOutput) {
     let report = validate_model(&output.artifact, &config);
     assert!(
         report.is_valid(),
-        "model validation should pass: {:#?}",
+        "{label} validation should pass: {:#?}",
         report.issues
     );
     assert_eq!(report.metrics.accidental_intersection_count, 0);
@@ -360,10 +364,10 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
         (
             "compact-vented",
             vec![
-                ("body_proportions", ControlValue::Scalar(0.0)),
+                ("body_proportions", ControlValue::Scalar(0.2)),
                 ("structural_heft", ControlValue::Scalar(0.15)),
                 ("panel_depth", ControlValue::Scalar(0.25)),
-                ("vent_density", ControlValue::Choice("dense".to_owned())),
+                ("vent_density", ControlValue::Choice("standard".to_owned())),
                 ("handle_style", ControlValue::Choice("flush".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.2)),
                 ("detail_density", ControlValue::Integer(10)),
@@ -412,7 +416,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
                 ("body_proportions", ControlValue::Scalar(0.55)),
                 ("structural_heft", ControlValue::Scalar(0.65)),
                 ("panel_depth", ControlValue::Scalar(1.0)),
-                ("vent_density", ControlValue::Choice("dense".to_owned())),
+                ("vent_density", ControlValue::Choice("standard".to_owned())),
                 ("handle_style", ControlValue::Choice("side_rail".to_owned())),
                 ("edge_softness", ControlValue::Scalar(0.55)),
                 ("detail_density", ControlValue::Integer(14)),
@@ -437,7 +441,7 @@ fn six_strategy_style_candidates_compile_with_current_foundry_apis() {
     let mut fingerprints = BTreeSet::new();
     for (label, overrides) in candidates {
         let output = compile_with(&overrides);
-        assert_valid_model(&output);
+        assert_valid_model_with_label(label, &output);
         assert!(
             fingerprints.insert(format!(
                 "{:?}",

@@ -240,9 +240,9 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     crate::LOCAL_DEFINITION,
                     "operation.1.recessed_panel_cut.center.x",
                 ),
-                transform: ScalarTransform::Ratio {
-                    minimum: -0.58,
-                    maximum: -0.34,
+                transform: ScalarTransform::ScaleOffset {
+                    scale: -0.26,
+                    offset: -0.32,
                 },
             },
             ParameterBinding::Scalar {
@@ -253,7 +253,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "operation.2.recessed_panel_cut.center.x",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.34,
+                    minimum: 0.32,
                     maximum: 0.58,
                 },
             },
