@@ -16,6 +16,7 @@ use shape_foundry_catalog::{
 };
 use shape_search::foundry::{
     FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
+    FoundryCandidateFailureReason, FoundryCandidateFallbackAction, FoundryCandidateMinimumResult,
     FoundryCandidateMode, FoundryCandidateRejectionReason, FoundryCandidateRequest,
     generate_foundry_candidate_plans, generate_foundry_control_endpoint_visibility_report,
 };
@@ -110,6 +111,16 @@ fn assert_endpoint_controls_clear(
                 .find(|row| row.control_id == *control_id)
         );
     }
+}
+
+fn top_failure_reason(
+    output: &shape_search::foundry::FoundryCandidateOutput,
+) -> Option<FoundryCandidateFailureReason> {
+    output
+        .reliability_report
+        .top_reasons
+        .first()
+        .map(|row| row.reason)
 }
 
 #[test]
@@ -233,6 +244,123 @@ fn foundry_focus_part_variation_changes_only_selected_part_group_controls() {
         );
         assert!(candidate_label_is_product_safe(&candidate.label));
     }
+}
+
+#[test]
+fn foundry_focused_vents_zero_candidates_suggest_detail_mode() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut search_request = request(24, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("vents", "Vents");
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("focused vents request should return reliability diagnostics");
+
+    assert!(output.candidates.is_empty());
+    assert_eq!(
+        output.reliability_report.minimum_result,
+        FoundryCandidateMinimumResult::NoFocusedCandidates
+    );
+    assert_eq!(
+        top_failure_reason(&output),
+        Some(FoundryCandidateFailureReason::ControlTooSubtle)
+    );
+    assert_eq!(
+        output.reliability_report.suggested_action,
+        Some(FoundryCandidateFallbackAction::UseDetailMode)
+    );
+    let vents = output
+        .reliability_report
+        .focused_part_capabilities
+        .iter()
+        .find(|row| row.group_id == "vents")
+        .expect("vents capability row should be reported");
+    assert!(!vents.can_generate_shape_ideas);
+    assert_eq!(vents.likely_candidate_count, 0);
+    assert!(
+        vents
+            .blocked_reasons
+            .contains(&FoundryCandidateFailureReason::ControlTooSubtle)
+    );
+}
+
+#[test]
+fn foundry_focused_part_locked_out_suggests_unlock_controls() {
+    let mut fixture = scifi_crate::fixture_catalog();
+    for control_id in ["body_proportions", "structural_heft"] {
+        fixture.document.foundry_locks.push(FoundryLock {
+            target: FoundryLockTarget::Control(control_id.to_owned()),
+            mode: FoundryLockMode::SearchProtected,
+            reason: Some("test lock".to_owned()),
+        });
+    }
+    let mut search_request = request(25, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("body", "Body");
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("locked focused request should return reliability diagnostics");
+
+    assert!(output.candidates.is_empty());
+    assert!(output.diagnostics.locked_targets_skipped >= 2);
+    assert_eq!(
+        top_failure_reason(&output),
+        Some(FoundryCandidateFailureReason::LockedOut)
+    );
+    assert_eq!(
+        output.reliability_report.suggested_action,
+        Some(FoundryCandidateFallbackAction::UnlockControls)
+    );
+}
+
+#[test]
+fn foundry_focused_part_without_bound_controls_reports_no_focused_variants() {
+    let fixture = roman_bridge::fixture_catalog();
+    let mut search_request = request(26, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("ramps", "Ramps");
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("unbound focused part should return reliability diagnostics");
+
+    assert!(output.candidates.is_empty());
+    assert_eq!(
+        top_failure_reason(&output),
+        Some(FoundryCandidateFailureReason::NoBoundControls)
+    );
+    assert_eq!(
+        output.reliability_report.suggested_action,
+        Some(FoundryCandidateFallbackAction::NoFocusedVariants)
+    );
+    let ramps = output
+        .reliability_report
+        .focused_part_capabilities
+        .iter()
+        .find(|row| row.group_id == "ramps")
+        .expect("ramps capability row should be reported");
+    assert!(!ramps.can_generate_shape_ideas);
+    assert_eq!(ramps.likely_candidate_count, 0);
+    assert_eq!(
+        ramps.suggested_action,
+        Some(FoundryCandidateFallbackAction::NoFocusedVariants)
+    );
+}
+
+#[test]
+fn foundry_focused_detail_control_reports_control_too_subtle_for_shape() {
+    let fixture = scifi_crate::fixture_catalog();
+    let mut search_request = request(27, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("fasteners", "Fasteners");
+
+    let output = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("detail-only focused part should return reliability diagnostics");
+
+    assert!(output.candidates.is_empty());
+    assert_eq!(
+        top_failure_reason(&output),
+        Some(FoundryCandidateFailureReason::ControlTooSubtle)
+    );
+    assert_eq!(
+        output.reliability_report.suggested_action,
+        Some(FoundryCandidateFallbackAction::UseDetailMode)
+    );
 }
 
 #[test]
@@ -489,7 +617,7 @@ fn explore_does_not_return_one_control_provider_role_fallback() {
 }
 
 #[test]
-fn visually_duplicate_control_plans_collapse() {
+fn foundry_visually_duplicate_control_plans_collapse_with_whole_asset_fallback() {
     let mut fixture = scifi_crate::fixture_catalog();
     let mut profile = profile(&fixture);
     let control = profile
@@ -513,6 +641,33 @@ fn visually_duplicate_control_plans_collapse() {
 
     assert!(!output.scoring_report.duplicate_groups.is_empty());
     assert_eq!(output.candidates.len(), 1);
+    assert_eq!(
+        output.reliability_report.minimum_result,
+        FoundryCandidateMinimumResult::NoUsefulCandidates
+    );
+    assert!(!output.reliability_report.top_reasons.is_empty());
+    assert_eq!(
+        output.reliability_report.suggested_action,
+        Some(FoundryCandidateFallbackAction::TryWholeAssetIdeas)
+    );
+}
+
+#[test]
+fn foundry_candidate_failure_report_is_deterministic() {
+    let fixture = roman_bridge::fixture_catalog();
+    let mut search_request = request(20, FoundryCandidateMode::Refine);
+    search_request.variation_intent = VariationIntent::focus_part_shape("ramps", "Ramps");
+
+    let first = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("first reliability report should generate");
+    let second = generate_foundry_candidate_plans(&fixture.document, &fixture, &search_request)
+        .expect("second reliability report should generate");
+
+    assert_eq!(first.reliability_report, second.reliability_report);
+    assert_eq!(
+        serde_json::to_string(&first.reliability_report).expect("serialize first report"),
+        serde_json::to_string(&second.reliability_report).expect("serialize second report")
+    );
 }
 
 #[test]

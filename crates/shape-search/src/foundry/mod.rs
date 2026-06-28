@@ -155,10 +155,146 @@ pub struct FoundryCandidateOutput {
     pub candidates: Vec<FoundryCandidatePlan>,
     /// Generation-level diagnostics.
     pub diagnostics: FoundryCandidateGenerationDiagnostics,
+    /// Product-facing reliability report for empty or weak candidate results.
+    #[serde(default)]
+    pub reliability_report: FoundryCandidateReliabilityReport,
     /// Scoring, hard-rejection, duplicate-collapse, and diversity report.
     pub scoring_report: AssetScoringReport,
     /// Local preference-bias report.
     pub preference_report: FoundryCandidatePreferenceReport,
+}
+
+/// Product-facing minimum-usefulness status for a candidate request.
+#[derive(
+    Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub enum FoundryCandidateMinimumResult {
+    /// Enough candidates survived for the requested scope.
+    #[default]
+    Useful,
+    /// Whole-asset generation returned fewer than two useful candidates.
+    NoUsefulCandidates,
+    /// Focused generation returned zero useful focused candidates.
+    NoFocusedCandidates,
+}
+
+/// Structured product-facing candidate failure reasons.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum FoundryCandidateFailureReason {
+    /// Candidates collapsed into duplicate-looking ideas.
+    TooSimilar,
+    /// Candidate changes did not affect visible authored controls or geometry.
+    HiddenChange,
+    /// Candidate changes landed outside the requested focus scope.
+    WrongScope,
+    /// Locks or search protection removed all useful controls.
+    LockedOut,
+    /// The requested focused part has no bound controls.
+    NoBoundControls,
+    /// The available controls are visible only as subtle detail changes.
+    ControlTooSubtle,
+    /// Provider or channel support was unavailable.
+    ProviderUnavailable,
+    /// Render or descriptor delta evidence was unavailable.
+    RenderDeltaUnavailable,
+    /// Validation or conformance rejected the candidate.
+    ValidationFailed,
+}
+
+impl FoundryCandidateFailureReason {
+    /// Return a stable product label for this failure reason.
+    #[must_use]
+    pub const fn display_label(self) -> &'static str {
+        match self {
+            Self::TooSimilar => "Too similar",
+            Self::HiddenChange => "Hidden change",
+            Self::WrongScope => "Wrong scope",
+            Self::LockedOut => "Locked out",
+            Self::NoBoundControls => "No bound controls",
+            Self::ControlTooSubtle => "Control too subtle",
+            Self::ProviderUnavailable => "Provider unavailable",
+            Self::RenderDeltaUnavailable => "Render delta unavailable",
+            Self::ValidationFailed => "Validation failed",
+        }
+    }
+}
+
+/// Counted failure reason row, sorted by impact in reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryCandidateFailureReasonCount {
+    /// Structured reason.
+    pub reason: FoundryCandidateFailureReason,
+    /// Number of observations behind this reason.
+    pub count: usize,
+}
+
+/// Human-visible fallback action suggested after a weak candidate result.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum FoundryCandidateFallbackAction {
+    /// Leave the selected part and try whole-asset generation.
+    TryWholeAssetIdeas,
+    /// Clear the current focus selection.
+    ClearFocus,
+    /// Unlock controls that block candidate generation.
+    UnlockControls,
+    /// Select another authored part group.
+    TryAnotherPart,
+    /// Switch to Detail mode for subtle detail controls.
+    UseDetailMode,
+    /// The focused part is authored but has no focused variants.
+    NoFocusedVariants,
+}
+
+impl FoundryCandidateFallbackAction {
+    /// Return the exact user-facing action text.
+    #[must_use]
+    pub const fn display_label(self) -> &'static str {
+        match self {
+            Self::TryWholeAssetIdeas => "Try whole-asset ideas",
+            Self::ClearFocus => "Clear focus",
+            Self::UnlockControls => "Unlock controls",
+            Self::TryAnotherPart => "Try another part",
+            Self::UseDetailMode => "Use Detail mode",
+            Self::NoFocusedVariants => "This part has no focused variants yet",
+        }
+    }
+}
+
+/// Focused-part candidate capability for one product-facing part group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryFocusedPartCapabilityReport {
+    /// Stable part group ID.
+    pub group_id: String,
+    /// Product-facing display name.
+    pub display_name: String,
+    /// Whether Shape ideas can be generated for this group right now.
+    pub can_generate_shape_ideas: bool,
+    /// Deterministic estimate of useful focused candidate count.
+    pub likely_candidate_count: usize,
+    /// Structured blockers for this group.
+    #[serde(default)]
+    pub blocked_reasons: Vec<FoundryCandidateFailureReason>,
+    /// Suggested user-visible action for this group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_action: Option<FoundryCandidateFallbackAction>,
+}
+
+/// Product-facing reliability report attached to every candidate response.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryCandidateReliabilityReport {
+    /// Minimum useful-result status.
+    pub minimum_result: FoundryCandidateMinimumResult,
+    /// Most important reasons for a weak or empty result.
+    #[serde(default)]
+    pub top_reasons: Vec<FoundryCandidateFailureReasonCount>,
+    /// Suggested user-visible fallback action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_action: Option<FoundryCandidateFallbackAction>,
+    /// Focused-part capability rows for known part groups.
+    #[serde(default)]
+    pub focused_part_capabilities: Vec<FoundryFocusedPartCapabilityReport>,
+    /// Plain-language deterministic summary.
+    pub human_summary: String,
 }
 
 /// Diagnostics for one accepted Foundry candidate.
@@ -368,16 +504,21 @@ pub fn generate_foundry_candidate_plans(
     let preference_profile =
         request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
     let variation_intent = request.variation_intent.clone().normalized();
+    let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     if let Some(reason) = unsupported_variation_reason(document, &variation_intent) {
-        return Ok(empty_candidate_output(
+        return Ok(empty_candidate_output(EmptyCandidateOutputContext {
+            document,
+            profile: &parent_output.catalog.customizer_profile,
+            context,
             request,
             preference_scope,
             preference_profile,
-            FoundryCandidateRejectionReason::UnsupportedChannel,
-            reason,
-        ));
+            reason: FoundryCandidateRejectionReason::UnsupportedChannel,
+            detail: reason,
+            locked_targets_skipped: 0,
+            forced_reason: Some(FoundryCandidateFailureReason::ProviderUnavailable),
+        }));
     }
-    let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     let strategy_controls = strategy_control_ids(
         &parent_output.catalog.customizer_profile,
         &request.strategy_id,
@@ -394,7 +535,25 @@ pub fn generate_foundry_candidate_plans(
         &mut locked_targets_skipped,
     );
     if opportunities.is_empty() {
-        return Err(FoundryCandidateError::NoEditableControls);
+        let failure_reason = no_editable_failure_reason(
+            document,
+            &parent_output.catalog.customizer_profile,
+            context,
+            &variation_intent,
+            locked_targets_skipped,
+        );
+        return Ok(empty_candidate_output(EmptyCandidateOutputContext {
+            document,
+            profile: &parent_output.catalog.customizer_profile,
+            context,
+            request,
+            preference_scope,
+            preference_profile,
+            reason: FoundryCandidateRejectionReason::EmptyProgram,
+            detail: "No editable controls match this candidate request.".to_owned(),
+            locked_targets_skipped,
+            forced_reason: Some(failure_reason),
+        }));
     }
 
     let mut diagnostics = FoundryCandidateGenerationDiagnostics {
@@ -585,10 +744,20 @@ pub fn generate_foundry_candidate_plans(
     diagnostics.returned_candidates = candidates.len();
     update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
+    let reliability_report = candidate_reliability_report(
+        document,
+        &parent_output.catalog.customizer_profile,
+        context,
+        &variation_intent,
+        &diagnostics,
+        candidates.len(),
+        None,
+    );
 
     Ok(FoundryCandidateOutput {
         candidates,
         diagnostics,
+        reliability_report,
         scoring_report,
         preference_report,
     })
@@ -615,16 +784,21 @@ pub fn generate_foundry_candidate_draft_plans(
     let preference_profile =
         request_preference_profile(request.preference_profile.as_ref(), &preference_scope);
     let variation_intent = request.variation_intent.clone().normalized();
+    let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     if let Some(reason) = unsupported_variation_reason(document, &variation_intent) {
-        return Ok(empty_candidate_output(
+        return Ok(empty_candidate_output(EmptyCandidateOutputContext {
+            document,
+            profile: &parent_output.catalog.customizer_profile,
+            context,
             request,
             preference_scope,
             preference_profile,
-            FoundryCandidateRejectionReason::UnsupportedChannel,
-            reason,
-        ));
+            reason: FoundryCandidateRejectionReason::UnsupportedChannel,
+            detail: reason,
+            locked_targets_skipped: 0,
+            forced_reason: Some(FoundryCandidateFailureReason::ProviderUnavailable),
+        }));
     }
-    let context = ControlEvaluationContext::new(&parent_output.catalog.family.parameter_slots);
     let strategy_controls = strategy_control_ids(
         &parent_output.catalog.customizer_profile,
         &request.strategy_id,
@@ -641,7 +815,25 @@ pub fn generate_foundry_candidate_draft_plans(
         &mut locked_targets_skipped,
     );
     if opportunities.is_empty() {
-        return Err(FoundryCandidateError::NoEditableControls);
+        let failure_reason = no_editable_failure_reason(
+            document,
+            &parent_output.catalog.customizer_profile,
+            context,
+            &variation_intent,
+            locked_targets_skipped,
+        );
+        return Ok(empty_candidate_output(EmptyCandidateOutputContext {
+            document,
+            profile: &parent_output.catalog.customizer_profile,
+            context,
+            request,
+            preference_scope,
+            preference_profile,
+            reason: FoundryCandidateRejectionReason::EmptyProgram,
+            detail: "No editable controls match this candidate request.".to_owned(),
+            locked_targets_skipped,
+            forced_reason: Some(failure_reason),
+        }));
     }
 
     let mut diagnostics = FoundryCandidateGenerationDiagnostics {
@@ -764,10 +956,20 @@ pub fn generate_foundry_candidate_draft_plans(
     diagnostics.returned_candidates = candidates.len();
     update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
+    let reliability_report = candidate_reliability_report(
+        document,
+        &parent_output.catalog.customizer_profile,
+        context,
+        &variation_intent,
+        &diagnostics,
+        candidates.len(),
+        None,
+    );
 
     Ok(FoundryCandidateOutput {
         candidates,
         diagnostics,
+        reliability_report,
         scoring_report: AssetScoringReport {
             rejected_candidates: Vec::new(),
             scored_candidates: Vec::new(),
@@ -960,27 +1162,525 @@ fn rejection_count(
     diagnostics.rejections.get(&reason).copied().unwrap_or(0)
 }
 
-fn empty_candidate_output(
-    request: &FoundryCandidateRequest,
+fn candidate_reliability_report(
+    document: &FoundryAssetDocument,
+    profile: &CustomizerProfile,
+    context: ControlEvaluationContext<'_>,
+    variation_intent: &VariationIntent,
+    diagnostics: &FoundryCandidateGenerationDiagnostics,
+    returned_candidate_count: usize,
+    forced_reason: Option<FoundryCandidateFailureReason>,
+) -> FoundryCandidateReliabilityReport {
+    let minimum_result = minimum_result_for_request(variation_intent, returned_candidate_count);
+    let focused_part_capabilities = focused_part_capability_reports(document, profile, context);
+    let top_reasons = top_failure_reasons(
+        diagnostics,
+        forced_reason,
+        minimum_result,
+        &focused_part_capabilities,
+        variation_intent,
+    );
+    let suggested_action = fallback_action_for_report(
+        minimum_result,
+        variation_intent,
+        top_reasons.first().map(|row| row.reason),
+    );
+    let human_summary = reliability_human_summary(
+        minimum_result,
+        returned_candidate_count,
+        &top_reasons,
+        suggested_action,
+    );
+    FoundryCandidateReliabilityReport {
+        minimum_result,
+        top_reasons,
+        suggested_action,
+        focused_part_capabilities,
+        human_summary,
+    }
+}
+
+fn minimum_result_for_request(
+    variation_intent: &VariationIntent,
+    returned_candidate_count: usize,
+) -> FoundryCandidateMinimumResult {
+    if variation_intent.scope.is_focus_part() && returned_candidate_count == 0 {
+        FoundryCandidateMinimumResult::NoFocusedCandidates
+    } else if !variation_intent.scope.is_focus_part() && returned_candidate_count < 2 {
+        FoundryCandidateMinimumResult::NoUsefulCandidates
+    } else {
+        FoundryCandidateMinimumResult::Useful
+    }
+}
+
+fn top_failure_reasons(
+    diagnostics: &FoundryCandidateGenerationDiagnostics,
+    forced_reason: Option<FoundryCandidateFailureReason>,
+    minimum_result: FoundryCandidateMinimumResult,
+    focused_part_capabilities: &[FoundryFocusedPartCapabilityReport],
+    variation_intent: &VariationIntent,
+) -> Vec<FoundryCandidateFailureReasonCount> {
+    if minimum_result == FoundryCandidateMinimumResult::Useful && forced_reason.is_none() {
+        return Vec::new();
+    }
+
+    let mut counts = BTreeMap::<FoundryCandidateFailureReason, usize>::new();
+    for (reason, count) in &diagnostics.rejections {
+        let failure_reason = failure_reason_for_rejection(*reason);
+        *counts.entry(failure_reason).or_insert(0) += *count;
+    }
+    if diagnostics.wrong_scope_rejections > 0 {
+        *counts
+            .entry(FoundryCandidateFailureReason::WrongScope)
+            .or_insert(0) += diagnostics.wrong_scope_rejections;
+    }
+    if let Some(reason) = forced_reason {
+        let forced_count = diagnostics
+            .rejections
+            .values()
+            .copied()
+            .sum::<usize>()
+            .saturating_add(1)
+            .max(1);
+        *counts.entry(reason).or_insert(0) += forced_count;
+    }
+    if counts.is_empty() {
+        if let Some(reason) =
+            focused_request_blocked_reason(focused_part_capabilities, variation_intent)
+        {
+            counts.insert(reason, 1);
+        } else {
+            counts.insert(FoundryCandidateFailureReason::HiddenChange, 1);
+        }
+    }
+
+    let mut rows = counts
+        .into_iter()
+        .map(|(reason, count)| FoundryCandidateFailureReasonCount { reason, count })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    rows.truncate(3);
+    rows
+}
+
+fn failure_reason_for_rejection(
+    reason: FoundryCandidateRejectionReason,
+) -> FoundryCandidateFailureReason {
+    match reason {
+        FoundryCandidateRejectionReason::DuplicateProgram
+        | FoundryCandidateRejectionReason::DuplicateLooking => {
+            FoundryCandidateFailureReason::TooSimilar
+        }
+        FoundryCandidateRejectionReason::EmptyProgram
+        | FoundryCandidateRejectionReason::HiddenOnlyChange
+        | FoundryCandidateRejectionReason::ExplanationMismatch => {
+            FoundryCandidateFailureReason::HiddenChange
+        }
+        FoundryCandidateRejectionReason::TooSubtle => {
+            FoundryCandidateFailureReason::ControlTooSubtle
+        }
+        FoundryCandidateRejectionReason::UnsupportedChannel
+        | FoundryCandidateRejectionReason::EditRejected => {
+            FoundryCandidateFailureReason::ProviderUnavailable
+        }
+        FoundryCandidateRejectionReason::DescriptorRejected => {
+            FoundryCandidateFailureReason::RenderDeltaUnavailable
+        }
+        FoundryCandidateRejectionReason::CompileRejected
+        | FoundryCandidateRejectionReason::ConformanceRejected => {
+            FoundryCandidateFailureReason::ValidationFailed
+        }
+    }
+}
+
+fn focused_request_blocked_reason(
+    focused_part_capabilities: &[FoundryFocusedPartCapabilityReport],
+    variation_intent: &VariationIntent,
+) -> Option<FoundryCandidateFailureReason> {
+    let group_id = variation_intent.scope.semantic_part_group_id()?;
+    focused_part_capabilities
+        .iter()
+        .find(|row| row.group_id == group_id)
+        .and_then(|row| row.blocked_reasons.first().copied())
+}
+
+fn fallback_action_for_report(
+    minimum_result: FoundryCandidateMinimumResult,
+    variation_intent: &VariationIntent,
+    top_reason: Option<FoundryCandidateFailureReason>,
+) -> Option<FoundryCandidateFallbackAction> {
+    if minimum_result == FoundryCandidateMinimumResult::Useful {
+        return None;
+    }
+    match top_reason {
+        Some(FoundryCandidateFailureReason::LockedOut) => {
+            Some(FoundryCandidateFallbackAction::UnlockControls)
+        }
+        Some(FoundryCandidateFailureReason::NoBoundControls) => {
+            Some(FoundryCandidateFallbackAction::NoFocusedVariants)
+        }
+        Some(FoundryCandidateFailureReason::ControlTooSubtle) => {
+            Some(FoundryCandidateFallbackAction::UseDetailMode)
+        }
+        Some(FoundryCandidateFailureReason::WrongScope) => {
+            Some(FoundryCandidateFallbackAction::ClearFocus)
+        }
+        Some(
+            FoundryCandidateFailureReason::ProviderUnavailable
+            | FoundryCandidateFailureReason::RenderDeltaUnavailable
+            | FoundryCandidateFailureReason::ValidationFailed,
+        ) if variation_intent.scope.is_focus_part() => {
+            Some(FoundryCandidateFallbackAction::TryAnotherPart)
+        }
+        Some(
+            FoundryCandidateFailureReason::HiddenChange | FoundryCandidateFailureReason::TooSimilar,
+        ) if variation_intent.scope.is_focus_part() => {
+            Some(FoundryCandidateFallbackAction::ClearFocus)
+        }
+        _ => Some(FoundryCandidateFallbackAction::TryWholeAssetIdeas),
+    }
+}
+
+fn reliability_human_summary(
+    minimum_result: FoundryCandidateMinimumResult,
+    returned_candidate_count: usize,
+    top_reasons: &[FoundryCandidateFailureReasonCount],
+    suggested_action: Option<FoundryCandidateFallbackAction>,
+) -> String {
+    if minimum_result == FoundryCandidateMinimumResult::Useful {
+        return format!("Generated {returned_candidate_count} useful candidate(s).");
+    }
+    let status = match minimum_result {
+        FoundryCandidateMinimumResult::Useful => "Useful",
+        FoundryCandidateMinimumResult::NoUsefulCandidates => "NoUsefulCandidates",
+        FoundryCandidateMinimumResult::NoFocusedCandidates => "NoFocusedCandidates",
+    };
+    let reasons = if top_reasons.is_empty() {
+        "no structured reason".to_owned()
+    } else {
+        top_reasons
+            .iter()
+            .map(|row| format!("{} ({})", row.reason.display_label(), row.count))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let action = suggested_action
+        .map(FoundryCandidateFallbackAction::display_label)
+        .unwrap_or("Try whole-asset ideas");
+    format!("{status}: {reasons}. Suggested fallback: {action}.")
+}
+
+fn focused_part_capability_reports(
+    document: &FoundryAssetDocument,
+    profile: &CustomizerProfile,
+    context: ControlEvaluationContext<'_>,
+) -> Vec<FoundryFocusedPartCapabilityReport> {
+    let slot_roles = slot_roles_by_id(context);
+    let mut descriptors = built_in_part_group_descriptors(document);
+    descriptors.sort_by(|left, right| left.group_id.cmp(&right.group_id));
+    descriptors
+        .iter()
+        .map(|descriptor| {
+            focused_part_capability_report_for_descriptor(
+                document,
+                profile,
+                context,
+                &slot_roles,
+                descriptor,
+            )
+        })
+        .collect()
+}
+
+fn focused_part_capability_report_for_descriptor(
+    document: &FoundryAssetDocument,
+    profile: &CustomizerProfile,
+    context: ControlEvaluationContext<'_>,
+    slot_roles: &BTreeMap<&str, &str>,
+    descriptor: &FoundryPartGroupDescriptor,
+) -> FoundryFocusedPartCapabilityReport {
+    let mut matched_controls = 0_usize;
+    let mut locked_controls = 0_usize;
+    let mut subtle_controls = 0_usize;
+    let mut provider_unavailable_controls = 0_usize;
+    let mut useful_capacity = 0_usize;
+    let focus_intent = VariationIntent::focus_part_shape(
+        descriptor.group_id.clone(),
+        descriptor.display_name.clone(),
+    );
+
+    let mut controls = profile.controls.iter().collect::<Vec<_>>();
+    controls.sort_by(|left, right| left.id.cmp(&right.id));
+    for control in controls {
+        if !control_matches_part_group_descriptor(control, descriptor) {
+            continue;
+        }
+        matched_controls += 1;
+        if !control.visible || control.topology_behavior == ControlTopologyBehavior::RuntimeOnly {
+            continue;
+        }
+        let kind = classify_control_kind(control, slot_roles);
+        if protected_by_lock(document, control, &kind) {
+            locked_controls += 1;
+            continue;
+        }
+        let class = classify_control(control, &kind);
+        if class == ControlClass::Detail {
+            subtle_controls += 1;
+        }
+        if !mode_allows_control(
+            FoundryCandidateMode::Refine,
+            class,
+            control.topology_behavior,
+            &kind,
+            &focus_intent,
+        ) || !variation_allows_control(document, &focus_intent, control, class)
+        {
+            continue;
+        }
+        let Ok(domain) = effective_control_domain(control, context) else {
+            provider_unavailable_controls += usize::from(matches!(
+                kind,
+                ControlOpportunityKind::Provider { .. }
+                    | ControlOpportunityKind::RolePresence { .. }
+            ));
+            continue;
+        };
+        let Some(current) = current_control_value(document, control, context, &domain) else {
+            continue;
+        };
+        if !domain.contains_available_value(&current) {
+            continue;
+        }
+        let capacity = control_candidate_capacity(&kind, &domain, &current);
+        if capacity == 0
+            && matches!(
+                kind,
+                ControlOpportunityKind::Provider { .. }
+                    | ControlOpportunityKind::Choice
+                    | ControlOpportunityKind::RolePresence { .. }
+            )
+        {
+            provider_unavailable_controls += 1;
+        }
+        useful_capacity = useful_capacity.saturating_add(capacity);
+    }
+
+    let likely_candidate_count = useful_capacity.min(FOUNDRY_MAX_RESULT_COUNT);
+    let mut blocked_reasons = Vec::new();
+    if !descriptor.focusable
+        || !descriptor.supports_channel(&VariationChannel::Shape)
+        || matched_controls == 0
+        || descriptor.bound_control_ids.is_empty() && descriptor.bound_provider_roles.is_empty()
+    {
+        blocked_reasons.push(FoundryCandidateFailureReason::NoBoundControls);
+    }
+    if likely_candidate_count == 0 && locked_controls > 0 {
+        push_unique_failure_reason(
+            &mut blocked_reasons,
+            FoundryCandidateFailureReason::LockedOut,
+        );
+    }
+    if likely_candidate_count == 0 && subtle_controls > 0 {
+        push_unique_failure_reason(
+            &mut blocked_reasons,
+            FoundryCandidateFailureReason::ControlTooSubtle,
+        );
+    }
+    if likely_candidate_count == 0 && provider_unavailable_controls > 0 {
+        push_unique_failure_reason(
+            &mut blocked_reasons,
+            FoundryCandidateFailureReason::ProviderUnavailable,
+        );
+    }
+    if likely_candidate_count == 0 && blocked_reasons.is_empty() {
+        blocked_reasons.push(FoundryCandidateFailureReason::HiddenChange);
+    }
+    let can_generate_shape_ideas = likely_candidate_count > 0;
+    let suggested_action = (!can_generate_shape_ideas)
+        .then(|| fallback_action_for_capability(&blocked_reasons))
+        .flatten();
+
+    FoundryFocusedPartCapabilityReport {
+        group_id: descriptor.group_id.clone(),
+        display_name: descriptor.display_name.clone(),
+        can_generate_shape_ideas,
+        likely_candidate_count,
+        blocked_reasons,
+        suggested_action,
+    }
+}
+
+fn slot_roles_by_id(context: ControlEvaluationContext<'_>) -> BTreeMap<&str, &str> {
+    context
+        .family_parameter_slots
+        .iter()
+        .filter_map(|slot| {
+            slot.target_role
+                .as_ref()
+                .map(|role| (slot.id.as_str(), role.as_str()))
+        })
+        .collect()
+}
+
+fn control_matches_part_group_descriptor(
+    control: &CustomizerControl,
+    descriptor: &FoundryPartGroupDescriptor,
+) -> bool {
+    if descriptor
+        .bound_control_ids
+        .iter()
+        .any(|control_id| control_id == &control.id)
+        || control.bindings.iter().any(|binding| {
+            descriptor
+                .bound_control_ids
+                .iter()
+                .any(|control_id| control_id == &binding.slot)
+        })
+    {
+        return true;
+    }
+    matches!(
+        &control.kind,
+        ControlKind::ProviderGallery { role, .. }
+            if descriptor
+                .bound_provider_roles
+                .iter()
+                .any(|provider_role| provider_role == role)
+    )
+}
+
+fn current_control_value(
+    document: &FoundryAssetDocument,
+    control: &CustomizerControl,
+    context: ControlEvaluationContext<'_>,
+    domain: &FeasibleControlDomain,
+) -> Option<ControlValue> {
+    let raw_current = document
+        .control_state
+        .get(&control.id)
+        .cloned()
+        .unwrap_or_else(|| {
+            default_control_value(control, context).unwrap_or_else(|_| first_domain_value(domain))
+        });
+    canonicalize_control_value(control, context, raw_current).ok()
+}
+
+fn control_candidate_capacity(
+    kind: &ControlOpportunityKind,
+    domain: &FeasibleControlDomain,
+    current: &ControlValue,
+) -> usize {
+    match (kind, current) {
+        (ControlOpportunityKind::Scalar, ControlValue::Scalar(_)) => {
+            usize::from(domain.continuous_intervals.iter().any(|interval| {
+                domain.contains_available_value(&ControlValue::Scalar(interval.minimum))
+                    || domain.contains_available_value(&ControlValue::Scalar(interval.maximum))
+            }))
+        }
+        (ControlOpportunityKind::Integer, ControlValue::Integer(current)) => {
+            available_integers(domain)
+                .into_iter()
+                .filter(|value| value != current)
+                .count()
+        }
+        (ControlOpportunityKind::Toggle, ControlValue::Toggle(current))
+        | (ControlOpportunityKind::RolePresence { .. }, ControlValue::Toggle(current)) => {
+            usize::from(domain.contains_available_value(&ControlValue::Toggle(!current)))
+        }
+        (ControlOpportunityKind::Choice, ControlValue::Choice(_))
+        | (ControlOpportunityKind::Provider { .. }, ControlValue::Provider(_)) => domain
+            .discrete_values
+            .iter()
+            .filter(|value| *value != current && domain.contains_available_value(value))
+            .count(),
+        _ => 0,
+    }
+}
+
+fn fallback_action_for_capability(
+    blocked_reasons: &[FoundryCandidateFailureReason],
+) -> Option<FoundryCandidateFallbackAction> {
+    if blocked_reasons.contains(&FoundryCandidateFailureReason::LockedOut) {
+        Some(FoundryCandidateFallbackAction::UnlockControls)
+    } else if blocked_reasons.contains(&FoundryCandidateFailureReason::ControlTooSubtle) {
+        Some(FoundryCandidateFallbackAction::UseDetailMode)
+    } else if blocked_reasons.contains(&FoundryCandidateFailureReason::NoBoundControls) {
+        Some(FoundryCandidateFallbackAction::NoFocusedVariants)
+    } else if blocked_reasons.contains(&FoundryCandidateFailureReason::ProviderUnavailable) {
+        Some(FoundryCandidateFallbackAction::TryAnotherPart)
+    } else if blocked_reasons.is_empty() {
+        None
+    } else {
+        Some(FoundryCandidateFallbackAction::TryWholeAssetIdeas)
+    }
+}
+
+fn push_unique_failure_reason(
+    reasons: &mut Vec<FoundryCandidateFailureReason>,
+    reason: FoundryCandidateFailureReason,
+) {
+    if !reasons.contains(&reason) {
+        reasons.push(reason);
+    }
+}
+
+fn no_editable_failure_reason(
+    document: &FoundryAssetDocument,
+    profile: &CustomizerProfile,
+    context: ControlEvaluationContext<'_>,
+    variation_intent: &VariationIntent,
+    locked_targets_skipped: usize,
+) -> FoundryCandidateFailureReason {
+    let capabilities = focused_part_capability_reports(document, profile, context);
+    if let Some(reason) = focused_request_blocked_reason(&capabilities, variation_intent) {
+        return reason;
+    }
+    if locked_targets_skipped > 0 {
+        FoundryCandidateFailureReason::LockedOut
+    } else if variation_intent.scope.is_focus_part() {
+        FoundryCandidateFailureReason::NoBoundControls
+    } else {
+        FoundryCandidateFailureReason::HiddenChange
+    }
+}
+
+struct EmptyCandidateOutputContext<'a> {
+    document: &'a FoundryAssetDocument,
+    profile: &'a CustomizerProfile,
+    context: ControlEvaluationContext<'a>,
+    request: &'a FoundryCandidateRequest,
     preference_scope: FoundryPreferenceScope,
-    preference_profile: Option<&FoundryPreferenceProfile>,
+    preference_profile: Option<&'a FoundryPreferenceProfile>,
     reason: FoundryCandidateRejectionReason,
     detail: String,
-) -> FoundryCandidateOutput {
+    locked_targets_skipped: usize,
+    forced_reason: Option<FoundryCandidateFailureReason>,
+}
+
+fn empty_candidate_output(input: EmptyCandidateOutputContext<'_>) -> FoundryCandidateOutput {
     let mut rejections = BTreeMap::new();
     rejections.insert(
-        reason,
-        request.result_count.clamp(1, FOUNDRY_MAX_RESULT_COUNT),
+        input.reason,
+        input
+            .request
+            .result_count
+            .clamp(1, FOUNDRY_MAX_RESULT_COUNT),
     );
     let diagnostics = FoundryCandidateGenerationDiagnostics {
-        requested_proposals: request.proposal_count,
-        requested_candidates: request.result_count,
+        requested_proposals: input.request.proposal_count,
+        requested_candidates: input.request.result_count,
         attempted_proposals: 0,
         scored_candidates: 0,
         accepted_candidates: 0,
         returned_candidates: 0,
         available_control_count: 0,
-        locked_targets_skipped: 0,
+        locked_targets_skipped: input.locked_targets_skipped,
         rejections,
         duplicate_looking_rejections: 0,
         hidden_internal_rejections: 0,
@@ -988,19 +1688,29 @@ fn empty_candidate_output(
         human_summary: String::new(),
     };
     let mut preference_report = preference_report(
-        request.preference_profile.as_ref(),
-        preference_profile,
-        preference_scope,
+        input.request.preference_profile.as_ref(),
+        input.preference_profile,
+        input.preference_scope,
         &[],
         &BTreeMap::new(),
     );
-    preference_report.ignored_reason = Some(detail);
+    preference_report.ignored_reason = Some(input.detail);
     let mut diagnostics = diagnostics;
     update_legibility_rejection_totals(&mut diagnostics);
     diagnostics.human_summary = candidate_generation_human_summary(&diagnostics);
+    let reliability_report = candidate_reliability_report(
+        input.document,
+        input.profile,
+        input.context,
+        &input.request.variation_intent.clone().normalized(),
+        &diagnostics,
+        0,
+        input.forced_reason,
+    );
     FoundryCandidateOutput {
         candidates: Vec::new(),
         diagnostics,
+        reliability_report,
         scoring_report: AssetScoringReport {
             rejected_candidates: Vec::new(),
             scored_candidates: Vec::new(),
@@ -1700,14 +2410,20 @@ struct KnownPartGroup {
 }
 
 fn known_part_groups(document: &FoundryAssetDocument) -> Vec<KnownPartGroup> {
+    built_in_part_group_descriptors(document)
+        .into_iter()
+        .map(part_group_from_descriptor)
+        .collect()
+}
+
+fn built_in_part_group_descriptors(
+    document: &FoundryAssetDocument,
+) -> Vec<FoundryPartGroupDescriptor> {
     let profile_hint = format!(
         "{} {}",
         document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
     );
     built_in_part_group_descriptors_for_profile(&profile_hint)
-        .into_iter()
-        .map(part_group_from_descriptor)
-        .collect()
 }
 
 fn part_group_from_descriptor(descriptor: FoundryPartGroupDescriptor) -> KnownPartGroup {
@@ -2584,7 +3300,7 @@ fn classify_control(control: &CustomizerControl, kind: &ControlOpportunityKind) 
         &text,
         &[
             "detail", "edge", "bevel", "segment", "weather", "trim", "bolt", "rim", "corner",
-            "profile",
+            "profile", "density",
         ],
     ) {
         return ControlClass::Detail;
