@@ -113,6 +113,20 @@ enum MakeCanvasMode {
     Error,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct MakeCanvasLayout {
+    top_height: f32,
+    tray_height: f32,
+    tray_gap: f32,
+    stage_width: f32,
+    ideas_width: f32,
+    inspector_width: f32,
+    content_gap: f32,
+    stacked_columns: bool,
+    inline_ideas: bool,
+    compact_ideas: bool,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum MakePreparationPhase {
     PreparingModel,
@@ -218,7 +232,7 @@ const MAKE_CONTEXT_INITIAL_CONTROL_LIMIT: usize = 4;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
-const MAX_CURRENT_PREVIEW_PIXELS: u32 = 1024;
+const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const ACTION_EXPORT: &str = "Export";
 const ACTION_SAVE: &str = "Save";
@@ -1114,49 +1128,90 @@ impl FoundryDesktopApp {
         }
 
         let available = ui.available_size();
-        let tray_height = (available.y * 0.36).clamp(240.0, 390.0);
-        let top_height = (available.y - tray_height - 14.0).max(320.0);
+        let layout = make_canvas_layout(available, &view_state);
 
         ui.allocate_ui_with_layout(
-            egui::vec2(available.x, top_height),
+            egui::vec2(available.x, layout.top_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                let total_width = ui.available_width();
-                let inspector_width = if total_width >= 1120.0 {
-                    360.0_f32
-                } else {
-                    320.0_f32
-                }
-                .min(total_width * 0.32);
-                let stage_width = (total_width - inspector_width - 18.0).max(420.0);
-                ui.horizontal_top(|ui| {
+                if layout.stacked_columns {
+                    let stage_height = make_canvas_stacked_stage_height(layout.top_height);
                     ui.allocate_ui_with_layout(
-                        egui::vec2(stage_width, top_height),
+                        egui::vec2(ui.available_width(), stage_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             commands.extend(self.show_make_model_stage_panel(ui, &view_state));
                         },
                     );
-                    ui.add_space(18.0);
+                    ui.add_space(layout.content_gap);
                     ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), top_height),
+                        egui::vec2(
+                            ui.available_width(),
+                            (layout.top_height - stage_height - layout.content_gap).max(180.0),
+                        ),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             commands.extend(self.show_make_inspector_panel(ui, &view_state));
                         },
                     );
-                });
+                } else if layout.inline_ideas {
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(layout.stage_width, layout.top_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                commands.extend(self.show_make_model_stage_panel(ui, &view_state));
+                            },
+                        );
+                        ui.add_space(layout.content_gap);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(layout.ideas_width, layout.top_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                commands.extend(self.show_direction_board_panel(ui, &view_state));
+                            },
+                        );
+                        ui.add_space(layout.content_gap);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(layout.inspector_width, layout.top_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                commands.extend(self.show_make_inspector_panel(ui, &view_state));
+                            },
+                        );
+                    });
+                } else {
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(layout.stage_width, layout.top_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                commands.extend(self.show_make_model_stage_panel(ui, &view_state));
+                            },
+                        );
+                        ui.add_space(layout.content_gap);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(layout.inspector_width, layout.top_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                commands.extend(self.show_make_inspector_panel(ui, &view_state));
+                            },
+                        );
+                    });
+                }
             },
         );
 
-        ui.add_space(14.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), tray_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                commands.extend(self.show_direction_board_panel(ui, &view_state));
-            },
-        );
+        if layout.tray_height > 0.0 {
+            ui.add_space(layout.tray_gap);
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), layout.tray_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    commands.extend(self.show_direction_board_panel(ui, &view_state));
+                },
+            );
+        }
         commands
     }
 
@@ -1192,7 +1247,7 @@ impl FoundryDesktopApp {
             view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible;
 
         let response = product_stage(ui, |ui| {
-            ui.set_min_height(ui.available_height().max(260.0));
+            ui.set_min_height(ui.available_height().max(220.0));
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new("Current asset")
@@ -1217,9 +1272,7 @@ impl FoundryDesktopApp {
                 let _ = status_pill(ui, StatusPillSpec::new(state_label, tone));
             });
             ui.add_space(8.0);
-            let preview_edge = (ui.available_height() - 116.0)
-                .min(ui.available_width() - 18.0)
-                .clamp(220.0, 620.0);
+            let preview_edge = make_stage_preview_edge(ui.available_width(), ui.available_height());
             self.show_current_preview_sized(ui, preview_edge);
             ui.add_space(10.0);
             ui.horizontal_wrapped(|ui| {
@@ -1392,85 +1445,95 @@ impl FoundryDesktopApp {
         let mut commands = Vec::new();
         let colors = VisualFoundryTokens::dark().colors;
         product_card(ui, false, |ui| {
-            ui.set_min_height(ui.available_height().max(320.0));
+            ui.set_min_height(ui.available_height().max(240.0));
             ui.label(
                 RichText::new(&view_state.primary_title)
                     .color(colors.text)
-                    .size(20.0)
+                    .size(18.0)
                     .strong(),
             );
-            ui.label(
-                RichText::new(make_canvas_mode_summary(view_state))
-                    .color(colors.text_muted)
-                    .small(),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(make_canvas_mode_summary(view_state))
+                        .color(colors.text_muted)
+                        .small(),
+                )
+                .wrap(),
             );
-            ui.label(
-                RichText::new(&view_state.next_action_hint)
-                    .color(colors.accent_hover)
-                    .strong(),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&view_state.next_action_hint)
+                        .color(colors.accent_hover)
+                        .strong(),
+                )
+                .wrap(),
             );
             ui.add_space(12.0);
-            ui.horizontal_wrapped(|ui| {
-                let build_actions_enabled = make_canvas_build_dependent_actions_enabled(view_state);
-                let build_actions_reason = make_canvas_build_dependent_disabled_reason(view_state);
-                if view_state.mode == MakeCanvasMode::ReviewingIdeas
-                    && action_button(
+            if make_canvas_inspector_build_actions_visible(view_state) {
+                ui.horizontal_wrapped(|ui| {
+                    let build_actions_enabled =
+                        make_canvas_build_dependent_actions_enabled(view_state);
+                    let build_actions_reason =
+                        make_canvas_build_dependent_disabled_reason(view_state);
+                    if view_state.mode == MakeCanvasMode::ReviewingIdeas
+                        && action_button(
+                            ui,
+                            &action_spec(
+                                make_canvas_candidate_actions_enabled(view_state),
+                                ACTION_TRY_MORE_IDEAS,
+                                ButtonTone::Secondary,
+                                build_actions_reason,
+                            ),
+                        )
+                        .clicked()
+                        && let Some(command) = self.make_primary_candidate_command()
+                    {
+                        commands.push(command);
+                    }
+                    if action_button(
                         ui,
                         &action_spec(
-                            make_canvas_candidate_actions_enabled(view_state),
-                            ACTION_TRY_MORE_IDEAS,
+                            build_actions_enabled,
+                            ACTION_ADD_TO_PACK,
                             ButtonTone::Secondary,
                             build_actions_reason,
                         ),
                     )
                     .clicked()
-                    && let Some(command) = self.make_primary_candidate_command()
-                {
-                    commands.push(command);
-                }
-                if action_button(
-                    ui,
-                    &action_spec(
-                        build_actions_enabled,
-                        ACTION_ADD_TO_PACK,
-                        ButtonTone::Secondary,
-                        build_actions_reason,
-                    ),
-                )
-                .clicked()
-                    && let Some(command) = self.add_current_to_pack_command()
-                {
-                    commands.push(command);
-                    self.drawer = Some(FoundryDrawer::Pack);
-                }
-                if action_button(
-                    ui,
-                    &action_spec(
-                        build_actions_enabled,
-                        ACTION_OPEN_PACK,
-                        ButtonTone::Secondary,
-                        build_actions_reason,
-                    ),
-                )
-                .clicked()
-                {
-                    self.drawer = Some(FoundryDrawer::Pack);
-                }
-                if action_button(
-                    ui,
-                    &action_spec(
-                        build_actions_enabled,
-                        ACTION_OPEN_EXPORT,
-                        ButtonTone::Secondary,
-                        build_actions_reason,
-                    ),
-                )
-                .clicked()
-                {
-                    self.drawer = Some(FoundryDrawer::Export);
-                }
-            });
-            ui.add_space(10.0);
+                        && let Some(command) = self.add_current_to_pack_command()
+                    {
+                        commands.push(command);
+                        self.drawer = Some(FoundryDrawer::Pack);
+                    }
+                    if action_button(
+                        ui,
+                        &action_spec(
+                            build_actions_enabled,
+                            ACTION_OPEN_PACK,
+                            ButtonTone::Secondary,
+                            build_actions_reason,
+                        ),
+                    )
+                    .clicked()
+                    {
+                        self.drawer = Some(FoundryDrawer::Pack);
+                    }
+                    if action_button(
+                        ui,
+                        &action_spec(
+                            build_actions_enabled,
+                            ACTION_OPEN_EXPORT,
+                            ButtonTone::Secondary,
+                            build_actions_reason,
+                        ),
+                    )
+                    .clicked()
+                    {
+                        self.drawer = Some(FoundryDrawer::Export);
+                    }
+                });
+                ui.add_space(10.0);
+            }
             status_banner(
                 ui,
                 StatusBannerSpec {
@@ -1541,10 +1604,10 @@ impl FoundryDesktopApp {
             egui::ScrollArea::vertical()
                 .id_salt("make_context_inspector_controls")
                 .auto_shrink([false, false])
-                .max_height((ui.available_height() - 18.0).max(160.0))
+                .max_height((ui.available_height() - 8.0).max(72.0))
                 .show(ui, |ui| {
                     if control_sections.visible.is_empty() {
-                        product_empty_state(
+                        product_compact_empty_state(
                             ui,
                             control_sections.empty_title,
                             control_sections.empty_message,
@@ -1696,7 +1759,9 @@ impl FoundryDesktopApp {
             || "Ideas".to_owned(),
             |group| format!("{} ideas", singular_title_case_part_label(&group.label)),
         );
-        let direction_count_label = if generating {
+        let direction_count_label = if view_state.mode == MakeCanvasMode::PreparingAsset {
+            "Ideas unlock after the model and preview are ready.".to_owned()
+        } else if generating {
             view_state
                 .local_busy_label
                 .as_deref()
@@ -1705,18 +1770,27 @@ impl FoundryDesktopApp {
         } else {
             direction_board_count_label(view_state.candidate_count)
         };
-        section_header(
-            ui,
-            SectionHeaderSpec {
-                eyebrow: if view_state.candidate_count > 0 {
-                    "Compare"
-                } else {
-                    "Ideas"
+        if make_canvas_uses_compact_ideas(view_state) {
+            compact_section_header(
+                ui,
+                "Ideas",
+                ideas_title.as_str(),
+                direction_count_label.as_str(),
+            );
+        } else {
+            section_header(
+                ui,
+                SectionHeaderSpec {
+                    eyebrow: if view_state.candidate_count > 0 {
+                        "Compare"
+                    } else {
+                        "Ideas"
+                    },
+                    title: ideas_title.as_str(),
+                    subtitle: Some(direction_count_label.as_str()),
                 },
-                title: ideas_title.as_str(),
-                subtitle: Some(direction_count_label.as_str()),
-            },
-        );
+            );
+        }
         if let Some(message) = &view_state.local_warning_message {
             status_banner(
                 ui,
@@ -1773,11 +1847,18 @@ impl FoundryDesktopApp {
                 return commands;
             }
             MakeCandidateTrayState::EmptyReady => {
-                product_empty_state(
-                    ui,
-                    "Ready to try ideas",
-                    "Try ideas or focus a part when the asset is ready.",
-                );
+                let (title, message) = if view_state.mode == MakeCanvasMode::PreparingAsset {
+                    (
+                        "Ideas unlock when ready",
+                        "The asset can be adjusted while the preview prepares.",
+                    )
+                } else {
+                    (
+                        "Ready to try ideas",
+                        "Try ideas or focus a part when the asset is ready.",
+                    )
+                };
+                product_compact_empty_state(ui, title, message);
                 return commands;
             }
             MakeCandidateTrayState::NoCandidatesWithRecovery => {
@@ -1797,23 +1878,11 @@ impl FoundryDesktopApp {
         let current_preview = self.state.current_preview.as_ref();
         let current_build = self.state.current_build.as_ref();
         let texture_cache = &mut self.texture_cache;
-        commands.extend(show_selected_candidate_comparison(
+        commands.extend(show_visible_direction_ideas_board(
             ui,
             texture_cache,
             current_build,
             current_preview,
-            &self.state.candidates,
-            make_canvas_candidate_actions_enabled(view_state),
-            view_state
-                .primary_action_disabled_reason
-                .as_deref()
-                .unwrap_or(ACTIVE_IDEA_JOB_REASON),
-        ));
-        ui.add_space(10.0);
-        commands.extend(show_direction_candidate_grid(
-            ui,
-            texture_cache,
-            current_build,
             &self.state.candidates,
             make_canvas_candidate_actions_enabled(view_state),
             view_state
@@ -3428,6 +3497,132 @@ fn make_canvas_candidate_actions_enabled(view_state: &MakeCanvasViewState) -> bo
         )
 }
 
+fn make_canvas_layout(available: egui::Vec2, view_state: &MakeCanvasViewState) -> MakeCanvasLayout {
+    let available_width = available.x.max(1.0);
+    let available_height = available.y.max(1.0);
+    let stacked_columns = available_width < 900.0;
+    let inline_ideas =
+        make_canvas_uses_inline_ideas(view_state) && !stacked_columns && available_width >= 1240.0;
+    let content_gap = if available_width >= 1280.0 {
+        14.0
+    } else {
+        10.0
+    };
+    let compact_ideas = make_canvas_uses_compact_ideas(view_state);
+    let requested_tray_height = if inline_ideas || !view_state.candidate_tray_visible {
+        0.0
+    } else if compact_ideas {
+        (available_height * 0.13).clamp(88.0, 128.0)
+    } else {
+        (available_height * 0.38).clamp(240.0, 420.0)
+    };
+    let min_top_height = if stacked_columns { 520.0 } else { 390.0 };
+    let max_tray_height = (available_height - min_top_height - content_gap).max(0.0);
+    let tray_height = requested_tray_height.min(max_tray_height);
+    let tray_gap = if tray_height > 0.0 { content_gap } else { 0.0 };
+    let top_height = (available_height - tray_height - tray_gap).max(available_height.min(260.0));
+
+    let (stage_width, ideas_width, inspector_width) = if stacked_columns {
+        (available_width, available_width, available_width)
+    } else if inline_ideas {
+        let desired_inspector_width = (available_width * 0.20).clamp(320.0, 380.0);
+        let desired_stage_width = (available_width * 0.38).clamp(520.0, 760.0);
+        let min_stage_width = 430.0;
+        let min_ideas_width = 430.0;
+        let min_inspector_width = 300.0;
+        let mut inspector_width = desired_inspector_width.min(available_width * 0.27);
+        let mut stage_width = desired_stage_width;
+        let mut ideas_width = available_width - stage_width - inspector_width - (content_gap * 2.0);
+
+        if ideas_width < min_ideas_width {
+            let deficit = min_ideas_width - ideas_width;
+            stage_width = (stage_width - deficit).max(min_stage_width);
+            ideas_width = available_width - stage_width - inspector_width - (content_gap * 2.0);
+        }
+        if ideas_width < min_ideas_width {
+            let deficit = min_ideas_width - ideas_width;
+            inspector_width = (inspector_width - deficit).max(min_inspector_width);
+            ideas_width = available_width - stage_width - inspector_width - (content_gap * 2.0);
+        }
+
+        (stage_width, ideas_width.max(300.0), inspector_width)
+    } else {
+        let min_stage_width = if available_width >= 1500.0 {
+            760.0
+        } else {
+            520.0
+        };
+        let max_inspector_width = (available_width - min_stage_width - content_gap).max(300.0);
+        let desired_inspector_width = if available_width >= 1500.0 {
+            (available_width * 0.30).clamp(420.0, 520.0)
+        } else {
+            (available_width * 0.34).clamp(340.0, 440.0)
+        };
+        let inspector_width = desired_inspector_width
+            .min(max_inspector_width)
+            .min(available_width - content_gap)
+            .max(300.0);
+        let stage_width = (available_width - inspector_width - content_gap).max(300.0);
+        (stage_width, 0.0, inspector_width)
+    };
+
+    MakeCanvasLayout {
+        top_height,
+        tray_height,
+        tray_gap,
+        stage_width,
+        ideas_width,
+        inspector_width,
+        content_gap,
+        stacked_columns,
+        inline_ideas,
+        compact_ideas,
+    }
+}
+
+fn make_canvas_uses_compact_ideas(view_state: &MakeCanvasViewState) -> bool {
+    view_state.candidate_tray_state == MakeCandidateTrayState::EmptyReady
+        && view_state.local_warning_message.is_none()
+        && view_state.local_error_message.is_none()
+}
+
+fn make_canvas_uses_inline_ideas(view_state: &MakeCanvasViewState) -> bool {
+    view_state.candidate_tray_visible
+        && matches!(
+            view_state.candidate_tray_state,
+            MakeCandidateTrayState::GeneratingSkeletons
+                | MakeCandidateTrayState::HasCandidates
+                | MakeCandidateTrayState::NoCandidatesWithRecovery
+                | MakeCandidateTrayState::ErrorWithRecovery
+        )
+}
+
+fn make_canvas_stacked_stage_height(top_height: f32) -> f32 {
+    if top_height <= 420.0 {
+        return (top_height * 0.56).max(180.0);
+    }
+    (top_height * 0.58).clamp(240.0, top_height - 180.0)
+}
+
+fn make_stage_preview_edge(available_width: f32, available_height: f32) -> f32 {
+    let vertical_budget = available_height * 0.68;
+    let horizontal_budget = available_width - 18.0;
+    vertical_budget.min(horizontal_budget).clamp(180.0, 520.0)
+}
+
+fn make_canvas_inspector_build_actions_visible(view_state: &MakeCanvasViewState) -> bool {
+    view_state.preview_ready
+        || view_state.preview_update_required
+        || matches!(
+            view_state.mode,
+            MakeCanvasMode::ReviewingIdeas
+                | MakeCanvasMode::FocusedPart
+                | MakeCanvasMode::PackDrawerOpen
+                | MakeCanvasMode::ExportDrawerOpen
+                | MakeCanvasMode::Error
+        )
+}
+
 fn tab_for_workflow_step(index: usize) -> FoundryTab {
     match index {
         1 => FoundryTab::Home,
@@ -4448,6 +4643,33 @@ fn product_empty_state(ui: &mut egui::Ui, title: &str, message: &str) {
     );
 }
 
+fn product_compact_empty_state(ui: &mut egui::Ui, title: &str, message: &str) {
+    product_card(ui, false, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.set_min_height(64.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(title).color(colors.text).strong());
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(RichText::new(message).color(colors.text_muted).small()).wrap(),
+            );
+        });
+    });
+}
+
+fn compact_section_header(ui: &mut egui::Ui, eyebrow: &str, title: &str, subtitle: &str) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(eyebrow.to_ascii_uppercase())
+                .color(colors.accent_hover)
+                .small(),
+        );
+        ui.label(RichText::new(title).color(colors.text).strong());
+        ui.label(RichText::new(subtitle).color(colors.text_muted).small());
+    });
+}
+
 fn product_panel_message(message: &str, fallback: &str) -> String {
     let trimmed = message.trim();
     let lowercase = trimmed.to_ascii_lowercase();
@@ -4971,6 +5193,170 @@ fn start_template_button(ui: &mut egui::Ui) -> egui::Response {
         .inner
 }
 
+fn show_visible_direction_ideas_board(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    current_preview: Option<&FoundryPreviewImage>,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &str,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    commands.extend(show_selected_candidate_comparison_compact(
+        ui,
+        texture_cache,
+        current_build,
+        current_preview,
+        candidates,
+        actions_enabled,
+        disabled_reason,
+    ));
+    ui.add_space(8.0);
+    commands.extend(show_direction_candidate_grid_compact(
+        ui,
+        texture_cache,
+        current_build,
+        candidates,
+        actions_enabled,
+        disabled_reason,
+    ));
+    commands
+}
+
+fn show_selected_candidate_comparison_compact(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    current_preview: Option<&FoundryPreviewImage>,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &str,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let Some(candidate) = candidates
+        .iter()
+        .find(|candidate| candidate.selected)
+        .or_else(|| candidates.first())
+    else {
+        return commands;
+    };
+    let Some(current_preview) = current_preview else {
+        return commands;
+    };
+    if candidate.rgba8.is_empty() || current_preview.rgba8.is_empty() {
+        return commands;
+    }
+
+    product_card(ui, true, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.horizontal_top(|ui| {
+            let preview_edge = compact_comparison_preview_edge(ui.available_width());
+            ui.vertical_centered(|ui| {
+                ui.set_width((preview_edge * 2.0) + 18.0);
+                ui.horizontal_top(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.set_width(preview_edge);
+                        ui.label(RichText::new("Current").color(colors.text).small().strong());
+                        show_rgba_preview(
+                            ui,
+                            texture_cache,
+                            FoundryPreviewDraw {
+                                preview_id: "direction-current-comparison-compact",
+                                build: current_preview.build.as_ref(),
+                                rgba8: &current_preview.rgba8,
+                                width: current_preview.width,
+                                height: current_preview.height,
+                                max_edge: preview_edge,
+                            },
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        ui.set_width(preview_edge);
+                        ui.label(RichText::new("Idea").color(colors.text).small().strong());
+                        let preview_id =
+                            format!("direction-selected-comparison-compact-{}", candidate.id.0);
+                        show_rgba_preview(
+                            ui,
+                            texture_cache,
+                            FoundryPreviewDraw {
+                                preview_id: &preview_id,
+                                build: current_build,
+                                rgba8: &candidate.rgba8,
+                                width: candidate.width,
+                                height: candidate.height,
+                                max_edge: preview_edge,
+                            },
+                        );
+                    });
+                });
+            });
+            ui.add_space(10.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(candidate_display_title(candidate))
+                        .color(colors.text)
+                        .strong(),
+                );
+                if let Some(detail) = candidate_display_detail(candidate) {
+                    ui.add(
+                        egui::Label::new(RichText::new(detail).color(colors.text_muted).small())
+                            .wrap(),
+                    );
+                }
+                ui.label(
+                    RichText::new(candidate_display_subtitle(candidate))
+                        .color(colors.text_muted)
+                        .small(),
+                );
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let choose_reason = candidate
+                        .preview_failure
+                        .as_ref()
+                        .map(|reason| {
+                            product_panel_message(reason, "Preview this idea before using it.")
+                        })
+                        .unwrap_or_else(|| NEED_DIRECTION_REASON.to_owned());
+                    if action_button(
+                        ui,
+                        &action_spec(
+                            actions_enabled && candidate.selectable,
+                            ACTION_CHOOSE_DIRECTION,
+                            ButtonTone::Primary,
+                            if actions_enabled {
+                                choose_reason.as_str()
+                            } else {
+                                disabled_reason
+                            },
+                        ),
+                    )
+                    .clicked()
+                    {
+                        commands.push(directions::accept_candidate_command(candidate.id.clone()));
+                    }
+                    if action_button(
+                        ui,
+                        &action_spec(
+                            actions_enabled,
+                            ACTION_REJECT,
+                            ButtonTone::Secondary,
+                            disabled_reason,
+                        ),
+                    )
+                    .clicked()
+                    {
+                        commands.push(directions::reject_candidate_command(candidate.id.clone()));
+                    }
+                });
+            });
+        });
+    });
+
+    commands
+}
+
 fn show_selected_candidate_comparison(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -5139,6 +5525,38 @@ fn show_direction_candidate_grid(
     commands
 }
 
+fn show_direction_candidate_grid_compact(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &str,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let columns = if candidates.len() >= 6 {
+        3
+    } else {
+        compact_direction_grid_columns(ui.available_width())
+    };
+    for row in candidates.chunks(columns) {
+        ui.columns(columns, |column_uis| {
+            for (column, candidate) in column_uis.iter_mut().zip(row) {
+                commands.extend(show_direction_candidate_card_compact(
+                    column,
+                    texture_cache,
+                    current_build,
+                    candidate,
+                    actions_enabled,
+                    disabled_reason,
+                ));
+            }
+        });
+        ui.add_space(6.0);
+    }
+    commands
+}
+
 fn direction_grid_columns(width: f32) -> usize {
     if width >= 1500.0 {
         4
@@ -5149,6 +5567,26 @@ fn direction_grid_columns(width: f32) -> usize {
     } else {
         1
     }
+}
+
+fn compact_direction_grid_columns(width: f32) -> usize {
+    if width >= 1120.0 {
+        3
+    } else if width >= 560.0 {
+        3
+    } else if width >= 380.0 {
+        2
+    } else {
+        1
+    }
+}
+
+fn compact_comparison_preview_edge(width: f32) -> f32 {
+    (width * 0.16).clamp(84.0, 128.0)
+}
+
+fn compact_direction_card_preview_edge(width: f32) -> f32 {
+    (width * 0.22).clamp(46.0, 64.0)
 }
 
 fn show_direction_skeleton_grid(ui: &mut egui::Ui) {
@@ -5180,6 +5618,76 @@ fn show_direction_skeleton_grid(ui: &mut egui::Ui) {
         });
         ui.add_space(8.0);
     }
+}
+
+fn show_direction_candidate_card_compact(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    candidate: &crate::foundry::view_model::FoundryCandidateCard,
+    _actions_enabled: bool,
+    _disabled_reason: &str,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    product_card(ui, candidate.selected, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.set_min_height(92.0);
+        let available_width = ui.available_width();
+        let preview_id = candidate_preview_texture_id(candidate);
+        let preview_edge = compact_direction_card_preview_edge(available_width);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(preview_edge + 4.0, preview_edge + 4.0),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    show_rgba_preview(
+                        ui,
+                        texture_cache,
+                        FoundryPreviewDraw {
+                            preview_id: &preview_id,
+                            build: current_build,
+                            rgba8: &candidate.rgba8,
+                            width: candidate.width,
+                            height: candidate.height,
+                            max_edge: preview_edge,
+                        },
+                    );
+                },
+            );
+            ui.add_space(8.0);
+            let text_width = (available_width - preview_edge - 18.0).max(92.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(text_width, 52.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(text_width);
+                    ui.label(RichText::new(candidate_display_title(candidate)).strong());
+                    ui.label(
+                        RichText::new(candidate_display_subtitle(candidate))
+                            .color(colors.text_muted)
+                            .small(),
+                    );
+                    if candidate.selected {
+                        ui.label(RichText::new("Selected").color(colors.accent_hover).small());
+                    }
+                },
+            );
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            if action_button(
+                ui,
+                &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Secondary),
+            )
+            .clicked()
+            {
+                commands.push(FoundryAppCommand::SelectCandidate(Some(
+                    candidate.id.clone(),
+                )));
+            }
+        });
+    });
+    commands
 }
 
 fn show_direction_candidate_card(
@@ -6646,7 +7154,10 @@ mod tests {
             current_preview_pixels_for_scale(1.0),
             DEFAULT_PREVIEW_PIXELS
         );
-        assert_eq!(current_preview_pixels_for_scale(1.5), 768);
+        assert_eq!(
+            current_preview_pixels_for_scale(1.5),
+            DEFAULT_PREVIEW_PIXELS
+        );
         assert_eq!(
             current_preview_pixels_for_scale(0.5),
             DEFAULT_PREVIEW_PIXELS
@@ -7494,6 +8005,47 @@ mod tests {
         assert!(strings.contains(&ACTION_UPDATE_PREVIEW));
         assert!(!strings.contains(&"Build Asset"));
         assert!(!strings.contains(&"Refresh Preview"));
+    }
+
+    #[test]
+    fn make_canvas_responsive_layout_keeps_adjust_visible_on_wide_short_viewports() {
+        let app = visible_state_test_app();
+        let visible = app.make_canvas_view_state();
+
+        let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
+
+        assert!(layout.compact_ideas);
+        assert!(!layout.stacked_columns);
+        assert!(layout.inspector_width >= 500.0);
+        assert!(layout.tray_height <= 128.0);
+        assert!(layout.top_height >= 700.0);
+        assert!(layout.stage_width > layout.inspector_width * 2.0);
+        assert!(!make_canvas_inspector_build_actions_visible(&visible));
+    }
+
+    #[test]
+    fn make_canvas_responsive_layout_expands_ideas_when_candidates_exist() {
+        let mut app = ready_visible_state_test_app();
+        app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
+        let visible = app.make_canvas_view_state();
+
+        let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
+
+        assert!(!layout.compact_ideas);
+        assert!(layout.inline_ideas);
+        assert_eq!(layout.tray_height, 0.0);
+        assert_eq!(layout.top_height, 860.0);
+        assert!(layout.ideas_width >= 650.0);
+        assert!(make_canvas_inspector_build_actions_visible(&visible));
+    }
+
+    #[test]
+    fn make_canvas_responsive_layout_preview_edge_uses_available_viewport_without_overgrowing() {
+        assert_eq!(make_stage_preview_edge(1400.0, 900.0), 520.0);
+        assert_eq!(make_stage_preview_edge(260.0, 220.0), 180.0);
+        assert!((make_canvas_stacked_stage_height(360.0) - 201.6).abs() < 0.01);
+        assert_eq!(compact_direction_grid_columns(734.0), 3);
+        assert_eq!(compact_direction_card_preview_edge(330.0), 64.0);
     }
 
     #[test]

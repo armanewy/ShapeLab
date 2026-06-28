@@ -96,6 +96,46 @@ fn semantic_command_schedules_apply_edit_and_stales_superseded_jobs() {
 }
 
 #[test]
+fn focus_part_group_applies_without_background_rebuild() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+
+    let effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::SetFocusPartGroup {
+            group_id: "handles".to_owned(),
+        }))
+        .expect("focus scope should apply locally");
+
+    assert!(effects.is_empty());
+    assert!(state.active_jobs.is_empty());
+    assert_eq!(
+        state.document.as_ref().and_then(|document| document
+            .variation_state
+            .intent
+            .scope
+            .semantic_part_group_id()),
+        Some("handles")
+    );
+
+    let effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::ClearFocusPartGroup))
+        .expect("clearing focus should apply locally");
+
+    assert!(effects.is_empty());
+    assert!(state.active_jobs.is_empty());
+    assert!(
+        state
+            .document
+            .as_ref()
+            .and_then(|document| document
+                .variation_state
+                .intent
+                .scope
+                .semantic_part_group_id())
+            .is_none()
+    );
+}
+
+#[test]
 fn candidate_job_mode_comes_from_explicit_candidate_request() {
     let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
     let request = FoundryCandidateRequest {

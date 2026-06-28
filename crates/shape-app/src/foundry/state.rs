@@ -531,6 +531,9 @@ impl FoundryAppState {
                 self.reject_candidate(&candidate_id);
                 Ok(Vec::new())
             }
+            FoundryCommand::SetFocusPartGroup { .. }
+            | FoundryCommand::ClearFocusPartGroup
+            | FoundryCommand::ClearVariationFocus => self.apply_focus_scope_command(command),
             FoundryCommand::Undo => self.undo(),
             FoundryCommand::SwitchRevision { revision_id } => self.switch_revision(revision_id),
             FoundryCommand::Export { profile, out_dir } => self.export(profile, out_dir),
@@ -552,6 +555,22 @@ impl FoundryAppState {
                 Ok(effects)
             }
         }
+    }
+
+    fn apply_focus_scope_command(
+        &mut self,
+        command: FoundryCommand,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let document = self
+            .document
+            .as_mut()
+            .ok_or(FoundryAppStateError::MissingDocument)?;
+        apply_foundry_command(document, &command)
+            .map_err(|error| FoundryAppStateError::Project(format!("{error:?}")))?;
+        self.clear_candidates();
+        self.refresh_from_document_snapshot();
+        self.refresh_project_flags();
+        Ok(Vec::new())
     }
 
     fn schedule_apply_edit(
