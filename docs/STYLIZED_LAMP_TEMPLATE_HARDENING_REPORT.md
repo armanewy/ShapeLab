@@ -2,7 +2,10 @@
 
 ## Scope
 
-Prompt 5 reauthored only the Stylized Furniture Lamp catalog fixture, its focused tests, and this documentation. No app UI, gamekit, rig/motion, runtime LLM, root manifest, or lockfile changes were made.
+Prompt 3C v2 re-verified the existing Stylized Furniture Lamp hardening. The
+earlier lamp hardening pass reauthored only the Stylized Furniture Lamp catalog
+fixture, its focused tests, and this documentation. No app UI, gamekit,
+rig/motion, runtime LLM, root manifest, or lockfile changes were made.
 
 ## Geometry Hardening
 
