@@ -143,6 +143,8 @@ enum Command {
     HqQualityBenchmark(hq_quality::HqQualityBenchmarkArgs),
     /// Emit starter-template quality benchmark evidence and pass/fail reports.
     StarterTemplateQualityBenchmark(starter_template_quality::StarterTemplateQualityBenchmarkArgs),
+    /// Emit starter-template dogfood evidence and pass/fail reports.
+    StarterTemplateDogfoodBenchmark(starter_template_quality::StarterTemplateDogfoodBenchmarkArgs),
     /// Emit a deterministic adversarial review over an HQ benchmark evidence directory.
     HqAdversarialReview(hq_quality::HqAdversarialReviewArgs),
     /// Emit the first static-prop game-readiness package with truthful blockers.
@@ -656,6 +658,9 @@ fn main() -> anyhow::Result<()> {
         Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
         Command::StarterTemplateQualityBenchmark(args) => {
             starter_template_quality::run_starter_template_quality_benchmark(args)
+        }
+        Command::StarterTemplateDogfoodBenchmark(args) => {
+            starter_template_quality::run_starter_template_dogfood_benchmark(args)
         }
         Command::HqAdversarialReview(args) => hq_quality::run_hq_adversarial_review(args),
         Command::GameReadyStaticProp(args) => game_ready_static::run_game_ready_static_prop(args),

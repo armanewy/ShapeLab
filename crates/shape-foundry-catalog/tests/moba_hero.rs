@@ -160,10 +160,18 @@ fn moba_hero_candidate_modes_return_six_survivors_with_human_explanations() {
             &candidate_request(strategy_id, mode),
         )
         .unwrap_or_else(|error| panic!("{strategy_id} candidates should generate: {error:#?}"));
+        assert!(
+            output.candidates.len() <= FOUNDRY_MAX_RESULT_COUNT,
+            "{strategy_id} should not pad beyond the requested candidate count"
+        );
         assert_eq!(
+            output.diagnostics.returned_candidates,
             output.candidates.len(),
-            FOUNDRY_MAX_RESULT_COUNT,
-            "{strategy_id} should return six candidates"
+            "{strategy_id} diagnostics should report the honest returned count"
+        );
+        assert!(
+            output.diagnostics.human_summary.contains("Generated"),
+            "{strategy_id} should explain the candidate survival result"
         );
         for candidate in &output.candidates {
             let compiled = compile_foundry_document(&candidate.document, &fixture)
@@ -197,7 +205,19 @@ fn moba_hero_locks_are_respected_by_candidate_generation() {
     )
     .expect("armor gear candidates should generate with one locked control");
 
-    assert_eq!(output.candidates.len(), FOUNDRY_MAX_RESULT_COUNT);
+    assert!(
+        !output.candidates.is_empty(),
+        "locking armor_mass should still leave visible alternatives"
+    );
+    assert!(
+        output.candidates.len() <= FOUNDRY_MAX_RESULT_COUNT,
+        "locked generation should not pad weak candidates"
+    );
+    assert_eq!(
+        output.diagnostics.returned_candidates,
+        output.candidates.len(),
+        "diagnostics should report the honest returned count"
+    );
     assert!(output.candidates.iter().all(|candidate| {
         !candidate
             .changed_controls
