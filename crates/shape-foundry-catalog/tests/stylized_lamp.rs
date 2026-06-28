@@ -7,7 +7,9 @@ use shape_foundry::{
     CandidateLegibilityClass, ControlKind, ControlValue, FoundryCompilationOutput,
     compile_foundry_document,
 };
-use shape_foundry_catalog::{FoundryFixtureCatalog, stylized_lamp};
+use shape_foundry_catalog::{
+    CatalogCurationState, FoundryFixtureCatalog, catalog_curation_metadata_for_slug, stylized_lamp,
+};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
 };
@@ -29,6 +31,106 @@ fn stylized_lamp_exposes_product_part_groups() {
         .expect("shade group");
     assert!(shade.bound_control_ids.contains(&"shade_style".to_owned()));
     assert!(shade.focusable);
+}
+
+#[test]
+fn stylized_lamp_prepares_as_usable_quick_control_template() {
+    let fixture = stylized_lamp::fixture_catalog();
+    let output = compile_with(&fixture, &[]);
+
+    assert!(
+        output.final_conformance.is_accepted(),
+        "default lamp preparation should pass conformance"
+    );
+    assert!(
+        output.artifact.validation_report.is_valid(),
+        "default lamp preparation should produce a valid preview artifact"
+    );
+    assert!(
+        !output.artifact.statistics.used_sdf_or_remeshing,
+        "lamp preparation should stay on authored primitive/sweep/lathe paths"
+    );
+    assert!(
+        output.artifact.statistics.part_count <= 12,
+        "lamp should prepare as a compact authored template, got {} parts",
+        output.artifact.statistics.part_count
+    );
+    assert!(
+        output.artifact.statistics.triangle_count <= 12_000,
+        "lamp preview should remain small enough for quick starter use, got {} triangles",
+        output.artifact.statistics.triangle_count
+    );
+
+    let metadata =
+        catalog_curation_metadata_for_slug(&fixture.slug).expect("lamp curation metadata");
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.has_visual_direction_evidence);
+    assert!(metadata.has_readable_control_evidence);
+
+    let profile = &output.catalog.customizer_profile;
+    let quick_controls = profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+    let expected_ids = vec![
+        "overall_height",
+        "base_weight",
+        "stem_curvature",
+        "joint_size",
+        "shade_style",
+        "shade_scale",
+        "edge_softness",
+    ];
+    assert_eq!(
+        quick_controls
+            .iter()
+            .map(|control| control.id.as_str())
+            .collect::<Vec<_>>(),
+        expected_ids
+    );
+    assert!(quick_controls.len() <= profile.maximum_primary_controls as usize);
+    for control_id in &expected_ids {
+        assert!(
+            fixture.document.control_state.contains_key(*control_id),
+            "{control_id} should have an authored initial state"
+        );
+    }
+    for control in quick_controls {
+        assert!(
+            !control.bindings.is_empty(),
+            "{} should bind to authored lamp geometry",
+            control.id
+        );
+        match &control.kind {
+            ControlKind::ContinuousAxis { .. } => {
+                assert_eq!(control.domain.continuous_intervals.len(), 1);
+                let interval = control
+                    .domain
+                    .continuous_intervals
+                    .first()
+                    .expect("continuous control interval");
+                assert!(
+                    interval.maximum > interval.minimum,
+                    "{} should expose a usable continuous range",
+                    control.id
+                );
+            }
+            ControlKind::ChoiceGallery { options } if control.id == "shade_style" => {
+                assert_eq!(
+                    options
+                        .iter()
+                        .map(|option| option.value.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["cone", "drum", "task", "wide", "minimal", "playful"]
+                );
+            }
+            other => panic!(
+                "{} exposes unexpected quick-control kind {other:?}",
+                control.id
+            ),
+        }
+    }
 }
 
 #[test]
@@ -221,7 +323,7 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
             "Compact Task Lamp",
             "Tall Reading Lamp",
             "Playful Curved Lamp",
-            "Heavy Base",
+            "Heavy Base Lamp",
             "Minimal Studio Lamp",
             "Wide Shade Lamp"
         ]
@@ -236,6 +338,21 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
             .iter()
             .all(|label| label.split_whitespace().count() >= 2)
     );
+    for strategy in &baseline.catalog.customizer_profile.candidate_strategies {
+        for control_id in [
+            "overall_height",
+            "base_weight",
+            "stem_curvature",
+            "shade_style",
+            "shade_scale",
+        ] {
+            assert!(
+                strategy.control_ids.iter().any(|id| id == control_id),
+                "{} should be able to vary macro control {control_id}",
+                strategy.label
+            );
+        }
+    }
 
     let candidates: Vec<(&str, Vec<(&str, ControlValue)>)> = vec![
         ("balanced", vec![]),
@@ -315,6 +432,11 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
 
     let mut fingerprints = BTreeSet::new();
     let mut silhouettes = BTreeSet::new();
+    let mut height_bands = BTreeSet::new();
+    let mut shade_source_signatures = BTreeSet::new();
+    let mut shade_extent_bands = BTreeSet::new();
+    let mut base_footprint_bands = BTreeSet::new();
+    let mut stem_curve_bands = BTreeSet::new();
     for (name, overrides) in candidates {
         let output = compile_with(&fixture, &overrides);
         assert!(
@@ -330,12 +452,40 @@ fn six_authored_candidate_states_are_valid_and_distinct() {
             "{:?}",
             output.build_stamp.geometry_input_fingerprint
         ));
-        silhouettes.insert(quantized_whole_model_extent(&output));
+        let whole_extent = quantized_whole_model_extent(&output);
+        silhouettes.insert(whole_extent);
+        height_bands.insert(whole_extent.1);
+        shade_source_signatures.insert(shade_source_signature(&output));
+        shade_extent_bands.insert(quantized_role_extent(&output, "shade"));
+        let base_extent = quantized_role_extent(&output, "base");
+        base_footprint_bands.insert((base_extent.0, base_extent.2));
+        let stem_extent = quantized_role_extent(&output, "stem");
+        stem_curve_bands.insert(stem_extent.0);
     }
     assert_eq!(fingerprints.len(), 7);
     assert!(
         silhouettes.len() >= 4,
         "at least four authored candidate states should have visibly distinct whole-model proportions"
+    );
+    assert!(
+        height_bands.len() >= 4,
+        "authored lamp ideas should include clearly different heights"
+    );
+    assert!(
+        shade_source_signatures.len() >= 5,
+        "authored lamp ideas should exercise different shade styles"
+    );
+    assert!(
+        shade_extent_bands.len() >= 4,
+        "authored lamp ideas should include readable shade scale/style changes"
+    );
+    assert!(
+        base_footprint_bands.len() >= 4,
+        "authored lamp ideas should include readable base-weight changes"
+    );
+    assert!(
+        stem_curve_bands.len() >= 4,
+        "authored lamp ideas should include readable stem-curvature changes"
     );
 }
 
@@ -545,6 +695,18 @@ fn explore_generation_returns_readable_lamp_directions() {
         .count()
             >= 4,
         "Explore should cover at least four macro lamp controls"
+    );
+    assert!(
+        changed_controls.contains("base_weight"),
+        "Explore should include a readable base-weight direction"
+    );
+    assert!(
+        changed_controls.contains("stem_curvature"),
+        "Explore should include a readable stem-curvature direction"
+    );
+    assert!(
+        changed_controls.contains("shade_style") || changed_controls.contains("shade_scale"),
+        "Explore should include a readable shade direction"
     );
 }
 

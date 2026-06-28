@@ -631,8 +631,10 @@ fn lamp_candidate_strategies() -> Vec<CandidateStrategy> {
             label: "Tall Reading Lamp".to_owned(),
             control_ids: ids(&[
                 "overall_height",
+                "base_weight",
                 "stem_curvature",
                 "joint_size",
+                "shade_style",
                 "shade_scale",
             ]),
         },
@@ -640,16 +642,27 @@ fn lamp_candidate_strategies() -> Vec<CandidateStrategy> {
             id: "playful_curved_lamp".to_owned(),
             label: "Playful Curved Lamp".to_owned(),
             control_ids: ids(&[
+                "overall_height",
+                "base_weight",
                 "stem_curvature",
                 "joint_size",
                 "shade_style",
+                "shade_scale",
                 "edge_softness",
             ]),
         },
         CandidateStrategy {
             id: "heavy_base".to_owned(),
-            label: "Heavy Base".to_owned(),
-            control_ids: ids(&["base_weight", "joint_size", "edge_softness"]),
+            label: "Heavy Base Lamp".to_owned(),
+            control_ids: ids(&[
+                "overall_height",
+                "base_weight",
+                "stem_curvature",
+                "joint_size",
+                "shade_style",
+                "shade_scale",
+                "edge_softness",
+            ]),
         },
         CandidateStrategy {
             id: "minimal_studio_lamp".to_owned(),
@@ -657,6 +670,7 @@ fn lamp_candidate_strategies() -> Vec<CandidateStrategy> {
             control_ids: ids(&[
                 "overall_height",
                 "base_weight",
+                "stem_curvature",
                 "shade_style",
                 "shade_scale",
                 "edge_softness",

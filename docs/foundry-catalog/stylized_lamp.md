@@ -10,6 +10,8 @@ The stylized lamp catalog entry defines a compact whole-model customizer for a t
 - Shade Scale
 - Edge Softness
 
+Current dogfood decision: `Usable`. The profile prepares through authored primitive, lathe, sweep, and bevel paths without SDF/remeshing fallback, stays within a compact preview budget, and exposes all seven controls as visible primary quick controls.
+
 ## Construction
 
 The assembled model uses a lathed base body with a connected slab foot, a swept curve-backed stem, two explicit pivot disc joints, and a shade provider selected by Shade Style. Each shade provider now has an attached mount collar plus a child shade body, so attachment owns the socket connection while Shade Scale visibly changes the body and trim in clay previews. Required attachment rules keep stem-to-base, joint-to-stem, and shade-to-stem relationships present across provider swaps.
@@ -36,11 +38,11 @@ The customizer profile exposes these strategy labels for candidate workflows:
 - Compact Task Lamp
 - Tall Reading Lamp
 - Playful Curved Lamp
-- Heavy Base
+- Heavy Base Lamp
 - Minimal Studio Lamp
 - Wide Shade Lamp
 
-The catalog tests exercise these directions through compiled control states and generated Explore candidates, requiring at least four distinct whole-model proportions. The strategies deliberately combine height, base weight, curvature, shade style, shade scale, joint size, and edge softness so direction cards are not only tiny detail edits. Playful Curved Lamp uses the `playful` shade provider.
+The catalog tests exercise these directions through compiled control states and generated Explore candidates, requiring at least four distinct whole-model proportions. Every strategy can vary the macro dogfood axes: Overall Height, Base Weight, Stem Curvature, Shade Style, and Shade Scale. The strategies also use joint size and edge softness where they help the direction, so direction cards are not only tiny detail edits. Playful Curved Lamp uses the `playful` shade provider.
 
 ## HQ Authoring Notes
 
