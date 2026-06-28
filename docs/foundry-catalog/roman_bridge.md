@@ -88,3 +88,21 @@ benchmark requires six surviving direction candidates or an approved exception;
 the generated candidate report records four survivors, which satisfies Prompt 4
 but not that broader release gate. Default novice-catalog exposure remains
 blocked until manual review is approved.
+
+## Dogfood Hardening v3
+
+Prompt 4B keeps `roman-bridge-hq` at `PreviewOnly`. The catalog-owned v3 report
+defines a 10,000 ms local preparation threshold for compile plus whole-model
+preview-mesh availability. Over-threshold local runs are reported as
+long-running preparation instead of pretending the app path is ready. The
+profile preserves visible bridge ideas for supports, deck width, bracing,
+railing, and structural heft as primary quick controls.
+
+The profile is still not Usable because the six-surviving-direction gate is not
+met and no explicit exception is approved. The app-owned reliability issues
+around automatic preparation queueing, blocked-preparation messaging, and stale
+background jobs remain outside the catalog layer; they must be fixed in
+`shape-app` before the interactive Make path can claim stronger reliability.
+
+See [`../ROMAN_BRIDGE_DOGFOOD_HARDENING_V3.md`](../ROMAN_BRIDGE_DOGFOOD_HARDENING_V3.md)
+for the v3 decision record.
