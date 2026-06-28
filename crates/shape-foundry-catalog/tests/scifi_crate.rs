@@ -12,8 +12,8 @@ use shape_family::AssetFamilySchema;
 use shape_foundry::{
     CandidateLegibilityClass, ControlEvaluationContext, ControlKind, ControlValue,
     CustomizerProfile, FoundryCommand, FoundryCompilationOutput, FoundryLock, FoundryLockMode,
-    FoundryLockTarget, VariationIntent, compile_foundry_document,
-    whole_model_preview_sample_requests_with_count,
+    FoundryLockTarget, FoundryPartGroupDescriptor, VariationChannel, VariationIntent,
+    compile_foundry_document, whole_model_preview_sample_requests_with_count,
 };
 use shape_foundry_catalog::{FoundryFixtureCatalog, scifi_crate};
 use shape_search::foundry::{
@@ -51,12 +51,128 @@ fn scifi_crate_exposes_product_part_groups() {
             "Fasteners"
         ]
     );
-    let handles = groups
-        .iter()
-        .find(|group| group.group_id == "handles")
-        .expect("handles group");
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.group_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "body",
+            "panels",
+            "vents",
+            "handles",
+            "edge-trim",
+            "fasteners"
+        ]
+    );
+
+    assert_candidate_ready_group(
+        group(&groups, "body"),
+        &["body_proportions", "structural_heft"],
+        &["body"],
+    );
+    let panels = group(&groups, "panels");
+    assert!(panels.focusable, "panels remain selectable for inspection");
+    assert_eq!(
+        panels.bound_control_ids,
+        vec!["panel_depth", "panel_spacing"]
+    );
+    assert_eq!(panels.bound_provider_roles, vec!["panel"]);
+    assert!(!panels.capability.shape_ready);
+    assert!(!panels.supports_channel(&VariationChannel::Shape));
+    assert_eq!(
+        panels.capability.unavailable_reasons,
+        vec![scifi_crate::PANEL_FOCUSED_LIMITED_REASON.to_owned()]
+    );
+
+    let handles = group(&groups, "handles");
+    assert!(
+        handles.focusable,
+        "handles remain selectable for inspection"
+    );
     assert_eq!(handles.bound_control_ids, vec!["handle_style"]);
+    assert_eq!(handles.bound_provider_roles, vec!["handle"]);
+    assert!(!handles.capability.shape_ready);
+    assert!(!handles.supports_channel(&VariationChannel::Shape));
+    assert_eq!(
+        handles.capability.unavailable_reasons,
+        vec![scifi_crate::HANDLE_FOCUSED_LIMITED_REASON.to_owned()]
+    );
+
+    let vents = group(&groups, "vents");
+    assert!(vents.focusable, "vents remain selectable for inspection");
+    assert_eq!(vents.bound_control_ids, vec!["vent_density"]);
+    assert_eq!(vents.bound_provider_roles, vec!["body"]);
+    assert!(!vents.capability.shape_ready);
+    assert!(!vents.capability.detail_ready);
+    assert!(!vents.supports_channel(&VariationChannel::Shape));
+    assert_eq!(
+        vents.capability.unavailable_reasons,
+        vec![scifi_crate::VENT_FOCUSED_LIMITED_REASON.to_owned()]
+    );
+
+    let edge_trim = group(&groups, "edge-trim");
+    assert!(!edge_trim.focusable);
+    assert!(!edge_trim.capability.shape_ready);
+    assert_eq!(
+        edge_trim.bound_control_ids,
+        vec!["edge_softness", "has_trim"]
+    );
+    assert_eq!(
+        edge_trim.capability.unavailable_reasons,
+        vec![scifi_crate::EDGE_TRIM_FOCUSED_LIMITED_REASON.to_owned()]
+    );
+
+    let fasteners = group(&groups, "fasteners");
+    assert!(!fasteners.focusable);
+    assert!(!fasteners.capability.shape_ready);
+    assert_eq!(fasteners.bound_control_ids, vec!["detail_density"]);
+    assert_eq!(
+        fasteners.capability.unavailable_reasons,
+        vec![scifi_crate::FASTENER_FOCUSED_LIMITED_REASON.to_owned()]
+    );
+
     assert!(handles.focusable);
+}
+
+fn group<'a>(
+    groups: &'a [FoundryPartGroupDescriptor],
+    group_id: &str,
+) -> &'a FoundryPartGroupDescriptor {
+    groups
+        .iter()
+        .find(|group| group.group_id == group_id)
+        .unwrap_or_else(|| panic!("{group_id} group"))
+}
+
+fn assert_candidate_ready_group(
+    group: &FoundryPartGroupDescriptor,
+    controls: &[&str],
+    roles: &[&str],
+) {
+    assert!(group.focusable, "{} should be focusable", group.group_id);
+    assert!(group.lockable, "{} should be lockable", group.group_id);
+    assert!(
+        group.capability.shape_ready,
+        "{} should be shape-ready",
+        group.group_id
+    );
+    assert!(!group.capability.detail_ready);
+    assert!(group.supports_channel(&VariationChannel::Shape));
+    assert_eq!(
+        group.bound_control_ids,
+        controls
+            .iter()
+            .map(|control| (*control).to_owned())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        group.bound_provider_roles,
+        roles
+            .iter()
+            .map(|role| (*role).to_owned())
+            .collect::<Vec<_>>()
+    );
 }
 
 fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
@@ -414,6 +530,18 @@ fn body_panel_heft_detail_and_edge_endpoints_are_visible_descriptors() {
             .all(|(deep, shallow)| *deep > *shallow + 0.11),
         "both front panel cuts should get a card-visible depth delta"
     );
+    let tight_panels = compile_with(&[("panel_spacing", ControlValue::Scalar(0.0))]);
+    let wide_panels = compile_with(&[("panel_spacing", ControlValue::Scalar(1.0))]);
+    let tight_centers = panel_centers(&tight_panels);
+    let wide_centers = panel_centers(&wide_panels);
+    assert_eq!(tight_centers.len(), 2);
+    assert_eq!(wide_centers.len(), 2);
+    let tight_span = tight_centers[1][0] - tight_centers[0][0];
+    let wide_span = wide_centers[1][0] - wide_centers[0][0];
+    assert!(
+        wide_span > tight_span + 0.4,
+        "panel spacing should move paired recesses far enough to read in focused previews"
+    );
 
     let low_detail = compile_with(&[("detail_density", ControlValue::Integer(4))]);
     let high_detail = compile_with(&[("detail_density", ControlValue::Integer(16))]);
@@ -494,6 +622,122 @@ fn explore_candidates_survive_as_intent_labeled_whole_asset_ideas() {
     assert_eq!(
         returned_too_subtle, 0,
         "TooSubtle proposals may be rejected ({rejected_too_subtle}), but must not be returned"
+    );
+}
+
+#[test]
+fn focused_candidate_ready_groups_generate_visible_scoped_ideas() {
+    let fixture = scifi_crate::fixture_catalog();
+    let groups = scifi_crate::part_group_descriptors();
+    let ready_groups = groups
+        .iter()
+        .filter(|group| group.focusable && group.capability.shape_ready)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ready_groups
+            .iter()
+            .map(|group| group.group_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
+    );
+
+    for (index, group) in ready_groups.iter().enumerate() {
+        let output = generate_foundry_candidate_plans(
+            &fixture.document,
+            &fixture,
+            &focused_candidate_request(group, 101 + index as u64),
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "{} focused candidates should generate: {error:#?}",
+                group.display_name
+            )
+        });
+
+        assert!(
+            output.diagnostics.available_control_count >= 1,
+            "{} should expose at least one scoped control",
+            group.display_name
+        );
+        assert!(
+            output.candidates.len() >= 2,
+            "{} should return at least two visible focused candidates; diagnostics: {}",
+            group.display_name,
+            output.diagnostics.human_summary
+        );
+        assert!(
+            output.candidates.iter().all(|candidate| {
+                candidate.conformance.accepted
+                    && candidate
+                        .variation_metadata
+                        .visible_delta
+                        .legibility_class
+                        .selectable()
+                    && candidate.variation_metadata.visible_delta.legibility_class
+                        != CandidateLegibilityClass::TooSubtle
+                    && candidate
+                        .variation_metadata
+                        .changed_part_groups
+                        .iter()
+                        .any(|changed| changed.group_id == group.group_id && changed.visible)
+            }),
+            "{} focused candidates should be selectable, conforming, scoped, and not TooSubtle",
+            group.display_name
+        );
+        let signatures = output
+            .candidates
+            .iter()
+            .map(|candidate| candidate.changed_controls.join("|"))
+            .collect::<BTreeSet<_>>();
+        assert!(
+            signatures.len() >= 2,
+            "{} focused candidates should include at least two distinct control signatures",
+            group.display_name
+        );
+    }
+}
+
+#[test]
+fn non_candidate_ready_groups_do_not_report_focused_shape_generation() {
+    let groups = scifi_crate::part_group_descriptors();
+    for group_id in ["panels", "vents", "handles", "edge-trim", "fasteners"] {
+        let group = group(&groups, group_id);
+        assert!(
+            !group.capability.shape_ready,
+            "{} must not claim shape-focused candidate readiness without survival evidence",
+            group.display_name
+        );
+        assert!(
+            !group.supports_channel(&VariationChannel::Shape),
+            "{} must not expose a focused shape channel while not candidate-ready",
+            group.display_name
+        );
+        assert!(
+            !group.capability.unavailable_reasons.is_empty(),
+            "{} should explain the blocker",
+            group.display_name
+        );
+    }
+
+    let vents = group(&groups, "vents");
+    assert!(vents.focusable);
+    assert_eq!(
+        vents.capability.unavailable_reasons[0],
+        scifi_crate::VENT_FOCUSED_LIMITED_REASON
+    );
+
+    let panels = group(&groups, "panels");
+    assert!(panels.focusable);
+    assert_eq!(
+        panels.capability.unavailable_reasons[0],
+        scifi_crate::PANEL_FOCUSED_LIMITED_REASON
+    );
+
+    let handles = group(&groups, "handles");
+    assert!(handles.focusable);
+    assert_eq!(
+        handles.capability.unavailable_reasons[0],
+        scifi_crate::HANDLE_FOCUSED_LIMITED_REASON
     );
 }
 
@@ -748,6 +992,21 @@ fn panel_depths(output: &FoundryCompilationOutput) -> Vec<f32> {
         .collect()
 }
 
+fn panel_centers(output: &FoundryCompilationOutput) -> Vec<[f32; 2]> {
+    let mut centers = output
+        .recipe
+        .definitions
+        .values()
+        .flat_map(|definition| &definition.geometry.operations)
+        .filter_map(|operation| match operation {
+            ModelingOperationSpec::RecessedPanelCut { center, .. } => Some(*center),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    centers.sort_by(|left, right| left[0].total_cmp(&right[0]));
+    centers
+}
+
 fn fastener_count(output: &FoundryCompilationOutput) -> u32 {
     output
         .recipe
@@ -788,6 +1047,24 @@ fn candidate_request(seed: u64) -> FoundryCandidateRequest {
         strategy_id: None,
         preference_profile: None,
         variation_intent: VariationIntent::whole_asset_shape(),
+    }
+}
+
+fn focused_candidate_request(
+    group: &FoundryPartGroupDescriptor,
+    seed: u64,
+) -> FoundryCandidateRequest {
+    FoundryCandidateRequest {
+        seed,
+        proposal_count: 72,
+        result_count: 6,
+        mode: FoundryCandidateMode::Refine,
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: VariationIntent::focus_part_shape(
+            group.group_id.clone(),
+            group.display_name.clone(),
+        ),
     }
 }
 
