@@ -2,7 +2,8 @@
 
 ## Scope
 
-Prompt 4 reauthored `roman-bridge-hq` so untextured clay previews have stronger
+Prompt 3B v2 re-verified the existing `roman-bridge-hq` hardening. The earlier
+Roman hardening pass reauthored `roman-bridge-hq` so untextured clay previews have stronger
 shape separation across deck width, span length, structural heft, supports,
 bracing, railings, and detail density.
 
