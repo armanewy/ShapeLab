@@ -841,13 +841,8 @@ impl FoundryAppState {
                 })
                 .collect()
         };
-        if self
-            .selected_candidate
-            .as_ref()
-            .is_none_or(|selected| !self.candidates.iter().any(|card| &card.id == selected))
-        {
-            self.selected_candidate = self.candidates.first().map(|card| card.id.clone());
-        }
+        self.selected_candidate =
+            preferred_candidate_selection(&self.candidates, self.selected_candidate.as_ref());
         let selected = self.selected_candidate.clone();
         for card in &mut self.candidates {
             card.selected = selected
@@ -878,16 +873,8 @@ impl FoundryAppState {
             .collect();
         self.candidate_edits
             .retain(|candidate_id, _| visible_candidate_ids.contains(candidate_id));
-        if self
-            .selected_candidate
-            .as_ref()
-            .is_some_and(|selected| !visible_candidate_ids.contains(selected))
-        {
-            self.selected_candidate = None;
-        }
-        if self.selected_candidate.is_none() {
-            self.selected_candidate = self.candidates.first().map(|card| card.id.clone());
-        }
+        self.selected_candidate =
+            preferred_candidate_selection(&self.candidates, self.selected_candidate.as_ref());
         let selected = self.selected_candidate.clone();
         for card in &mut self.candidates {
             card.selected = selected
@@ -1219,6 +1206,25 @@ impl FoundryAppState {
                 .is_some_and(|current| current == pack.as_ref()),
         }
     }
+}
+
+fn preferred_candidate_selection(
+    candidates: &[FoundryCandidateCard],
+    current: Option<&FoundryCandidateId>,
+) -> Option<FoundryCandidateId> {
+    if let Some(current) = current
+        && candidates
+            .iter()
+            .any(|card| &card.id == current && card.selectable)
+    {
+        return Some(current.clone());
+    }
+    candidates
+        .iter()
+        .find(|card| card.selectable)
+        .or_else(|| current.and_then(|current| candidates.iter().find(|card| &card.id == current)))
+        .or_else(|| candidates.first())
+        .map(|card| card.id.clone())
 }
 
 /// State transition errors.
@@ -1839,5 +1845,83 @@ fn foundry_command_label(command: &FoundryCommand) -> &'static str {
         FoundryCommand::SwitchRevision { .. } => "Switch revision",
         FoundryCommand::Export { .. } => "Export",
         FoundryCommand::AddCurrentToPack { .. } => "Add current to pack",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferred_candidate_selection_keeps_current_selectable_direction() {
+        let cards = vec![
+            test_candidate_card("candidate-a", true),
+            test_candidate_card("candidate-b", true),
+        ];
+
+        assert_eq!(
+            preferred_candidate_selection(&cards, Some(&cards[1].id)),
+            Some(cards[1].id.clone())
+        );
+    }
+
+    #[test]
+    fn preferred_candidate_selection_skips_unselectable_current_direction() {
+        let cards = vec![
+            test_candidate_card("candidate-a", false),
+            test_candidate_card("candidate-b", true),
+            test_candidate_card("candidate-c", true),
+        ];
+
+        assert_eq!(
+            preferred_candidate_selection(&cards, Some(&cards[0].id)),
+            Some(cards[1].id.clone())
+        );
+    }
+
+    #[test]
+    fn preferred_candidate_selection_keeps_pending_direction_when_none_are_selectable() {
+        let cards = vec![
+            test_candidate_card("candidate-a", false),
+            test_candidate_card("candidate-b", false),
+        ];
+
+        assert_eq!(
+            preferred_candidate_selection(&cards, Some(&cards[1].id)),
+            Some(cards[1].id.clone())
+        );
+    }
+
+    fn test_candidate_card(id: &str, selectable: bool) -> FoundryCandidateCard {
+        FoundryCandidateCard {
+            id: FoundryCandidateId(id.to_owned()),
+            slot: 0,
+            mode: Some(FoundryCandidateMode::Explore),
+            parent: false,
+            title: "Direction".to_owned(),
+            subtitle: "Whole asset".to_owned(),
+            preview_id: Some(format!("{id}-preview")),
+            rgba8: Vec::new(),
+            width: 0,
+            height: 0,
+            camera: Some(shape_render::OrbitCamera::default()),
+            preview_failure: None,
+            changed_controls: Vec::new(),
+            changed_roles: Vec::new(),
+            explanations: Vec::new(),
+            rejections: BTreeMap::new(),
+            validation_label: "Ready".to_owned(),
+            validation_detail: None,
+            selectable,
+            selected: false,
+            variation_intent_label: "Direction".to_owned(),
+            variation_scope_label: "Whole asset".to_owned(),
+            variation_channel_labels: Vec::new(),
+            visible_delta_label: "Clear".to_owned(),
+            what_changed_summary: "Visible whole-asset change.".to_owned(),
+            legibility_class: shape_foundry::CandidateLegibilityClass::Clear,
+            focus_part_label: None,
+            surface_unavailable_reason: None,
+        }
     }
 }

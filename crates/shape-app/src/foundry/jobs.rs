@@ -979,6 +979,7 @@ fn filter_legible_candidate_cards(
         if duplicate {
             continue;
         }
+        let conformance_accepted = card.validation_label != "Rejected";
         card.legibility_class = preview_class;
         card.visible_delta_label = preview_class.display_label().to_owned();
         card.validation_label = preview_class.display_label().to_owned();
@@ -986,8 +987,14 @@ fn filter_legible_candidate_cards(
             "Card-size visible change score {:.1}%.",
             parent_delta.score() * 100.0
         ));
-        card.rejections
-            .remove(&FoundryCandidateRejectionReason::DescriptorRejected);
+        for reason in [
+            FoundryCandidateRejectionReason::DescriptorRejected,
+            FoundryCandidateRejectionReason::TooSubtle,
+            FoundryCandidateRejectionReason::DuplicateLooking,
+        ] {
+            card.rejections.remove(&reason);
+        }
+        card.selectable = conformance_accepted && preview_class.selectable();
         kept.push(card);
     }
     kept
@@ -1323,5 +1330,82 @@ pub(crate) fn pack_view_from_output(output: FoundryPackCompilationOutput) -> Fou
         coherent: output.report.conformance_status.accepted,
         can_export: output.report.conformance_status.accepted && !output.pack.members.is_empty(),
         pack: Some(output.pack),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_legibility_filter_promotes_rendered_selectable_candidate() {
+        let parent = solid_rgba(16, 16, [16, 20, 24, 255]);
+        let candidate = solid_rgba(16, 16, [220, 230, 238, 255]);
+        let mut card = test_candidate_card("candidate-a", candidate);
+        card.selectable = false;
+        card.legibility_class = CandidateLegibilityClass::TooSubtle;
+        card.validation_label = CandidateLegibilityClass::TooSubtle
+            .display_label()
+            .to_owned();
+        card.rejections
+            .insert(FoundryCandidateRejectionReason::TooSubtle, 1);
+
+        let cards = filter_legible_candidate_cards(
+            vec![card],
+            Some(&parent),
+            Some((16, 16)),
+            Some(FoundryCandidateMode::Explore),
+        );
+
+        assert_eq!(cards.len(), 1);
+        assert!(cards[0].selectable);
+        assert!(cards[0].preview_failure.is_none());
+        assert!(cards[0].legibility_class.selectable());
+        assert!(
+            !cards[0]
+                .rejections
+                .contains_key(&FoundryCandidateRejectionReason::TooSubtle)
+        );
+    }
+
+    fn solid_rgba(width: usize, height: usize, color: [u8; 4]) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        for _ in 0..(width * height) {
+            rgba.extend_from_slice(&color);
+        }
+        rgba
+    }
+
+    fn test_candidate_card(id: &str, rgba8: Vec<u8>) -> FoundryCandidateCard {
+        FoundryCandidateCard {
+            id: shape_foundry::FoundryCandidateId(id.to_owned()),
+            slot: 0,
+            mode: Some(FoundryCandidateMode::Explore),
+            parent: false,
+            title: "Rendered candidate".to_owned(),
+            subtitle: "Explore".to_owned(),
+            preview_id: Some(format!("candidate-{id}")),
+            rgba8,
+            width: 16,
+            height: 16,
+            camera: Some(OrbitCamera::default()),
+            preview_failure: None,
+            changed_controls: Vec::new(),
+            changed_roles: Vec::new(),
+            explanations: Vec::new(),
+            rejections: BTreeMap::new(),
+            validation_label: "Ready".to_owned(),
+            validation_detail: None,
+            selectable: true,
+            selected: false,
+            variation_intent_label: "Complete look".to_owned(),
+            variation_scope_label: "Whole asset".to_owned(),
+            variation_channel_labels: Vec::new(),
+            visible_delta_label: "Clear change".to_owned(),
+            what_changed_summary: "The rendered candidate is visibly different.".to_owned(),
+            legibility_class: CandidateLegibilityClass::Clear,
+            focus_part_label: None,
+            surface_unavailable_reason: None,
+        }
     }
 }

@@ -1048,10 +1048,13 @@ impl FoundryDesktopApp {
     }
 
     fn directions_are_generating(&self) -> bool {
-        self.state
-            .active_jobs
-            .values()
-            .any(|request| matches!(request, FoundryJobRequest::GenerateCandidates { .. }))
+        self.state.active_jobs.values().any(|request| {
+            matches!(
+                request,
+                FoundryJobRequest::GenerateCandidates { .. }
+                    | FoundryJobRequest::RenderCandidatePreviews { .. }
+            )
+        }) || candidate_previews_are_pending(&self.state.candidates)
     }
 
     fn show_home(&mut self, ui: &mut egui::Ui) {
@@ -1534,15 +1537,22 @@ impl FoundryDesktopApp {
                 });
                 ui.add_space(10.0);
             }
-            status_banner(
-                ui,
-                StatusBannerSpec {
-                    title: &view_state.local_banner_title,
-                    message: &view_state.local_banner_message,
-                    tone: view_state.local_banner_tone,
-                },
-            );
-            ui.add_space(8.0);
+            if view_state.mode != MakeCanvasMode::ReviewingIdeas
+                || matches!(
+                    view_state.local_banner_tone,
+                    BannerTone::Warning | BannerTone::Error
+                )
+            {
+                status_banner(
+                    ui,
+                    StatusBannerSpec {
+                        title: &view_state.local_banner_title,
+                        message: &view_state.local_banner_message,
+                        tone: view_state.local_banner_tone,
+                    },
+                );
+                ui.add_space(8.0);
+            }
             ui.horizontal_wrapped(|ui| {
                 if view_state.local_warning_message.is_some()
                     && action_button(
@@ -2742,11 +2752,10 @@ impl FoundryDesktopApp {
                         )));
                     } else {
                         let view_state = self.make_canvas_view_state();
-                        if view_state.mode == MakeCanvasMode::ReviewingIdeas
-                            && view_state.preview_ready
-                            && view_state.selected_candidate_present
-                        {
+                        if candidate_review_is_ready(&view_state, &self.state.candidates) {
                             self.complete_screenshot_scenario(scenario);
+                        } else {
+                            ctx.request_repaint_after(Duration::from_millis(33));
                         }
                     }
                 }
@@ -3623,6 +3632,34 @@ fn make_canvas_inspector_build_actions_visible(view_state: &MakeCanvasViewState)
         )
 }
 
+fn candidate_previews_are_pending(
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+) -> bool {
+    !candidates.is_empty()
+        && candidates.iter().any(|candidate| {
+            candidate.validation_label == "Preview pending"
+                || candidate
+                    .preview_failure
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("Preview rendering"))
+        })
+}
+
+fn candidate_review_is_ready(
+    view_state: &MakeCanvasViewState,
+    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
+) -> bool {
+    view_state.mode == MakeCanvasMode::ReviewingIdeas
+        && view_state.preview_ready
+        && view_state.selected_comparison_visible
+        && candidates.iter().any(|candidate| {
+            candidate.selected
+                && candidate.selectable
+                && candidate.preview_failure.is_none()
+                && !candidate.rgba8.is_empty()
+        })
+}
+
 fn tab_for_workflow_step(index: usize) -> FoundryTab {
     match index {
         1 => FoundryTab::Home,
@@ -3677,9 +3714,9 @@ fn screenshot_scenario_assertion(
             "local_busy_visible whole-asset generation",
         ),
         ScreenshotScenario::GeneratedWholeAssetIdeas => require_screenshot_state(
-            view_state.candidate_tray_visible,
+            view_state.candidate_tray_visible && view_state.selected_comparison_visible,
             scenario,
-            "candidate_tray_visible",
+            "candidate_tray_visible with rendered selected comparison",
         ),
         ScreenshotScenario::SelectedComparison => require_screenshot_state(
             view_state.selected_comparison_visible,
@@ -8073,6 +8110,15 @@ mod tests {
         );
 
         app.state.active_jobs.clear();
+        let mut pending_card = test_candidate_card("candidate-pending", false, None);
+        pending_card.validation_label = "Preview pending".to_owned();
+        pending_card.preview_failure = Some("Preview rendering for this direction.".to_owned());
+        app.state.candidates = vec![pending_card];
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::GeneratingSkeletons
+        );
+
         app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
         assert_eq!(
             app.make_canvas_view_state().candidate_tray_state,
