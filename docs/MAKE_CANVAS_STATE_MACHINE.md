@@ -28,6 +28,14 @@ prompt:
 
 - `mode`
 - `asset_name`
+- `preparation_phase`
+- `preparation_timed_out`
+- `preparation_fallback_visible`
+- `preview_updating`
+- `preview_update_required`
+- `local_banner_title`
+- `local_banner_message`
+- `local_banner_tone`
 - `primary_title`
 - `primary_action_label`
 - `primary_action_enabled`
@@ -40,7 +48,9 @@ prompt:
 - `model_ready`
 - `preview_ready`
 - `candidate_tray_visible`
+- `candidate_tray_state`
 - `candidate_count`
+- `candidate_search_finished_empty`
 - `rejected_candidate_summary`
 - `selected_candidate_present`
 - `selected_comparison_visible`
@@ -82,6 +92,22 @@ workflow.
 
 Starting a template switches to Make and queues model preparation automatically.
 After compile completion, the host requests the current preview automatically.
+The visible preparation phase is `Preparing model`, then `Rendering preview`,
+then `Ready`.
+
+Make does not expose novice-facing `Build Asset` or `Refresh Preview` actions.
+When the current preview is stale, missing, or rendering, the visible copy is
+`Preview is updating...`; the manual recovery action is `Update preview`.
+
+If preparation times out locally, `preparation_fallback_visible` is true and the
+copy is:
+
+```text
+Still preparing. You can keep waiting or retry.
+```
+
+The fallback actions are `Retry preparation`, `Choose another template`, and
+`Open Project`.
 
 Idea generation is disabled until both `model_ready` and `preview_ready` are
 true.
@@ -96,6 +122,14 @@ While ideas are generating:
 - option actions are disabled;
 - candidate acceptance is disabled;
 - Pack and Export are disabled when the current build is stale.
+
+The candidate tray renders from `candidate_tray_state`:
+
+- `EmptyReady` shows the ready-to-try-ideas empty state;
+- `GeneratingSkeletons` shows skeleton cards;
+- `HasCandidates` shows comparison and candidate cards;
+- `NoCandidatesWithRecovery` shows no-survivor copy and recovery actions;
+- `ErrorWithRecovery` shows local error copy and recovery actions.
 
 When an old result is ignored, `local_warning_message` is set to:
 
@@ -123,6 +157,15 @@ When candidates exist:
   available;
 - `next_action_hint` tells the user whether to select, compare, use, reject, or
   continue waiting.
+
+When a focused search returns zero clear candidates, the local banner title is
+`No clear focused ideas survived`. The recovery card explains whether candidates
+were hidden, too subtle, duplicate-looking, or outside the focused part. Vents
+use limited-variation copy when applicable. Recovery actions include `Try again`,
+`Choose another part`, and `Unlock controls`.
+
+When stale background work is ignored, the local banner title is `Older result
+ignored`, the copy is product-safe, and the local region offers `Try again`.
 
 Pack and Export drawers are visible state, not status-only state:
 

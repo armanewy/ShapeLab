@@ -230,6 +230,7 @@ impl FoundryAppState {
                 self.preview_control_value(control_id, value)
             }
             FoundryAppCommand::RequestBuild => self.request_build(),
+            FoundryAppCommand::RetryPreparation => self.retry_preparation(),
             FoundryAppCommand::RequestPreview { width, height } => {
                 self.request_preview(width, height)
             }
@@ -361,6 +362,15 @@ impl FoundryAppState {
 
     /// Request a current-document compilation job.
     pub(crate) fn request_build(&mut self) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        if self.active_jobs.values().any(|request| {
+            matches!(
+                request.slot(),
+                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
+            )
+        }) {
+            return Ok(Vec::new());
+        }
+
         let document = self.current_document()?.clone();
         let job_id = self.allocate_job_id()?;
         Ok(self.schedule_job(FoundryJobRequest::CompileCurrent {
@@ -369,12 +379,30 @@ impl FoundryAppState {
         }))
     }
 
+    /// Cancel visible preparation work and request a fresh current-document build.
+    pub(crate) fn retry_preparation(
+        &mut self,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        self.stale_all_active_jobs();
+        self.clear_candidates();
+        self.status = Some("Retrying preparation.".to_owned());
+        self.request_build()
+    }
+
     /// Request a current-preview render from the latest compiled output.
     pub(crate) fn request_preview(
         &mut self,
         width: u32,
         height: u32,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        if self
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == FoundryJobSlot::RenderPreview)
+        {
+            return Ok(Vec::new());
+        }
+
         let output = self
             .current_output
             .as_ref()
@@ -402,6 +430,14 @@ impl FoundryAppState {
         &mut self,
         mut request: FoundryCandidateRequest,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        if self
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == FoundryJobSlot::GenerateCandidates)
+        {
+            return Ok(Vec::new());
+        }
+
         let document = self.current_document()?.clone();
         if request.preference_profile.is_none() {
             request.preference_profile = self.preference_profile_for_current_scope();

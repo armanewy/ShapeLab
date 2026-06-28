@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
@@ -30,7 +30,9 @@ use shape_project::foundry::{
 use shape_render::{
     OrbitCamera, RenderSettings, fit_camera_to_bounds, foundry::FoundryPreviewCache, render_mesh,
 };
-use shape_search::foundry::{FoundryCandidateMode, FoundryCandidateRequest};
+use shape_search::foundry::{
+    FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
+};
 
 use crate::foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryJobEvent, FoundryJobRequest,
@@ -64,6 +66,7 @@ pub(crate) struct FoundryDesktopApp {
     selected_home_profile_slug: Option<String>,
     recent_projects: Vec<PathBuf>,
     requested_start_window_mode: bool,
+    make_preparation_started_at: Option<Instant>,
     screenshot_scenario: Option<ScreenshotScenario>,
     screenshot_scenario_step: u8,
 }
@@ -109,10 +112,44 @@ enum MakeCanvasMode {
     Error,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum MakePreparationPhase {
+    PreparingModel,
+    RenderingPreview,
+    Ready,
+}
+
+impl MakePreparationPhase {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PreparingModel => "Preparing model",
+            Self::RenderingPreview => "Rendering preview",
+            Self::Ready => "Ready",
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum MakeCandidateTrayState {
+    EmptyReady,
+    GeneratingSkeletons,
+    HasCandidates,
+    NoCandidatesWithRecovery,
+    ErrorWithRecovery,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MakeCanvasViewState {
     mode: MakeCanvasMode,
     asset_name: String,
+    preparation_phase: MakePreparationPhase,
+    preparation_timed_out: bool,
+    preparation_fallback_visible: bool,
+    preview_updating: bool,
+    preview_update_required: bool,
+    local_banner_title: String,
+    local_banner_message: String,
+    local_banner_tone: BannerTone,
     primary_title: String,
     primary_action_label: String,
     primary_action_enabled: bool,
@@ -125,7 +162,9 @@ struct MakeCanvasViewState {
     model_ready: bool,
     preview_ready: bool,
     candidate_tray_visible: bool,
+    candidate_tray_state: MakeCandidateTrayState,
     candidate_count: usize,
+    candidate_search_finished_empty: bool,
     rejected_candidate_summary: Option<String>,
     selected_candidate_present: bool,
     selected_comparison_visible: bool,
@@ -165,9 +204,13 @@ const NEED_HISTORY_REASON: &str = "No earlier project step is available.";
 const NEED_DIRECTION_REASON: &str = "This direction is not ready to choose.";
 const NEED_RESET_REASON: &str = "This control is already at its starting value.";
 const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a pack.";
+const NEED_LOCKED_CONTROLS_REASON: &str = "No locked controls are active.";
 const ASSET_PREPARING_REASON: &str = "The asset is preparing. This usually takes a moment.";
+const PREVIEW_UPDATING_REASON: &str = "Preview is updating...";
 const ACTIVE_IDEA_JOB_REASON: &str = "Finish the current idea search before changing this.";
 const STALE_RESULT_WARNING: &str = "An older result was ignored because you changed the asset.";
+const PREPARATION_TIMEOUT_MESSAGE: &str = "Still preparing. You can keep waiting or retry.";
+const PREPARATION_TIMEOUT: Duration = Duration::from_secs(12);
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
@@ -190,7 +233,10 @@ const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
 const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
+const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
+const ACTION_TRY_AGAIN: &str = "Try again";
 const ACTION_CHOOSE_TEMPLATE: &str = "Choose Template";
+const ACTION_CHOOSE_ANOTHER_TEMPLATE: &str = "Choose another template";
 const ACTION_SWITCH: &str = "Switch";
 const ACTION_BRANCH: &str = "Branch";
 const ACTION_ADD_TO_PACK: &str = "Add to Pack";
@@ -204,10 +250,15 @@ const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
+const ACTION_UNLOCK_CONTROLS: &str = "Unlock controls";
 const ACTION_LOCK: &str = "Lock";
 const ACTION_FOCUS: &str = "Focus";
 const ACTION_APPLY: &str = "Use option";
-const RENDERED_ACTION_LABELS: [&str; 33] = [
+const ACTION_CLEAR_FOCUS: &str = "Clear focus";
+const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
+const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
+const ACTION_UPDATE_PREVIEW: &str = "Update preview";
+const RENDERED_ACTION_LABELS: [&str; 41] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -224,7 +275,10 @@ const RENDERED_ACTION_LABELS: [&str; 33] = [
     ACTION_START,
     ACTION_TRY_WHOLE_ASSET_IDEAS,
     ACTION_GENERATING_IDEAS,
+    ACTION_TRY_WHOLE_ASSET_RECOVERY,
+    ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
+    ACTION_CHOOSE_ANOTHER_TEMPLATE,
     ACTION_SWITCH,
     ACTION_BRANCH,
     ACTION_ADD_TO_PACK,
@@ -238,9 +292,14 @@ const RENDERED_ACTION_LABELS: [&str; 33] = [
     ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
+    ACTION_UNLOCK_CONTROLS,
     ACTION_LOCK,
     ACTION_FOCUS,
     ACTION_APPLY,
+    ACTION_CLEAR_FOCUS,
+    ACTION_CHOOSE_ANOTHER_PART,
+    ACTION_RETRY_PREPARATION,
+    ACTION_UPDATE_PREVIEW,
 ];
 
 impl Default for FoundryDesktopApp {
@@ -261,6 +320,7 @@ impl Default for FoundryDesktopApp {
             selected_home_profile_slug,
             recent_projects: Vec::new(),
             requested_start_window_mode: false,
+            make_preparation_started_at: None,
             screenshot_scenario: read_screenshot_scenario(),
             screenshot_scenario_step: 0,
         }
@@ -280,6 +340,7 @@ impl FoundryDesktopApp {
         apply_visual_foundry_theme(&ctx);
         self.poll_jobs(&ctx);
         self.poll_home_thumbnail_jobs(&ctx);
+        self.refresh_make_preparation_timer();
 
         let tokens = VisualFoundryTokens::dark();
         let colors = tokens.colors;
@@ -364,6 +425,7 @@ impl FoundryDesktopApp {
             });
 
         self.apply_commands(commands, &ctx);
+        self.refresh_make_preparation_timer();
         if !self.state.active_jobs.is_empty() || self.home_thumbnails.has_active_jobs() {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
@@ -608,32 +670,58 @@ impl FoundryDesktopApp {
         });
         let asset_name = self.current_project_title();
         let generating = self.directions_are_generating();
-        let current_asset_job_active = self.current_asset_job_active();
-        let model_ready = self.state.current_output.is_some()
-            && !self.state.active_jobs.values().any(|request| {
-                matches!(
-                    request.slot(),
-                    FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
-                )
-            });
+        let compiling_or_editing = self.state.active_jobs.values().any(|request| {
+            matches!(
+                request.slot(),
+                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
+            )
+        });
+        let preview_rendering = self
+            .state
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
+        let current_asset_job_active = compiling_or_editing || preview_rendering;
+        let model_ready = self.state.current_output.is_some() && !compiling_or_editing;
+        let preview_image_ready = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| !preview.rgba8.is_empty());
+        let preview_matches_current_build = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| preview.build == self.state.current_build);
+        let stale_preview = preview_image_ready && !preview_matches_current_build;
         let preview_ready = model_ready
-            && self
-                .state
-                .current_preview
-                .as_ref()
-                .is_some_and(|preview| !preview.rgba8.is_empty())
-            && !self
-                .state
-                .active_jobs
-                .values()
-                .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
+            && preview_image_ready
+            && preview_matches_current_build
+            && !preview_rendering;
+        let preview_updating = model_ready && (preview_rendering || stale_preview);
+        let preview_update_required = model_ready && !preview_ready && !preview_rendering;
+        let preparation_phase = if !model_ready {
+            MakePreparationPhase::PreparingModel
+        } else if !preview_ready {
+            MakePreparationPhase::RenderingPreview
+        } else {
+            MakePreparationPhase::Ready
+        };
         let focused_part_label = active_group.as_ref().map(|group| group.label.clone());
         let focused_part_visible = focused_part_label.is_some();
         let focused_part_actions_visible = focused_part_visible && model_ready && preview_ready;
         let preparing = self.state.document.is_some()
             && (!model_ready || !preview_ready || current_asset_job_active);
+        let preparation_timed_out = preparing
+            && self
+                .make_preparation_started_at
+                .is_some_and(|started| started.elapsed() >= PREPARATION_TIMEOUT);
+        let preparation_fallback_visible = preparation_timed_out;
         let local_warning_message = self.make_canvas_local_warning();
         let local_error_message = self.make_canvas_local_error();
+        let candidate_search_finished_empty = self.state.candidate_output.is_some()
+            && self.state.candidates.is_empty()
+            && !generating;
         let mode = if self.drawer == Some(FoundryDrawer::Pack) {
             MakeCanvasMode::PackDrawerOpen
         } else if self.drawer == Some(FoundryDrawer::Export) {
@@ -671,6 +759,30 @@ impl FoundryDesktopApp {
             _ => None,
         };
         let local_busy_visible = local_busy_label.is_some();
+        let candidate_tray_state = if local_error_message.is_some() {
+            MakeCandidateTrayState::ErrorWithRecovery
+        } else if generating {
+            MakeCandidateTrayState::GeneratingSkeletons
+        } else if !self.state.candidates.is_empty() {
+            MakeCandidateTrayState::HasCandidates
+        } else if candidate_search_finished_empty {
+            MakeCandidateTrayState::NoCandidatesWithRecovery
+        } else {
+            MakeCandidateTrayState::EmptyReady
+        };
+        let (local_banner_title, local_banner_message, local_banner_tone) =
+            make_canvas_local_banner(
+                &mode,
+                &asset_name,
+                preparation_phase,
+                preparation_timed_out,
+                preview_updating,
+                &local_busy_label,
+                active_group.as_ref(),
+                self.state.candidate_output.as_deref(),
+                local_warning_message.as_deref(),
+                local_error_message.as_deref(),
+            );
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
             (MakeCanvasMode::PreparingAsset, _) => {
@@ -699,7 +811,11 @@ impl FoundryDesktopApp {
             || (model_ready && preview_ready && !generating));
         let primary_action_disabled_reason = (!primary_action_enabled).then(|| {
             if preparing {
-                ASSET_PREPARING_REASON.to_owned()
+                if preview_updating {
+                    PREVIEW_UPDATING_REASON.to_owned()
+                } else {
+                    ASSET_PREPARING_REASON.to_owned()
+                }
             } else if generating {
                 ACTIVE_IDEA_JOB_REASON.to_owned()
             } else if let Some(message) = &local_error_message {
@@ -708,7 +824,7 @@ impl FoundryDesktopApp {
                 NEED_PROJECT_REASON.to_owned()
             }
         });
-        let candidate_tray_visible = generating || !self.state.candidates.is_empty();
+        let candidate_tray_visible = self.state.document.is_some();
         let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
         let selected_candidate_present = selected_candidate.is_some();
         let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
@@ -720,15 +836,28 @@ impl FoundryDesktopApp {
                     .as_ref()
                     .is_some_and(|preview| !preview.rgba8.is_empty())
         });
-        let next_action_hint = make_canvas_next_action_hint(
+        let mut next_action_hint = make_canvas_next_action_hint(
             &mode,
             focused_part_label.as_deref(),
             selected_comparison_visible,
         );
+        if preparation_fallback_visible {
+            next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
+        } else if preview_update_required {
+            next_action_hint = "Update preview to keep making changes.".to_owned();
+        }
 
         MakeCanvasViewState {
             asset_name,
             mode,
+            preparation_phase,
+            preparation_timed_out,
+            preparation_fallback_visible,
+            preview_updating,
+            preview_update_required,
+            local_banner_title,
+            local_banner_message,
+            local_banner_tone,
             primary_title,
             primary_action_label,
             primary_action_enabled,
@@ -741,7 +870,9 @@ impl FoundryDesktopApp {
             model_ready,
             preview_ready,
             candidate_tray_visible,
+            candidate_tray_state,
             candidate_count: self.state.candidates.len(),
+            candidate_search_finished_empty,
             rejected_candidate_summary,
             selected_candidate_present,
             selected_comparison_visible,
@@ -794,15 +925,39 @@ impl FoundryDesktopApp {
         }
     }
 
-    fn current_asset_job_active(&self) -> bool {
-        self.state.active_jobs.values().any(|request| {
+    fn make_is_preparing_now(&self) -> bool {
+        if self.state.document.is_none() {
+            return false;
+        }
+
+        let compiling_or_editing = self.state.active_jobs.values().any(|request| {
             matches!(
                 request.slot(),
-                FoundryJobSlot::CompileCurrent
-                    | FoundryJobSlot::RenderPreview
-                    | FoundryJobSlot::ApplyEdit
+                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
             )
-        })
+        });
+        let preview_rendering = self
+            .state
+            .active_jobs
+            .values()
+            .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
+        let model_ready = self.state.current_output.is_some() && !compiling_or_editing;
+        let preview_ready = model_ready
+            && self.state.current_preview.as_ref().is_some_and(|preview| {
+                !preview.rgba8.is_empty() && preview.build == self.state.current_build
+            })
+            && !preview_rendering;
+
+        !model_ready || !preview_ready || compiling_or_editing || preview_rendering
+    }
+
+    fn refresh_make_preparation_timer(&mut self) {
+        if self.make_is_preparing_now() {
+            self.make_preparation_started_at
+                .get_or_insert_with(Instant::now);
+        } else {
+            self.make_preparation_started_at = None;
+        }
     }
 
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
@@ -1022,7 +1177,7 @@ impl FoundryDesktopApp {
                         .strong(),
                 );
                 let state_label = match view_state.mode {
-                    MakeCanvasMode::PreparingAsset => "Preparing model",
+                    MakeCanvasMode::PreparingAsset => view_state.preparation_phase.label(),
                     MakeCanvasMode::GeneratingWholeAssetIdeas
                     | MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas",
                     _ if view_state.preview_ready => "Preview ready",
@@ -1174,28 +1329,68 @@ impl FoundryDesktopApp {
                     self.drawer = Some(FoundryDrawer::Export);
                 }
             });
-            if let Some(message) = &view_state.local_warning_message {
-                ui.add_space(10.0);
-                status_banner(
-                    ui,
-                    StatusBannerSpec {
-                        title: "Older result ignored",
-                        message,
-                        tone: BannerTone::Warning,
-                    },
-                );
-            }
-            if let Some(message) = &view_state.local_error_message {
-                ui.add_space(10.0);
-                status_banner(
-                    ui,
-                    StatusBannerSpec {
-                        title: "Asset needs attention",
-                        message,
-                        tone: BannerTone::Error,
-                    },
-                );
-            }
+            ui.add_space(10.0);
+            status_banner(
+                ui,
+                StatusBannerSpec {
+                    title: &view_state.local_banner_title,
+                    message: &view_state.local_banner_message,
+                    tone: view_state.local_banner_tone,
+                },
+            );
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                if view_state.local_warning_message.is_some()
+                    && action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                    && let Some(command) = self.make_primary_candidate_command()
+                {
+                    commands.push(command);
+                }
+                if view_state.preparation_fallback_visible {
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
+                    )
+                    .clicked()
+                    {
+                        commands.push(FoundryAppCommand::RetryPreparation);
+                    }
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                    {
+                        self.tab = FoundryTab::Home;
+                    }
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                        && let Some(path) = open_foundry_project_file()
+                    {
+                        commands.push(FoundryAppCommand::Load(path));
+                    }
+                }
+                if view_state.preview_update_required
+                    && action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
+                    )
+                    .clicked()
+                {
+                    let preview_pixels = current_preview_pixels_for_context(ui.ctx());
+                    commands.push(FoundryAppCommand::RequestPreview {
+                        width: preview_pixels,
+                        height: preview_pixels,
+                    });
+                }
+            });
             if let Some(group) = self.active_make_part_group() {
                 ui.add_space(12.0);
                 product_card(ui, true, |ui| {
@@ -1257,7 +1452,7 @@ impl FoundryDesktopApp {
                             ui,
                             &action_spec(
                                 view_state.primary_action_enabled,
-                                "Clear focus",
+                                ACTION_CLEAR_FOCUS,
                                 ButtonTone::Secondary,
                                 view_state
                                     .primary_action_disabled_reason
@@ -1383,6 +1578,16 @@ impl FoundryDesktopApp {
                     tone: BannerTone::Warning,
                 },
             );
+            ui.add_space(6.0);
+            if action_button(
+                ui,
+                &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
+            )
+            .clicked()
+                && let Some(command) = self.make_primary_candidate_command()
+            {
+                commands.push(command);
+            }
             ui.add_space(8.0);
         } else if let Some(message) = &view_state.rejected_candidate_summary {
             status_banner(
@@ -1414,24 +1619,30 @@ impl FoundryDesktopApp {
             ui.add_space(8.0);
         }
         ui.add_space(8.0);
-        if generating {
-            show_direction_skeleton_grid(ui);
-            return commands;
-        }
-        if self.state.candidates.is_empty() {
-            if let Some(group) = active_group.as_ref() {
-                let message = format!(
-                    "No clear {} ideas survived. Try unlocking more controls.",
-                    singular_part_copy(&group.label).to_ascii_lowercase()
-                );
-                product_empty_state(ui, "No clear ideas yet", &message);
-            } else {
+        match view_state.candidate_tray_state {
+            MakeCandidateTrayState::GeneratingSkeletons => {
+                show_direction_skeleton_grid(ui);
+                return commands;
+            }
+            MakeCandidateTrayState::EmptyReady => {
                 product_empty_state(
                     ui,
-                    "No ideas yet",
-                    "Try whole-asset ideas to compare readable candidates.",
+                    "Ready to try ideas",
+                    "Try whole-asset ideas or focus a part when the asset is ready.",
                 );
+                return commands;
             }
+            MakeCandidateTrayState::NoCandidatesWithRecovery => {
+                commands.extend(self.show_no_candidates_recovery_card(ui, active_group.as_ref()));
+                return commands;
+            }
+            MakeCandidateTrayState::ErrorWithRecovery => {
+                commands.extend(self.show_candidate_error_recovery_card(ui, view_state));
+                return commands;
+            }
+            MakeCandidateTrayState::HasCandidates => {}
+        }
+        if self.state.candidates.is_empty() {
             return commands;
         }
 
@@ -1463,6 +1674,135 @@ impl FoundryDesktopApp {
                 .unwrap_or(ACTIVE_IDEA_JOB_REASON),
         ));
         commands
+    }
+
+    fn show_no_candidates_recovery_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        active_group: Option<&directions::DirectionPartGroup>,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let (title, message) =
+            no_candidates_recovery_copy(active_group, self.state.candidate_output.as_deref());
+        product_card(ui, false, |ui| {
+            let colors = VisualFoundryTokens::dark().colors;
+            ui.label(RichText::new(title).color(colors.text).size(17.0).strong());
+            ui.add(egui::Label::new(RichText::new(message).color(colors.text_muted)).wrap());
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                if action_button(
+                    ui,
+                    &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
+                )
+                .clicked()
+                    && let Some(command) = self.make_primary_candidate_command()
+                {
+                    commands.push(command);
+                }
+                if active_group.is_some()
+                    && action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_PART, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                {
+                    commands.push(directions::clear_focus_part_group_command());
+                }
+                let unlock_command = self.clear_all_locks_command();
+                let unlock_spec = action_spec(
+                    unlock_command.is_some(),
+                    ACTION_UNLOCK_CONTROLS,
+                    ButtonTone::Secondary,
+                    NEED_LOCKED_CONTROLS_REASON,
+                );
+                if action_button(ui, &unlock_spec).clicked()
+                    && let Some(command) = unlock_command
+                {
+                    commands.push(command);
+                }
+            });
+        });
+        commands
+    }
+
+    fn show_candidate_error_recovery_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        view_state: &MakeCanvasViewState,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let message = view_state
+            .local_error_message
+            .as_deref()
+            .unwrap_or("The current asset needs attention.");
+        product_card(ui, false, |ui| {
+            let colors = VisualFoundryTokens::dark().colors;
+            ui.label(
+                RichText::new("Asset needs attention")
+                    .color(colors.text)
+                    .size(17.0)
+                    .strong(),
+            );
+            ui.add(egui::Label::new(RichText::new(message).color(colors.text_muted)).wrap());
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                let try_enabled = view_state.model_ready && view_state.preview_ready;
+                let try_reason = view_state
+                    .primary_action_disabled_reason
+                    .as_deref()
+                    .unwrap_or(ASSET_PREPARING_REASON);
+                if action_button(
+                    ui,
+                    &action_spec(
+                        try_enabled,
+                        ACTION_TRY_AGAIN,
+                        ButtonTone::Primary,
+                        try_reason,
+                    ),
+                )
+                .clicked()
+                    && let Some(command) = self.make_primary_candidate_command()
+                {
+                    commands.push(command);
+                }
+                if action_button(
+                    ui,
+                    &ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
+                )
+                .clicked()
+                {
+                    self.tab = FoundryTab::Home;
+                }
+                if action_button(
+                    ui,
+                    &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
+                )
+                .clicked()
+                    && let Some(path) = open_foundry_project_file()
+                {
+                    commands.push(FoundryAppCommand::Load(path));
+                }
+            });
+        });
+        commands
+    }
+
+    fn clear_all_locks_command(&self) -> Option<FoundryAppCommand> {
+        if self.state.locks.is_empty() {
+            return None;
+        }
+
+        Some(FoundryAppCommand::RunFoundryCommandProgram {
+            label: ACTION_UNLOCK_CONTROLS.to_owned(),
+            commands: self
+                .state
+                .locks
+                .iter()
+                .map(|lock| FoundryCommand::ClearLock {
+                    target: lock.target.clone(),
+                })
+                .collect(),
+        })
     }
 
     fn show_choose_asset_empty_state(
@@ -1926,6 +2266,8 @@ impl FoundryDesktopApp {
             .active_jobs
             .values()
             .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
+        let preview_is_stale =
+            preview.is_some_and(|preview| preview.build != self.state.current_build);
         let draw_edge = max_edge.min(ui.available_width().max(1.0));
         ui.vertical_centered(|ui| {
             if let Some(preview) = &preview {
@@ -1942,9 +2284,16 @@ impl FoundryDesktopApp {
                         max_edge: draw_edge,
                     },
                 );
+                if preview_is_stale || rendering_preview {
+                    ui.label(
+                        RichText::new(PREVIEW_UPDATING_REASON)
+                            .color(VisualFoundryTokens::dark().colors.warning)
+                            .small(),
+                    );
+                }
             } else if has_output {
                 if rendering_preview {
-                    ui.weak("Rendering preview...");
+                    ui.weak(PREVIEW_UPDATING_REASON);
                 } else {
                     ui.weak("Preview is being prepared.");
                 }
@@ -1984,6 +2333,14 @@ impl FoundryDesktopApp {
     fn apply_commands(&mut self, commands: Vec<FoundryAppCommand>, ctx: &egui::Context) {
         let mut state_changed = false;
         for command in commands {
+            if matches!(
+                command,
+                FoundryAppCommand::RetryPreparation
+                    | FoundryAppCommand::RequestBuild
+                    | FoundryAppCommand::RequestPreview { .. }
+            ) {
+                self.make_preparation_started_at = Some(Instant::now());
+            }
             match self.state.handle_command(command) {
                 Ok(effects) => {
                     state_changed = true;
@@ -2322,6 +2679,7 @@ impl FoundryDesktopApp {
                     self.tab = FoundryTab::Make;
                     self.drawer = None;
                     self.remember_recent_project(path.clone());
+                    self.make_preparation_started_at = Some(Instant::now());
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -2340,6 +2698,7 @@ impl FoundryDesktopApp {
                     self.state = state;
                     self.tab = FoundryTab::Make;
                     self.drawer = None;
+                    self.make_preparation_started_at = Some(Instant::now());
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -3324,8 +3683,13 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Trying ideas...",
         "Choose Template",
         "Preparing model",
+        "Rendering preview",
+        "Ready to try ideas",
+        PREVIEW_UPDATING_REASON,
+        PREPARATION_TIMEOUT_MESSAGE,
         ASSET_PREPARING_REASON,
         STALE_RESULT_WARNING,
+        "Try again when you are ready.",
         "Current Asset",
         "Candidate tray",
         "Compare current vs. candidate",
@@ -3336,6 +3700,10 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Handle ideas",
         "Vent ideas",
         "No clear ideas yet",
+        "No clear focused ideas survived",
+        "No clear ideas survived",
+        "The search found changes that were hidden or too subtle.",
+        "Vents have limited visible variation in this template.",
         "No clear handle ideas survived. Try unlocking more controls.",
         "No clear vent ideas survived. Try unlocking more controls.",
         "No ideas yet",
@@ -3457,14 +3825,20 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
     vec![
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
         ActionSpec::enabled("Try handle ideas", ButtonTone::Primary),
         ActionSpec::enabled("Try vent ideas", ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_UNLOCK_CONTROLS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
-        ActionSpec::enabled("Clear focus", ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_CLEAR_FOCUS, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_PART, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_ADD_TO_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_OPEN_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_EXPORT, ButtonTone::Primary),
@@ -3518,9 +3892,137 @@ fn product_stage<R>(
         .show(ui, |ui| ui.vertical_centered(|ui| add_contents(ui)).inner)
 }
 
+fn make_canvas_local_banner(
+    mode: &MakeCanvasMode,
+    asset_name: &str,
+    preparation_phase: MakePreparationPhase,
+    preparation_timed_out: bool,
+    preview_updating: bool,
+    local_busy_label: &Option<String>,
+    active_group: Option<&directions::DirectionPartGroup>,
+    candidate_output: Option<&FoundryCandidateOutput>,
+    local_warning_message: Option<&str>,
+    local_error_message: Option<&str>,
+) -> (String, String, BannerTone) {
+    if let Some(message) = local_warning_message {
+        return (
+            "Older result ignored".to_owned(),
+            format!("{message} Try again when you are ready."),
+            BannerTone::Warning,
+        );
+    }
+    if let Some(message) = local_error_message {
+        return (
+            "Asset needs attention".to_owned(),
+            message.to_owned(),
+            BannerTone::Error,
+        );
+    }
+    if matches!(mode, MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart)
+        && candidate_output.is_some_and(|output| output.candidates.is_empty())
+    {
+        let (title, message) = no_candidates_recovery_copy(active_group, candidate_output);
+        return (title, message, BannerTone::Warning);
+    }
+
+    match mode {
+        MakeCanvasMode::NoAsset => (
+            "Choose an asset".to_owned(),
+            "Pick a template or open a project before making changes.".to_owned(),
+            BannerTone::Info,
+        ),
+        MakeCanvasMode::PreparingAsset => {
+            let message = if preparation_timed_out {
+                PREPARATION_TIMEOUT_MESSAGE.to_owned()
+            } else if preview_updating {
+                PREVIEW_UPDATING_REASON.to_owned()
+            } else {
+                preparation_phase.label().to_owned()
+            };
+            (format!("Preparing {asset_name}"), message, BannerTone::Info)
+        }
+        MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas => (
+            "Trying ideas".to_owned(),
+            local_busy_label
+                .clone()
+                .unwrap_or_else(|| "Trying ideas from the current asset...".to_owned()),
+            BannerTone::Info,
+        ),
+        MakeCanvasMode::ReviewingIdeas => (
+            "Ideas ready".to_owned(),
+            "Compare the selected idea, then use it or reject it.".to_owned(),
+            BannerTone::Success,
+        ),
+        MakeCanvasMode::PackDrawerOpen => (
+            "Pack drawer open".to_owned(),
+            "Review pack members or export the pack.".to_owned(),
+            BannerTone::Info,
+        ),
+        MakeCanvasMode::ExportDrawerOpen => (
+            "Export drawer open".to_owned(),
+            "Choose an export option when readiness is clear.".to_owned(),
+            BannerTone::Info,
+        ),
+        MakeCanvasMode::Error => (
+            "Asset needs attention".to_owned(),
+            "The current asset needs attention.".to_owned(),
+            BannerTone::Error,
+        ),
+        MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => (
+            "Ready to try ideas".to_owned(),
+            "Try ideas, focus a part, or tune controls.".to_owned(),
+            BannerTone::Success,
+        ),
+    }
+}
+
+fn no_candidates_recovery_copy(
+    active_group: Option<&directions::DirectionPartGroup>,
+    candidate_output: Option<&FoundryCandidateOutput>,
+) -> (String, String) {
+    let reason = no_candidates_reason_copy(candidate_output);
+    if let Some(group) = active_group {
+        let part = singular_part_copy(&group.label).to_ascii_lowercase();
+        let message = if group.label.eq_ignore_ascii_case("Vents") {
+            format!(
+                "Vents have limited visible variation in this template. {reason} Try another part or unlock controls."
+            )
+        } else {
+            format!(
+                "No clear {part} ideas survived. {reason} Try again, choose another part, or unlock controls."
+            )
+        };
+        return ("No clear focused ideas survived".to_owned(), message);
+    }
+
+    (
+        "No clear ideas survived".to_owned(),
+        format!("{reason} Try again or adjust the current asset."),
+    )
+}
+
+fn no_candidates_reason_copy(candidate_output: Option<&FoundryCandidateOutput>) -> &'static str {
+    let Some(output) = candidate_output else {
+        return "The search did not find a clear visible change.";
+    };
+    if output.diagnostics.wrong_scope_rejections > 0 {
+        "The clearest changes affected something outside the focused part."
+    } else if output.diagnostics.hidden_internal_rejections > 0 {
+        "The search found changes that were hidden or too subtle."
+    } else if output.diagnostics.duplicate_looking_rejections > 0 {
+        "The search found ideas that looked too similar."
+    } else {
+        "The search did not find a clear visible change."
+    }
+}
+
 fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
     match view_state.mode {
         MakeCanvasMode::NoAsset => "Choose a template first.",
+        MakeCanvasMode::PreparingAsset if view_state.preparation_timed_out => {
+            PREPARATION_TIMEOUT_MESSAGE
+        }
+        MakeCanvasMode::PreparingAsset if view_state.preview_updating => PREVIEW_UPDATING_REASON,
         MakeCanvasMode::PreparingAsset => ASSET_PREPARING_REASON,
         MakeCanvasMode::GeneratingWholeAssetIdeas => "Trying 6 ideas from the current asset.",
         MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas for the focused part.",
@@ -6138,6 +6640,57 @@ mod tests {
     }
 
     #[test]
+    fn make_pipeline_reliability_docs_cover_recovery_contract() {
+        let docs = [
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/MAKE_PIPELINE_RELIABILITY.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/MAKE_NO_DEAD_END_STATES.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/MAKE_CANVAS_STATE_MACHINE.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/FOUNDRY_UI_MANUAL_GATE.md"
+            )),
+        ];
+        let joined = docs.join("\n");
+
+        for required in [
+            "Preparing model",
+            "Rendering preview",
+            "Ready",
+            PREPARATION_TIMEOUT_MESSAGE,
+            ACTION_RETRY_PREPARATION,
+            ACTION_CHOOSE_ANOTHER_TEMPLATE,
+            ACTION_OPEN_PROJECT,
+            PREVIEW_UPDATING_REASON,
+            ACTION_UPDATE_PREVIEW,
+            "Ready to try ideas",
+            "Trying ideas",
+            "No clear focused ideas survived",
+            "Vents have limited visible variation",
+            "EmptyReady",
+            "GeneratingSkeletons",
+            "HasCandidates",
+            "NoCandidatesWithRecovery",
+            "ErrorWithRecovery",
+            STALE_RESULT_WARNING,
+            ACTION_TRY_AGAIN,
+        ] {
+            assert!(
+                joined.contains(required),
+                "Make reliability docs missing {required}"
+            );
+        }
+    }
+
+    #[test]
     fn export_surface_copy_states_package_without_full_game_ready_claim() {
         let strings = product_visible_strings_for_default_shell();
 
@@ -6506,6 +7059,224 @@ mod tests {
             Some("Preparing Sci-Fi Industrial Crate...")
         );
         assert!(visible.local_busy_visible);
+    }
+
+    #[test]
+    fn preparation_phases_timeout_and_recovery_actions_are_visible() {
+        let mut app = visible_state_test_app();
+
+        let visible = app.make_canvas_view_state();
+        assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
+        assert_eq!(
+            visible.preparation_phase,
+            MakePreparationPhase::PreparingModel
+        );
+        assert_eq!(
+            visible.local_banner_title,
+            "Preparing Sci-Fi Industrial Crate"
+        );
+        assert_eq!(visible.local_banner_message, "Preparing model");
+        assert!(!visible.preparation_fallback_visible);
+
+        let output = compile_foundry_document(
+            app.state.document.as_ref().expect("document"),
+            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+        )
+        .expect("fixture compiles");
+        app.state.current_build = Some(output.build_stamp.clone());
+        app.state.current_output = Some(Box::new(output));
+        let visible = app.make_canvas_view_state();
+        assert_eq!(
+            visible.preparation_phase,
+            MakePreparationPhase::RenderingPreview
+        );
+        assert!(visible.preview_update_required);
+        assert_eq!(visible.local_banner_message, "Rendering preview");
+
+        app.state.current_preview = Some(test_preview_image_for_build(
+            "current",
+            app.state.current_build.clone(),
+        ));
+        let visible = app.make_canvas_view_state();
+        assert_eq!(visible.preparation_phase, MakePreparationPhase::Ready);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.local_banner_title, "Ready to try ideas");
+
+        let mut timed_out = visible_state_test_app();
+        timed_out.make_preparation_started_at =
+            Some(Instant::now() - PREPARATION_TIMEOUT - Duration::from_secs(1));
+        let visible = timed_out.make_canvas_view_state();
+        assert!(visible.preparation_timed_out);
+        assert!(visible.preparation_fallback_visible);
+        assert_eq!(visible.local_banner_message, PREPARATION_TIMEOUT_MESSAGE);
+
+        for label in [
+            ACTION_RETRY_PREPARATION,
+            ACTION_CHOOSE_ANOTHER_TEMPLATE,
+            ACTION_OPEN_PROJECT,
+        ] {
+            assert!(rendered_action_labels_for_default_shell().contains(&label));
+        }
+    }
+
+    #[test]
+    fn stale_preview_uses_update_preview_copy_and_no_legacy_make_actions() {
+        let mut app = visible_state_test_app();
+        let output = compile_foundry_document(
+            app.state.document.as_ref().expect("document"),
+            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+        )
+        .expect("fixture compiles");
+        app.state.current_build = Some(output.build_stamp.clone());
+        app.state.current_output = Some(Box::new(output));
+        app.state.current_preview = Some(test_preview_image("old-current"));
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
+        assert!(visible.preview_updating);
+        assert!(visible.preview_update_required);
+        assert_eq!(
+            visible.primary_action_disabled_reason.as_deref(),
+            Some(PREVIEW_UPDATING_REASON)
+        );
+        assert_eq!(visible.local_banner_message, PREVIEW_UPDATING_REASON);
+        assert_eq!(
+            visible.next_action_hint,
+            "Update preview to keep making changes."
+        );
+
+        let strings = product_visible_strings_for_default_shell();
+        assert!(strings.contains(&ACTION_UPDATE_PREVIEW));
+        assert!(!strings.contains(&"Build Asset"));
+        assert!(!strings.contains(&"Refresh Preview"));
+    }
+
+    #[test]
+    fn candidate_tray_state_enum_covers_every_rendering_state() {
+        let mut app = ready_visible_state_test_app();
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::EmptyReady
+        );
+
+        app.state
+            .request_candidates(FoundryCandidateRequest {
+                seed: 1,
+                proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
+                result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            })
+            .expect("candidate job schedules");
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::GeneratingSkeletons
+        );
+
+        app.state.active_jobs.clear();
+        app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::HasCandidates
+        );
+
+        app.state.candidates.clear();
+        app.state.candidate_output = Some(Box::new(empty_test_candidate_output(3, 1, 0)));
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::NoCandidatesWithRecovery
+        );
+
+        app.state.status = Some("Candidate search failed locally.".to_owned());
+        assert_eq!(
+            app.make_canvas_view_state().candidate_tray_state,
+            MakeCandidateTrayState::ErrorWithRecovery
+        );
+    }
+
+    #[test]
+    fn focused_zero_candidates_show_why_and_vents_recovery_copy() {
+        let mut app = ready_visible_state_test_app();
+        set_test_focus_scope(&mut app, "vents", "Vents");
+        app.state.candidates.clear();
+        app.state.candidate_output = Some(Box::new(empty_test_candidate_output(4, 0, 0)));
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(
+            visible.candidate_tray_state,
+            MakeCandidateTrayState::NoCandidatesWithRecovery
+        );
+        assert!(visible.candidate_search_finished_empty);
+        assert_eq!(
+            visible.local_banner_title,
+            "No clear focused ideas survived"
+        );
+        assert!(
+            visible
+                .local_banner_message
+                .contains("Vents have limited visible variation in this template")
+        );
+        assert!(
+            visible
+                .local_banner_message
+                .contains("hidden or too subtle")
+        );
+    }
+
+    #[test]
+    fn stale_result_warning_is_local_and_recoverable_with_try_again() {
+        let mut app = ready_visible_state_test_app();
+        app.state.status =
+            Some("Ignored a background result because newer work is active.".to_owned());
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(
+            visible.local_warning_message.as_deref(),
+            Some(STALE_RESULT_WARNING)
+        );
+        assert_eq!(visible.local_banner_title, "Older result ignored");
+        assert!(visible.local_banner_message.contains(ACTION_TRY_AGAIN));
+        assert!(rendered_action_labels_for_default_shell().contains(&ACTION_TRY_AGAIN));
+    }
+
+    #[test]
+    fn busy_candidate_request_does_not_accept_duplicate_clicks() {
+        let mut app = ready_visible_state_test_app();
+        let request = FoundryCandidateRequest {
+            seed: 1,
+            proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
+            result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::complete_look(),
+        };
+
+        let first = app
+            .state
+            .request_candidates(request.clone())
+            .expect("first request schedules");
+        let second = app
+            .state
+            .request_candidates(request)
+            .expect("duplicate request is ignored");
+
+        assert_eq!(first.len(), 1);
+        assert!(second.is_empty());
+        assert_eq!(
+            app.state
+                .active_jobs
+                .values()
+                .filter(|request| request.slot() == FoundryJobSlot::GenerateCandidates)
+                .count(),
+            1
+        );
+        assert!(!app.make_canvas_view_state().primary_action_enabled);
     }
 
     #[test]
@@ -7028,25 +7799,73 @@ mod tests {
 
     fn ready_visible_state_test_app() -> FoundryDesktopApp {
         let mut app = visible_state_test_app();
-        app.state.current_output = Some(Box::new(
-            compile_foundry_document(
-                app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
-            )
-            .expect("fixture compiles"),
-        ));
-        app.state.current_preview = Some(test_preview_image("current"));
+        let output = compile_foundry_document(
+            app.state.document.as_ref().expect("document"),
+            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+        )
+        .expect("fixture compiles");
+        let build = output.build_stamp.clone();
+        app.state.current_build = Some(build.clone());
+        app.state.current_output = Some(Box::new(output));
+        app.state.current_preview = Some(test_preview_image_for_build("current", Some(build)));
         app
     }
 
     fn test_preview_image(preview_id: &str) -> FoundryPreviewImage {
+        test_preview_image_for_build(preview_id, None)
+    }
+
+    fn test_preview_image_for_build(
+        preview_id: &str,
+        build: Option<FoundryBuildStamp>,
+    ) -> FoundryPreviewImage {
         FoundryPreviewImage {
             preview_id: preview_id.to_owned(),
             rgba8: vec![24, 32, 40, 255],
             width: 1,
             height: 1,
             camera: OrbitCamera::default(),
-            build: None,
+            build,
+        }
+    }
+
+    fn empty_test_candidate_output(
+        hidden_internal_rejections: usize,
+        duplicate_looking_rejections: usize,
+        wrong_scope_rejections: usize,
+    ) -> FoundryCandidateOutput {
+        FoundryCandidateOutput {
+            candidates: Vec::new(),
+            diagnostics: shape_search::foundry::FoundryCandidateGenerationDiagnostics {
+                requested_proposals: directions::DEFAULT_DIRECTION_PROPOSALS,
+                requested_candidates: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+                attempted_proposals: directions::DEFAULT_DIRECTION_PROPOSALS,
+                scored_candidates: 0,
+                accepted_candidates: 0,
+                returned_candidates: 0,
+                available_control_count: 0,
+                locked_targets_skipped: 0,
+                rejections: std::collections::BTreeMap::new(),
+                duplicate_looking_rejections,
+                hidden_internal_rejections,
+                wrong_scope_rejections,
+                human_summary: "Generated 0 clear ideas.".to_owned(),
+            },
+            scoring_report: shape_search::asset::scoring::AssetScoringReport {
+                rejected_candidates: Vec::new(),
+                scored_candidates: Vec::new(),
+                unique_candidates: Vec::new(),
+                duplicate_groups: Vec::new(),
+                representatives: Vec::new(),
+            },
+            preference_report: shape_search::foundry::FoundryCandidatePreferenceReport {
+                requested: false,
+                applied: false,
+                scope_matched: false,
+                scope: shape_foundry::FoundryPreferenceScope::new("test-family", "test-profile"),
+                ignored_reason: None,
+                selected_scores: Vec::new(),
+            },
         }
     }
 
