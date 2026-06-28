@@ -81,7 +81,7 @@ pairs=(
   "05_selected_comparison.png 04_generated_ideas.png"
   "06_focus_handles.png 05_selected_comparison.png"
   "07_generating_handle_ideas.png 06_focus_handles.png"
-  "08_handle_ideas.png 06_focus_handles.png"
+  "08_handle_ideas.png 07_generating_handle_ideas.png"
   "09_focus_vents.png 08_handle_ideas.png"
   "10_pack_drawer.png 09_focus_vents.png"
   "11_export_drawer.png 10_pack_drawer.png"

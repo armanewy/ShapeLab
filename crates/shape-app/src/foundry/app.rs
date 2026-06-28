@@ -121,16 +121,19 @@ struct MakeCanvasViewState {
     local_busy_visible: bool,
     focused_part_label: Option<String>,
     focused_part_visible: bool,
+    focused_part_actions_visible: bool,
     model_ready: bool,
     preview_ready: bool,
     candidate_tray_visible: bool,
     candidate_count: usize,
+    rejected_candidate_summary: Option<String>,
     selected_candidate_present: bool,
     selected_comparison_visible: bool,
     pack_drawer_visible: bool,
     export_drawer_visible: bool,
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
+    next_action_hint: String,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -626,6 +629,7 @@ impl FoundryDesktopApp {
                 .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
         let focused_part_label = active_group.as_ref().map(|group| group.label.clone());
         let focused_part_visible = focused_part_label.is_some();
+        let focused_part_actions_visible = focused_part_visible && model_ready && preview_ready;
         let preparing = self.state.document.is_some()
             && (!model_ready || !preview_ready || current_asset_job_active);
         let local_warning_message = self.make_canvas_local_warning();
@@ -705,6 +709,7 @@ impl FoundryDesktopApp {
             }
         });
         let candidate_tray_visible = generating || !self.state.candidates.is_empty();
+        let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
         let selected_candidate_present = selected_candidate.is_some();
         let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
             preview_ready
@@ -715,6 +720,11 @@ impl FoundryDesktopApp {
                     .as_ref()
                     .is_some_and(|preview| !preview.rgba8.is_empty())
         });
+        let next_action_hint = make_canvas_next_action_hint(
+            &mode,
+            focused_part_label.as_deref(),
+            selected_comparison_visible,
+        );
 
         MakeCanvasViewState {
             asset_name,
@@ -727,16 +737,19 @@ impl FoundryDesktopApp {
             local_busy_visible,
             focused_part_label,
             focused_part_visible,
+            focused_part_actions_visible,
             model_ready,
             preview_ready,
             candidate_tray_visible,
             candidate_count: self.state.candidates.len(),
+            rejected_candidate_summary,
             selected_candidate_present,
             selected_comparison_visible,
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
             local_warning_message,
             local_error_message,
+            next_action_hint,
         }
     }
 
@@ -744,6 +757,18 @@ impl FoundryDesktopApp {
         let status = self.state.status.as_deref()?;
         if status.starts_with("Ignored a background result") {
             Some(STALE_RESULT_WARNING.to_owned())
+        } else {
+            None
+        }
+    }
+
+    fn make_canvas_rejected_candidate_summary(&self) -> Option<String> {
+        let status = self.state.status.as_deref()?;
+        if status.contains("Rejected") {
+            Some(product_panel_message(
+                status,
+                "Some ideas were rejected because they looked too similar.",
+            ))
         } else {
             None
         }
@@ -1081,6 +1106,11 @@ impl FoundryDesktopApp {
                     .color(colors.text_muted)
                     .small(),
             );
+            ui.label(
+                RichText::new(&view_state.next_action_hint)
+                    .color(colors.accent_hover)
+                    .strong(),
+            );
             ui.add_space(12.0);
             let primary = action_spec(
                 view_state.primary_action_enabled,
@@ -1354,19 +1384,12 @@ impl FoundryDesktopApp {
                 },
             );
             ui.add_space(8.0);
-        } else if let Some(status) = self.state.status.as_deref().filter(|status| {
-            status.contains("Rejected")
-                || (status.starts_with("Found ") && self.state.candidates.is_empty())
-        }) {
-            let message = product_panel_message(
-                status,
-                "Some ideas were rejected because they looked too similar.",
-            );
+        } else if let Some(message) = &view_state.rejected_candidate_summary {
             status_banner(
                 ui,
                 StatusBannerSpec {
                     title: "Idea search result",
-                    message: &message,
+                    message,
                     tone: BannerTone::Info,
                 },
             );
@@ -1991,6 +2014,11 @@ impl FoundryDesktopApp {
     }
 
     fn poll_jobs(&mut self, ctx: &egui::Context) {
+        if self.screenshot_scenario_holds_active_job_capture() {
+            ctx.request_repaint_after(Duration::from_millis(250));
+            return;
+        }
+
         let mut affected = false;
         let mut schedule_preview = false;
         let mut schedule_candidate_previews = None;
@@ -2040,6 +2068,18 @@ impl FoundryDesktopApp {
             self.texture_cache.clear();
             ctx.request_repaint();
         }
+    }
+
+    fn screenshot_scenario_holds_active_job_capture(&self) -> bool {
+        self.screenshot_scenario_step == u8::MAX
+            && !self.state.active_jobs.is_empty()
+            && matches!(
+                self.screenshot_scenario,
+                Some(
+                    ScreenshotScenario::GeneratingWholeAssetIdeas
+                        | ScreenshotScenario::GeneratingHandleIdeas
+                )
+            )
     }
 
     fn poll_home_thumbnail_jobs(&mut self, ctx: &egui::Context) {
@@ -3480,6 +3520,56 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
         MakeCanvasMode::Ready => "Try ideas, focus a part, or tune controls.",
         MakeCanvasMode::Error => "The current asset needs attention.",
+    }
+}
+
+fn make_canvas_next_action_hint(
+    mode: &MakeCanvasMode,
+    focused_part_label: Option<&str>,
+    selected_comparison_visible: bool,
+) -> String {
+    match (mode, focused_part_label, selected_comparison_visible) {
+        (MakeCanvasMode::NoAsset, _, _) => "Start with a template from Choose.".to_owned(),
+        (MakeCanvasMode::PreparingAsset, _, _) => {
+            "Wait for the model and preview to finish preparing.".to_owned()
+        }
+        (MakeCanvasMode::GeneratingFocusedPartIdeas, Some(part), _) => {
+            format!(
+                "Watch the tray for new {} ideas.",
+                singular_part_copy(part).to_ascii_lowercase()
+            )
+        }
+        (MakeCanvasMode::GeneratingFocusedPartIdeas, None, _) => {
+            "Watch the tray for new focused ideas.".to_owned()
+        }
+        (MakeCanvasMode::GeneratingWholeAssetIdeas, _, _) => {
+            "Watch the tray for new whole-asset ideas.".to_owned()
+        }
+        (MakeCanvasMode::ReviewingIdeas, _, true) => {
+            "Compare the selected idea, then use it or reject it.".to_owned()
+        }
+        (MakeCanvasMode::ReviewingIdeas, _, false) => {
+            "Select an idea to compare it against the current asset.".to_owned()
+        }
+        (MakeCanvasMode::FocusedPart, Some(part), _) => {
+            format!(
+                "Try {} ideas, lock this part, or clear focus.",
+                singular_part_copy(part).to_ascii_lowercase()
+            )
+        }
+        (MakeCanvasMode::FocusedPart, None, _) => {
+            "Try focused ideas, lock this part, or clear focus.".to_owned()
+        }
+        (MakeCanvasMode::PackDrawerOpen, _, _) => {
+            "Review pack members or export the pack.".to_owned()
+        }
+        (MakeCanvasMode::ExportDrawerOpen, _, _) => {
+            "Choose an export option when readiness is clear.".to_owned()
+        }
+        (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
+        (MakeCanvasMode::Ready, _, _) => {
+            "Try ideas, focus a part, add to pack, or export.".to_owned()
+        }
     }
 }
 
@@ -6004,6 +6094,10 @@ mod tests {
         assert!(visible.selected_candidate_present);
         assert!(visible.selected_comparison_visible);
         assert_eq!(visible.primary_action_label, ACTION_TRY_WHOLE_ASSET_IDEAS);
+        assert_eq!(
+            visible.next_action_hint,
+            "Compare the selected idea, then use it or reject it."
+        );
     }
 
     #[test]
@@ -6026,6 +6120,10 @@ mod tests {
         assert!(visible.candidate_tray_visible);
         assert!(!visible.selected_candidate_present);
         assert!(!visible.selected_comparison_visible);
+        assert_eq!(
+            visible.next_action_hint,
+            "Select an idea to compare it against the current asset."
+        );
     }
 
     #[test]
@@ -6047,7 +6145,12 @@ mod tests {
         assert_eq!(visible.primary_title, "Handles");
         assert_eq!(visible.focused_part_label.as_deref(), Some("Handles"));
         assert!(visible.focused_part_visible);
+        assert!(visible.focused_part_actions_visible);
         assert_eq!(visible.primary_action_label, "Try handle ideas");
+        assert_eq!(
+            visible.next_action_hint,
+            "Try handle ideas, lock this part, or clear focus."
+        );
     }
 
     #[test]
@@ -6298,6 +6401,24 @@ mod tests {
         assert!(visible.local_busy_label.is_some());
         assert!(visible.local_busy_visible);
         assert!(visible.candidate_tray_visible);
+        assert_eq!(
+            visible.next_action_hint,
+            "Watch the tray for new whole-asset ideas."
+        );
+    }
+
+    #[test]
+    fn rejected_candidate_summary_is_local_make_state() {
+        let mut app = ready_visible_state_test_app();
+        app.state.status =
+            Some("Found 4 clear ideas. Rejected 2 that looked too similar.".to_owned());
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(
+            visible.rejected_candidate_summary.as_deref(),
+            Some("Found 4 clear ideas. Rejected 2 that looked too similar.")
+        );
     }
 
     #[test]

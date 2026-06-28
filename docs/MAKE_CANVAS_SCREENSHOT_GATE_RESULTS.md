@@ -2,25 +2,38 @@
 
 ## Status
 
-`AUTOMATED SCREENSHOT GATE PASSED; HUMAN DOGFOOD NOT PASSED`
+`PROMPT 1 AUTOMATED VISUAL GATE PASSED; FINAL HUMAN DOGFOOD STILL REQUIRED`
 
-This document supersedes the older branch-local BLOCKED report from
-`codex/make-canvas-interaction-recovery`. That first attempt could not capture
-the raw `target/release/shape-app` process. A later integration retry used a
-macOS `.app` wrapper and captured the required Make Canvas screenshots.
+Prompt 1 captured the required Make Canvas scenario screenshots from the
+release macOS app bundle and recorded state assertions before capture. This is
+stronger than the earlier file-existence/hash-only gate, but it is still not a
+final product-stability verdict. Prompt 5 must record a full human dogfood video
+for Sci-Fi Crate, Roman Bridge HQ, and Stylized Lamp.
 
-The current repository also includes `scripts/package_macos_app.sh` and
-`packaging/macos/Info.plist`, so local macOS smoke tests can create
-`target/release/Shape Lab.app` without hand-building a temporary wrapper.
+Final dogfood status remains `HUMAN DOGFOOD NOT PASSED` / `NO-GO` until that
+Prompt 5 video gate passes.
 
-Important: this is not a human dogfood pass. The screenshot gate proves that
-the app can reach required states and that screenshot files are not
-byte-identical. It does not prove that Make is clear to a novice, that candidate
-differences are readable, or that the next action is obvious.
+## Build And Capture
 
-## Automated Evidence
+App bundle:
 
-Required screenshots:
+```text
+target/release/Shape Lab.app
+```
+
+Screenshot path:
+
+```text
+target/make-canvas-interaction-recovery-v2/screenshots/
+```
+
+State assertion output:
+
+```text
+target/make-canvas-interaction-recovery-v2/shape-lab-screenshot-state-assertions.txt
+```
+
+## Captured Screenshots
 
 - `01_choose.png`
 - `02_make_ready.png`
@@ -34,72 +47,74 @@ Required screenshots:
 - `10_pack_drawer.png`
 - `11_export_drawer.png`
 
-Known local evidence paths from the recovery work:
+## State Assertion Output
 
 ```text
-target/visual-retry/make-canvas-screenshots/
-target/visual-demo/screenshots/
+MakeInitialCrate: PASS; mode=Ready; asset=Sci-Fi Industrial Crate; busy=false; tray=false; comparison=false; focus=None; pack=false; export=false
+GeneratingWholeAssetIdeas: PASS; mode=GeneratingWholeAssetIdeas; asset=Sci-Fi Industrial Crate; busy=true; tray=true; comparison=false; focus=None; pack=false; export=false
+GeneratedWholeAssetIdeas: PASS; mode=ReviewingIdeas; asset=Sci-Fi Industrial Crate; busy=false; tray=true; comparison=true; focus=None; pack=false; export=false
+SelectedComparison: PASS; mode=ReviewingIdeas; asset=Sci-Fi Industrial Crate; busy=false; tray=true; comparison=true; focus=None; pack=false; export=false
+FocusHandles: PASS; mode=FocusedPart; asset=Sci-Fi Industrial Crate; busy=false; tray=false; comparison=false; focus=Handles; pack=false; export=false
+GeneratingHandleIdeas: PASS; mode=GeneratingFocusedPartIdeas; asset=Sci-Fi Industrial Crate; busy=true; tray=true; comparison=false; focus=Handles; pack=false; export=false
+HandleIdeas: PASS; mode=ReviewingIdeas; asset=Sci-Fi Industrial Crate; busy=false; tray=true; comparison=true; focus=Handles; pack=false; export=false
+FocusVents: PASS; mode=FocusedPart; asset=Sci-Fi Industrial Crate; busy=false; tray=false; comparison=false; focus=Vents; pack=false; export=false
+PackDrawer: PASS; mode=PackDrawerOpen; asset=Sci-Fi Industrial Crate; busy=false; tray=false; comparison=false; focus=None; pack=true; export=false
+ExportDrawer: PASS; mode=ExportDrawerOpen; asset=Sci-Fi Industrial Crate; busy=false; tray=false; comparison=false; focus=None; pack=false; export=true
 ```
 
-The `target/visual-demo/` run also produced:
+## Image Sanity Output
+
+Command:
+
+```bash
+bash crates/shape-app/tests/check_make_canvas_screenshots.sh target/make-canvas-interaction-recovery-v2/screenshots
+```
+
+Result:
 
 ```text
-target/visual-demo/shape-lab-demo.mov
+01_choose.png 2940x1912 2f17fecf2a2c8e1d236eebc4b477964ee7e6376b2ee9a64c3caf5cfd4acbeae3
+02_make_ready.png 2940x1912 3701ed6178ec81dfae91021ba13c47cd83a57cfa59d90bb7d9fd0f6e8336a17b
+03_generating_ideas.png 2940x1912 b35150bf54e214a681dda9c567d771cc93ef1b22df3800c3786d2993fd79d7e3
+04_generated_ideas.png 2940x1912 9f81d9654537ff9a70d90e7a9f9efac533ec8547c6667871d61bf764585e6a5c
+05_selected_comparison.png 2940x1912 93bdabf19967d14193e34c80eff79b90af085db01480ecbbcac067447b18a46a
+06_focus_handles.png 2940x1912 8a1d1434bb723cc8c68999aa2e41526ecd36844e0734fef92b610790210aed05
+07_generating_handle_ideas.png 2940x1912 f6e156c8c0c6a19a64edc5a0bfe9fdacf142080dc4cdef7e6448d0aecbbb5f07
+08_handle_ideas.png 2940x1912 8974d2809c4d1bf72666309c308a972b3b4e6aa7a79bc9e8b2bf1b825d4c3fda
+09_focus_vents.png 2940x1912 1997b2dba32d43d4890a3eb2a2de72437664b5c9265ed03d3f503337ec6840b9
+10_pack_drawer.png 2940x1912 4dde8dd77bb8a22f382535897d755806b566edfb87e209716cc3ce0037379370
+11_export_drawer.png 2940x1912 3e182e3a034e0404fa0418a11ab23552fe1c9d25f403e8b4ddc4da2c919276db
+Make Canvas screenshot sanity passed.
 ```
 
-## State Assertions
+## Pass/Fail Table
 
-The app records scenario assertions in:
+| Item | Result | Notes |
+| --- | --- | --- |
+| Make ready state has model and preview ready | Pass | State assertion and screenshot captured. |
+| Whole-asset generation shows local busy state | Pass | Screenshot shows overlay, disabled actions, and skeleton tray. |
+| Generated ideas are visible above the fold | Pass | Candidate tray and selected comparison are visible. |
+| Selected comparison appears | Pass | Current/candidate/what-changed area is visible. |
+| Handles focus changes the screen | Pass | Chip, title, callout, part action tray, and filtered controls change. |
+| Focused generation shows local busy state | Pass | Screenshot shows focused overlay and skeleton tray. |
+| Vents focus changes the screen | Pass | State assertion and screenshot captured. |
+| Pack drawer opens visibly | Pass | Drawer state assertion and screenshot captured. |
+| Export drawer opens visibly | Pass | Drawer state assertion and screenshot captured. |
+| Screenshot hashes differ across adjacent states | Pass | Script checks all required adjacent pairs. |
+| Full human dogfood video | Not yet | Required in Prompt 5. |
 
-```text
-<system-temp>/shape-lab-screenshot-state-assertions.txt
-```
+## Visual Review Verdict
 
-Code-level assertions cover:
+Codex visual inspection of the captured screenshots: `PASS` for Prompt 1
+scenario evidence.
 
-- `02_make_ready.png`: mode `Ready`, model ready, preview ready;
-- `03_generating_ideas.png`: local busy whole-asset generation;
-- `04_generated_ideas.png`: candidate tray visible;
-- `05_selected_comparison.png`: selected comparison visible;
-- `06_focus_handles.png`: focused part `Handles`;
-- `07_generating_handle_ideas.png`: local busy Handles generation;
-- `08_handle_ideas.png`: candidate tray visible with Handles focus;
-- `09_focus_vents.png`: focused part `Vents`;
-- `10_pack_drawer.png`: pack drawer visible;
-- `11_export_drawer.png`: export drawer visible.
-
-## Image Sanity Check
-
-Script:
-
-```text
-crates/shape-app/tests/check_make_canvas_screenshots.sh
-```
-
-The script verifies:
-
-- all required screenshots exist;
-- screenshots meet minimum dimensions;
-- selected adjacent state screenshots have different hashes.
-
-Weakness: hash differences are not product comprehension. They do not prove
-that buttons look clickable, local busy state is visually dominant, candidate
-differences read at decision size, focus feels direct, or Pack/Export are clear
-as a workflow.
-
-## Human Verdict
-
-`NO-GO`
-
-The latest human video audit says the Make tab still feels like a model beside
-a control form, exposes build/preview sequencing, relies too much on status
-text, and does not make generated differences or focused-part interaction clear
-enough.
+This verdict is scoped to required screenshots only. It does not replace a
+fresh human dogfood video of the full starter-template flow.
 
 ## Remaining Blockers
 
-- Replace screenshot existence/hash checks with a stronger visual-state gate.
-- Record a clean dogfood video for Sci-Fi Crate, Roman Bridge HQ, and Stylized
-  Lamp.
-- Do not mark Make Canvas as product-stable until a human can complete the
-  flow without implementation docs.
+- Prompt 2 must keep unreadable candidates out of the UI.
+- Prompt 3A/3B/3C must harden starter-template geometry.
+- Prompt 4 must produce dogfood benchmark evidence for all three starters.
+- Prompt 5 must capture a clean human dogfood video and issue the final merge
+  recommendation.

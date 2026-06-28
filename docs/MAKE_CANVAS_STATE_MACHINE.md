@@ -36,16 +36,19 @@ prompt:
 - `local_busy_visible`
 - `focused_part_label`
 - `focused_part_visible`
+- `focused_part_actions_visible`
 - `model_ready`
 - `preview_ready`
 - `candidate_tray_visible`
 - `candidate_count`
+- `rejected_candidate_summary`
 - `selected_candidate_present`
 - `selected_comparison_visible`
 - `pack_drawer_visible`
 - `export_drawer_visible`
 - `local_warning_message`
 - `local_error_message`
+- `next_action_hint`
 
 ## Mode Rules
 
@@ -116,7 +119,10 @@ When candidates exist:
 - `selected_comparison_visible` is true when a selected candidate and current
   preview are both renderable;
 - the candidate count is shown near the tray;
-- rejected-similar counts are shown locally when available.
+- `rejected_candidate_summary` shows rejected-similar counts locally when
+  available;
+- `next_action_hint` tells the user whether to select, compare, use, reject, or
+  continue waiting.
 
 Pack and Export drawers are visible state, not status-only state:
 
@@ -146,3 +152,8 @@ Assertion output is appended to:
 ```text
 <system-temp>/shape-lab-screenshot-state-assertions.txt
 ```
+
+For generating scenarios, screenshot mode holds completed background job events
+after the assertion passes so the captured frame still shows the local busy
+overlay and skeleton tray. Normal app sessions continue to consume job events
+immediately.
