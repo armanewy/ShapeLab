@@ -15,8 +15,8 @@ use shape_family_compile::{
     RecipeFragmentExports, ScalarTransform, scalar_parameter,
 };
 use shape_foundry::{
-    CandidateStrategy, ControlValue, FoundryPartGroupDescriptor,
-    built_in_part_group_descriptors_for_profile,
+    CandidateStrategy, ControlValue, FoundryPartGroupDescriptor, PartGroupCapability,
+    PartPreviewHint, VariationChannel,
 };
 
 use crate::{
@@ -31,6 +31,12 @@ const FRONT_REGION: RegionId = RegionId(0);
 const BODY_HALF_EXTENTS: [f32; 3] = [1.28, 0.5, 0.88];
 const BODY_RADIUS: f32 = 0.065;
 const FRONT_DETAIL_Y: f32 = 0.67;
+pub const VENT_FOCUSED_LIMITED_REASON: &str =
+    "Vents can be adjusted through Vent Density, but focused vent ideas are limited in this build.";
+pub const PANEL_FOCUSED_LIMITED_REASON: &str = "Panels have visible depth and spacing controls, but focused panel search currently collapses to one surviving idea in this build.";
+pub const HANDLE_FOCUSED_LIMITED_REASON: &str = "Handles have authored style variants, but focused handle search currently collapses to one surviving idea in this build.";
+pub const EDGE_TRIM_FOCUSED_LIMITED_REASON: &str = "Edge Trim shares body edge softness and hidden trim presence, so focused trim ideas are not isolated in this build.";
+pub const FASTENER_FOCUSED_LIMITED_REASON: &str = "Fasteners can be adjusted through Detail Density, but focused fastener ideas are detail-only and are not exposed in this shape-focused build.";
 
 /// Build the sci-fi crate fixture catalog.
 #[must_use]
@@ -73,6 +79,15 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 0.45,
             ),
             ratio_slot("panel_depth", "Panel Depth", "body", 0.0, 1.0, 0.05, 0.55),
+            ratio_slot(
+                "panel_spacing",
+                "Panel Spacing",
+                "panel",
+                0.0,
+                1.0,
+                0.05,
+                0.5,
+            ),
             choice_slot(
                 "vent_density",
                 "Vent Density",
@@ -202,8 +217,8 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "operation.1.recessed_panel_cut.depth",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.045,
-                    maximum: 0.17,
+                    minimum: 0.035,
+                    maximum: 0.24,
                 },
             },
             ParameterBinding::Scalar {
@@ -214,8 +229,32 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                     "operation.2.recessed_panel_cut.depth",
                 ),
                 transform: ScalarTransform::Ratio {
-                    minimum: 0.045,
-                    maximum: 0.17,
+                    minimum: 0.035,
+                    maximum: 0.24,
+                },
+            },
+            ParameterBinding::Scalar {
+                slot: "panel_spacing".to_owned(),
+                role: "body".to_owned(),
+                local_path: shape_asset::definition_scalar_path(
+                    crate::LOCAL_DEFINITION,
+                    "operation.1.recessed_panel_cut.center.x",
+                ),
+                transform: ScalarTransform::Ratio {
+                    minimum: -0.58,
+                    maximum: -0.34,
+                },
+            },
+            ParameterBinding::Scalar {
+                slot: "panel_spacing".to_owned(),
+                role: "body".to_owned(),
+                local_path: shape_asset::definition_scalar_path(
+                    crate::LOCAL_DEFINITION,
+                    "operation.2.recessed_panel_cut.center.x",
+                ),
+                transform: ScalarTransform::Ratio {
+                    minimum: 0.34,
+                    maximum: 0.58,
                 },
             },
             ParameterBinding::ChoiceToPrototype {
@@ -345,6 +384,18 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 1.0,
             ),
             continuous_control("panel_depth", "Panel Depth", "panel_depth", 0.55, 0.0, 1.0),
+            {
+                let mut control = continuous_control(
+                    "panel_spacing",
+                    "Panel Spacing",
+                    "panel_spacing",
+                    0.5,
+                    0.0,
+                    1.0,
+                );
+                control.primary = false;
+                control
+            },
             choice_control(
                 "vent_density",
                 "Vent Density",
@@ -389,9 +440,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             label: "Compact Vented".to_owned(),
             control_ids: vec![
                 "body_proportions".to_owned(),
+                "structural_heft".to_owned(),
+                "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
                 "vent_density".to_owned(),
                 "handle_style".to_owned(),
                 "detail_density".to_owned(),
+                "edge_softness".to_owned(),
             ],
         },
         CandidateStrategy {
@@ -399,9 +454,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             label: "Reinforced Cargo".to_owned(),
             control_ids: vec![
                 "structural_heft".to_owned(),
+                "body_proportions".to_owned(),
                 "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
+                "vent_density".to_owned(),
                 "detail_density".to_owned(),
                 "handle_style".to_owned(),
+                "edge_softness".to_owned(),
             ],
         },
         CandidateStrategy {
@@ -409,9 +468,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             label: "Clean Lab Crate".to_owned(),
             control_ids: vec![
                 "body_proportions".to_owned(),
+                "structural_heft".to_owned(),
+                "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
                 "vent_density".to_owned(),
                 "handle_style".to_owned(),
                 "detail_density".to_owned(),
+                "edge_softness".to_owned(),
                 "has_trim".to_owned(),
             ],
         },
@@ -421,16 +484,24 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             control_ids: vec![
                 "structural_heft".to_owned(),
                 "body_proportions".to_owned(),
+                "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
+                "vent_density".to_owned(),
                 "handle_style".to_owned(),
                 "detail_density".to_owned(),
+                "edge_softness".to_owned(),
             ],
         },
         CandidateStrategy {
             id: "deep-panel-equipment".to_owned(),
             label: "Deep Panel Equipment".to_owned(),
             control_ids: vec![
+                "body_proportions".to_owned(),
+                "structural_heft".to_owned(),
                 "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
                 "vent_density".to_owned(),
+                "handle_style".to_owned(),
                 "edge_softness".to_owned(),
                 "detail_density".to_owned(),
             ],
@@ -440,9 +511,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             label: "Minimal Industrial".to_owned(),
             control_ids: vec![
                 "body_proportions".to_owned(),
+                "structural_heft".to_owned(),
                 "panel_depth".to_owned(),
+                "panel_spacing".to_owned(),
+                "vent_density".to_owned(),
                 "handle_style".to_owned(),
                 "edge_softness".to_owned(),
+                "detail_density".to_owned(),
                 "has_trim".to_owned(),
             ],
         },
@@ -460,6 +535,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ("body_proportions".to_owned(), ControlValue::Scalar(0.45)),
             ("structural_heft".to_owned(), ControlValue::Scalar(0.5)),
             ("panel_depth".to_owned(), ControlValue::Scalar(0.55)),
+            ("panel_spacing".to_owned(), ControlValue::Scalar(0.5)),
             (
                 "vent_density".to_owned(),
                 ControlValue::Choice("standard".to_owned()),
@@ -480,7 +556,183 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
 /// Product-safe semantic part groups for the Sci-Fi Industrial Crate.
 #[must_use]
 pub fn part_group_descriptors() -> Vec<FoundryPartGroupDescriptor> {
-    built_in_part_group_descriptors_for_profile("sci-fi-crate")
+    vec![
+        candidate_ready_part_group(
+            "body",
+            "Body",
+            "Main container silhouette and structural mass.",
+            &["body_proportions", "structural_heft"],
+            &["body"],
+            [50, 48],
+        ),
+        inspection_only_part_group(
+            "panels",
+            "Panels",
+            "Front recessed access-panel relief.",
+            &["panel_depth", "panel_spacing"],
+            &["panel"],
+            [50, 44],
+            PANEL_FOCUSED_LIMITED_REASON,
+        ),
+        inspection_only_part_group(
+            "vents",
+            "Vents",
+            "Cooling slots on the front shell.",
+            &["vent_density"],
+            &["body"],
+            [50, 38],
+            VENT_FOCUSED_LIMITED_REASON,
+        ),
+        inspection_only_part_group(
+            "handles",
+            "Handles",
+            "Front lift handles and cargo bars.",
+            &["handle_style"],
+            &["handle"],
+            [50, 70],
+            HANDLE_FOCUSED_LIMITED_REASON,
+        ),
+        not_candidate_ready_part_group(
+            "edge-trim",
+            "Edge Trim",
+            "Outer protective trim and edge treatment.",
+            &["edge_softness", "has_trim"],
+            &["trim"],
+            [50, 24],
+            EDGE_TRIM_FOCUSED_LIMITED_REASON,
+        ),
+        not_candidate_ready_part_group(
+            "fasteners",
+            "Fasteners",
+            "Bolts and small attachment details.",
+            &["detail_density"],
+            &["fastener"],
+            [50, 30],
+            FASTENER_FOCUSED_LIMITED_REASON,
+        ),
+    ]
+}
+
+fn candidate_ready_part_group(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    controls: &[&str],
+    provider_roles: &[&str],
+    anchor_percent: [u16; 2],
+) -> FoundryPartGroupDescriptor {
+    part_group_descriptor(
+        group_id,
+        display_name,
+        description,
+        controls,
+        provider_roles,
+        true,
+        true,
+        vec![VariationChannel::Shape],
+        PartGroupCapability {
+            shape_ready: true,
+            surface_ready: false,
+            detail_ready: false,
+            unavailable_reasons: vec![
+                "Surface options need textured previews before they can be shown.".to_owned(),
+            ],
+        },
+        anchor_percent,
+    )
+}
+
+fn inspection_only_part_group(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    controls: &[&str],
+    provider_roles: &[&str],
+    anchor_percent: [u16; 2],
+    reason: &str,
+) -> FoundryPartGroupDescriptor {
+    part_group_descriptor(
+        group_id,
+        display_name,
+        description,
+        controls,
+        provider_roles,
+        true,
+        true,
+        Vec::new(),
+        PartGroupCapability {
+            shape_ready: false,
+            surface_ready: false,
+            detail_ready: false,
+            unavailable_reasons: vec![reason.to_owned()],
+        },
+        anchor_percent,
+    )
+}
+
+fn not_candidate_ready_part_group(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    controls: &[&str],
+    provider_roles: &[&str],
+    anchor_percent: [u16; 2],
+    reason: &str,
+) -> FoundryPartGroupDescriptor {
+    part_group_descriptor(
+        group_id,
+        display_name,
+        description,
+        controls,
+        provider_roles,
+        true,
+        false,
+        Vec::new(),
+        PartGroupCapability {
+            shape_ready: false,
+            surface_ready: false,
+            detail_ready: false,
+            unavailable_reasons: vec![reason.to_owned()],
+        },
+        anchor_percent,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn part_group_descriptor(
+    group_id: &str,
+    display_name: &str,
+    description: &str,
+    controls: &[&str],
+    provider_roles: &[&str],
+    lockable: bool,
+    focusable: bool,
+    supported_channels: Vec<VariationChannel>,
+    capability: PartGroupCapability,
+    anchor_percent: [u16; 2],
+) -> FoundryPartGroupDescriptor {
+    FoundryPartGroupDescriptor {
+        group_id: group_id.to_owned(),
+        display_name: display_name.to_owned(),
+        description: description.to_owned(),
+        supported_channels,
+        bound_control_ids: controls
+            .iter()
+            .map(|control| (*control).to_owned())
+            .collect(),
+        bound_provider_roles: provider_roles
+            .iter()
+            .map(|role| (*role).to_owned())
+            .collect(),
+        lockable,
+        focusable,
+        preview_hint: PartPreviewHint {
+            label: display_name.to_owned(),
+            approximate_screen_anchor: Some(anchor_percent),
+            highlight_color_name: Some("accent".to_owned()),
+        },
+        capability,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -658,7 +910,7 @@ fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
             ),
             "Main panel depth",
             0.02,
-            0.18,
+            0.26,
             0.005,
             false,
         ),
@@ -673,12 +925,42 @@ fn body_fragment(id: &str, vents: &[VentSpec]) -> RecipeFragment {
             ),
             "Secondary panel depth",
             0.02,
-            0.18,
+            0.26,
             0.005,
             false,
         ),
     );
-    recipe.next_ids.parameter = 7;
+    recipe.parameters.insert(
+        ParameterId(7),
+        scalar_parameter(
+            7,
+            shape_asset::definition_scalar_path(
+                crate::LOCAL_DEFINITION,
+                "operation.1.recessed_panel_cut.center.x",
+            ),
+            "Left panel center",
+            -0.65,
+            -0.25,
+            0.01,
+            false,
+        ),
+    );
+    recipe.parameters.insert(
+        ParameterId(8),
+        scalar_parameter(
+            8,
+            shape_asset::definition_scalar_path(
+                crate::LOCAL_DEFINITION,
+                "operation.2.recessed_panel_cut.center.x",
+            ),
+            "Right panel center",
+            0.25,
+            0.65,
+            0.01,
+            false,
+        ),
+    );
+    recipe.next_ids.parameter = 9;
     recipe.next_ids.region = 120;
     recipe.next_ids.boundary_loop = 120;
     recipe.next_ids.operation = recipe

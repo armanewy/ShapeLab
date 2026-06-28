@@ -7,6 +7,7 @@ The sci-fi crate profile is a headless foundry catalog entry for a hard-surface 
 - Body Proportions: maps to body width and height/depth so compact and broad/tall crates are visibly different.
 - Structural Heft: maps to front/back body mass while keeping mounted details validation-clean.
 - Panel Depth: maps to both recessed panel cuts for visible clay-preview relief.
+- Panel Spacing: secondary, non-primary panel control that moves the paired recessed panels apart or together; it exists to strengthen panel-visible variation but is not exposed as a primary app control.
 - Vent Density: sparse, standard, and dense body providers use different authored slot counts, sizes, spacing, placement, and rim widths.
 - Handle Style: flush inset grip, side rail handles with brackets, or cargo bar with mounts.
 - Edge Softness: maps to rounded-box radius for subtle but measurable edge treatment.
@@ -26,14 +27,23 @@ Hidden metadata controls keep trim presence, runtime wear, and advisory weatheri
 
 ## Candidate Strategies
 
-- Compact Vented: compact body, dense vents, visible handle, medium detail.
-- Reinforced Cargo: heavier frame, deeper panel relief, cargo-bar handle, high fasteners.
-- Clean Lab Crate: smoother body, sparse vents, flush handle, low detail, trim optional.
-- Heavy Utility: broad/heavy massing, cargo handling, high detail.
-- Deep Panel Equipment: strong panel depth, dense vents, softened edges, higher detail.
-- Minimal Industrial: compact/simple body, shallow panels, flush handle, low detail, trim optional.
+- Compact Vented: compact body, stronger panel/read changes, dense vents, visible handle, medium detail, and crisper edges.
+- Reinforced Cargo: heavier and broader frame, deeper/spaced panel relief, standard vents, cargo-bar handle, high fasteners, and softened edges.
+- Clean Lab Crate: smoother body, shallower/spaced panels, sparse vents, flush handle, low detail, and trim optional.
+- Heavy Utility: broad/heavy massing, panel relief, cargo handling, visible vents, high detail, and heavier edge treatment.
+- Deep Panel Equipment: panel depth and spacing changes combined with body, vent, handle, edge, and detail changes.
+- Minimal Industrial: compact/simple body, shallow/tighter panels, sparse vents, flush handle, low detail, and trim optional.
 
-The catalog crate does not depend on `shape-search` at runtime. Tests cover strategy-style foundry states, handle attachment, structural vent differences, panel-depth descriptors, detail-density mesh growth, candidate survival, TooSubtle rejection from returned whole-asset ideas, locks, export/package verification, conformance, and zero accidental intersections.
+The catalog crate does not depend on `shape-search` at runtime. Tests cover strategy-style foundry states, handle attachment, structural vent differences, panel-depth and panel-spacing descriptors, detail-density mesh growth, candidate survival, TooSubtle rejection from returned whole-asset ideas, locks, export/package verification, conformance, and zero accidental intersections.
+
+## Focused Part Capability
+
+- Body: candidate-ready for focused shape ideas through Body Proportions and Structural Heft.
+- Panels: inspection-only in this build. Panel Depth and Panel Spacing visibly change the crate, but focused panel search currently collapses to one surviving idea, so Panels are not reported as candidate-ready.
+- Vents: focusable for inspection but not candidate-ready. Vents can be adjusted through Vent Density, but focused vent ideas are limited in this build.
+- Handles: inspection-only in this build. Handle Style swaps authored attached assemblies, but focused handle search currently collapses to one surviving idea, so Handles are not reported as candidate-ready.
+- Edge Trim: not candidate-ready. Edge softness is shared with the body and trim presence is hidden, so focused trim ideas are not isolated.
+- Fasteners: not candidate-ready. Detail Density changes fastener count, but focused fastener ideas are detail-only and are not exposed as shape-focused candidates.
 
 ## HQ Evidence
 
