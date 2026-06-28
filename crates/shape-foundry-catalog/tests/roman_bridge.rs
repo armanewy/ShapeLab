@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 
 use shape_asset::{GeometrySource, ModelingOperationSpec};
 use shape_compile::export::{verify_model_package, write_model_package};
@@ -7,7 +8,9 @@ use shape_compile::validation::{
 };
 use shape_family_compile::conformance::ConformanceStatus;
 use shape_foundry::{CandidateLegibilityClass, ControlKind, ControlValue, VariationIntent};
-use shape_foundry_catalog::roman_bridge;
+use shape_foundry_catalog::{
+    CatalogCurationState, catalog_curation_metadata_for_slug, roman_bridge,
+};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
 };
@@ -275,6 +278,124 @@ fn roman_bridge_hq_profile_declares_required_controls_and_direction_strategies()
             "detail_density"
         ]
     );
+}
+
+#[test]
+fn roman_bridge_hq_dogfood_visible_ideas_are_primary_quick_controls() {
+    let dogfood = roman_bridge::hq_dogfood_hardening_v3();
+    let fixture = roman_bridge::hq_fixture_catalog();
+    let catalog = shape_foundry::resolve_foundry_catalog(&fixture.document, &fixture)
+        .expect("HQ roman bridge catalog should resolve");
+
+    let primary_controls = catalog
+        .customizer_profile
+        .controls
+        .iter()
+        .filter(|control| control.primary)
+        .collect::<Vec<_>>();
+    assert!(primary_controls.len() <= catalog.customizer_profile.maximum_primary_controls as usize);
+    assert_eq!(catalog.customizer_profile.maximum_primary_controls, 7);
+    assert!(primary_controls.iter().all(|control| control.visible));
+
+    let primary_ids = primary_controls
+        .iter()
+        .map(|control| control.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        dogfood.visible_idea_controls,
+        [
+            "support_style",
+            "deck_width",
+            "bracing_style",
+            "railing_style",
+            "structural_heft"
+        ]
+    );
+    for control_id in dogfood.visible_idea_controls {
+        assert!(
+            primary_ids.contains(control_id),
+            "{control_id} must stay visible as a quick control for bridge dogfood"
+        );
+    }
+
+    let visible_labels = dogfood
+        .visible_idea_controls
+        .iter()
+        .map(|control_id| {
+            primary_controls
+                .iter()
+                .find(|control| control.id == *control_id)
+                .expect("dogfood control should be primary")
+                .label
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        visible_labels,
+        vec![
+            "Support Style",
+            "Deck Width",
+            "Bracing Style",
+            "Railing Style",
+            "Structural Heft"
+        ]
+    );
+
+    let curation =
+        catalog_curation_metadata_for_slug("roman-bridge-hq").expect("roman bridge HQ curation");
+    if curation.state == CatalogCurationState::Usable {
+        assert!(
+            primary_controls.len() <= 7,
+            "Usable Roman Bridge must expose only quick, novice-safe primary controls"
+        );
+    } else {
+        assert_eq!(curation.state, CatalogCurationState::PreviewOnly);
+    }
+}
+
+#[test]
+fn roman_bridge_hq_preparation_completes_or_reports_long_running_state() {
+    let dogfood = roman_bridge::hq_dogfood_hardening_v3();
+    let threshold = Duration::from_millis(dogfood.preparation_threshold_ms as u64);
+    let fixture = roman_bridge::hq_fixture_catalog();
+
+    let started = Instant::now();
+    let output = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
+        .expect("HQ roman bridge preparation should compile");
+    let elapsed = started.elapsed();
+
+    assert!(output.final_conformance.is_accepted());
+    assert!(output.artifact.validation_report.is_valid());
+    let preview_mesh = &output.artifact.combined_preview.mesh;
+    assert!(
+        !preview_mesh.positions.is_empty(),
+        "preparation must produce a whole-model preview mesh"
+    );
+    assert!(
+        !preview_mesh.indices.is_empty() && preview_mesh.indices.len().is_multiple_of(3),
+        "preparation must produce triangle preview geometry"
+    );
+    let preparation_state = if elapsed <= threshold {
+        PreparationReliabilityState::CompletedUnderThreshold
+    } else {
+        PreparationReliabilityState::LongRunningReported { elapsed, threshold }
+    };
+    match preparation_state {
+        PreparationReliabilityState::CompletedUnderThreshold => {}
+        PreparationReliabilityState::LongRunningReported { elapsed, threshold } => {
+            assert!(
+                dogfood
+                    .app_dependency_notes
+                    .iter()
+                    .any(|note| note.contains("blocked preparation")),
+                "long-running preparation should be documented as an app-owned blocked-preparation dependency"
+            );
+            assert!(
+                elapsed > threshold,
+                "long-running state should only be reported after the local threshold"
+            );
+        }
+    }
 }
 
 #[test]
@@ -626,6 +747,7 @@ fn roman_bridge_hq_span_heft_rail_and_detail_controls_are_readable() {
 
 #[test]
 fn roman_bridge_hq_explore_returns_clear_distinct_whole_asset_directions() {
+    let dogfood = roman_bridge::hq_dogfood_hardening_v3();
     let fixture = roman_bridge::hq_fixture_catalog();
     let output = generate_foundry_candidate_plans(
         &fixture.document,
@@ -684,10 +806,24 @@ fn roman_bridge_hq_explore_returns_clear_distinct_whole_asset_directions() {
     }
 
     assert!(
-        visual_signatures.len() >= 4,
-        "at least four Explore directions should be visually distinct; got {}",
+        visual_signatures.len() >= dogfood.preview_required_visible_ideas,
+        "at least {} Explore directions should be visually distinct; got {}",
+        dogfood.preview_required_visible_ideas,
         visual_signatures.len()
     );
+
+    let curation =
+        catalog_curation_metadata_for_slug("roman-bridge-hq").expect("roman bridge HQ curation");
+    assert!(
+        dogfood.observed_surviving_directions < dogfood.usable_required_surviving_directions,
+        "only a recorded six-survivor benchmark or approved exception can promote Roman Bridge HQ"
+    );
+    assert_eq!(
+        curation.state,
+        CatalogCurationState::PreviewOnly,
+        "Roman Bridge HQ must remain PreviewOnly while fewer than six directions survive"
+    );
+    assert_eq!(curation.state, dogfood.tier_decision);
 }
 
 #[test]
@@ -771,6 +907,15 @@ fn roman_bridge_compile_is_deterministic() {
     );
     assert_eq!(first.artifact.statistics, second.artifact.statistics);
     assert_eq!(first.final_conformance, second.final_conformance);
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum PreparationReliabilityState {
+    CompletedUnderThreshold,
+    LongRunningReported {
+        elapsed: Duration,
+        threshold: Duration,
+    },
 }
 
 fn compile_with_control(

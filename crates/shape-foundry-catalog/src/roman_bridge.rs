@@ -26,9 +26,9 @@ use shape_foundry::{
 };
 
 use crate::{
-    FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog, build_fixture_catalog,
-    choice_slot, family_implementation, family_schema, length_slot, ratio_slot, role,
-    style_implementation,
+    CatalogCurationState, FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog,
+    build_fixture_catalog, choice_slot, family_implementation, family_schema, length_slot,
+    ratio_slot, role, style_implementation,
 };
 
 const BRIDGE_FAMILY_ID: &str = "bridge";
@@ -41,6 +41,52 @@ const FIRST_INSTANCE: u64 = 91;
 enum BridgeQuality {
     Standard,
     Hq,
+}
+
+/// Catalog-owned Prompt 4B dogfood facts for Roman Bridge HQ.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct RomanBridgeDogfoodHardeningV3 {
+    /// Honest catalog tier decision after the local dogfood pass.
+    pub tier_decision: CatalogCurationState,
+    /// Required distinct surviving direction count before a Usable claim.
+    pub usable_required_surviving_directions: usize,
+    /// Previously observed surviving directions from the HQ benchmark evidence.
+    pub observed_surviving_directions: usize,
+    /// Minimum visible ideas accepted for continued preview/dogfood use.
+    pub preview_required_visible_ideas: usize,
+    /// Local compile plus preview-mesh preparation threshold in milliseconds.
+    pub preparation_threshold_ms: u128,
+    /// Product-visible idea/control surfaces that must remain readable.
+    pub visible_idea_controls: [&'static str; 5],
+    /// Preparation reliability concerns that are owned by the app job layer.
+    pub app_dependency_notes: [&'static str; 3],
+}
+
+/// Conservative dogfood status for `roman-bridge-hq`.
+pub const HQ_DOGFOOD_HARDENING_V3: RomanBridgeDogfoodHardeningV3 = RomanBridgeDogfoodHardeningV3 {
+    tier_decision: CatalogCurationState::PreviewOnly,
+    usable_required_surviving_directions: 6,
+    observed_surviving_directions: 4,
+    preview_required_visible_ideas: 4,
+    preparation_threshold_ms: 10_000,
+    visible_idea_controls: [
+        "support_style",
+        "deck_width",
+        "bracing_style",
+        "railing_style",
+        "structural_heft",
+    ],
+    app_dependency_notes: [
+        "automatic preparation queueing is owned by shape-app",
+        "blocked preparation copy and disabled actions are owned by shape-app",
+        "stale background job rejection is owned by shape-app",
+    ],
+};
+
+/// Return the Roman Bridge HQ dogfood status used by tests and docs.
+#[must_use]
+pub const fn hq_dogfood_hardening_v3() -> RomanBridgeDogfoodHardeningV3 {
+    HQ_DOGFOOD_HARDENING_V3
 }
 
 /// Build the Roman bridge fixture catalog.
