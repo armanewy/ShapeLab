@@ -152,7 +152,7 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
             .iter()
             .map(|action| action.label)
             .collect::<Vec<_>>(),
-        vec!["Complete Looks", "Shape", "Surface", "Focus Part"]
+        vec!["Looks", "Shape", "Surface", "Focused part"]
     );
     assert!(actions[0].selected);
     assert!(actions[0].enabled);
@@ -183,7 +183,7 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
     assert!(!actions[3].enabled);
     assert_eq!(
         actions[3].unavailable_reason,
-        Some("Focus Part is available when this asset exposes editable part groups.")
+        Some("Focused part ideas are available when this asset exposes editable part groups.")
     );
 }
 
@@ -271,7 +271,7 @@ fn focus_part_mode_targets_active_group_when_selected() {
     let actions = direction_variation_mode_actions(&intent, 73, None, None, &groups);
     let focus = actions
         .iter()
-        .find(|action| action.label == "Focus Part")
+        .find(|action| action.label == "Focused part")
         .expect("focus action exists");
 
     assert!(focus.selected);

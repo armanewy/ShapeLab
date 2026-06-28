@@ -32,6 +32,35 @@ cargo build -p shape-app --release
 cargo run -p shape-app --release
 ```
 
+## Fast Local Development
+
+Use the dev-speed helpers before running broad release gates:
+
+```bash
+source scripts/dev_env.sh
+python3 scripts/dev_gate.py --tier branch --changed
+python3 scripts/dev_gate.py --tier branch --changed --run
+python3 scripts/clean_targets.py --list --root ..
+```
+
+On Windows:
+
+```powershell
+. .\scripts\dev_env.ps1
+python scripts/dev_gate.py --tier branch --changed --run
+python scripts/clean_targets.py --list --root ..
+```
+
+`scripts/dev_env.*` can share Cargo build output and enable `sccache` when it is
+installed. `scripts/dev_gate.py` maps changed files to the smallest relevant
+gate. `scripts/clean_targets.py` reports stale Cargo `target` directories and
+refuses to delete active worktree targets unless explicitly allowed.
+
+Full workspace test, clippy, release build, and human dogfood gates are still
+required before main/release claims. They are not required for every local
+prompt lane. See [`docs/DEVELOPMENT_SPEED.md`](docs/DEVELOPMENT_SPEED.md) and
+[`docs/TEST_GATE_POLICY.md`](docs/TEST_GATE_POLICY.md).
+
 On Windows, use the launcher script when you want only the app window and no
 extra console window. The script rebuilds the selected profile before launch and
 stops stale Shape Lab processes from this repo's `target` directory, so debug and

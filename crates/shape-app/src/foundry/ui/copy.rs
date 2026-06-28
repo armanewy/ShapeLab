@@ -16,7 +16,7 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     WorkflowStepCopy {
         index: 2,
         label: "Make",
-        detail: "Model workspace",
+        detail: "Asset",
     },
 ];
 
@@ -51,7 +51,7 @@ pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Choose what to make",
     "Make",
     "Make asset",
-    "Model workspace",
+    "Current asset",
     "Pack preview",
     "Export ready",
     "Recent Projects",

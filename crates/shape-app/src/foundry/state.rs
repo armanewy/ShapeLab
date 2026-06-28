@@ -1373,7 +1373,7 @@ fn focused_candidate_request_from_command(
                 display_name: display_name.clone(),
             },
             channels,
-            human_label: "Focus Part".to_owned(),
+            human_label: "Focused part".to_owned(),
             human_summary: format!("Vary the {display_name} part group."),
         }
         .normalized(),

@@ -81,3 +81,9 @@ shape-project = { path = "crates/shape-project" }
 shape-render = { path = "crates/shape-render" }
 shape-search = { path = "crates/shape-search" }
 shape-inverse = { path = "crates/shape-inverse" }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

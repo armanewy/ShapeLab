@@ -546,7 +546,7 @@ pub(crate) fn command_summary(command: &FoundryCommand) -> FoundryHistorySummary
         }
         FoundryCommand::SetFocusPartGroup { group_id } => FoundryHistorySummary {
             kind: FoundryHistorySummaryKind::ControlEdit,
-            label: "Set Focus Part".to_owned(),
+            label: "Set focused part".to_owned(),
             detail: Some(friendly_history_label(group_id)),
             changed_controls: Vec::new(),
             changed_provider_roles: Vec::new(),

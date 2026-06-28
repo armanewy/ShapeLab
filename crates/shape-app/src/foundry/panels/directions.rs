@@ -17,8 +17,8 @@ use crate::foundry::{FoundryAppCommand, FoundryCandidateCard};
 pub(crate) const VISIBLE_DIRECTION_CANDIDATE_CARDS: usize = 6;
 /// Candidate proposal count used by the lightweight mode request helpers.
 pub(crate) const DEFAULT_DIRECTION_PROPOSALS: usize = 12;
-/// Button copy for accepting a direction.
-pub(crate) const CHOOSE_THIS_DIRECTION_LABEL: &str = "Choose This Direction";
+/// Button copy for accepting an idea.
+pub(crate) const CHOOSE_THIS_DIRECTION_LABEL: &str = "Use this idea";
 /// Button copy for rejecting a direction.
 pub(crate) const REJECT_DIRECTION_LABEL: &str = "Reject";
 
@@ -32,7 +32,7 @@ pub(crate) const DIRECTION_BOARD_MODES: [FoundryCandidateMode; 5] = [
 ];
 
 const FOCUS_PART_UNAVAILABLE_REASON: &str =
-    "Focus Part is available when this asset exposes editable part groups.";
+    "Focused part ideas are available when this asset exposes editable part groups.";
 
 /// Transient UI state needed to derive pure direction-board view data.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -353,7 +353,7 @@ impl DirectionVariationModeAction {
     }
 }
 
-/// Product-safe part group exposed to Focus Part.
+/// Product-safe part group exposed to focused part actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DirectionPartGroup {
     /// Stable group ID.
@@ -543,7 +543,7 @@ pub(crate) fn direction_variation_mode_actions(
 
     vec![
         DirectionVariationModeAction {
-            label: "Complete Looks",
+            label: "Looks",
             selected: variation_intents_match(&active_intent, &complete),
             enabled: true,
             unavailable_reason: None,
@@ -581,7 +581,7 @@ pub(crate) fn direction_variation_mode_actions(
             }),
         },
         DirectionVariationModeAction {
-            label: "Focus Part",
+            label: "Focused part",
             selected: active_intent.scope.is_focus_part(),
             enabled: focus_part.is_some(),
             unavailable_reason: focus_part
@@ -599,7 +599,7 @@ pub(crate) fn direction_variation_mode_actions(
     ]
 }
 
-/// Derive product-safe Focus Part groups for known starter assets.
+/// Derive product-safe focused part groups for known starter assets.
 #[must_use]
 pub(crate) fn direction_part_groups_for_document(
     document: &FoundryAssetDocument,

@@ -15,7 +15,7 @@ rustup show
 
 ```bash
 cargo fmt --all --check
-cargo test -p shape-app foundry --jobs 1
+cargo test -p shape-app --lib foundry --jobs 1
 cargo test -p shape-search foundry --jobs 1
 cargo test -p shape-render foundry --jobs 1
 cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1

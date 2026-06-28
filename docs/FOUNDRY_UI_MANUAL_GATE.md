@@ -37,6 +37,20 @@ recipe surfaces. Do not use docs to infer what a control means.
 Capture screenshots for every item below. Written notes are allowed only as
 additional observations and cannot replace the required screenshots.
 
+- Make ready on Sci-Fi Industrial Crate: one dominant model stage and one
+  obvious `Try ideas` action.
+- Focused Handles: selected part chip, visible model callout, attached action
+  tray with `Try handle ideas`, `Lock handles`, and `Clear focus`.
+- Focused Vents: selected part chip, visible model callout, and vent-relevant
+  controls only until `Show all controls` is opened.
+- Generated ideas: comparison panel above the idea thumbnails.
+- Selected comparison: large `Current` and `Candidate` previews, `What changed`
+  directly below, and an obvious `Use this idea` button.
+- Focused zero-candidate recovery: why message plus `Try whole-asset ideas` and
+  `Clear focus`.
+- Pack drawer: title, asset count, current asset, and `Add Current Asset`.
+- Export drawer: title, current asset readiness, surface package note when
+  applicable, blocked game-ready note when applicable, and export action.
 - Clean launch home screen.
 - Default Choose profile selection.
 - Roman Timber Bridge Make canvas with generated ideas.
@@ -60,20 +74,23 @@ additional observations and cannot replace the required screenshots.
 ## Pass Criteria
 
 - No legacy labels are visible.
+- `Candidate tray`, `Variation Mode`, `Complete Looks`, `Model workspace`, and
+  `Focus Part` are not visible as product copy.
 - Launch is not blank.
 - Advanced Recipe is not visible or required.
 - No raw technical strings are visible.
-- The central whole-model preview or whole-model cards dominate the screen.
+- The model stage dominates the screen; controls and thumbnails are secondary.
 - A novice can identify the next action within five seconds.
 - Running actions are visible in the active workspace, not only in the bottom
   status strip.
 - Roman bridge, sci-fi crate, and stylized lamp tasks complete without docs.
 - Whole-model direction cards are understandable.
-- Make controls are meaningful and not raw IDs.
+- Make controls are contextual: whole asset starts with 3-5 controls, focused
+  parts show only relevant controls before `Show all controls`.
 - Disabled reasons are plain English.
 - Pack and export drawers use plain English readiness.
 - Part chips are semantic nouns only and show plain unavailable reasons.
-- Selected candidates show larger parent/candidate comparison previews and an
+- Selected candidates show larger current/candidate comparison previews and an
   exact what-changed summary.
 - Surface options say they need textured previews before they can be shown.
 - `Build Asset` and `Refresh Preview` are not visible in the default Make flow.
@@ -85,6 +102,7 @@ additional observations and cannot replace the required screenshots.
 - The user lands on a blank, history-first, or debug-looking screen.
 - Any task requires Advanced Recipe or implementation terms.
 - Direction cards lack visible whole-model previews or differences.
+- Current/candidate comparison depends on thumbnails instead of large previews.
 - Option thumbnails are missing or placeholder-like in the real app.
 - Candidate accept/reject, lock/regenerate, pack, export, or reopen fails.
 - The next action is not obvious after five seconds.

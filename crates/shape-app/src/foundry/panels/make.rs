@@ -14,5 +14,5 @@ pub(crate) const SELECTED_COMPARISON_ACTIONS: [&str; 2] = ["Use this idea", "Rej
 /// Return the active Make scope label.
 #[must_use]
 pub(crate) fn make_scope_label(active_group: Option<&DirectionPartGroup>) -> &str {
-    active_group.map_or("Whole asset", |group| group.label.as_str())
+    active_group.map_or("Current asset", |group| group.label.as_str())
 }
