@@ -2097,8 +2097,8 @@ impl FoundryDesktopApp {
         }
 
         let mut commands = Vec::new();
-        if self.state.document.is_none() {
-            self.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), ctx);
+        if self.screenshot_scenario_step == 0 {
+            self.load_fixture(read_screenshot_fixture_catalog(), ctx);
             self.tab = FoundryTab::Make;
             self.screenshot_scenario_step = 1;
             return commands;
@@ -2923,6 +2923,16 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
         _ => None,
+    }
+}
+
+fn read_screenshot_fixture_catalog() -> shape_foundry_catalog::FoundryFixtureCatalog {
+    let path = env::temp_dir().join("shape-lab-screenshot-template.txt");
+    let value = fs::read_to_string(path).unwrap_or_default();
+    match value.trim() {
+        "roman_bridge_hq" => shape_foundry_catalog::roman_bridge::hq_fixture_catalog(),
+        "stylized_lamp" => shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+        _ => shape_foundry_catalog::scifi_crate::fixture_catalog(),
     }
 }
 
