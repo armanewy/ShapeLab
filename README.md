@@ -7,14 +7,20 @@ customizer for authored semantic asset families. The old implicit editor,
 explicit modeling workspace, and nested mode switchers are no longer product
 surfaces.
 
-The product slice proves a category-independent loop:
+Current recovery status: automated gates can pass, but the latest human
+dogfood video audit is a no-go for product stability. Treat the current
+mainline as a recovery baseline until Make passes the manual dogfood gate.
+
+The product slice targets a category-independent `Choose -> Make` loop:
 
 1. Open a local desktop app.
 2. Choose an asset family.
-3. Generate several coherent whole-model directions.
-4. Choose one direction.
-5. Customize primary controls and lock traits.
-6. Export a single asset or a small family pack while keeping branchable history.
+3. Enter Make and let the app prepare the first model and preview.
+4. Try coherent whole-asset ideas.
+5. Choose an idea or focus a visible part, then use contextual controls and
+   locks only when they are clear.
+6. Export a single asset or a small family pack while keeping branchable
+   history.
 
 ## Build
 
@@ -37,14 +43,15 @@ pwsh -File scripts/run_shape_app.ps1 -PreviewCatalog
 
 Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md), [`docs/VARIATION_LEGIBILITY_GATE.md`](docs/VARIATION_LEGIBILITY_GATE.md), [`docs/FOCUS_PART_MODE.md`](docs/FOCUS_PART_MODE.md), [`docs/FOUNDRY_KIT_SYSTEM.md`](docs/FOUNDRY_KIT_SYSTEM.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in [`docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md`](docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md), [`docs/NEXT_PRODUCT_RECOVERY_PLAN.md`](docs/NEXT_PRODUCT_RECOVERY_PLAN.md), [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md), [`docs/VARIATION_LEGIBILITY_GATE.md`](docs/VARIATION_LEGIBILITY_GATE.md), [`docs/FOCUS_PART_MODE.md`](docs/FOCUS_PART_MODE.md), [`docs/FOUNDRY_KIT_SYSTEM.md`](docs/FOUNDRY_KIT_SYSTEM.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
 
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
 - seventeen installed Visual Foundry kit-backed profiles available to preview/developer catalogs, including the original Visual Foundry families, Roman Timber Bridge HQ, promoted gear kits, and the Hero Character preview kit
-- an asset-family grouped Choose list, direction board, customizer deck, pack workspace, and export flow
-- whole-model candidate cards and DPI-aware whole-model customizer previews
+- an asset-family grouped Choose list, Make workspace, candidate tray, focused
+  part chips, contextual controls, pack workspace, and export flow
+- whole-model candidate cards and DPI-aware whole-model previews
 - reducer-backed locks, undo, save/open, current export, and pack export
 - background compile, preview, semantic candidate generation, candidate render, save/open, and export jobs
 - branch-preserving `.shapelab-foundry.json` save/open, grouped OBJ export, and canonical model-package export
@@ -57,12 +64,15 @@ recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 ## Manual Dogfood Pass 1
 
 Use this pass to make one Sci-Fi Crate and export it through the product UI.
+Do not count this as passing unless the flow is understandable without reading
+implementation docs.
 
-1. Launch the release app with `pwsh -File scripts/run_shape_app.ps1 -PreviewCatalog`.
+1. Launch the release app with `cargo run -p shape-app --release`.
 2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
-3. Wait for the status strip to show the model and preview are ready.
-4. Open Directions, generate directions, and choose one coherent whole-model option.
-5. Adjust one or two Customize controls only if the controls are clear.
+3. In Make, wait for the local preparing or preview-ready state to complete.
+4. Use `Try ideas` and confirm the candidate tray or comparison visibly changes.
+5. Choose one coherent whole-model idea, or focus a visible part such as
+   Handles or Vents if that action is obvious.
 6. Open Export and export the current asset to a local test directory.
 7. Confirm the export path contains the expected package files and grouped OBJ output.
 

@@ -5853,6 +5853,35 @@ mod tests {
     }
 
     #[test]
+    fn foundry_recovery_docs_do_not_claim_current_make_dogfood_success() {
+        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        assert!(readme.contains("Choose -> Make"));
+        assert!(!readme.contains("Open Directions"));
+        assert!(!readme.contains("Customize controls"));
+
+        let screenshot_results = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md"
+        ));
+        assert!(screenshot_results.contains("HUMAN DOGFOOD NOT PASSED"));
+        assert!(screenshot_results.contains("NO-GO"));
+
+        let integration_report = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/PRODUCT_QUALITY_RECOVERY_INTEGRATION_REPORT.md"
+        ));
+        assert!(integration_report.contains("HUMAN DOGFOOD NO-GO"));
+        assert!(integration_report.contains("unstable product-recovery baseline"));
+
+        let manual_gate = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/RELEASE_CANDIDATE_MANUAL_GATE.md"
+        ));
+        assert!(manual_gate.contains("human dogfood video audit is"));
+        assert!(manual_gate.contains("NO-GO"));
+    }
+
+    #[test]
     fn export_surface_copy_states_package_without_full_game_ready_claim() {
         let strings = product_visible_strings_for_default_shell();
 

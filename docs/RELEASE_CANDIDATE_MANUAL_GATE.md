@@ -4,6 +4,11 @@ This checklist is the manual product gate for a release-readiness claim. It
 tests the default novice Visual Foundry path only: no technical recipe surface
 should be exposed or required for any task below.
 
+Current mainline status: automated tests, starter benchmarks, and screenshot
+file/hash checks are evidence only. The latest human dogfood video audit is
+`NO-GO`, so release readiness must not be claimed until this checklist and a
+clean dogfood video pass the default novice flow.
+
 Also complete the screenshot-oriented UI checklist in
 [`docs/FOUNDRY_UI_MANUAL_GATE.md`](FOUNDRY_UI_MANUAL_GATE.md). The automated
 `--verify-product-ui-gate` report proves the headless shell contract, but it

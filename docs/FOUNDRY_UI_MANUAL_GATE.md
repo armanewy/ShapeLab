@@ -10,6 +10,11 @@ cargo run -p shape-cli -- release-readiness --verify-product-ui-gate
 The automated gate proves the headless shell contract. This manual gate checks
 whether the app actually looks and behaves like a usable product.
 
+Current mainline status: automated gates and screenshot hash checks can pass,
+but the latest human dogfood video audit is `NO-GO`. Do not treat this gate as
+passed until a human can complete the Make flow without implementation docs and
+without relying on the bottom status strip to understand what is happening.
+
 Unified Make Canvas evidence is tracked in
 [`docs/MAKE_CANVAS_SCREENSHOT_GATE.md`](MAKE_CANVAS_SCREENSHOT_GATE.md). That
 gate is required whenever the Make canvas is changed.
@@ -31,7 +36,7 @@ Capture screenshots for every item below. Written notes are allowed only as
 additional observations and cannot replace the required screenshots.
 
 - Clean launch home screen.
-- Profile selection from the ten Visual Foundry profiles.
+- Default Choose profile selection.
 - Roman Timber Bridge Make canvas with generated ideas.
 - Sci-Fi Industrial Crate Make canvas with contextual controls.
 - Stylized Furniture Lamp option gallery.
@@ -41,7 +46,7 @@ additional observations and cannot replace the required screenshots.
 - Focused handle candidate generation and selected A/B comparison.
 - Make canvas showing a focused control card.
 - One disabled-control or disabled-action reason.
-- One stale, building, or working status message.
+- One local stale, preparing, or working message or overlay.
 - 1280x800 layout.
 - 1440x900 layout.
 
@@ -53,6 +58,8 @@ additional observations and cannot replace the required screenshots.
 - No raw technical strings are visible.
 - The central whole-model preview or whole-model cards dominate the screen.
 - A novice can identify the next action within five seconds.
+- Running actions are visible in the active workspace, not only in the bottom
+  status strip.
 - Roman bridge, sci-fi crate, and stylized lamp tasks complete without docs.
 - Whole-model direction cards are understandable.
 - Make controls are meaningful and not raw IDs.

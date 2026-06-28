@@ -2,13 +2,16 @@
 
 ## Status
 
-`PASS WITH DISTRIBUTION PACKAGING FOLLOW-UP`
+`AUTOMATED GATES PASS; HUMAN DOGFOOD NO-GO`
 
 The integration branch merges the Make recovery, candidate legibility, starter
 template hardening, and starter-template benchmark work. Automated Rust gates
-pass, the starter-template benchmark emits all required evidence, and the
-mandatory Make Canvas screenshot gate now captures and passes image sanity
-checks.
+pass, the starter-template benchmark emits all required evidence, and the Make
+Canvas screenshot automation can capture the required states.
+
+This report is not a product-stability verdict. The latest human video audit
+still finds the Make tab confusing and not dogfood-stable. Treat current `main`
+as an unstable product-recovery baseline.
 
 Retry note: the original visual gate used a temporary `.app` wrapper because
 the raw `target/release/shape-app` process did not expose a normal macOS bundle
@@ -83,9 +86,9 @@ Each template directory contains:
 - `legibility-report.json`
 - `adversarial-review.md`
 
-## Visual Gate
+## Automated Visual Gate
 
-Result: `PASS`
+Result: `AUTOMATED PASS; HUMAN DOGFOOD NO-GO`
 
 Attempt:
 
@@ -123,7 +126,9 @@ Captured files:
 - `11_export_drawer.png`
 
 Image sanity result: pass. Every screenshot is at least 1000x700, all required
-files exist, and the required state-transition screenshot hashes differ.
+files exist, and the required state-transition screenshot hashes differ. This is
+weaker than a human product gate and must not be treated as proof that the UI is
+usable.
 
 Retry fixes made after the first visual attempt:
 
@@ -134,19 +139,19 @@ Retry fixes made after the first visual attempt:
   selected comparisons and prevents control labels from colliding with
   Focus/Lock/Reset actions in drawers.
 
-## Pass/Fail Table
+## Automated Evidence Table
 
 | Review Item | Result | Notes |
 | --- | --- | --- |
-| I know what to do next on Make. | Pass | Screenshots show Choose, Make, Try ideas, focused part actions, and drawer actions. |
-| Buttons look clickable. | Pass | Primary and secondary actions render as filled buttons; disabled actions show muted state. |
-| Running actions are visible locally. | Pass | Generating whole-asset and Handles states show local busy treatment. |
+| I know what to do next on Make. | Human Fail | Latest video audit says the next action is still not obvious enough. |
+| Buttons look clickable. | Human Fail | Core actions exist, but priority and behavior remain ambiguous in video. |
+| Running actions are visible locally. | Human Fail | Local state exists, but status-strip interpretation still carries too much UX. |
 | I can tell what changed in at least four crate ideas. | Pass | Benchmark passes Sci-Fi Crate as Usable. |
 | I can tell what changed in at least four bridge ideas. | Pass | Benchmark passes Roman Bridge HQ as Usable. |
 | I can tell what changed in at least four lamp ideas. | Pass | Benchmark passes Stylized Lamp as Usable. |
-| Focus Part visibly changes the workspace. | Pass | Handles and Vents focus screenshots show focused chip/callout and local tray copy. |
-| Candidate comparison is readable. | Pass | Selected comparison screenshot shows current vs candidate previews and visible change copy. |
-| Pack/export are visible drawers. | Pass | Pack and Export screenshots show right-side drawers with ready states. |
+| Focus Part visibly changes the workspace. | Human Fail | State changes exist, but video says focus still feels like filtering rather than direct model selection. |
+| Candidate comparison is readable. | Human Fail | Screenshot existence does not prove human-readable difference at decision size. |
+| Pack/export are visible drawers. | Not Proven | Drawer screenshots exist, but full novice workflow clarity is not proven. |
 | Surface/rig/motion/game-ready are not overclaimed. | Pass | Automated copy gates pass; visual screenshots do not expose unsupported surface/rig/motion/game-ready claims. |
 | No technical/internal terms appear. | Pass | Automated copy gates pass; reviewed screenshots use product-facing labels. |
 
@@ -164,10 +169,10 @@ Retry fixes made after the first visual attempt:
 
 ## Recommendation
 
-Mergeable as a product-quality recovery candidate, with release-distribution
-packaging follow-up. The local macOS `.app` bundle path is checked in; public
-distribution still needs signing, notarization, final icon packaging, and
-installer/archive validation.
+Keep as an unstable integration checkpoint. Do not use this report to justify
+new app-facing feature work. The next branch should be Make Canvas interaction
+recovery v2, followed by candidate/template hardening and a human dogfood
+integration gate.
 
 Current release-distribution caveats:
 

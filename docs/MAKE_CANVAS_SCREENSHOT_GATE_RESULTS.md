@@ -1,61 +1,61 @@
 # Make Canvas Screenshot Gate Results
 
-## Branch
-
-`codex/make-canvas-interaction-recovery`
-
 ## Status
 
-`BLOCKED`
+`AUTOMATED SCREENSHOT GATE PASSED; HUMAN DOGFOOD NOT PASSED`
 
-The release build completed, and `target/release/shape-app` launched as a
-process, but the visual gate could not capture usable Make canvas screenshots.
-The app appeared only as the active macOS menu-bar app (`Shape Lab`) with no
-visible window. Computer Use could not attach to it by app name or executable
-path, and full-screen `screencapture` captured only the desktop/menu bar.
+This document supersedes the older branch-local BLOCKED report from
+`codex/make-canvas-interaction-recovery`. That first attempt could not capture
+the raw `target/release/shape-app` process. A later integration retry used a
+macOS `.app` wrapper and captured the required Make Canvas screenshots.
 
-This branch does not claim visual success.
+The current repository also includes `scripts/package_macos_app.sh` and
+`packaging/macos/Info.plist`, so local macOS smoke tests can create
+`target/release/Shape Lab.app` without hand-building a temporary wrapper.
 
-## Screenshot Path
+Important: this is not a human dogfood pass. The screenshot gate proves that
+the app can reach required states and that screenshot files are not
+byte-identical. It does not prove that Make is clear to a novice, that candidate
+differences are readable, or that the next action is obvious.
 
-Attempted local capture directory:
+## Automated Evidence
+
+Required screenshots:
+
+- `01_choose.png`
+- `02_make_ready.png`
+- `03_generating_ideas.png`
+- `04_generated_ideas.png`
+- `05_selected_comparison.png`
+- `06_focus_handles.png`
+- `07_generating_handle_ideas.png`
+- `08_handle_ideas.png`
+- `09_focus_vents.png`
+- `10_pack_drawer.png`
+- `11_export_drawer.png`
+
+Known local evidence paths from the recovery work:
 
 ```text
-target/make-canvas-screenshots-recovery
+target/visual-retry/make-canvas-screenshots/
+target/visual-demo/screenshots/
 ```
 
-## Screenshot Files
+The `target/visual-demo/` run also produced:
 
-| Screenshot | Scenario file value | Expected state | Result |
-| --- | --- | --- | --- |
-| `01_choose.png` | none | Choose screen | Captured, but invalid: desktop/menu bar only |
-| `02_make_ready.png` | `make_initial_crate` | `Ready` | Missing |
-| `03_generating_ideas.png` | `generating_whole_asset_ideas` | `local_busy_visible = true` | Missing |
-| `04_generated_ideas.png` | `generated_whole_asset_ideas` | `candidate_tray_visible = true` | Missing |
-| `05_selected_comparison.png` | `selected_comparison` | `selected_comparison_visible = true` | Missing |
-| `06_focus_handles.png` | `focus_handles` | `focused_part_label = Handles` | Missing |
-| `07_generating_handle_ideas.png` | `generating_handle_ideas` | Handles generation busy | Missing |
-| `08_handle_ideas.png` | `handle_ideas` | Handles focused and tray visible | Missing |
-| `09_focus_vents.png` | `focus_vents` | `focused_part_label = Vents` | Missing |
-| `10_pack_drawer.png` | `pack_drawer` | `pack_drawer_visible = true` | Missing |
-| `11_export_drawer.png` | `export_drawer` | `export_drawer_visible = true` | Missing |
+```text
+target/visual-demo/shape-lab-demo.mov
+```
 
-## State Assertion Output
+## State Assertions
 
-Expected assertion log:
+The app records scenario assertions in:
 
 ```text
 <system-temp>/shape-lab-screenshot-state-assertions.txt
 ```
 
-Result:
-
-```text
-Not produced. The release app did not expose a visible window for scenario
-capture, so no scenario advanced to a completed state assertion.
-```
-
-Code-level unit coverage was added for the same assertions:
+Code-level assertions cover:
 
 - `02_make_ready.png`: mode `Ready`, model ready, preview ready;
 - `03_generating_ideas.png`: local busy whole-asset generation;
@@ -70,49 +70,36 @@ Code-level unit coverage was added for the same assertions:
 
 ## Image Sanity Check
 
-Script added:
+Script:
 
 ```text
 crates/shape-app/tests/check_make_canvas_screenshots.sh
 ```
 
-Command run:
+The script verifies:
 
-```bash
-bash crates/shape-app/tests/check_make_canvas_screenshots.sh target/make-canvas-screenshots-recovery
-```
+- all required screenshots exist;
+- screenshots meet minimum dimensions;
+- selected adjacent state screenshots have different hashes.
 
-Output:
+Weakness: hash differences are not product comprehension. They do not prove
+that buttons look clickable, local busy state is visually dominant, candidate
+differences read at decision size, focus feels direct, or Pack/Export are clear
+as a workflow.
 
-```text
-01_choose.png 2940x1912 870c31cb5330fa94b20cf9ddf1d5fdef730e906c2179045691e8caef0ee30a53
-Missing screenshot: 02_make_ready.png
-```
+## Human Verdict
 
-Result: `FAIL`, because the visual capture is blocked and the required
-screenshots are missing.
+`NO-GO`
 
-## Code Gate Output
-
-| Command | Result |
-| --- | --- |
-| `cargo fmt --all --check` | Pass |
-| `cargo test -p shape-app foundry --jobs 1` | Pass |
-| `cargo test -p shape-app --test foundry_direction_board --jobs 1` | Pass |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Pass |
-| `cargo build --release --workspace` | Pass |
-
-## Manual Review
-
-Manual screenshot review is blocked. The only captured image is not a valid
-Shape Lab UI capture.
+The latest human video audit says the Make tab still feels like a model beside
+a control form, exposes build/preview sequencing, relies too much on status
+text, and does not make generated differences or focused-part interaction clear
+enough.
 
 ## Remaining Blockers
 
-- A visible release app window is required before the screenshot scenario can be
-  captured.
-- Computer Use currently reports `Invalid app` for both `shape-app` and the
-  full release executable path.
-- Screenshot state assertions must produce a pass log before capture.
-- All eleven screenshots must exist and pass image sanity checks.
-- The screenshots must be manually inspected before this gate can pass.
+- Replace screenshot existence/hash checks with a stronger visual-state gate.
+- Record a clean dogfood video for Sci-Fi Crate, Roman Bridge HQ, and Stylized
+  Lamp.
+- Do not mark Make Canvas as product-stable until a human can complete the
+  flow without implementation docs.
