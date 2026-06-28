@@ -49,6 +49,11 @@ additional observations and cannot replace the required screenshots.
 - Make canvas showing a focused control card.
 - One disabled-control or disabled-action reason.
 - One local stale, preparing, or working message or overlay.
+- Template start showing `Preparing model`, `Rendering preview`, and `Ready`.
+- Preparing timeout fallback with `Retry preparation`, `Choose another template`,
+  and `Open Project`.
+- Stale preview copy showing `Preview is updating...` and `Update preview`.
+- Focused zero-candidate recovery with a why message and recovery actions.
 - 1280x800 layout.
 - 1440x900 layout.
 
@@ -71,6 +76,9 @@ additional observations and cannot replace the required screenshots.
 - Selected candidates show larger parent/candidate comparison previews and an
   exact what-changed summary.
 - Surface options say they need textured previews before they can be shown.
+- `Build Asset` and `Refresh Preview` are not visible in the default Make flow.
+- Busy Make actions cannot be double-clicked into duplicate visible work.
+- Zero focused candidates never leave the user without a recovery action.
 
 ## Fail Criteria
 
@@ -102,6 +110,10 @@ Selected candidate comparison screenshot:
 Focused Make control screenshot:
 Disabled reason screenshot:
 Status message screenshot:
+Preparation phases screenshot:
+Preparation timeout screenshot:
+Stale preview update screenshot:
+Focused no-candidate recovery screenshot:
 1280x800 screenshot:
 1440x900 screenshot:
 

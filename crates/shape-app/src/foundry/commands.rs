@@ -43,6 +43,8 @@ pub(crate) enum FoundryAppCommand {
     },
     /// Request an exact rebuild for the current document.
     RequestBuild,
+    /// Cancel stale local preparation work and request a fresh model rebuild.
+    RetryPreparation,
     /// Request fresh whole-model preview images for current state.
     RequestPreview {
         /// Requested image width.
