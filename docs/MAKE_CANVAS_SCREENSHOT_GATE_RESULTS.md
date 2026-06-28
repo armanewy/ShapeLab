@@ -2,16 +2,18 @@
 
 ## Status
 
-`PROMPT 1 AUTOMATED VISUAL GATE PASSED; FINAL HUMAN DOGFOOD STILL REQUIRED`
+`PROMPT 1 AUTOMATED VISUAL GATE PASSED; LATEST HUMAN DOGFOOD NO-GO`
 
 Prompt 1 captured the required Make Canvas scenario screenshots from the
 release macOS app bundle and recorded state assertions before capture. This is
 stronger than the earlier file-existence/hash-only gate, but it is still not a
-final product-stability verdict. Prompt 5 must record a full human dogfood video
-for Sci-Fi Crate, Roman Bridge HQ, and Stylized Lamp.
+final product-stability verdict. A later Prompt 5 video was recorded, then human
+review of the 540p recording found Make UX blockers that this screenshot gate
+did not catch.
 
-Final dogfood status remains `HUMAN DOGFOOD NOT PASSED` / `NO-GO` until that
-Prompt 5 video gate passes.
+Current dogfood status remains `HUMAN DOGFOOD NOT PASSED` / `NO-GO` until the
+new manual gate passes. See
+[`CURRENT_PRODUCT_STATUS.md`](CURRENT_PRODUCT_STATUS.md).
 
 ## Build And Capture
 
@@ -109,12 +111,15 @@ Codex visual inspection of the captured screenshots: `PASS` for Prompt 1
 scenario evidence.
 
 This verdict is scoped to required screenshots only. It does not replace a
-fresh human dogfood video of the full starter-template flow.
+fresh human dogfood video of the full starter-template flow, and it is not a
+stable-product verdict.
 
 ## Remaining Blockers
 
 - Prompt 2 must keep unreadable candidates out of the UI.
 - Prompt 3A/3B/3C must harden starter-template geometry.
 - Prompt 4 must produce dogfood benchmark evidence for all three starters.
-- Prompt 5 must capture a clean human dogfood video and issue the final merge
+- Prompt 5 captured a video, but later human review rejected the product
+  stability claim.
+- The next recovery pass must fix Make no-dead-end behavior before a new merge
   recommendation.

@@ -8,6 +8,8 @@ Current mainline status: automated tests, starter benchmarks, and screenshot
 file/hash checks are evidence only. The latest human dogfood video audit is
 `NO-GO`, so release readiness must not be claimed until this checklist and a
 clean dogfood video pass the default novice flow.
+The canonical current status is
+[`CURRENT_PRODUCT_STATUS.md`](CURRENT_PRODUCT_STATUS.md).
 
 Also complete the screenshot-oriented UI checklist in
 [`docs/FOUNDRY_UI_MANUAL_GATE.md`](FOUNDRY_UI_MANUAL_GATE.md). The automated

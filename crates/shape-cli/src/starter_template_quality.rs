@@ -77,7 +77,7 @@ impl BenchmarkCommandKind {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum StarterTemplate {
     ScifiCrate,
     RomanBridgeHq,
@@ -536,9 +536,10 @@ fn benchmark_template(
         parent_disconnected_parts.len(),
     );
     let pass_criteria = evaluate_pass_criteria(&signals);
-    let blockers = blockers_for_criteria(&pass_criteria, &signals);
     let passed = pass_criteria.passed();
-    let catalog_recommendation = catalog_recommendation_for_pass(passed);
+    let mut blockers = blockers_for_criteria(&pass_criteria, &signals);
+    let catalog_recommendation = catalog_recommendation_for_template(template, passed);
+    blockers.extend(catalog_blockers_for_template(template, passed));
     let adversarial_questions = adversarial_question_report(&pass_criteria, &signals);
 
     let report = StarterTemplateQualityReport {
@@ -1078,11 +1079,32 @@ fn evaluate_pass_criteria(signals: &QualitySignals) -> TemplatePassCriteria {
     }
 }
 
-fn catalog_recommendation_for_pass(passed: bool) -> CatalogRecommendation {
-    if passed {
-        CatalogRecommendation::Usable
-    } else {
-        CatalogRecommendation::PreviewOnly
+fn catalog_recommendation_for_template(
+    template: StarterTemplate,
+    passed: bool,
+) -> CatalogRecommendation {
+    if !passed {
+        return CatalogRecommendation::PreviewOnly;
+    }
+
+    match template {
+        StarterTemplate::RomanBridgeHq => CatalogRecommendation::PreviewOnly,
+        StarterTemplate::ScifiCrate | StarterTemplate::StylizedLamp => {
+            CatalogRecommendation::Usable
+        }
+    }
+}
+
+fn catalog_blockers_for_template(template: StarterTemplate, passed: bool) -> Vec<String> {
+    if !passed {
+        return Vec::new();
+    }
+
+    match template {
+        StarterTemplate::RomanBridgeHq => vec![
+            "Roman Bridge HQ remains PreviewOnly until the six-direction Usable gate passes or an explicit exception is approved.".to_owned(),
+        ],
+        StarterTemplate::ScifiCrate | StarterTemplate::StylizedLamp => Vec::new(),
     }
 }
 
@@ -1469,7 +1491,11 @@ fn dogfood_summary_from_report(
         profile_slug: report.profile_slug.clone(),
         display_name: report.display_name.clone(),
         passed,
-        catalog_recommendation: catalog_recommendation_for_pass(passed),
+        catalog_recommendation: if passed {
+            report.catalog_recommendation
+        } else {
+            CatalogRecommendation::PreviewOnly
+        },
         manual_review_required_for_showcase: true,
         required_visible_ideas: report.required_visible_ideas,
         visible_idea_count: report.signals.visible_idea_count,
@@ -1655,7 +1681,11 @@ mod tests {
             )
             .expect("parse legibility report");
             if report["passed"].as_bool().unwrap() {
-                assert_eq!(report["catalog_recommendation"], "Usable");
+                if template == StarterTemplate::RomanBridgeHq {
+                    assert_eq!(report["catalog_recommendation"], "PreviewOnly");
+                } else {
+                    assert_eq!(report["catalog_recommendation"], "Usable");
+                }
             } else {
                 assert_eq!(report["catalog_recommendation"], "PreviewOnly");
             }
@@ -1681,7 +1711,7 @@ mod tests {
 
         assert!(!criteria.at_least_four_visible_ideas);
         assert_eq!(
-            catalog_recommendation_for_pass(passed),
+            catalog_recommendation_for_template(StarterTemplate::ScifiCrate, passed),
             CatalogRecommendation::PreviewOnly
         );
     }
@@ -1695,7 +1725,7 @@ mod tests {
 
         assert!(!criteria.passed());
         assert_eq!(
-            catalog_recommendation_for_pass(criteria.passed()),
+            catalog_recommendation_for_template(StarterTemplate::ScifiCrate, criteria.passed()),
             CatalogRecommendation::PreviewOnly
         );
     }
@@ -1706,8 +1736,25 @@ mod tests {
 
         assert!(criteria.passed());
         assert_eq!(
-            catalog_recommendation_for_pass(criteria.passed()),
+            catalog_recommendation_for_template(StarterTemplate::ScifiCrate, criteria.passed()),
             CatalogRecommendation::Usable
+        );
+    }
+
+    #[test]
+    fn starter_template_dogfood_roman_hq_remains_preview_only_without_exception() {
+        let criteria = evaluate_pass_criteria(&passing_signals());
+
+        assert!(criteria.passed());
+        assert_eq!(
+            catalog_recommendation_for_template(StarterTemplate::RomanBridgeHq, criteria.passed()),
+            CatalogRecommendation::PreviewOnly
+        );
+        assert_eq!(
+            catalog_blockers_for_template(StarterTemplate::RomanBridgeHq, criteria.passed()),
+            vec![
+                "Roman Bridge HQ remains PreviewOnly until the six-direction Usable gate passes or an explicit exception is approved.".to_owned()
+            ]
         );
     }
 

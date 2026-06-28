@@ -8,7 +8,7 @@ Run:
 cargo run -p shape-cli -- starter-template-dogfood-benchmark --out-dir target/starter-template-dogfood
 ```
 
-The benchmark covers the three default starter templates:
+The benchmark covers the three product-recovery starter templates:
 
 - Sci-Fi Industrial Crate (`sci-fi-crate`)
 - Roman Timber Bridge HQ (`roman-bridge-hq`)
@@ -44,7 +44,7 @@ preview scale.
 
 ## Pass Criteria
 
-A starter template is `Usable` only when all automated criteria pass:
+A starter template passes this benchmark only when all automated criteria pass:
 
 - at least four generated ideas are visibly distinct;
 - all primary controls have endpoint visibility reports;
@@ -56,8 +56,10 @@ A starter template is `Usable` only when all automated criteria pass:
 - evidence uses the app camera/scale or stricter;
 - manual review remains required before any Showcase claim.
 
-Failing templates are reported as `PreviewOnly`. They remain in source for
-developer review but must not be shown as `Usable` in the novice catalog.
+Failing templates are reported as `PreviewOnly`. Passing benchmark evidence is
+necessary but not always sufficient for a `Usable` catalog recommendation.
+Roman Bridge HQ remains `PreviewOnly` until its separate six-direction HQ
+Usable gate passes or an explicit exception is approved.
 
 ## Adversarial Review Questions
 

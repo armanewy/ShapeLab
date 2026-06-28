@@ -1,5 +1,14 @@
 # Roman Bridge Template Hardening Report
 
+## Current Tier Truth
+
+Current catalog recommendation: `PreviewOnly`.
+
+Prompt 0 chose the conservative downgrade path. Roman Bridge HQ has useful
+starter-template evidence, but the broader HQ Usable-tier gate still requires
+six surviving direction candidates or an approved exception. No exception is
+approved, so `roman-bridge-hq` must stay out of the default novice catalog.
+
 ## Scope
 
 Prompt 3B v2 re-verified the existing `roman-bridge-hq` hardening. The earlier
@@ -94,5 +103,6 @@ Non-blocking finding:
 
 - manual art review is still pending; automatic evidence is not human approval.
 
-Prompt 4 hardening is complete, but broader Usable-tier promotion remains blocked
-until the six-direction benchmark gate is met or an exception is approved.
+Prompt 4 hardening is complete, but broader Usable-tier promotion remains
+blocked until the six-direction benchmark gate is met or an exception is
+approved. Until then, Roman Bridge HQ remains `PreviewOnly`.

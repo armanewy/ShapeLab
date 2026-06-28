@@ -5716,17 +5716,17 @@ mod tests {
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
         assert_eq!(installed_product_kit_count(), 17);
-        assert_eq!(default_product_home_profile_count(), 3);
+        assert_eq!(default_product_home_profile_count(), 2);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
             .iter()
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
-        assert!(default_labels.contains(&"Roman Timber Bridge HQ"));
         assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(default_labels.contains(&"Stylized Furniture Lamp"));
         assert!(!default_labels.contains(&"Roman Timber Bridge"));
+        assert!(!default_labels.contains(&"Roman Timber Bridge HQ"));
         assert!(!default_labels.contains(&"Sci-Fi Door Panel"));
 
         let profiles = product_home_profiles(true);
@@ -5831,7 +5831,7 @@ mod tests {
             &mut selected_slug,
         );
 
-        assert_eq!(selected_slug.as_deref(), Some("roman-bridge-hq"));
+        assert_eq!(selected_slug.as_deref(), None);
         assert!(
             filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::Props)
                 .iter()
@@ -5956,8 +5956,17 @@ mod tests {
     fn foundry_recovery_docs_do_not_claim_current_make_dogfood_success() {
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
         assert!(readme.contains("Choose -> Make"));
+        assert!(readme.contains("product-recovery baseline"));
         assert!(!readme.contains("Open Directions"));
         assert!(!readme.contains("Customize controls"));
+
+        let current_status = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CURRENT_PRODUCT_STATUS.md"
+        ));
+        assert!(current_status.contains("PRODUCT-RECOVERY BASELINE"));
+        assert!(current_status.contains("latest human dogfood review"));
+        assert!(current_status.contains("Do not start larger user-facing UV/Texturing/Rigging"));
 
         let screenshot_results = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -5979,6 +5988,153 @@ mod tests {
         ));
         assert!(manual_gate.contains("human dogfood video audit is"));
         assert!(manual_gate.contains("NO-GO"));
+    }
+
+    #[test]
+    fn product_truth_docs_agree_on_no_go_status_and_roman_preview_only() {
+        let current_status = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CURRENT_PRODUCT_STATUS.md"
+        ));
+        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let integration_v2 = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
+        ));
+        let roman_report = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
+        ));
+
+        for doc in [current_status, readme, integration_v2] {
+            assert!(doc.contains("product-recovery baseline"));
+            assert!(
+                doc.to_ascii_lowercase().contains("no-go"),
+                "status doc must keep the human no-go verdict visible: {doc}"
+            );
+        }
+
+        assert!(current_status.contains("Roman Bridge HQ is downgraded to `PreviewOnly`"));
+        assert!(roman_report.contains("Current catalog recommendation: `PreviewOnly`"));
+        assert!(integration_v2.contains("| Roman Timber Bridge HQ | Pass | PreviewOnly |"));
+    }
+
+    #[test]
+    fn source_and_markdown_hygiene_targets_are_audit_friendly() {
+        let targets = [
+            (
+                "README.md",
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md")),
+            ),
+            (
+                "docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
+                )),
+            ),
+            (
+                "docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md"
+                )),
+            ),
+            (
+                "docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
+                )),
+            ),
+            (
+                "docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md"
+                )),
+            ),
+            (
+                "docs/CURRENT_PRODUCT_STATUS.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/CURRENT_PRODUCT_STATUS.md"
+                )),
+            ),
+        ];
+
+        for (path, contents) in targets {
+            let line_count = contents.lines().count();
+            let max_line_len = contents.lines().map(str::len).max().unwrap_or_default();
+            assert!(line_count >= 20, "{path} is too short to be audit-friendly");
+            assert!(
+                max_line_len <= 180,
+                "{path} has a line longer than 180 characters: {max_line_len}"
+            );
+        }
+
+        let app_source = include_str!("app.rs");
+        let app_line_count = app_source.lines().count();
+        let app_max_line_len = app_source.lines().map(str::len).max().unwrap_or_default();
+        assert!(
+            app_line_count > 1_000,
+            "foundry app.rs appears physically collapsed: {app_line_count} lines"
+        );
+        assert!(
+            app_max_line_len <= 180,
+            "foundry app.rs has a line longer than 180 characters: {app_max_line_len}"
+        );
+    }
+
+    #[test]
+    fn product_docs_keep_surface_rig_motion_and_game_ready_claims_caveated() {
+        let docs = [
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/CURRENT_PRODUCT_STATUS.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/RELEASE_CANDIDATE_MANUAL_GATE.md"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/FOUNDRY_UI_MANUAL_GATE.md"
+            )),
+        ];
+        let joined = docs.join("\n").to_ascii_lowercase();
+
+        for forbidden in [
+            "broad uv/texturing support is ready",
+            "broad texturing support is ready",
+            "rigging integration is ready",
+            "animation integration is ready",
+            "full game-ready support",
+            "showcase claim approved",
+        ] {
+            assert!(
+                !joined.contains(forbidden),
+                "product docs must not overclaim unsupported work: {forbidden}"
+            );
+        }
+
+        for claim in ["game-ready", "rigging", "animation", "texturing"] {
+            if joined.contains(claim) {
+                assert!(
+                    joined.contains("do not claim")
+                        || joined.contains("outside")
+                        || joined.contains("not product-supported")
+                        || joined.contains("blocked")
+                        || joined.contains("manual"),
+                    "mentions of {claim} must remain caveated"
+                );
+            }
+        }
     }
 
     #[test]

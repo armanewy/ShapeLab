@@ -382,11 +382,11 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
         },
         CatalogCurationMetadata {
             profile_slug: "roman-bridge-hq",
-            state: CatalogCurationState::Usable,
+            state: CatalogCurationState::PreviewOnly,
             has_visual_direction_evidence: true,
             has_readable_control_evidence: true,
             has_human_showcase_review: false,
-            note: "HQ Roman Bridge has refreshed starter-template benchmark evidence for visible directions, controls, and connected parts.",
+            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes or an explicit exception is approved.",
         },
         CatalogCurationMetadata {
             profile_slug: "sci-fi-crate",

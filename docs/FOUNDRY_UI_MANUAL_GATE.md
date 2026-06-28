@@ -14,6 +14,8 @@ Current mainline status: automated gates and screenshot hash checks can pass,
 but the latest human dogfood video audit is `NO-GO`. Do not treat this gate as
 passed until a human can complete the Make flow without implementation docs and
 without relying on the bottom status strip to understand what is happening.
+The canonical current status is
+[`CURRENT_PRODUCT_STATUS.md`](CURRENT_PRODUCT_STATUS.md).
 
 Unified Make Canvas evidence is tracked in
 [`docs/MAKE_CANVAS_SCREENSHOT_GATE.md`](MAKE_CANVAS_SCREENSHOT_GATE.md). That

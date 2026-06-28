@@ -9,7 +9,9 @@ surfaces.
 
 Current recovery status: automated gates can pass, but the latest human
 dogfood video audit is a no-go for product stability. Treat the current
-mainline as a recovery baseline until Make passes the manual dogfood gate.
+mainline as a product-recovery baseline until Make passes the manual dogfood
+gate. The canonical status note is
+[`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md).
 
 The product slice targets a category-independent `Choose -> Make` loop:
 
@@ -41,14 +43,36 @@ area:
 pwsh -File scripts/run_shape_app.ps1 -PreviewCatalog
 ```
 
-Detailed local and CI build instructions, including Linux native packages and the reproducible release command list, are in [`docs/building.md`](docs/building.md).
+Detailed local and CI build instructions, including Linux native packages and
+the reproducible release command list, are in
+[`docs/building.md`](docs/building.md).
 
-Release status and scope are documented in [`docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md`](docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md), [`docs/NEXT_PRODUCT_RECOVERY_PLAN.md`](docs/NEXT_PRODUCT_RECOVERY_PLAN.md), [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md), [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md), [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md), [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md), [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md), [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md), [`docs/VARIATION_LEGIBILITY_GATE.md`](docs/VARIATION_LEGIBILITY_GATE.md), [`docs/FOCUS_PART_MODE.md`](docs/FOCUS_PART_MODE.md), [`docs/FOUNDRY_KIT_SYSTEM.md`](docs/FOUNDRY_KIT_SYSTEM.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md), and [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md).
+Release status and scope are documented in:
+
+- [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
+- [`docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md`](docs/MAINLINE_MAKE_CANVAS_FAILURE_AUDIT.md)
+- [`docs/NEXT_PRODUCT_RECOVERY_PLAN.md`](docs/NEXT_PRODUCT_RECOVERY_PLAN.md)
+- [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md)
+- [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md)
+- [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md)
+- [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md)
+- [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md)
+- [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md)
+- [`docs/VARIATION_LEGIBILITY_GATE.md`](docs/VARIATION_LEGIBILITY_GATE.md)
+- [`docs/FOCUS_PART_MODE.md`](docs/FOCUS_PART_MODE.md)
+- [`docs/FOUNDRY_KIT_SYSTEM.md`](docs/FOUNDRY_KIT_SYSTEM.md)
+- [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
+- [`docs/NEXT_BACKENDS.md`](docs/NEXT_BACKENDS.md)
+- [`docs/MANUAL_TEST_CHECKLIST.md`](docs/MANUAL_TEST_CHECKLIST.md)
 
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- seventeen installed Visual Foundry kit-backed profiles available to preview/developer catalogs, including the original Visual Foundry families, Roman Timber Bridge HQ, promoted gear kits, and the Hero Character preview kit
+- two default novice profiles: Sci-Fi Industrial Crate and Stylized Furniture
+  Lamp
+- seventeen installed Visual Foundry kit-backed profiles available to
+  preview/developer catalogs, including Roman Timber Bridge HQ, promoted gear
+  kits, and the Hero Character preview kit
 - an asset-family grouped Choose list, Make workspace, candidate tray, focused
   part chips, contextual controls, pack workspace, and export flow
 - whole-model candidate cards and DPI-aware whole-model previews
@@ -131,7 +155,15 @@ AssetFamilySchema
   -> validation, preview, export, and adapter packaging
 ```
 
-`shape-family` owns theme-neutral family and style-kit contracts. `shape-family-compile` owns the first executable binding layer from those contracts to concrete `AssetRecipe` output. `shape-gamekit` owns runtime-neutral game metadata. `shape-caesar-assets` is the first content-pack customer, not a core engine dependency. See [`docs/asset-family-foundry.md`](docs/asset-family-foundry.md), [`docs/adr/0011-asset-family-style-kit-layer.md`](docs/adr/0011-asset-family-style-kit-layer.md), and [`docs/adr/0012-executable-family-bindings.md`](docs/adr/0012-executable-family-bindings.md).
+`shape-family` owns theme-neutral family and style-kit contracts.
+`shape-family-compile` owns the first executable binding layer from those
+contracts to concrete `AssetRecipe` output. `shape-gamekit` owns
+runtime-neutral game metadata. `shape-caesar-assets` is the first content-pack
+customer, not a core engine dependency. See
+[`docs/asset-family-foundry.md`](docs/asset-family-foundry.md),
+[`docs/adr/0011-asset-family-style-kit-layer.md`](docs/adr/0011-asset-family-style-kit-layer.md),
+and
+[`docs/adr/0012-executable-family-bindings.md`](docs/adr/0012-executable-family-bindings.md).
 
 ## CLI
 
@@ -207,7 +239,10 @@ cargo run -p shape-cli -- model-demo --asset explicit-desk-lamp --out-dir target
 cargo run -p shape-cli -- model-demo --asset stylized-stool --out-dir target/model-demo/stool
 ```
 
-Each `model-demo` run writes `recipe.json`, grouped `asset.obj`, `provenance.json`, `validation.json`, `model-validation.json`, `statistics.json`, `preview.png`, and `blender_reconstruct.py`. Package validation carries compile issues plus recipe-derived model validation issues.
+Each `model-demo` run writes `recipe.json`, grouped `asset.obj`,
+`provenance.json`, `validation.json`, `model-validation.json`,
+`statistics.json`, `preview.png`, and `blender_reconstruct.py`. Package
+validation carries compile issues plus recipe-derived model validation issues.
 
 Render fixed-camera shaded and wireframe benchmark sheets for the explicit asset search loop:
 
@@ -215,7 +250,12 @@ Render fixed-camera shaded and wireframe benchmark sheets for the explicit asset
 cargo run -p shape-cli -- asset-visual-benchmark --out-dir target/asset-visual-benchmark
 ```
 
-Each asset directory contains original renders, six Refine candidates, six Explore candidates, an accepted branch, a final canonical package, contact sheets, wireframe contact sheets, and `visual-benchmark-summary.json`. Candidate selection uses compiled mesh descriptors derived from fixed-camera silhouette masks, perimeter, visible z-buffer depth histograms, mesh volume, and recipe structure.
+Each asset directory contains original renders, six Refine candidates, six
+Explore candidates, an accepted branch, a final canonical package, contact
+sheets, wireframe contact sheets, and `visual-benchmark-summary.json`.
+Candidate selection uses compiled mesh descriptors derived from fixed-camera
+silhouette masks, perimeter, visible z-buffer depth histograms, mesh volume,
+and recipe structure.
 
 Packaging notes, third-party dependency documentation, and placeholder icon assets live under [`packaging/`](packaging/).
 
@@ -233,15 +273,38 @@ cargo run -p shape-cli -- decompile source.obj target.obj --out-dir target/decom
 cargo run -p shape-cli -- verify-decompile target/decompile-package
 ```
 
-The decompiler requires identical ordered topology and writes canonical binary mesh sidecars, an ordered reconstruction stream, cumulative baked stage sidecars, an exact final correction, `manifest.json`, two verification reports, schema-3 program-hypothesis diagnostics, and `blender_reconstruct.py`. Package schema 2 specifies deterministic stepwise binary32 affine arithmetic and manifest-declared stage files so Rust and Python replay can verify every serialized stage bit-for-bit; diagnostics are versioned separately and describe scored ordered programs rather than single operator families. Package output is staged and replay-verified before replacing an existing directory. The generated Blender script reconstructs editable shape-key stages, bakes the final object from replayed operators, and verifies exact topology and final positions. Details are in [`docs/deformation-decompiler.md`](docs/deformation-decompiler.md).
+The decompiler requires identical ordered topology and writes canonical binary
+mesh sidecars, an ordered reconstruction stream, cumulative baked stage
+sidecars, an exact final correction, `manifest.json`, two verification reports,
+schema-3 program-hypothesis diagnostics, and `blender_reconstruct.py`. Package
+schema 2 specifies deterministic stepwise binary32 affine arithmetic and
+manifest-declared stage files so Rust and Python replay can verify every
+serialized stage bit-for-bit. Diagnostics are versioned separately and describe
+scored ordered programs rather than single operator families. Package output is
+staged and replay-verified before replacing an existing directory. The generated
+Blender script reconstructs editable shape-key stages, bakes the final object
+from replayed operators, and verifies exact topology and final positions.
+Details are in [`docs/deformation-decompiler.md`](docs/deformation-decompiler.md).
 
 ## Scope
 
-The MVP is category-general because it contains no humanoid-specific engine concepts. Visual Foundry profiles span props, furniture, environment pieces, and structures. The core vocabulary is parts, generators, transforms, semantic edits, visual descriptors, candidates, validation relationship selectors, and revisions.
+The MVP is category-general because it contains no humanoid-specific engine
+concepts. Visual Foundry profiles span props, furniture, environment pieces,
+and structures. The core vocabulary is parts, generators, transforms, semantic
+edits, visual descriptors, candidates, validation relationship selectors, and
+revisions.
 
-The MVP is still representation-specific: Visual Foundry works on authored semantic asset-family documents that compile to explicit `AssetRecipe` graphs. Triangle-mesh import handling exists only in headless/research strict reconstruction and same-topology deformation decompiler paths, not as Visual Foundry product editability. Arbitrary imported meshes are not semantically editable unless they fit a known grammar and strict verification proves exact recovery.
+The MVP is still representation-specific: Visual Foundry works on authored
+semantic asset-family documents that compile to explicit `AssetRecipe` graphs.
+Triangle-mesh import handling exists only in headless/research strict
+reconstruction and same-topology deformation decompiler paths, not as Visual
+Foundry product editability. Arbitrary imported meshes are not semantically
+editable unless they fit a known grammar and strict verification proves exact
+recovery.
 
-Release readiness is archive-first only. The repository documents manual package contents, but installers, code signing, notarization, package-manager publishing, and app-store publishing are not implemented.
+Release readiness is archive-first only. The repository documents manual
+package contents, but installers, code signing, notarization, package-manager
+publishing, and app-store publishing are not implemented.
 
 ## Non-Goals Before MVP Gate
 

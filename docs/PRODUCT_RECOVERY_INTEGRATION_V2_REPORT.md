@@ -4,11 +4,16 @@ Date: 2026-06-28
 
 ## Status
 
-`PASS - PRODUCT RECOVERY PROMPTS 0 THROUGH 5 INTEGRATED`
+`SUPERSEDED - AUTOMATED PROMPT 5 EVIDENCE PASSED; LATEST HUMAN DOGFOOD NO-GO`
 
-This report covers the final Prompt 5 integration gate for the recovery prompt
-set. It supersedes the earlier product-quality recovery report that marked the
-Make experience as a human dogfood no-go.
+This report originally covered the Prompt 5 integration gate for the previous
+recovery prompt set. It is now superseded by
+[`CURRENT_PRODUCT_STATUS.md`](CURRENT_PRODUCT_STATUS.md).
+
+Current truth: automated gates and screenshot/video capture can pass, but the
+latest human review of the 540p dogfood video still identifies Make UX blockers.
+Treat `main` as a product-recovery baseline, not as a stable Visual Foundry
+baseline.
 
 The integration branch is:
 
@@ -79,7 +84,7 @@ Root summary:
 | Template | Result | Catalog Recommendation | Blockers |
 | --- | --- | --- | --- |
 | Sci-Fi Industrial Crate | Pass | Usable | None |
-| Roman Timber Bridge HQ | Pass | Usable | None |
+| Roman Timber Bridge HQ | Pass | PreviewOnly | Six-direction Usable gate is not met and no exception is approved. |
 | Stylized Furniture Lamp | Pass | Usable | None |
 
 ## Screenshot And Video Gate
@@ -142,7 +147,12 @@ Screenshot sanity passed: all required files exist, every screenshot is
 the macOS Dock during recording and restored the previous Dock setting
 afterward.
 
-## Human Product Gate
+## Superseded Human Product Gate
+
+The table below records the original Prompt 5 self-review. It must not be used
+as the current product-stability verdict. The later human video audit found that
+Make can still stall or dead-end around preparation, disabled actions, no clear
+ideas, focused-part failures, and bottom-status-dependent feedback.
 
 | Review Item | Result | Evidence |
 | --- | --- | --- |
@@ -171,9 +181,16 @@ afterward.
 - Pack and Export drawers are visible as workspace drawers and communicate
   readiness or blocked pack export state.
 
-## Remaining Blockers
+## Current Remaining Blockers
 
-None for Prompts 0 through 5.
+- Make pipeline reliability and no-dead-end handling are still blocking product
+  stability.
+- Focused-part generation needs an explicit recovery path when no clear ideas
+  survive.
+- Evidence reports must stay reproducible and tied to hashes, commit, platform,
+  and reviewer identity.
+- Roman Bridge HQ remains PreviewOnly until the six-direction Usable gate passes
+  or an explicit exception is approved.
 
 Remaining non-blocking caveats:
 
@@ -186,5 +203,8 @@ Remaining non-blocking caveats:
 
 ## Merge Recommendation
 
-The Prompt 5 screenshot/video gate and starter-template benchmark passed. The
-recovery stack is eligible to merge to `main`.
+Historical note: this branch was merged to `main` after the Prompt 5 evidence
+run. Current recommendation: do not treat that merge as a stable product
+baseline. Continue recovery work from `main`, and do not start larger
+user-facing UV/Texturing/Rigging/Animation integration until Make passes the new
+manual gate.
