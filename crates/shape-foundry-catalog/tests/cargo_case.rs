@@ -27,12 +27,24 @@ fn family(fixture: &FoundryFixtureCatalog) -> AssetFamilySchema {
     payload(fixture, "cargo-case-base-family")
 }
 
+fn clean_family(fixture: &FoundryFixtureCatalog) -> AssetFamilySchema {
+    payload(fixture, "clean-utility-case-family")
+}
+
 fn profile(fixture: &FoundryFixtureCatalog) -> CustomizerProfile {
     payload(fixture, "cargo-case-base-profile")
 }
 
+fn clean_profile(fixture: &FoundryFixtureCatalog) -> CustomizerProfile {
+    payload(fixture, "clean-utility-case-profile")
+}
+
 fn style_impl(fixture: &FoundryFixtureCatalog) -> StyleImplementation {
     payload(fixture, "cargo-case-base-style-impl")
+}
+
+fn clean_style_impl(fixture: &FoundryFixtureCatalog) -> StyleImplementation {
+    payload(fixture, "clean-utility-case-style-impl")
 }
 
 fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
@@ -44,6 +56,17 @@ fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput 
             .insert((*control).to_owned(), value.clone());
     }
     compile_foundry_document(&document, &fixture).expect("cargo case variant compiles")
+}
+
+fn compile_clean_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    let fixture = cargo_case::clean_utility_fixture_catalog();
+    let mut document = fixture.document.clone();
+    for (control, value) in overrides {
+        document
+            .control_state
+            .insert((*control).to_owned(), value.clone());
+    }
+    compile_foundry_document(&document, &fixture).expect("clean utility case variant compiles")
 }
 
 fn assert_valid_model(output: &FoundryCompilationOutput) {
@@ -393,6 +416,194 @@ fn cargo_case_base_is_not_plain_rounded_box_with_tiny_attachments() {
     assert!(role_instances(&output, "corner_guards").len() >= 4);
     assert!(role_instances(&output, "base_feet_or_skids").len() >= 2);
     assert!(mesh_triangle_count(&output) > 300);
+}
+
+#[test]
+fn clean_utility_case_uses_cargo_case_family_without_bespoke_fork() {
+    let base = cargo_case::fixture_catalog();
+    let clean = cargo_case::clean_utility_fixture_catalog();
+    let base_family = family(&base);
+    let clean_family = clean_family(&clean);
+    let clean_profile = clean_profile(&clean);
+    let clean_style_impl = clean_style_impl(&clean);
+
+    assert_eq!(clean.slug, cargo_case::CLEAN_UTILITY_CASE_SLUG);
+    assert_eq!(clean_family.id, cargo_case::CARGO_CASE_FAMILY_ID);
+    assert_eq!(clean_profile.family_id, cargo_case::CARGO_CASE_FAMILY_ID);
+    assert_eq!(
+        clean_profile.style_id.as_deref(),
+        Some(cargo_case::CLEAN_UTILITY_CASE_STYLE_ID)
+    );
+    assert_eq!(clean_style_impl.family_id, cargo_case::CARGO_CASE_FAMILY_ID);
+    assert_eq!(
+        clean_style_impl.style_kit_id,
+        cargo_case::CLEAN_UTILITY_CASE_STYLE_ID
+    );
+    assert_eq!(base_family.part_roles, clean_family.part_roles);
+    assert_eq!(base_family.parameter_slots, clean_family.parameter_slots);
+}
+
+#[test]
+fn clean_utility_case_defaults_are_cleaner_than_base_cargo_case() {
+    let clean = cargo_case::clean_utility_fixture_catalog();
+    let base = cargo_case::fixture_catalog();
+    let clean_style = clean_style_impl(&clean);
+
+    assert_eq!(
+        clean.document.control_state["panel_complexity"],
+        ControlValue::Choice("clean_panel".to_owned())
+    );
+    assert_eq!(
+        clean.document.control_state["vent_density"],
+        ControlValue::Choice("none_sparse".to_owned())
+    );
+    assert_eq!(
+        clean.document.control_state["trim_style"],
+        ControlValue::Choice("clean".to_owned())
+    );
+    assert_eq!(
+        clean.document.control_state["detail_density"],
+        ControlValue::Choice("low_detail".to_owned())
+    );
+    assert_eq!(
+        clean.document.control_state["handle_style"],
+        ControlValue::Choice("flush_grip".to_owned())
+    );
+    assert_ne!(
+        clean.document.control_state["vent_density"],
+        base.document.control_state["vent_density"]
+    );
+    assert_eq!(
+        clean_style.default_role_providers["corner_guards"],
+        "minimal_corner_cap"
+    );
+    assert_ne!(
+        clean_style.default_role_providers["handles"], "cargo_bar_handle",
+        "Clean Utility must not default to cargo-bar handles"
+    );
+    assert_ne!(
+        clean_style.default_role_providers["edge_trim"], "industrial_band_trim",
+        "Clean Utility must not default to heavy industrial bands"
+    );
+}
+
+#[test]
+fn clean_utility_case_controls_and_candidates_remain_visible() {
+    let fixture = cargo_case::clean_utility_fixture_catalog();
+    let profile = clean_profile(&fixture);
+    let primary = profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+    assert_eq!(primary.len(), 7);
+    assert_eq!(
+        primary
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Overall Proportions",
+            "Structural Heft",
+            "Panel Complexity",
+            "Handle Style",
+            "Vent Density",
+            "Trim Style",
+            "Detail Density",
+        ]
+    );
+    assert_eq!(
+        profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Light Utility",
+            "Compact Carry Case",
+            "Clean Storage Case",
+            "Reinforced Utility",
+            "Minimal Field Case",
+        ]
+    );
+
+    let output =
+        generate_foundry_candidate_plans(&fixture.document, &fixture, &candidate_request(91))
+            .expect("Clean Utility candidates should generate");
+    assert!(output.candidates.len() >= 4);
+    let unique_signatures = output
+        .candidates
+        .iter()
+        .map(|candidate| candidate.changed_controls.join("|"))
+        .collect::<BTreeSet<_>>();
+    assert!(unique_signatures.len() >= 4);
+    assert!(output.candidates.iter().all(|candidate| {
+        candidate.conformance.accepted
+            && candidate.variation_metadata.visible_delta.shape_delta_score > 0.0
+            && candidate.variation_metadata.visible_delta.legibility_class
+                != CandidateLegibilityClass::TooSubtle
+    }));
+}
+
+#[test]
+fn clean_utility_case_exports_clean_and_reads_in_clay() {
+    let output = compile_clean_with(&[]);
+    assert_valid_model(&output);
+    assert!(mesh_triangle_count(&output) > 250);
+    for role in [
+        "body",
+        "lid",
+        "panel_fields",
+        "edge_trim",
+        "corner_guards",
+        "base_feet_or_skids",
+        "handles",
+        "vents",
+        "fasteners",
+    ] {
+        assert!(
+            !role_instances(&output, role).is_empty(),
+            "Clean Utility missing readable role {role}"
+        );
+    }
+    assert!(
+        role_instances(&output, "vents").len() <= 2,
+        "Clean Utility default should keep vents sparse"
+    );
+}
+
+#[test]
+fn clean_utility_case_keeps_semantic_clay_preview_only() {
+    let assignments = cargo_case::semantic_clay_assignments();
+    assert!(assignments.len() >= 5);
+    assert!(
+        assignments
+            .iter()
+            .all(|assignment| assignment.applies_to_candidates)
+    );
+
+    let docs = [
+        include_str!("../../../docs/foundry-catalog/cargo_case.md"),
+        include_str!("../../../docs/CLEAN_UTILITY_CASE_PROFILE_REPORT.md"),
+    ]
+    .join("\n");
+    let lower = docs.to_ascii_lowercase();
+    assert!(lower.contains("clean utility case"));
+    assert!(lower.contains("same cargo case family grammar"));
+    assert!(lower.contains("pure clay"));
+    assert!(lower.contains("semantic clay"));
+    for forbidden in [
+        "uv/texturing support is approved",
+        "material editor is supported",
+        "texture maps are supported",
+        "decals are supported",
+        "logos are supported",
+    ] {
+        assert!(
+            !lower.contains(forbidden),
+            "Clean Utility docs must not overclaim {forbidden}"
+        );
+    }
 }
 
 fn candidate_request(seed: u64) -> FoundryCandidateRequest {
