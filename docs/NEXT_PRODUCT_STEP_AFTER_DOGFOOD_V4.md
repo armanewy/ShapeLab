@@ -30,6 +30,11 @@ The v4 pass still recorded latency misses:
 
 These are follow-up items, not approval for a broader product expansion.
 
+The follow-up branch records the detailed analysis in
+`docs/MAKE_LATENCY_FOLLOWUP_V4.md` and adds trace fields for first visible
+model, skeleton idea tray, candidate shells, candidate previews, reused jobs,
+and coalesced jobs.
+
 ## Still Prohibited
 
 - Broad user-facing UV/Texturing UI.
