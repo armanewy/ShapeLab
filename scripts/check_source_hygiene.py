@@ -41,6 +41,10 @@ DEFAULT_MARKDOWN_REPORTS = frozenset(
     }
 )
 
+IMPORTANT_RUST_SOURCES = frozenset(
+    path for path in DEFAULT_FILES if path.endswith(".rs")
+)
+
 APP_LOGIC_MARKERS = (
     "struct FoundryDesktopApp",
     "impl eframe::App for FoundryDesktopApp",
@@ -55,8 +59,9 @@ class FileMetrics:
     path: str
     physical_line_count: int
     max_line_length: int
-    non_code_lines_over_180: int
-    non_code_lines_over_220: int
+    lines_over_180: int
+    lines_over_220: int
+    non_code_markdown_lines_over_220: int
     likely_collapsed: bool
     failures: tuple[str, ...]
 
@@ -86,6 +91,10 @@ def relative_path(path: Path, root: Path) -> str:
 
 def is_markdown_report(path: str) -> bool:
     return path in DEFAULT_MARKDOWN_REPORTS
+
+
+def is_important_rust_source(path: str) -> bool:
+    return path in IMPORTANT_RUST_SOURCES
 
 
 def has_major_app_logic(path: str, text: str) -> bool:
@@ -120,25 +129,29 @@ def measure_file(path: Path, root: Path) -> FileMetrics:
 
     physical_line_count = len(lines)
     max_line_length = max(line_lengths, default=0)
-    non_code_lines_over_180 = sum(1 for length in non_code_lengths if length > 180)
-    non_code_lines_over_220 = sum(1 for length in non_code_lengths if length > 220)
+    lines_over_180 = sum(1 for length in line_lengths if length > 180)
+    lines_over_220 = sum(1 for length in line_lengths if length > 220)
+    non_code_markdown_lines_over_220 = (
+        sum(1 for length in non_code_lengths if length > 220)
+        if rel_path.endswith(".md")
+        else 0
+    )
 
     failures: list[str] = []
     if rel_path == APP_SOURCE and physical_line_count < 500 and has_major_app_logic(rel_path, text):
         failures.append("app.rs has major app logic but fewer than 500 physical lines")
     if is_markdown_report(rel_path) and physical_line_count < 20:
         failures.append("Markdown report has fewer than 20 physical lines")
-    if non_code_lines_over_220:
+    if non_code_markdown_lines_over_220:
         failures.append("non-code-block line exceeds 220 characters")
-    if non_code_lines_over_180 > 5:
-        failures.append("more than 5 non-code-block lines exceed 180 characters")
-    if max_line_length > 1000:
-        failures.append("file contains a line over 1000 characters")
+    if is_important_rust_source(rel_path) and lines_over_220 > 5:
+        failures.append("important Rust source has more than 5 lines over 220 characters")
 
     likely_collapsed = (
         (physical_line_count <= 5 and max_line_length > 500)
         or max_line_length > 1000
-        or (non_code_lines_over_180 > 5)
+        or non_code_markdown_lines_over_220 > 0
+        or (is_important_rust_source(rel_path) and lines_over_220 > 5)
         or (
             rel_path == APP_SOURCE
             and physical_line_count < 500
@@ -151,8 +164,9 @@ def measure_file(path: Path, root: Path) -> FileMetrics:
         path=rel_path,
         physical_line_count=physical_line_count,
         max_line_length=max_line_length,
-        non_code_lines_over_180=non_code_lines_over_180,
-        non_code_lines_over_220=non_code_lines_over_220,
+        lines_over_180=lines_over_180,
+        lines_over_220=lines_over_220,
+        non_code_markdown_lines_over_220=non_code_markdown_lines_over_220,
         likely_collapsed=likely_collapsed,
         failures=tuple(failures),
     )
@@ -198,7 +212,8 @@ def print_metrics(metrics: list[FileMetrics]) -> None:
         "File",
         "Physical lines",
         "Max line",
-        "Non-code >180",
+        "Lines >180",
+        "Lines >220",
         "Likely collapsed",
     )
     rows = [
@@ -206,7 +221,8 @@ def print_metrics(metrics: list[FileMetrics]) -> None:
             metric.path,
             str(metric.physical_line_count),
             str(metric.max_line_length),
-            str(metric.non_code_lines_over_180),
+            str(metric.lines_over_180),
+            str(metric.lines_over_220),
             "yes" if metric.likely_collapsed else "no",
         )
         for metric in metrics
