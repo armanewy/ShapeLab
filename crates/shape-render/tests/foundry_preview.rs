@@ -1,6 +1,11 @@
+use std::collections::BTreeSet;
+
 use glam::{Vec3, Vec4};
 use shape_core::Aabb;
-use shape_foundry::{CandidateLegibilityClass, VariationChannel, VariationScope};
+use shape_foundry::{
+    CandidateLegibilityClass, FoundryClayQualityGateRecord, FoundryPreviewDisplayMode,
+    SemanticClayRoleAssignment, VariationChannel, VariationScope,
+};
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
     FoundryChangedRoleOverlay, FoundryPreviewBatchRequest, FoundryPreviewCache,
@@ -42,6 +47,172 @@ fn cache_hit_reuses_whole_model_preview() {
     assert_eq!(first.previews[0].image, second.previews[0].image);
     assert_eq!(cache.stats().hits, 1);
     assert_eq!(cache.stats().misses, 1);
+}
+
+#[test]
+fn foundry_pure_clay_preview_produces_one_display_class() {
+    let mut cache = FoundryPreviewCache::new(4);
+    let output = render_foundry_previews(
+        &mut cache,
+        batch(
+            "pure-clay",
+            vec![candidate_request("pure", "geom-pure", 1.0)],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("pure clay render should succeed");
+
+    let preview = &output.previews[0];
+    assert_eq!(
+        preview.key.display_mode,
+        FoundryPreviewDisplayMode::PureClay
+    );
+    assert!(preview.key.semantic_clay_assignments.is_empty());
+    assert_eq!(
+        unique_foreground_rgbs(&preview.image, output.render_settings.background).len(),
+        1
+    );
+}
+
+#[test]
+fn foundry_semantic_clay_preview_maps_neutral_gray_assignments() {
+    let mut request = candidate_request("semantic", "geom-semantic", 1.0);
+    request.semantic_clay_assignments = semantic_assignments();
+    request.use_novice_default_display_mode();
+    let mut cache = FoundryPreviewCache::new(4);
+
+    let output = render_foundry_previews(
+        &mut cache,
+        batch(
+            "semantic-clay",
+            vec![request],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("semantic clay render should succeed");
+
+    let preview = &output.previews[0];
+    assert_eq!(
+        preview.key.display_mode,
+        FoundryPreviewDisplayMode::SemanticClay
+    );
+    assert!(preview.key.semantic_clay_assignments.len() >= 2);
+    let colors = unique_foreground_rgbs(&preview.image, output.render_settings.background);
+    assert!(
+        colors.len() >= 2,
+        "semantic clay should show multiple grays"
+    );
+    assert!(
+        colors
+            .iter()
+            .all(|[red, green, blue]| red == green && green == blue),
+        "semantic clay must use neutral gray values only: {colors:?}"
+    );
+}
+
+#[test]
+fn foundry_semantic_clay_cache_key_is_separate_from_pure_clay() {
+    let mut pure = candidate_request("preview", "geom-shared", 1.0);
+    let mut semantic = pure.clone();
+    semantic.semantic_clay_assignments = semantic_assignments();
+    semantic.use_novice_default_display_mode();
+    pure.display_mode = FoundryPreviewDisplayMode::PureClay;
+    let mut cache = FoundryPreviewCache::new(4);
+
+    let output = render_foundry_previews(
+        &mut cache,
+        batch(
+            "display-key",
+            vec![pure, semantic],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("display key render should succeed");
+
+    assert_ne!(output.previews[0].key, output.previews[1].key);
+    assert_eq!(cache.stats().len, 2);
+}
+
+#[test]
+fn foundry_diagnostic_part_color_is_not_a_novice_default() {
+    assert_eq!(
+        FoundryPreviewDisplayMode::novice_default(&[]),
+        FoundryPreviewDisplayMode::PureClay
+    );
+    assert_eq!(
+        FoundryPreviewDisplayMode::novice_default(&semantic_assignments()),
+        FoundryPreviewDisplayMode::SemanticClay
+    );
+    assert!(!FoundryPreviewDisplayMode::DiagnosticPartColor.default_novice_safe());
+}
+
+#[test]
+fn foundry_candidate_comparison_uses_same_display_mode_for_all_items() {
+    let assignments = semantic_assignments();
+    let items = ["a", "b"]
+        .into_iter()
+        .map(|id| {
+            let mut item = candidate_request(id, &format!("geom-{id}"), 1.0);
+            item.semantic_clay_assignments = assignments.clone();
+            item.use_novice_default_display_mode();
+            item
+        })
+        .collect::<Vec<_>>();
+    let mut cache = FoundryPreviewCache::new(4);
+
+    let output = render_foundry_previews(
+        &mut cache,
+        batch("same-display", items, FoundryPreviewResolution::Px64),
+    )
+    .expect("semantic comparison should render");
+
+    assert!(output.previews.iter().all(|preview| {
+        preview.key.display_mode == FoundryPreviewDisplayMode::SemanticClay
+            && preview.key.semantic_clay_assignments.len() == assignments.len()
+    }));
+}
+
+#[test]
+fn foundry_semantic_clay_output_is_deterministic() {
+    let mut item = candidate_request("semantic", "geom-semantic", 1.0);
+    item.semantic_clay_assignments = semantic_assignments();
+    item.use_novice_default_display_mode();
+    let mut first_cache = FoundryPreviewCache::new(4);
+    let mut second_cache = FoundryPreviewCache::new(4);
+
+    let first = render_foundry_previews(
+        &mut first_cache,
+        batch(
+            "semantic-deterministic",
+            vec![item.clone()],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("first semantic render");
+    let second = render_foundry_previews(
+        &mut second_cache,
+        batch(
+            "semantic-deterministic",
+            vec![item],
+            FoundryPreviewResolution::Px64,
+        ),
+    )
+    .expect("second semantic render");
+
+    assert_eq!(first.previews[0].image, second.previews[0].image);
+}
+
+#[test]
+fn foundry_pure_clay_and_semantic_clay_quality_gates_are_separate() {
+    let record = FoundryClayQualityGateRecord {
+        pure_clay_pass: false,
+        semantic_clay_readability_pass: true,
+        display_mode_used: FoundryPreviewDisplayMode::SemanticClay,
+    };
+
+    assert!(!record.both_pass());
+    assert!(!record.pure_clay_pass);
+    assert!(record.semantic_clay_readability_pass);
 }
 
 #[test]
@@ -758,6 +929,26 @@ fn preview_ids(previews: &[shape_render::foundry::FoundryRenderedPreview]) -> Ve
     previews
         .iter()
         .map(|preview| preview.preview_id.as_str())
+        .collect()
+}
+
+fn semantic_assignments() -> Vec<SemanticClayRoleAssignment> {
+    vec![
+        SemanticClayRoleAssignment::new("body", "Primary Mass", 0.72, 10, true),
+        SemanticClayRoleAssignment::new("panels", "Secondary Panels", 0.58, 20, true),
+        SemanticClayRoleAssignment::new("vents", "Recesses / Vents", 0.34, 30, true),
+    ]
+}
+
+fn unique_foreground_rgbs(
+    image: &shape_render::RenderedImage,
+    background: [u8; 4],
+) -> BTreeSet<[u8; 3]> {
+    image
+        .rgba8
+        .chunks_exact(4)
+        .filter(|pixel| *pixel != background)
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
         .collect()
 }
 
