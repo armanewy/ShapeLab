@@ -387,7 +387,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
             has_visual_direction_evidence: true,
             has_readable_control_evidence: true,
             has_human_showcase_review: false,
-            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes or an explicit exception is approved.",
+            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes.",
         },
         CatalogCurationMetadata {
             profile_slug: "sci-fi-crate",

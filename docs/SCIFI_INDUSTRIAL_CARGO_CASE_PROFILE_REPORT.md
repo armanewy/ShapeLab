@@ -73,6 +73,11 @@ the geometry source for `sci-fi-crate`; any existing material-look preview
 evidence tied to the older frozen mesh fingerprint is stale until regenerated.
 Stale evidence must not enable material-look UI or be silently reused.
 
+The stabilization pass regenerated default surface evidence at
+`target/surface-candidate-evidence-v0/sci-fi-crate`. Release-app dogfood also
+confirmed that material looks are disabled after an idea changes the crate build,
+with copy stating that the material looks do not match the current crate build.
+
 The static surface package command remains supported for the narrow static prop
 path:
 

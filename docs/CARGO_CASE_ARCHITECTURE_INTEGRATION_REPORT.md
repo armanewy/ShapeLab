@@ -29,7 +29,7 @@ their own vertical proof before novice catalog exposure.
 | Does pure clay still read? | Yes. Pure Clay pass/fail remains separate from Semantic Clay readability. |
 | Is there any hidden bespoke sci-fi fork? | No. `scifi_crate.rs` is a compatibility shim over Cargo Case. |
 | Are draft materialized families hidden from novice catalog? | Yes. Materialized drafts are `publish_allowed=false`, `novice_visible=false`, `human_review_required=true`. |
-| Does existing Sci-Fi Crate material-look preview remain valid or get honestly regenerated/disabled? | The Cargo Case migration changes the geometry source, so old evidence is stale. Current evidence must be regenerated against the Cargo Case output before the preview UI is enabled. |
+| Does existing Sci-Fi Crate material-look preview remain valid or get honestly regenerated/disabled? | See material-look compatibility below. |
 | Does static surface package generation remain blocked from full game-ready? | Yes. The static package still reports full game-ready blocked pending manual/runtime proof. |
 
 ## Contact Sheet Gate
@@ -66,6 +66,17 @@ Human gate result:
 - Roman Bridge remains `PreviewOnly`.
 - No broad Surface, UV/Texturing, Rigging, animation, or game-ready UI claim is
   added.
+
+## Material-Look Compatibility
+
+The Cargo Case migration changes the geometry source for `sci-fi-crate`, so old
+material-look evidence is stale. Current evidence must be regenerated against
+the Cargo Case output before the preview UI is enabled.
+
+The stabilization pass regenerated default Sci-Fi Crate surface evidence at
+`target/surface-candidate-evidence-v0/sci-fi-crate`. During release-app dogfood,
+after applying a new idea, the app honestly disabled material looks with
+`Material looks do not match this crate build` instead of reusing stale evidence.
 
 ## Draft Materializer
 
