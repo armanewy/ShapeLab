@@ -6,10 +6,12 @@ release candidate.
 
 The goal is:
 
-- inner loop: under 60-90 seconds
-- branch handoff: under 5 minutes
-- integration gate: under 15 minutes
-- main/release gate: slow but rare
+- inner loop: affected crate check/test only, target under 90 seconds
+- branch handoff: affected crate plus adjacent tests and targeted clippy, target
+  under 5 minutes
+- integration gate: merged slice tests plus workspace clippy, target under 15
+  minutes
+- main/release gate: full workspace proof, slow but rare
 
 ## Local Environment
 
@@ -71,6 +73,12 @@ By default the script prints commands. It only executes them with `--run`.
 
 For a clean feature branch, `--changed` falls back from worktree changes to
 `origin/main...HEAD`, so committed branch work still maps to relevant gates.
+
+Branch gates should not run a full release build unless the branch touches the
+build/profile/release/export stack. Integration gates run merged slice tests and
+workspace clippy, and add the release build only when product code changed.
+Main/release gates always run the full workspace tests, workspace clippy, and
+release build.
 
 ## Optional Nextest
 

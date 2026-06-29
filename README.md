@@ -65,12 +65,17 @@ python scripts/clean_targets.py --list --root ..
 
 `scripts/dev_env.*` can share Cargo build output and enable `sccache` when it is
 installed. `scripts/dev_gate.py` maps changed files to the smallest relevant
-gate. `scripts/clean_targets.py` reports stale Cargo `target` directories and
-refuses to delete active worktree targets unless explicitly allowed.
+gate and prints commands by default; pass `--run` only when you want it to
+execute them. `scripts/clean_targets.py` reports stale Cargo `target`
+directories and refuses to delete active worktree targets unless explicitly
+allowed.
 
 Full workspace test, clippy, release build, and human dogfood gates are still
 required before main/release claims. They are not required for every local
-prompt lane. See [`docs/DEVELOPMENT_SPEED.md`](docs/DEVELOPMENT_SPEED.md) and
+prompt lane. Branch handoff should stay to affected crates, adjacent tests, and
+targeted clippy unless the branch touches build/profile/release/export code.
+Integration gates add a release build only when product code changed. See
+[`docs/DEVELOPMENT_SPEED.md`](docs/DEVELOPMENT_SPEED.md) and
 [`docs/TEST_GATE_POLICY.md`](docs/TEST_GATE_POLICY.md).
 
 On Windows, use the launcher script when you want only the app window and no

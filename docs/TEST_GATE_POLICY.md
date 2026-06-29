@@ -6,12 +6,12 @@ merged, or prepared for release.
 
 ## Tier 0: Inner Loop
 
-Use while editing. Target: under 60-90 seconds.
+Use while editing. Target: under 90 seconds. This tier should stay to affected
+crate checks and focused affected-crate tests only.
 
 Typical commands:
 
 ```bash
-cargo fmt --all --check
 cargo check -p <touched-crate>
 cargo test -p <touched-crate> <focused_filter> --jobs 1
 ```
@@ -27,6 +27,8 @@ cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1
 ## Tier 1: Branch Handoff
 
 Use before handing off or committing a focused branch. Target: 2-5 minutes.
+Run affected-crate tests, adjacent tests that cover the touched contract, and
+targeted clippy for the owned crate or app surface.
 
 Typical commands:
 
@@ -39,6 +41,12 @@ cargo clippy -p <touched-crate> --all-targets -- -D warnings
 
 Use `python3 scripts/dev_gate.py --tier branch --changed` to select the concrete
 commands from changed paths.
+
+The script prints commands by default. It executes them only when `--run` is
+passed.
+
+Do not add a full release build to branch handoff unless the branch touches the
+build/profile/release/export stack.
 
 For `shape-app`, run foundry app tests as a library gate:
 
@@ -53,6 +61,8 @@ foundry module and can re-run the same app unit tests several times.
 ## Tier 2: Integration Branch
 
 Use after merging related branches. Target: 8-15 minutes.
+Run merged slice tests and workspace clippy. Add a release build when product
+code changed; skip it for docs-only and policy-only integrations.
 
 ```bash
 cargo fmt --all --check
@@ -63,7 +73,7 @@ cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1
 cargo test -p shape-foundry-catalog --test roman_bridge --jobs 1
 cargo test -p shape-foundry-catalog --test stylized_lamp --jobs 1
 cargo clippy --workspace --all-targets -- -D warnings
-cargo build --release --workspace
+cargo build --release --workspace  # only when product code changed
 ```
 
 ## Tier 3: Main/Release Gate
@@ -78,8 +88,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release --workspace
 ```
 
-The human screenshot/video dogfood pass remains required for product-quality
-claims. It is not a normal unit-test gate.
+Manual dogfood remains required where product-quality claims or release prompts
+require it. It is not a normal unit-test gate.
 
 ## Heavy And Manual Gates
 
@@ -105,7 +115,11 @@ Tier 1 work.
 - `crates/shape-app/**`: app check, foundry library tests, direction-board test, app clippy
 - `crates/shape-search/**`: shape-search foundry tests, shape-render foundry adjacency
 - `crates/shape-render/**`: shape-render foundry tests, surface filter when surface files change
-- `crates/shape-foundry-catalog/src/scifi_crate.rs`: Sci-Fi Crate test plus search adjacency
+- `crates/shape-foundry-catalog/src/simple_crate.rs`: Simple Crate test plus search/render foundry adjacency
+- `crates/shape-foundry-catalog/src/utility_crate.rs`: Utility Crate test plus search/render foundry adjacency
+- `crates/shape-foundry-catalog/src/cargo_case.rs`: Cargo Case test plus search/render foundry adjacency
+- `crates/shape-foundry-catalog/src/scifi_crate.rs`: Sci-Fi Crate test plus search foundry adjacency; add
+  `shape-cli game_ready_static` only when the static surface package path also changed
 - `crates/shape-foundry-catalog/src/roman_bridge.rs`: Roman Bridge test
 - `crates/shape-foundry-catalog/src/stylized_lamp.rs`: Stylized Lamp test
 - `crates/shape-gamekit/**`: surface, rig, and motion filters
