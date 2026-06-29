@@ -57,3 +57,31 @@ labels, logos, material editor, or image-based detail is implied.
 - Wide
 - Minimal
 - Detailed
+
+## Clean Utility Case Profile
+
+Clean Utility Case is a Cargo Case family profile with a quieter practical
+equipment-case bias. It uses the same Cargo Case family grammar, role set,
+control vocabulary, provider slots, and clay metadata as the base family proof.
+
+Clean Utility defaults:
+
+- lower panel complexity
+- lower detail density
+- clean trim
+- sparse vents
+- flush grip handles
+- modest corner guards
+- light/medium structural heft
+
+Clean Utility avoids dense sci-fi vents, heavy industrial rails, cargo-bar
+handles as the primary default, heavy industrial bands as the primary default,
+decals, logos, text, grime, UVs, texture maps, and material maps.
+
+Clean Utility candidate strategies:
+
+- Light Utility
+- Compact Carry Case
+- Clean Storage Case
+- Reinforced Utility
+- Minimal Field Case

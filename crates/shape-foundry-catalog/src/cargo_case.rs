@@ -21,10 +21,145 @@ use crate::{
 
 /// Cargo Case base-family slug.
 pub const CARGO_CASE_BASE_SLUG: &str = "cargo-case-base";
+/// Clean Utility Case profile slug.
+pub const CLEAN_UTILITY_CASE_SLUG: &str = "clean-utility-case";
 /// Cargo Case family ID.
 pub const CARGO_CASE_FAMILY_ID: &str = "cargo_case";
 /// Base style ID for neutral Cargo Case proof renders.
 pub const CARGO_CASE_BASE_STYLE_ID: &str = "cargo_case_base";
+/// Clean Utility style ID for the Cargo Case family.
+pub const CLEAN_UTILITY_CASE_STYLE_ID: &str = "clean_utility_case";
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum CargoCaseProfileKind {
+    Base,
+    CleanUtility,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CargoCaseControlDefaults {
+    overall_proportions: f32,
+    structural_heft: f32,
+    panel_complexity: &'static str,
+    handle_style: &'static str,
+    vent_density: &'static str,
+    trim_style: &'static str,
+    detail_density: &'static str,
+}
+
+impl CargoCaseProfileKind {
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Base => CARGO_CASE_BASE_SLUG,
+            Self::CleanUtility => CLEAN_UTILITY_CASE_SLUG,
+        }
+    }
+
+    const fn document_id(self) -> &'static str {
+        match self {
+            Self::Base => "cargo-case-base-doc",
+            Self::CleanUtility => "clean-utility-case-doc",
+        }
+    }
+
+    const fn style_id(self) -> &'static str {
+        match self {
+            Self::Base => CARGO_CASE_BASE_STYLE_ID,
+            Self::CleanUtility => CLEAN_UTILITY_CASE_STYLE_ID,
+        }
+    }
+
+    const fn style_display_name(self) -> &'static str {
+        match self {
+            Self::Base => "Cargo Case Base",
+            Self::CleanUtility => "Clean Utility Case",
+        }
+    }
+
+    const fn control_defaults(self) -> CargoCaseControlDefaults {
+        match self {
+            Self::Base => CargoCaseControlDefaults {
+                overall_proportions: 0.52,
+                structural_heft: 0.46,
+                panel_complexity: "shallow_recessed_panel",
+                handle_style: "flush_grip",
+                vent_density: "standard_grille",
+                trim_style: "clean",
+                detail_density: "medium_detail",
+            },
+            Self::CleanUtility => CargoCaseControlDefaults {
+                overall_proportions: 0.46,
+                structural_heft: 0.30,
+                panel_complexity: "clean_panel",
+                handle_style: "flush_grip",
+                vent_density: "none_sparse",
+                trim_style: "clean",
+                detail_density: "low_detail",
+            },
+        }
+    }
+
+    fn style_tags(self) -> Vec<String> {
+        match self {
+            Self::Base => vec!["cargo-case".to_owned(), "clay".to_owned()],
+            Self::CleanUtility => vec![
+                "cargo-case".to_owned(),
+                "clean-utility".to_owned(),
+                "clay".to_owned(),
+            ],
+        }
+    }
+
+    fn default_provider_map(self) -> BTreeMap<String, String> {
+        match self {
+            Self::Base => BTreeMap::from([
+                ("body".to_owned(), "cargo_case_body".to_owned()),
+                ("lid".to_owned(), "raised_lid".to_owned()),
+                (
+                    "panel_fields".to_owned(),
+                    "shallow_recessed_panel".to_owned(),
+                ),
+                ("edge_trim".to_owned(), "clean_edge_trim".to_owned()),
+                ("corner_guards".to_owned(), "block_corner_guard".to_owned()),
+                ("base_feet_or_skids".to_owned(), "low_case_skids".to_owned()),
+                ("handles".to_owned(), "flush_grip_handle".to_owned()),
+                ("vents".to_owned(), "standard_grille_vents".to_owned()),
+                ("fasteners".to_owned(), "medium_fasteners".to_owned()),
+            ]),
+            Self::CleanUtility => BTreeMap::from([
+                ("body".to_owned(), "cargo_case_body".to_owned()),
+                ("lid".to_owned(), "raised_lid".to_owned()),
+                ("panel_fields".to_owned(), "clean_panel".to_owned()),
+                ("edge_trim".to_owned(), "clean_edge_trim".to_owned()),
+                ("corner_guards".to_owned(), "minimal_corner_cap".to_owned()),
+                ("base_feet_or_skids".to_owned(), "low_case_skids".to_owned()),
+                ("handles".to_owned(), "flush_grip_handle".to_owned()),
+                ("vents".to_owned(), "none_sparse_vents".to_owned()),
+                ("fasteners".to_owned(), "low_fasteners".to_owned()),
+            ]),
+        }
+    }
+
+    fn candidate_strategy_labels(self) -> Vec<(&'static str, &'static str)> {
+        match self {
+            Self::Base => vec![
+                ("light-utility", "Light Utility"),
+                ("reinforced", "Reinforced"),
+                ("compact", "Compact"),
+                ("wide", "Wide"),
+                ("minimal", "Minimal"),
+                ("detailed", "Detailed"),
+            ],
+            Self::CleanUtility => vec![
+                ("light-utility", "Light Utility"),
+                ("compact-carry-case", "Compact Carry Case"),
+                ("clean-storage-case", "Clean Storage Case"),
+                ("reinforced-utility", "Reinforced Utility"),
+                ("minimal-field-case", "Minimal Field Case"),
+            ],
+        }
+    }
+}
 
 /// Clay display mode used by Cargo Case quality gates.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -101,6 +236,17 @@ pub fn semantic_clay_assignments() -> Vec<CargoCaseSemanticClayAssignment> {
 /// Build the Cargo Case base-family fixture catalog.
 #[must_use]
 pub fn fixture_catalog() -> FoundryFixtureCatalog {
+    fixture_catalog_for(CargoCaseProfileKind::Base)
+}
+
+/// Build the Clean Utility Case fixture catalog from the Cargo Case family.
+#[must_use]
+pub fn clean_utility_fixture_catalog() -> FoundryFixtureCatalog {
+    fixture_catalog_for(CargoCaseProfileKind::CleanUtility)
+}
+
+fn fixture_catalog_for(profile_kind: CargoCaseProfileKind) -> FoundryFixtureCatalog {
+    let defaults = profile_kind.control_defaults();
     let family = family_schema(FamilySchemaSpec {
         id: CARGO_CASE_FAMILY_ID,
         display_name: "Cargo Case",
@@ -201,13 +347,16 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 ],
             ),
         ],
-        compatible_style_kits: vec![CARGO_CASE_BASE_STYLE_ID.to_owned()],
+        compatible_style_kits: vec![
+            CARGO_CASE_BASE_STYLE_ID.to_owned(),
+            CLEAN_UTILITY_CASE_STYLE_ID.to_owned(),
+        ],
         tags: vec!["cargo-case".to_owned(), "equipment-case".to_owned()],
     });
 
     let style = style_kit(
-        CARGO_CASE_BASE_STYLE_ID,
-        "Cargo Case Base",
+        profile_kind.style_id(),
+        profile_kind.style_display_name(),
         CARGO_CASE_FAMILY_ID,
         &[
             ("cargo_case_body", "Cargo case body", "body"),
@@ -254,7 +403,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "hinge_or_closure_detail",
             ),
         ],
-        vec!["cargo-case".to_owned(), "clay".to_owned()],
+        profile_kind.style_tags(),
     );
 
     let family_impl = family_implementation(
@@ -352,22 +501,9 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
     );
 
     let style_impl = style_implementation(
-        CARGO_CASE_BASE_STYLE_ID,
+        profile_kind.style_id(),
         CARGO_CASE_FAMILY_ID,
-        BTreeMap::from([
-            ("body".to_owned(), "cargo_case_body".to_owned()),
-            ("lid".to_owned(), "raised_lid".to_owned()),
-            (
-                "panel_fields".to_owned(),
-                "shallow_recessed_panel".to_owned(),
-            ),
-            ("edge_trim".to_owned(), "clean_edge_trim".to_owned()),
-            ("corner_guards".to_owned(), "block_corner_guard".to_owned()),
-            ("base_feet_or_skids".to_owned(), "low_case_skids".to_owned()),
-            ("handles".to_owned(), "flush_grip_handle".to_owned()),
-            ("vents".to_owned(), "standard_grille_vents".to_owned()),
-            ("fasteners".to_owned(), "medium_fasteners".to_owned()),
-        ]),
+        profile_kind.default_provider_map(),
         vec![
             body_fragment(),
             rounded_box_fragment(
@@ -564,13 +700,13 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
 
     let mut profile = crate::customizer_profile(
         CARGO_CASE_FAMILY_ID,
-        CARGO_CASE_BASE_STYLE_ID,
+        profile_kind.style_id(),
         vec![
             continuous_control(
                 "overall_proportions",
                 "Overall Proportions",
                 "overall_proportions",
-                0.52,
+                defaults.overall_proportions,
                 0.0,
                 1.0,
             ),
@@ -578,7 +714,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
                 "structural_heft",
                 "Structural Heft",
                 "structural_heft",
-                0.46,
+                defaults.structural_heft,
                 0.0,
                 1.0,
             ),
@@ -624,45 +760,48 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             ),
         ],
     );
-    profile.candidate_strategies = vec![
-        strategy("light-utility", "Light Utility"),
-        strategy("reinforced", "Reinforced"),
-        strategy("compact", "Compact"),
-        strategy("wide", "Wide"),
-        strategy("minimal", "Minimal"),
-        strategy("detailed", "Detailed"),
-    ];
+    profile.candidate_strategies = profile_kind
+        .candidate_strategy_labels()
+        .into_iter()
+        .map(|(id, label)| strategy(id, label))
+        .collect();
 
     build_fixture_catalog(FixtureCatalogSpec {
-        slug: CARGO_CASE_BASE_SLUG,
-        document_id: "cargo-case-base-doc",
+        slug: profile_kind.slug(),
+        document_id: profile_kind.document_id(),
         family,
         style,
         family_implementation: family_impl,
         style_implementation: style_impl,
         customizer_profile: profile,
         control_state: BTreeMap::from([
-            ("overall_proportions".to_owned(), ControlValue::Scalar(0.52)),
-            ("structural_heft".to_owned(), ControlValue::Scalar(0.46)),
+            (
+                "overall_proportions".to_owned(),
+                ControlValue::Scalar(defaults.overall_proportions),
+            ),
+            (
+                "structural_heft".to_owned(),
+                ControlValue::Scalar(defaults.structural_heft),
+            ),
             (
                 "panel_complexity".to_owned(),
-                ControlValue::Choice("shallow_recessed_panel".to_owned()),
+                ControlValue::Choice(defaults.panel_complexity.to_owned()),
             ),
             (
                 "handle_style".to_owned(),
-                ControlValue::Choice("flush_grip".to_owned()),
+                ControlValue::Choice(defaults.handle_style.to_owned()),
             ),
             (
                 "vent_density".to_owned(),
-                ControlValue::Choice("standard_grille".to_owned()),
+                ControlValue::Choice(defaults.vent_density.to_owned()),
             ),
             (
                 "trim_style".to_owned(),
-                ControlValue::Choice("clean".to_owned()),
+                ControlValue::Choice(defaults.trim_style.to_owned()),
             ),
             (
                 "detail_density".to_owned(),
-                ControlValue::Choice("medium_detail".to_owned()),
+                ControlValue::Choice(defaults.detail_density.to_owned()),
             ),
         ]),
     })
