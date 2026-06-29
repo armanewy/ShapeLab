@@ -8335,7 +8335,7 @@ mod tests {
 
         assert_eq!(family_names, sorted_family_names);
         assert!(family_names.contains(&"Bridge"));
-        assert!(family_names.contains(&"Crate"));
+        assert!(family_names.contains(&"Cargo Case"));
         assert!(family_names.contains(&"Lamp"));
         assert!(!family_names.contains(&"Hero Character"));
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
@@ -10343,7 +10343,10 @@ mod tests {
     fn compact_filmstrip_does_not_hide_remaining_options() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
-        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            &ctx,
+        );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
@@ -10577,7 +10580,7 @@ mod tests {
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if default_customize_controls(&app.state.controls)
-                .any(|control| control.id == "body_proportions")
+                .any(|control| control.id == "overall_proportions")
             {
                 break;
             }
@@ -10587,8 +10590,10 @@ mod tests {
         let default_ids = default_customize_controls(&app.state.controls)
             .map(|control| control.id.as_str())
             .collect::<Vec<_>>();
-        assert!(default_ids.contains(&"body_proportions"));
-        assert!(!default_ids.contains(&"has_trim"));
+        assert!(default_ids.contains(&"overall_proportions"));
+        assert!(default_ids.contains(&"structural_heft"));
+        assert!(default_ids.contains(&"panel_complexity"));
+        assert!(default_ids.contains(&"handle_style"));
         assert!(!default_ids.contains(&"runtime_wear"));
         assert!(!default_ids.contains(&"advisory_weathering"));
         assert!(
