@@ -401,7 +401,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
             has_visual_direction_evidence: true,
             has_readable_control_evidence: true,
             has_human_showcase_review: false,
-            note: "Sci-Fi Crate has authored clay legibility evidence for directions and controls.",
+            note: "Sci-Fi Crate is default-visible only for current dogfood regression continuity; Simple Crate is the first novice crate baseline.",
         },
         CatalogCurationMetadata {
             profile_slug: "stylized-lamp",

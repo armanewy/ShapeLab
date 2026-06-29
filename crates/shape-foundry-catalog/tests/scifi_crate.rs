@@ -286,14 +286,26 @@ fn scifi_surface_evidence_boundary_is_documented() {
         include_str!("../../../docs/foundry-catalog/scifi_crate.md"),
         include_str!("../../../docs/foundry-catalog/cargo_case.md"),
         include_str!("../../../docs/SCIFI_INDUSTRIAL_CARGO_CASE_PROFILE_REPORT.md"),
+        include_str!("../../../docs/SCIFI_CRATE_REGRESSION_ROLE.md"),
     ]
     .join("\n");
-    let lower = docs.to_ascii_lowercase();
+    let lower = docs
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(lower.contains("cargo case family"));
     assert!(lower.contains("sci-fi industrial style/profile"));
+    assert!(lower.contains("advanced regression profile"));
+    assert!(lower.contains("not the flagship"));
+    assert!(lower.contains("simple crate is the new novice baseline proof"));
+    assert!(lower.contains("cargo case is the advanced equipment-case proof"));
     assert!(lower.contains("material-look preview"));
     assert!(lower.contains("preview-only"));
     assert!(lower.contains("stale"));
+    assert!(lower.contains("game-ready-static-prop --profile sci-fi-crate"));
+    assert!(lower.contains("game_ready"));
+    assert!(lower.contains("false"));
     for forbidden in [
         "uv/texturing support is approved",
         "material editor is supported",

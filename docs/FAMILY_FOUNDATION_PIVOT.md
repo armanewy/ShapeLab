@@ -12,8 +12,8 @@ Sci-Fi Crate was useful as a stress test for authored detail density,
 material-look preview evidence, Cargo Case compatibility, and product dogfood
 recovery. It is no longer the flagship proof.
 
-The next flagship family-authoring proof starts from Simple Crate Primitive and
-then matures through this sequence:
+The family-authoring proof starts from Simple Crate Primitive as the novice
+baseline and then matures through this sequence:
 
 ```text
 Simple Crate Primitive

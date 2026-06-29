@@ -2,11 +2,16 @@
 
 Date: 2026-06-29
 
-Status: PASS for Prompt 5 automated proof.
+Status: PASS as Sci-Fi Crate regression and Cargo Case compatibility proof.
+This is not a flagship product proof.
 
 Sci-Fi Industrial Crate is implemented as Cargo Case family plus Sci-Fi
 Industrial style/profile defaults. The public `sci-fi-crate` profile ID is
 preserved as a compatibility slug.
+
+Sci-Fi Crate is an advanced regression profile. Simple Crate is the novice
+baseline proof, Utility Crate is the next family-maturity rung, and Cargo Case
+is the advanced equipment-case proof.
 
 ## Reuse Proof
 
@@ -87,7 +92,19 @@ cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-di
 
 Static surface packaging remains blocked from any full game-ready claim.
 
+## Catalog Visibility
+
+Sci-Fi Crate may remain visible only while current dogfood status says the
+advanced regression baseline is non-regressed. If the Make baseline, material
+preview gating, static package command, or full-ready blocker truth regresses,
+the profile should move to preview/developer catalog visibility until fixed.
+
+Simple Crate is the first novice crate baseline. Utility Crate is the next
+family-maturity rung. Sci-Fi Crate remains visible only for advanced regression
+continuity while its evidence stays current.
+
 ## Boundaries
 
 No UV/texturing support, material editor, decals, labels, rigging, animation,
 runtime LLM integration, or broad Surface mode is introduced by this migration.
+Full game-ready remains blocked.

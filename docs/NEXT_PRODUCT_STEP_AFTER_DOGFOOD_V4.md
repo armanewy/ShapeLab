@@ -11,18 +11,18 @@ Cargo Case supports both Clean Utility Case and Sci-Fi Industrial Crate as
 profiles over one reusable clay base family.
 
 Shape Lab is not being built for one specific model. Sci-Fi Crate is a
-regression/advanced profile, not the flagship. Simple Crate is the next
-flagship family-authoring proof.
+regression/advanced profile, not the flagship. Simple Crate is the novice
+baseline proof. Utility Crate is the next family-maturity rung.
 
 Roman Bridge remains PreviewOnly. Broad UV/Texturing/Rigging/Animation UI
 remains blocked.
 
 ## Allowed Next Steps
 
-1. Simple Crate Primitive v0.
-2. Simple Crate Make baseline.
-3. Utility Crate v1.
-4. Cargo Case ladder reconciliation.
+1. Simple Crate material slots / surface evidence.
+2. Utility Crate product dogfood polish.
+3. Third Cargo Case profile.
+4. Material persistence for Sci-Fi only if still desired.
 5. Dev-speed improvements.
 6. Headless backend work that does not overclaim product support.
 
@@ -43,11 +43,10 @@ cases only. Do not use it to begin broad archetype expansion.
 
 ## Follow-Up Work
 
-1. Simple Crate Primitive v0.
-2. Simple Crate Make baseline.
-3. Utility Crate v1.
-4. Cargo Case ladder reconciliation.
-5. Sci-Fi Crate regression and material-look compatibility checks only when
+1. Simple Crate material slots / surface evidence.
+2. Utility Crate product dogfood polish.
+3. Third Cargo Case profile.
+4. Sci-Fi Crate regression and material-look compatibility checks only when
    needed.
 
 The detailed allowed and blocked list is in

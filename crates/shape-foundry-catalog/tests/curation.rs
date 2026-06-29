@@ -40,12 +40,38 @@ fn default_catalog_hides_preview_only_and_hidden_draft_profiles() {
 
     assert_eq!(
         default_slugs,
-        BTreeSet::from(["sci-fi-crate".to_owned(), "stylized-lamp".to_owned(),])
+        BTreeSet::from([
+            "simple-crate".to_owned(),
+            "utility-crate".to_owned(),
+            "sci-fi-crate".to_owned(),
+            "stylized-lamp".to_owned(),
+        ])
     );
     assert!(!default_slugs.contains("roman-bridge"));
     assert!(!default_slugs.contains("roman-bridge-hq"));
     assert!(!default_slugs.contains("market-stall"));
     assert!(!default_slugs.contains(MOBA_HERO_CLAY_SLUG));
+}
+
+#[test]
+fn scifi_crate_visibility_is_regression_continuity_after_simple_crate_baseline() {
+    let metadata =
+        catalog_curation_metadata_for_slug("sci-fi-crate").expect("sci-fi crate curation metadata");
+    let note = metadata.note.to_ascii_lowercase();
+    let simple_metadata =
+        catalog_curation_metadata_for_slug("simple-crate").expect("simple crate curation metadata");
+    let utility_metadata = catalog_curation_metadata_for_slug("utility-crate")
+        .expect("utility crate curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(note.contains("regression"));
+    assert!(note.contains("dogfood"));
+    assert!(note.contains("simple crate"));
+    assert_eq!(simple_metadata.state, CatalogCurationState::Usable);
+    assert!(simple_metadata.default_novice_visible());
+    assert_eq!(utility_metadata.state, CatalogCurationState::Usable);
+    assert!(utility_metadata.default_novice_visible());
 }
 
 #[test]
@@ -60,12 +86,17 @@ fn preview_catalog_shows_preview_only_but_not_hidden_drafts() {
     assert!(preview_slugs.contains("fantasy-sword"));
     assert!(preview_slugs.contains("roman-bridge-hq"));
     assert!(!preview_slugs.contains(MOBA_HERO_CLAY_SLUG));
-    assert_eq!(preview_slugs.len(), 16);
+    assert_eq!(preview_slugs.len(), 18);
 }
 
 #[test]
 fn starter_templates_with_clean_benchmark_evidence_are_usable_but_not_showcase() {
-    for slug in ["sci-fi-crate", "stylized-lamp"] {
+    for slug in [
+        "simple-crate",
+        "utility-crate",
+        "sci-fi-crate",
+        "stylized-lamp",
+    ] {
         let metadata = catalog_curation_metadata_for_slug(slug).expect("curation metadata");
         assert_eq!(metadata.state, CatalogCurationState::Usable);
         assert!(metadata.has_visual_direction_evidence);

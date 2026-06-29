@@ -13,9 +13,9 @@ Sci-Fi Crate compatibility boundaries.
 
 This does not prove a broad archetype system. Future archetypes still require
 their own vertical proof before novice catalog exposure. After the family
-foundation pivot, Simple Crate is the next flagship family-authoring proof;
-Cargo Case remains an equipment-case proof and Sci-Fi Crate remains a
-regression/advanced profile, not the flagship.
+foundation pivot, Simple Crate is the novice baseline proof, Utility Crate is
+the next family-maturity rung, Cargo Case remains an equipment-case proof, and
+Sci-Fi Crate remains a regression/advanced profile, not the flagship.
 
 ## Proof Answers
 
@@ -62,7 +62,8 @@ Human gate result:
 - The stable `sci-fi-crate` profile ID is preserved.
 - The Sci-Fi Crate Make dogfood baseline remains approved as regression
   evidence, not as the flagship product proof.
-- Simple Crate is the next flagship family-authoring proof.
+- Simple Crate is the novice baseline proof.
+- Utility Crate is the next family-maturity rung.
 - Cargo Case remains valid but scoped to equipment cases only.
 - Material looks remain preview-only unless a later scoped branch adds
   persistence/export inclusion.
@@ -94,10 +95,10 @@ inject raw vertices, bypass validation, or require a runtime LLM SDK.
 
 Allowed next work:
 
-- Simple Crate Primitive v0;
-- Simple Crate Make baseline;
-- Utility Crate v1;
+- Simple Crate material slots / surface evidence;
+- Utility Crate product dogfood polish;
 - Cargo Case ladder reconciliation;
+- third Cargo Case profile;
 - Sci-Fi Crate regression and material-look compatibility checks only when
   needed.
 

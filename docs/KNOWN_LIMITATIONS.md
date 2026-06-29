@@ -19,8 +19,8 @@
   regression evidence. Sci-Fi Crate is a regression/advanced profile, not the
   flagship. It does not approve broader Surface, UV/Texturing, Rigging,
   animation, or full game-ready product UI.
-- Simple Crate is the next flagship family-authoring proof. It is a next-work
-  policy target in this branch, not newly implemented geometry.
+- Simple Crate is the novice baseline proof. Utility Crate is the next
+  family-maturity rung. Cargo Case remains the advanced equipment-case proof.
 - Surface is not a general visual Directions mode. The Sci-Fi Crate can expose
   preview-only `Try material looks` candidates when the generated
   surface-candidate evidence package is present and matches the current crate
