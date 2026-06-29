@@ -10,6 +10,9 @@
   animation. The headless Sci-Fi Crate static-prop package is the narrow
   exception: Surface Lab v1 emits deterministic UV/material/texture evidence
   for that one profile only.
+- Product Dogfood Gate v4 approves only the Sci-Fi Crate Make baseline. It does
+  not approve broader Surface, UV/Texturing, Rigging, animation, or full
+  game-ready product UI.
 - Surface is not a visual Directions mode yet. The Sci-Fi Crate package can
   report surface package availability, but visual surface variation still needs
   textured previews and material candidate support.
@@ -47,4 +50,3 @@
 - Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains affine-only by default.
 - Ambiguous affine/bend compositions may select deterministic approximation programs rather than the exact generating affine/bend order, then rely on the final lossless correction for exact replay.
 - There are no falloff masks, multiple bends, arbitrary handle deformations, topology changes, vertex correspondence solving, Maya adapter, native Blender deformers, or LLM/reference-image workflows in the decompiler.
-

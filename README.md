@@ -7,10 +7,11 @@ customizer for authored semantic asset families. The old implicit editor,
 explicit modeling workspace, and nested mode switchers are no longer product
 surfaces.
 
-Current recovery status: automated gates can pass, but the latest human
-dogfood video audit is a no-go for product stability. Treat the current
-mainline as a product-recovery baseline until Make passes the manual dogfood
-gate. The canonical status note is
+Current dogfood status: Product Dogfood Gate v4 passes the Sci-Fi Crate
+Make baseline only. Treat Visual Foundry as dogfood-acceptable for that narrow
+`Choose -> Make -> ideas -> pack/export` flow, while Roman Bridge remains
+PreviewOnly and broader user-facing UV/Texturing/Rigging UI remains no-go.
+The canonical status note is
 [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md).
 
 The product slice targets a category-independent `Choose -> Make` loop:
@@ -84,6 +85,8 @@ Release status and scope are documented in:
 - [`docs/MVP_REPORT.md`](docs/MVP_REPORT.md)
 - [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md)
 - [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md)
+- [`docs/PRODUCT_DOGFOOD_GATE_V4.md`](docs/PRODUCT_DOGFOOD_GATE_V4.md)
+- [`docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md`](docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md)
 - [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md)
 - [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md)
 - [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md)
@@ -117,8 +120,8 @@ recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 ## Manual Dogfood Pass 1
 
 Use this pass to make one Sci-Fi Crate and export it through the product UI.
-Do not count this as passing unless the flow is understandable without reading
-implementation docs.
+Product Dogfood Gate v4 has passed this Sci-Fi Crate baseline only; repeat this
+pass when validating regressions or new visual Surface candidate work.
 
 1. Launch the release app with `cargo run -p shape-app --release`.
 2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
@@ -131,7 +134,8 @@ implementation docs.
 
 During this pass, the app should not expose raw provider IDs, semantic IDs,
 compiler/decompiler wording, scalar paths, or internal kit planning labels in the
-asset-user UI.
+asset-user UI. Passing this flow does not approve broader Surface,
+UV/Texturing, Rigging, animation, or full game-ready product UI.
 
 ## Architecture
 

@@ -7236,10 +7236,11 @@ mod tests {
     }
 
     #[test]
-    fn foundry_recovery_docs_do_not_claim_current_make_dogfood_success() {
+    fn product_docs_claim_only_narrow_scifi_dogfood_success() {
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
         assert!(readme.contains("Choose -> Make"));
-        assert!(readme.contains("product-recovery baseline"));
+        assert!(readme.contains("Sci-Fi Crate"));
+        assert!(readme.contains("baseline only"));
         assert!(!readme.contains("Open Directions"));
         assert!(!readme.contains("Customize controls"));
 
@@ -7247,9 +7248,17 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
-        assert!(current_status.contains("PRODUCT-RECOVERY BASELINE"));
-        assert!(current_status.contains("latest human dogfood review"));
-        assert!(current_status.contains("Do not start larger user-facing UV/Texturing/Rigging"));
+        assert!(current_status.contains("SCI-FI CRATE MAKE BASELINE DOGFOOD-ACCEPTABLE"));
+        assert!(current_status.contains("Product Dogfood Gate v4 passed"));
+        assert!(current_status.contains("Sci-Fi Crate visual Surface candidates v0"));
+        assert!(current_status.contains("Do not start broader user-facing UV/Texturing/Rigging"));
+
+        let dogfood_v4 = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
+        ));
+        assert!(dogfood_v4.contains("PASS - SCI-FI CRATE BASELINE ONLY"));
+        assert!(dogfood_v4.contains("Broader user-facing UV, Texturing, Rigging"));
 
         let screenshot_results = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -7274,12 +7283,16 @@ mod tests {
     }
 
     #[test]
-    fn product_truth_docs_agree_on_no_go_status_and_roman_preview_only() {
+    fn product_truth_docs_agree_on_narrow_scifi_pass_and_roman_preview_only() {
         let current_status = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let dogfood_v4 = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
+        ));
         let integration_v2 = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
@@ -7289,14 +7302,19 @@ mod tests {
             "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
         ));
 
-        for doc in [current_status, readme, integration_v2] {
-            assert!(doc.contains("product-recovery baseline"));
+        for doc in [current_status, readme, dogfood_v4] {
             assert!(
-                doc.to_ascii_lowercase().contains("no-go"),
-                "status doc must keep the human no-go verdict visible: {doc}"
+                doc.contains("Sci-Fi Crate") && doc.contains("baseline"),
+                "current status docs must keep the narrow Sci-Fi baseline visible: {doc}"
+            );
+            assert!(
+                doc.contains("UV/Texturing") || doc.contains("UV, Texturing"),
+                "current status docs must keep broader product expansion caveated: {doc}"
             );
         }
 
+        assert!(integration_v2.contains("product-recovery baseline"));
+        assert!(integration_v2.to_ascii_lowercase().contains("no-go"));
         assert!(current_status.contains("Roman Bridge HQ is downgraded to `PreviewOnly`"));
         assert!(roman_report.contains("Current catalog recommendation: `PreviewOnly`"));
         assert!(integration_v2.contains("| Roman Timber Bridge HQ | Pass | PreviewOnly |"));

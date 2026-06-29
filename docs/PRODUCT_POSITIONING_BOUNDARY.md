@@ -30,6 +30,8 @@ editability.
   marketplace readiness, or arbitrary mesh editing.
 - Whole-model controls, locks, branches, packs, and export are the product
   loop.
+- Product Dogfood Gate v4 passes only the Sci-Fi Crate Make baseline. The next
+  allowed product expansion is narrow Sci-Fi Crate visual Surface candidates v0.
 - Release-readiness reports can verify the direct Visual Foundry shell contract
   with `--verify-product-ui-gate`, but manual screenshots remain required for
   visual polish and usability claims.
@@ -46,8 +48,8 @@ editability.
   described as blocked until manual DCC/runtime review, engine import proof,
   and engine-native package handoff are complete.
 - Surface package availability is not the same as visual Surface variation.
-  The Directions Surface mode remains disabled until textured previews and
-  material candidate support exist.
+  The Directions Surface mode remains disabled except for the next narrow
+  Sci-Fi Crate visual Surface candidates v0 lane.
 - Foundry kits package curated authored content with review evidence and
   visibility policy. They do not bypass exact catalog compilation.
 - Strict semantic reconstruction is a truth engine for covered grammars.
@@ -68,7 +70,8 @@ editability.
 - Replacing Blender, Houdini, Maya, or DCC authoring pipelines.
 - Broad UV/material coverage, rigging, animation, marketplace workflows, or LLM
   modeling. The Sci-Fi Crate Surface Lab v1 package is a headless static-prop
-  exception, not a default Visual Foundry material workflow.
+  exception, not a default Visual Foundry material workflow. Product Dogfood
+  Gate v4 does not change that boundary.
 - Photoreal output or textured reference parity from the current clay mesh
   pipeline.
 - Natural-language geometry generation or direct recipe mutation by an LLM.
