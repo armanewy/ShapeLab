@@ -12,6 +12,8 @@ Ready for this one package:
 - a surface-aware portable GLB containing `TEXCOORD_0`;
 - deterministic headless textured preview evidence for `sci-fi-crate`;
 - headless material-only Sci-Fi Crate variants that preserve frozen geometry.
+- per-variant material override, textured preview, surface delta, and validation
+  evidence for the six Sci-Fi Crate material looks.
 
 Still not implemented:
 
@@ -19,6 +21,7 @@ Still not implemented:
 - novice-facing material editing;
 - textured Visual Foundry candidate previews;
 - Visual Foundry material/surface candidate generation;
+- app Surface mode enablement from headless evidence alone;
 - part-specific surface editing;
 - wear/damage variation payloads;
 - GLB texture embedding;

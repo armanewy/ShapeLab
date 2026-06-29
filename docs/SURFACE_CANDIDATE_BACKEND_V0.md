@@ -11,10 +11,13 @@ The Sci-Fi Crate static-prop package writes candidate outputs under
 
 - `candidates.json`
 - `contact-sheet.png`
+- `surface-candidate-report.json`
 - one directory per material variant
+- per-variant `material-override.json`
 - per-variant `surface-artifact.json`
 - per-variant `material-pack.json`
 - per-variant `surface-delta.json`
+- per-variant `validation.json`
 - per-variant `textured-preview.png`
 - per-variant generated texture files
 
@@ -31,6 +34,9 @@ triangle-to-slot bindings. Surface deltas cannot claim shape changes.
 Duplicate-looking variants are rejected by candidate-set validation. Candidates
 with missing preview evidence or leaked shape delta cannot pass the surface
 delta gate.
+
+The aggregate report explicitly records that Visual Foundry Surface mode is not
+enabled by this headless evidence.
 
 ## Readiness Boundary
 

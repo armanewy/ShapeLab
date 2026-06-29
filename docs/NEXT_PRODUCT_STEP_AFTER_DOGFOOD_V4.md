@@ -9,6 +9,7 @@ Product Dogfood Gate v4 passed for the Sci-Fi Crate Make baseline only.
 Scope:
 
 - stay inside Sci-Fi Crate;
+- require headless material-only candidate evidence before any app UI exposure;
 - show visual material/surface candidate differences only when the app can
   render them clearly;
 - keep all Surface, UV, texture, and game-ready claims caveated;
