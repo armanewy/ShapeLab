@@ -8522,11 +8522,12 @@ mod tests {
     }
 
     #[test]
-    fn product_docs_claim_only_narrow_scifi_dogfood_success() {
+    fn product_docs_record_family_pivot_and_scifi_regression() {
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
         assert!(readme.contains("Choose -> Make"));
         assert!(readme.contains("Sci-Fi Crate"));
-        assert!(readme.contains("baseline only"));
+        assert!(readme.contains("regression/advanced profile, not the flagship"));
+        assert!(readme.contains("Simple Crate is the next flagship family-authoring proof"));
         assert!(!readme.contains("Open Directions"));
         assert!(!readme.contains("Customize controls"));
 
@@ -8534,14 +8535,15 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
-        assert!(
-            current_status
-                .contains("SCI-FI CRATE MAKE BASELINE + MATERIAL-LOOK PREVIEW BASELINE PASS")
-        );
+        assert!(current_status.contains("FAMILY FOUNDATION PIVOT RECORDED"));
         assert!(current_status.contains("Product Dogfood Gate v4 passed"));
         assert!(current_status.contains("Surface Candidate Integration Gate"));
-        assert!(current_status.contains("Cargo Case architecture proof"));
-        assert!(current_status.contains("Do not start broader user-facing UV/Texturing/Rigging"));
+        assert!(current_status.contains("Cargo Case architecture proof passed"));
+        assert!(current_status.contains("Sci-Fi Crate is not the flagship proof"));
+        assert!(
+            current_status.contains("Simple Crate is the next flagship family-authoring proof")
+        );
+        assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
 
         let dogfood_v4 = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -8570,6 +8572,126 @@ mod tests {
         ));
         assert!(manual_gate.contains("human dogfood video audit is"));
         assert!(manual_gate.contains("NO-GO"));
+    }
+
+    #[test]
+    fn family_foundation_docs_keep_next_flagship_and_blocked_scope_consistent() {
+        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let current_status = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CURRENT_PRODUCT_STATUS.md"
+        ));
+        let pivot = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/FAMILY_FOUNDATION_PIVOT.md"
+        ));
+        let ladder = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/FAMILY_MATURITY_LADDER.md"
+        ));
+        let next_work = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md"
+        ));
+        let cargo_report = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md"
+        ));
+        let limitations = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/KNOWN_LIMITATIONS.md"
+        ));
+        let normalized = |doc: &str| doc.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        for doc in [readme, current_status] {
+            let one_line = normalized(doc);
+            assert!(
+                one_line.contains("regression/advanced profile, not the flagship"),
+                "README and current status must agree that Sci-Fi is not flagship: {doc}"
+            );
+            assert!(
+                one_line.contains("Simple Crate is the next flagship family-authoring proof"),
+                "README and current status must agree on Simple Crate as next proof: {doc}"
+            );
+            assert!(
+                one_line.contains("Cargo Case remains valid but scoped to equipment cases only"),
+                "README and current status must scope Cargo Case to equipment cases: {doc}"
+            );
+            assert!(
+                one_line.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"),
+                "README and current status must keep broad UI blocked: {doc}"
+            );
+        }
+
+        assert!(pivot.contains("Shape Lab is not being built for any one specific model"));
+        assert!(pivot.contains("It is no longer the flagship proof"));
+        assert!(
+            normalized(pivot).contains("Clay mesh quality comes before UVs, texturing, materials")
+        );
+        assert!(
+            normalized(pivot)
+                .contains("Rigging, skinning, and animation UI remain blocked entirely")
+        );
+        assert!(ladder.contains("Rung 0 - Primitive Family"));
+        assert!(ladder.contains("Rung 4 - Surface / Material"));
+        assert!(
+            normalized(next_work).contains(
+                "Broad archetype expansion is forbidden until another family proof exists"
+            )
+        );
+        assert!(
+            normalized(current_status).contains(
+                "Broad archetype expansion is forbidden until another family proof exists"
+            )
+        );
+        assert!(
+            normalized(cargo_report)
+                .contains("Simple Crate is the next flagship family-authoring proof")
+        );
+        assert!(
+            normalized(limitations)
+                .contains("Simple Crate is the next flagship family-authoring proof")
+        );
+
+        for doc in [pivot, ladder, next_work, cargo_report, limitations] {
+            assert!(
+                normalized(doc).contains("scoped to equipment cases only"),
+                "family pivot docs must scope Cargo Case to equipment cases only: {doc}"
+            );
+        }
+
+        for (path, doc) in [
+            ("README.md", readme),
+            ("docs/CURRENT_PRODUCT_STATUS.md", current_status),
+            ("docs/FAMILY_FOUNDATION_PIVOT.md", pivot),
+            ("docs/FAMILY_MATURITY_LADDER.md", ladder),
+            ("docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md", next_work),
+            (
+                "docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md",
+                cargo_report,
+            ),
+            ("docs/KNOWN_LIMITATIONS.md", limitations),
+        ] {
+            let lower = doc.to_ascii_lowercase();
+            for forbidden in [
+                "sci-fi crate is the flagship",
+                "sci-fi crate remains the flagship",
+                "sci-fi industrial crate is the flagship",
+                "flagship proof is sci-fi",
+                "broad uv/texturing support is approved",
+                "broad texturing support is approved",
+                "broad surface mode is approved",
+                "material editor is supported",
+                "rigging/skinning/animation ui is approved",
+                "rigging, skinning, and animation ui is approved",
+                "animation ui is approved",
+            ] {
+                assert!(
+                    !lower.contains(forbidden),
+                    "{path} must not overclaim pivot-blocked scope: {forbidden}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -8846,6 +8968,27 @@ mod tests {
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/../../docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md"
+                )),
+            ),
+            (
+                "docs/FAMILY_FOUNDATION_PIVOT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/FAMILY_FOUNDATION_PIVOT.md"
+                )),
+            ),
+            (
+                "docs/FAMILY_MATURITY_LADDER.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/FAMILY_MATURITY_LADDER.md"
+                )),
+            ),
+            (
+                "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md"
                 )),
             ),
             (

@@ -11,12 +11,16 @@
   exception: Surface Lab v1 emits deterministic UV/material/texture evidence
   for that one profile only.
 - Cargo Case is the first proven reusable clay family architecture, but only
-  for equipment-case profiles. It does not prove a broad archetype system, and
+  for equipment-case profiles. Cargo Case remains valid but scoped to equipment
+  cases only. It does not prove a broad archetype system, and
   archetype materializer outputs remain internal drafts until validation,
   contact sheets, and human/adversarial review pass.
-- Product Dogfood Gate v4 approves only the Sci-Fi Crate Make baseline. It does
-  not approve broader Surface, UV/Texturing, Rigging, animation, or full
-  game-ready product UI.
+- Product Dogfood Gate v4 approves only the Sci-Fi Crate Make baseline as
+  regression evidence. Sci-Fi Crate is a regression/advanced profile, not the
+  flagship. It does not approve broader Surface, UV/Texturing, Rigging,
+  animation, or full game-ready product UI.
+- Simple Crate is the next flagship family-authoring proof. It is a next-work
+  policy target in this branch, not newly implemented geometry.
 - Surface is not a general visual Directions mode. The Sci-Fi Crate can expose
   preview-only `Try material looks` candidates when the generated
   surface-candidate evidence package is present and matches the current crate
@@ -40,6 +44,9 @@
 - HQ quality reports are clay-mesh truth reports. They do not claim UVs,
   materials, textures, rigging, animation, photoreal renders, marketplace-ready
   packages, or automatic Showcase approval.
+- Clay mesh quality comes before UV/texturing/materials. Surface and material
+  work remains narrow and evidence-backed, and no texture or material pass may
+  mask weak geometry.
 - HQ adversarial review records evidence gaps and required manual art-review
   questions. It cannot automatically decide whether output looks toy-like,
   art-directed, or better than a curated Blender/Houdini kit.
@@ -49,10 +56,21 @@
   material slots, procedural texture PNGs, and surface evidence. It is still
   blocked for a full game-ready claim because manual DCC/runtime review,
   engine import proof, and engine-native package handoff are not complete.
+- Broad archetype expansion is forbidden until another family proof exists and
+  passes its own clay, catalog, contact-sheet, and human review gates.
+- Broad Surface mode, material editor, rigging, skinning, and animation UI
+  remain blocked.
 - `moba-hero-clay` remains clay mesh only. It does not claim Dota/IP
   reconstruction, UVs, materials, textures, rigging, animation, marketplace
   readiness, or arbitrary imported mesh editability.
-- Schema-3 bend inference is experimental and limited to a single uniform-curvature bend plus at most one affine-family stage before or after it.
-- Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains affine-only by default.
-- Ambiguous affine/bend compositions may select deterministic approximation programs rather than the exact generating affine/bend order, then rely on the final lossless correction for exact replay.
-- There are no falloff masks, multiple bends, arbitrary handle deformations, topology changes, vertex correspondence solving, Maya adapter, native Blender deformers, or LLM/reference-image workflows in the decompiler.
+- Schema-3 bend inference is experimental and limited to a single
+  uniform-curvature bend plus at most one affine-family stage before or after
+  it.
+- Bend inference requires `--package-schema 3 --enable-bend`; schema 2 remains
+  affine-only by default.
+- Ambiguous affine/bend compositions may select deterministic approximation
+  programs rather than the exact generating affine/bend order, then rely on the
+  final lossless correction for exact replay.
+- There are no falloff masks, multiple bends, arbitrary handle deformations,
+  topology changes, vertex correspondence solving, Maya adapter, native Blender
+  deformers, or LLM/reference-image workflows in the decompiler.
