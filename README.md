@@ -11,6 +11,9 @@ Current dogfood status: Product Dogfood Gate v4 passes the Sci-Fi Crate
 Make baseline only. Treat Visual Foundry as dogfood-acceptable for that narrow
 `Choose -> Make -> ideas -> pack/export` flow, while Roman Bridge remains
 PreviewOnly and broader user-facing UV/Texturing/Rigging UI remains no-go.
+The Sci-Fi Crate material-look path is now implemented as a narrow preview-only
+branch feature backed by generated surface-candidate evidence; it does not
+change export payloads or full game-ready status.
 The canonical status note is
 [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md).
 
@@ -87,6 +90,8 @@ Release status and scope are documented in:
 - [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md)
 - [`docs/PRODUCT_DOGFOOD_GATE_V4.md`](docs/PRODUCT_DOGFOOD_GATE_V4.md)
 - [`docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md`](docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md)
+- [`docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md`](docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md)
+- [`docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md`](docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md)
 - [`docs/FOUNDRY_UI_MANUAL_GATE.md`](docs/FOUNDRY_UI_MANUAL_GATE.md)
 - [`docs/HQ_ASSET_QUALITY_BAR.md`](docs/HQ_ASSET_QUALITY_BAR.md)
 - [`docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md`](docs/VARIATION_SCOPE_CHANNEL_CONTRACT.md)

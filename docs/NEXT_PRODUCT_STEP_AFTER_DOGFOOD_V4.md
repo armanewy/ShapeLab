@@ -12,6 +12,8 @@ Scope:
 - require headless material-only candidate evidence before any app UI exposure;
 - show visual material/surface candidate differences only when the app can
   render them clearly;
+- keep the first app exposure preview-only unless project persistence and export
+  inclusion are implemented and reviewed;
 - keep all Surface, UV, texture, and game-ready claims caveated;
 - preserve the `Choose -> Make -> ideas -> focus -> pack/export` loop;
 - rerun Product Dogfood Gate v4 if the Make flow changes materially.
@@ -19,8 +21,10 @@ Scope:
 ## Follow-Up Work
 
 2. Make visual polish.
-3. Lamp and Roman Bridge product passes.
-4. Broader UV/Texturing/Rigging only after separate dogfood evidence.
+3. Sci-Fi Crate material persistence/export inclusion, if preview-only material
+   looks pass manual review.
+4. Lamp and Roman Bridge product passes.
+5. Broader UV/Texturing/Rigging only after separate dogfood evidence.
 
 ## Current Latency Follow-Up
 

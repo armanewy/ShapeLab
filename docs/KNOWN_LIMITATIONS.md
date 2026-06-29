@@ -13,9 +13,11 @@
 - Product Dogfood Gate v4 approves only the Sci-Fi Crate Make baseline. It does
   not approve broader Surface, UV/Texturing, Rigging, animation, or full
   game-ready product UI.
-- Surface is not a visual Directions mode yet. The Sci-Fi Crate package can
-  report surface package availability, but visual surface variation still needs
-  textured previews and material candidate support.
+- Surface is not a general visual Directions mode. The Sci-Fi Crate can expose
+  preview-only `Try material looks` candidates when the generated
+  surface-candidate evidence package is present and matches the current crate
+  build. These previews do not mutate geometry, shape controls, project state,
+  pack contents, or export payloads.
 - Candidate generation can propose semantic scalar edits, structural part choices, duplicated cuts, and grouped cut-operation edits, but it is still not a general-purpose modeler.
 - The viewport and thumbnails use a deterministic CPU renderer and bounded
   preview caches. A native GPU viewport/render backend is still future work.

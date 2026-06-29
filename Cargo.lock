@@ -3668,6 +3668,7 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger",
+ "image",
  "rfd",
  "serde",
  "serde_json",

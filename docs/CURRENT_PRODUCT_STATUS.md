@@ -1,6 +1,6 @@
 # Current Product Status
 
-Date: 2026-06-28
+Date: 2026-06-29
 
 ## Verdict
 
@@ -29,6 +29,9 @@ Rigging, motion, and full game-ready UI work remains blocked.
   result.
 - The only allowed next product step is narrow: Sci-Fi Crate visual Surface
   candidates v0.
+- The Sci-Fi Crate visual Surface candidates v0 branch exposes `Try material
+  looks` as a crate-only, preview-only Make UI path backed by headless evidence.
+  It does not affect export payloads yet.
 - Do not claim broad texturing, rigging, animation, or full game-ready product
   support from the current Visual Foundry UI.
 - Headless/backend-only work may continue if it does not touch product UI and
@@ -69,6 +72,9 @@ Sci-Fi Crate visual Surface candidates v0
 That work must stay narrow:
 
 - use the Sci-Fi Crate baseline only;
+- require matching generated surface-candidate evidence and textured previews;
+- keep material looks preview-only unless persistence/export inclusion is
+  explicitly implemented and reviewed;
 - keep material and texture claims visibly caveated;
 - use visual candidate evidence, not broad Surface mode claims;
 - preserve Product Dogfood Gate v4 evidence paths and hashes;
