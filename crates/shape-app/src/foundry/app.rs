@@ -8387,8 +8387,8 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 18);
-        assert_eq!(default_product_home_profile_count(), 3);
+        assert_eq!(installed_product_kit_count(), 19);
+        assert_eq!(default_product_home_profile_count(), 4);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -8397,6 +8397,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(default_profiles[0].fixture.slug, "simple-crate");
         assert!(default_labels.contains(&"Simple Crate"));
+        assert!(default_labels.contains(&"Utility Crate"));
         assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(default_labels.contains(&"Stylized Furniture Lamp"));
         assert!(!default_labels.contains(&"Roman Timber Bridge"));
@@ -8409,8 +8410,9 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 17);
+        assert_eq!(profiles.len(), 18);
         assert!(labels.contains(&"Simple Crate"));
+        assert!(labels.contains(&"Utility Crate"));
         assert!(labels.contains(&"Roman Timber Bridge"));
         assert!(labels.contains(&"Roman Timber Bridge HQ"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
@@ -8635,8 +8637,9 @@ mod tests {
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
         assert!(readme.contains("Choose -> Make"));
         assert!(readme.contains("Sci-Fi Crate"));
-        assert!(readme.contains("regression/advanced profile, not the flagship"));
-        assert!(readme.contains("Simple Crate is the next flagship family-authoring proof"));
+        assert!(readme.contains("Sci-Fi Crate is a regression/advanced profile"));
+        assert!(readme.contains("Simple Crate is the novice Make baseline proof"));
+        assert!(readme.contains("Utility Crate is the next family-maturity rung"));
         assert!(!readme.contains("Open Directions"));
         assert!(!readme.contains("Customize controls"));
 
@@ -8649,9 +8652,8 @@ mod tests {
         assert!(current_status.contains("Surface Candidate Integration Gate"));
         assert!(current_status.contains("Cargo Case architecture proof passed"));
         assert!(current_status.contains("Sci-Fi Crate is not the flagship proof"));
-        assert!(
-            current_status.contains("Simple Crate is the next flagship family-authoring proof")
-        );
+        assert!(current_status.contains("Simple Crate is the default novice Make baseline"));
+        assert!(current_status.contains("Utility Crate is the next family-maturity rung"));
         assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
 
         let dogfood_v4 = include_str!(concat!(
@@ -8715,12 +8717,20 @@ mod tests {
         for doc in [readme, current_status] {
             let one_line = normalized(doc);
             assert!(
-                one_line.contains("regression/advanced profile, not the flagship"),
+                one_line.contains("regression/advanced profile"),
                 "README and current status must agree that Sci-Fi is not flagship: {doc}"
             );
             assert!(
-                one_line.contains("Simple Crate is the next flagship family-authoring proof"),
-                "README and current status must agree on Simple Crate as next proof: {doc}"
+                one_line.contains("not the flagship"),
+                "README and current status must agree that Sci-Fi is not flagship: {doc}"
+            );
+            assert!(
+                one_line.contains("Simple Crate is the novice"),
+                "README and current status must agree on Simple Crate as novice proof: {doc}"
+            );
+            assert!(
+                one_line.contains("Utility Crate is the next family-maturity rung"),
+                "README and current status must agree on Utility Crate as next rung: {doc}"
             );
             assert!(
                 one_line.contains("Cargo Case remains valid but scoped to equipment cases only"),
@@ -8753,14 +8763,12 @@ mod tests {
                 "Broad archetype expansion is forbidden until another family proof exists"
             )
         );
+        assert!(normalized(cargo_report).contains("Simple Crate is the novice baseline proof"));
+        assert!(normalized(limitations).contains("Simple Crate is the novice baseline proof"));
         assert!(
-            normalized(cargo_report)
-                .contains("Simple Crate is the next flagship family-authoring proof")
+            normalized(cargo_report).contains("Utility Crate is the next family-maturity rung")
         );
-        assert!(
-            normalized(limitations)
-                .contains("Simple Crate is the next flagship family-authoring proof")
-        );
+        assert!(normalized(limitations).contains("Utility Crate is the next family-maturity rung"));
 
         for doc in [pivot, ladder, next_work, cargo_report, limitations] {
             assert!(

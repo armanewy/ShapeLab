@@ -7,6 +7,9 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use shape_asset::{GeometrySource, ModelingOperationSpec};
+use shape_compile::validation::{
+    ValidationLimits, validate_model, validation_config_from_recipe_with_limits,
+};
 use shape_core::{Aabb, Scalar, Transform3};
 use shape_foundry::{
     CandidateExplanationQuality, CandidateLegibilityClass, CandidateVariationMetadata,
@@ -639,6 +642,17 @@ pub fn generate_foundry_candidate_plans(
         };
 
         if !compiled.conformance_summary.accepted {
+            increment_rejection(
+                &mut diagnostics,
+                FoundryCandidateRejectionReason::ConformanceRejected,
+            );
+            let mut rejected_input = descriptor_input_from_output(&candidate_id.0, &parent_output);
+            rejected_input.compile_succeeded = false;
+            rejected_input.recipe_fingerprint = format!("rejected-{}", candidate_id.0);
+            scoring_inputs.push(rejected_input);
+            continue;
+        }
+        if !compiled_model_validation_is_valid(&compiled) {
             increment_rejection(
                 &mut diagnostics,
                 FoundryCandidateRejectionReason::ConformanceRejected,
@@ -3855,6 +3869,18 @@ fn candidate_descriptor_is_usable(input: &AssetCandidateInput) -> bool {
             .silhouette_occupancy
             .iter()
             .all(|value| value.is_finite())
+}
+
+fn compiled_model_validation_is_valid(output: &FoundryCompilationOutput) -> bool {
+    if !output.artifact.validation_report.is_valid() {
+        return false;
+    }
+    let config = validation_config_from_recipe_with_limits(
+        &output.recipe,
+        &output.artifact,
+        ValidationLimits::default(),
+    );
+    validate_model(&output.artifact, &config).is_valid()
 }
 
 fn aabb_from_positions(positions: &[[f32; 3]]) -> Aabb {

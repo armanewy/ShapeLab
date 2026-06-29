@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 use std::{collections::BTreeMap, fs};
 
-use shape_compile::export::write_model_package;
+use shape_compile::{
+    export::write_model_package,
+    validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
+};
 use shape_core::Aabb;
 use shape_foundry::{
     CandidateLegibilityClass, CandidateVariationMetadata, CandidateVisibleDeltaReport,
@@ -801,6 +804,12 @@ pub(crate) fn candidate_cards_from_output_with_previews(
     for (index, candidate) in output.candidates.iter().enumerate() {
         match compile_foundry_document(&candidate.document, resolver) {
             Ok(candidate_output) => {
+                if !compiled_model_validation_is_valid(&candidate_output) {
+                    cards[index].preview_failure =
+                        Some("Candidate model validation failed.".to_owned());
+                    cards[index].selectable = false;
+                    continue;
+                }
                 let preview_id = format!("candidate-{}", candidate.id.0);
                 let mut request = preview_request_for_output(
                     preview_id.clone(),
@@ -903,6 +912,18 @@ pub(crate) fn candidate_cards_from_output_with_previews(
         parent_preview_size,
         mode,
     ))
+}
+
+fn compiled_model_validation_is_valid(output: &FoundryCompilationOutput) -> bool {
+    if !output.artifact.validation_report.is_valid() {
+        return false;
+    }
+    let config = validation_config_from_recipe_with_limits(
+        &output.recipe,
+        &output.artifact,
+        ValidationLimits::default(),
+    );
+    validate_model(&output.artifact, &config).is_valid()
 }
 
 #[derive(Debug, Copy, Clone)]

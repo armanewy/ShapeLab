@@ -11,9 +11,9 @@ as a stress test and Product Dogfood Gate v4 baseline, but Sci-Fi Crate is an
 advanced regression profile, not the flagship; in the existing family-pivot
 wording, it is a regression/advanced profile, not the flagship.
 
-Simple Crate is now the default novice Make baseline and the novice
-family-authoring proof. Utility Crate is the next family-maturity rung. Quality
-must still be proven gradually:
+Simple Crate is the novice baseline proof. Simple Crate is now the default
+novice Make baseline and the novice family-authoring proof. Utility Crate is
+the next family-maturity rung. Quality must still be proven gradually:
 
 ```text
 Simple Crate Primitive
@@ -52,8 +52,8 @@ cases only. This does not approve broad archetype expansion.
 - Sci-Fi Crate is not the flagship proof.
 - Simple Crate is implemented catalog content and the current novice
   family-authoring proof.
-- Simple Crate Primitive is the next starting point; Utility Crate, Cargo Case,
-  and product profiles must follow the maturity ladder.
+- Simple Crate Primitive is the baseline starting point; Utility Crate, Cargo
+  Case, and product profiles must follow the maturity ladder.
 - The recorded release-app run stayed in Shape Lab and completed the required
   Sci-Fi scenario with full video, 540p video, screenshots, Make trace, and
   latency summary evidence.
@@ -95,10 +95,10 @@ cases only. This does not approve broad archetype expansion.
 
 ## Current Allowed Next Work
 
-- Simple Crate Primitive v0.
-- Simple Crate Make baseline is active as the novice baseline.
-- Utility Crate v1.
-- Cargo Case ladder reconciliation.
+- Simple Crate material slots / surface evidence.
+- Utility Crate product dogfood polish.
+- Third Cargo Case profile.
+- Material persistence for Sci-Fi only if still desired.
 - Dev-speed improvements.
 - Headless backend work that does not overclaim product support.
 
