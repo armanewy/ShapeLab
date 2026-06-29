@@ -28,9 +28,10 @@ use shape_gamekit::surface::{
     MaterialRecipe, MaterialSlotBinding, MaterialStylePack, SURFACE_ARTIFACT_SCHEMA_VERSION,
     SURFACE_CAPABILITIES_SCHEMA_VERSION, SURFACE_LAB_PACKAGE_SCHEMA_VERSION, SurfaceArtifact,
     SurfaceArtifactEvidence, SurfaceCapabilities, SurfaceEvidence, SurfaceLabPackage,
-    SurfaceMaterialSlot, SurfaceMaterialVariantCandidate, SurfaceMaterialVariantCandidateSet,
-    SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet, SurfaceTriangleBinding,
-    SurfaceUvLayoutPolicy, SurfaceUvSet, SurfaceVariationChannels, SurfaceVisualDeltaEvidence,
+    SurfaceLabStatus, SurfaceMaterialSlot, SurfaceMaterialVariantCandidate,
+    SurfaceMaterialVariantCandidateSet, SurfaceReviewStatus, SurfaceTextureFile, SurfaceTextureSet,
+    SurfaceTriangleBinding, SurfaceUvLayoutPolicy, SurfaceUvSet, SurfaceVariationChannels,
+    SurfaceVisualDeltaEvidence, SurfaceVisualDeltaReport, SurfaceVisualDeltaResultClass,
     TextureChannel, TextureRequirement, TextureRequirementSet, UnsupportedSurfaceOutputReport,
     surface_visual_delta_report, validate_surface_artifact_with_root,
     validate_surface_lab_package_with_root, validate_surface_material_variant_candidate_set,
@@ -86,6 +87,7 @@ const SURFACE_PREVIEW_REPORT_FILE: &str = "surface/surface-preview-report.json";
 const SURFACE_VARIANTS_DIR: &str = "surface/variants";
 const SURFACE_VARIANTS_CANDIDATES_FILE: &str = "surface/variants/candidates.json";
 const SURFACE_VARIANTS_CONTACT_SHEET_FILE: &str = "surface/variants/contact-sheet.png";
+const SURFACE_VARIANTS_REPORT_FILE: &str = "surface/variants/surface-candidate-report.json";
 const SURFACE_TRIANGLE_COVERAGE_FILE: &str = "surface/triangle-slot-coverage.json";
 const SURFACE_TEXTURE_DIR: &str = "surface/textures";
 const SURFACE_TEXTURE_SIZE: u32 = 256;
@@ -143,6 +145,60 @@ pub struct GameReadyStaticPropSummary {
     pub game_ready: bool,
     /// Blocking issue codes.
     pub blocker_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SurfaceMaterialOverrideEvidence {
+    schema_version: u32,
+    profile_id: String,
+    candidate_id: String,
+    display_name: String,
+    changed_material_slots: Vec<String>,
+    material_pack: MaterialStylePack,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SurfaceVariantValidationCheck {
+    code: String,
+    passed: bool,
+    message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SurfaceVariantValidationReport {
+    schema_version: u32,
+    profile_id: String,
+    candidate_id: String,
+    valid: bool,
+    checks: Vec<SurfaceVariantValidationCheck>,
+    blocker_codes: Vec<String>,
+    full_ready_status: SurfaceLabStatus,
+    full_ready_blocker_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SurfaceCandidateEvidenceReport {
+    schema_version: u32,
+    profile_id: String,
+    visual_foundry_surface_mode_enabled: bool,
+    candidate_count: usize,
+    all_candidates_valid: bool,
+    full_ready_status: SurfaceLabStatus,
+    full_ready_blocker_codes: Vec<String>,
+    candidates: Vec<SurfaceCandidateEvidenceRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SurfaceCandidateEvidenceRow {
+    candidate_id: String,
+    display_name: String,
+    material_override_ref: String,
+    textured_preview_ref: String,
+    surface_delta_ref: String,
+    validation_ref: String,
+    result_class: SurfaceVisualDeltaResultClass,
+    shape_delta_leak_detected: bool,
+    visible_surface_pixel_delta: f32,
 }
 
 pub fn run_game_ready_static_prop(args: GameReadyStaticPropArgs) -> anyhow::Result<()> {
@@ -1271,6 +1327,8 @@ fn write_static_crate_material_variants(
     let specs = material_variant_specs();
     let mut candidates = Vec::with_capacity(specs.len());
     let mut preview_images = Vec::with_capacity(specs.len());
+    let mut validation_reports = Vec::with_capacity(specs.len());
+    let mut report_rows = Vec::with_capacity(specs.len());
 
     for spec in specs {
         let variant_dir = format!("{SURFACE_VARIANTS_DIR}/{}", spec.slug);
@@ -1304,10 +1362,23 @@ fn write_static_crate_material_variants(
 
         let surface_artifact_ref = format!("{variant_dir}/surface-artifact.json");
         let material_pack_ref = format!("{variant_dir}/material-pack.json");
+        let material_override_ref = format!("{variant_dir}/material-override.json");
         let textured_preview_ref = format!("{variant_dir}/textured-preview.png");
         let surface_delta_ref = format!("{variant_dir}/surface-delta.json");
+        let validation_ref = format!("{variant_dir}/validation.json");
         write_json(out_dir.join(&surface_artifact_ref), &artifact)?;
         write_json(out_dir.join(&material_pack_ref), &material_pack)?;
+        write_json(
+            out_dir.join(&material_override_ref),
+            &SurfaceMaterialOverrideEvidence {
+                schema_version: 1,
+                profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
+                candidate_id: spec.slug.to_owned(),
+                display_name: spec.display_name.to_owned(),
+                changed_material_slots: changed_material_slots.clone(),
+                material_pack: material_pack.clone(),
+            },
+        )?;
 
         let request = surface_preview_request_for_artifact(mesh, &artifact, out_dir, 256)?;
         let preview =
@@ -1329,6 +1400,27 @@ fn write_static_crate_material_variants(
             },
         );
         write_json(out_dir.join(&surface_delta_ref), &delta)?;
+        let validation = surface_variant_validation_report(
+            spec.slug,
+            &delta,
+            !delta.shape_delta_leak_detected,
+            &textured_preview_ref,
+            &texture_files,
+            out_dir,
+        );
+        write_json(out_dir.join(&validation_ref), &validation)?;
+        report_rows.push(SurfaceCandidateEvidenceRow {
+            candidate_id: spec.slug.to_owned(),
+            display_name: spec.display_name.to_owned(),
+            material_override_ref: material_override_ref.clone(),
+            textured_preview_ref: textured_preview_ref.clone(),
+            surface_delta_ref: surface_delta_ref.clone(),
+            validation_ref: validation_ref.clone(),
+            result_class: delta.result_class,
+            shape_delta_leak_detected: delta.shape_delta_leak_detected,
+            visible_surface_pixel_delta: delta.visible_surface_pixel_delta,
+        });
+        validation_reports.push(validation);
         candidates.push(SurfaceMaterialVariantCandidate {
             candidate_id: spec.slug.to_owned(),
             title: spec.display_name.to_owned(),
@@ -1341,9 +1433,11 @@ fn write_static_crate_material_variants(
             changed_material_slots,
             surface_artifact_ref,
             material_pack_ref,
+            material_override_ref,
             textured_preview_ref: textured_preview_ref.clone(),
             preview_path: textured_preview_ref,
             surface_delta_ref,
+            validation_ref,
             surface_delta: delta.clone(),
             texture_files,
             frozen_mesh_fingerprint: base_artifact.source_artifact_fingerprint.clone(),
@@ -1367,8 +1461,108 @@ fn write_static_crate_material_variants(
         base_textured_preview_ref: SURFACE_TEXTURED_PREVIEW_FILE.to_owned(),
         candidates,
     };
+    let all_candidates_valid = validation_reports
+        .iter()
+        .all(|validation| validation.valid && validation.blocker_codes.is_empty());
     write_json(out_dir.join(SURFACE_VARIANTS_CANDIDATES_FILE), &set)?;
+    write_json(
+        out_dir.join(SURFACE_VARIANTS_REPORT_FILE),
+        &SurfaceCandidateEvidenceReport {
+            schema_version: 1,
+            profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
+            visual_foundry_surface_mode_enabled: false,
+            candidate_count: set.candidates.len(),
+            all_candidates_valid,
+            full_ready_status: SurfaceLabStatus::Blocked,
+            full_ready_blocker_codes: static_surface_full_ready_blockers(),
+            candidates: report_rows,
+        },
+    )?;
     Ok(set)
+}
+
+fn surface_variant_validation_report(
+    candidate_id: &str,
+    delta: &SurfaceVisualDeltaReport,
+    preserves_frozen_geometry: bool,
+    textured_preview_ref: &str,
+    texture_files: &[String],
+    out_dir: &Path,
+) -> SurfaceVariantValidationReport {
+    let textured_preview_exists = out_dir.join(textured_preview_ref).is_file();
+    let texture_files_present = !texture_files.is_empty()
+        && texture_files
+            .iter()
+            .all(|path| out_dir.join(path).is_file());
+    let surface_delta_passes = delta.can_pass_surface_delta();
+    let checks = vec![
+        SurfaceVariantValidationCheck {
+            code: "preserves_frozen_geometry".to_owned(),
+            passed: preserves_frozen_geometry,
+            message: "Candidate preserves frozen mesh, UVs, and triangle/material bindings."
+                .to_owned(),
+        },
+        SurfaceVariantValidationCheck {
+            code: "textured_preview_exists".to_owned(),
+            passed: textured_preview_exists,
+            message: "Candidate textured-preview.png exists.".to_owned(),
+        },
+        SurfaceVariantValidationCheck {
+            code: "texture_payloads_exist".to_owned(),
+            passed: texture_files_present,
+            message: "Candidate generated texture payloads exist.".to_owned(),
+        },
+        SurfaceVariantValidationCheck {
+            code: "surface_delta_passes".to_owned(),
+            passed: surface_delta_passes,
+            message: "Candidate surface delta is material-only and visually distinct.".to_owned(),
+        },
+        SurfaceVariantValidationCheck {
+            code: "full_ready_blocked".to_owned(),
+            passed: true,
+            message:
+                "Full game-ready status remains blocked pending manual review and engine proof."
+                    .to_owned(),
+        },
+    ];
+    let mut blocker_codes = Vec::new();
+    if !preserves_frozen_geometry {
+        blocker_codes.push("shape_delta_leak_detected".to_owned());
+    }
+    if !textured_preview_exists {
+        blocker_codes.push("missing_textured_preview".to_owned());
+    }
+    if !texture_files_present {
+        blocker_codes.push("missing_texture_payload".to_owned());
+    }
+    if !surface_delta_passes {
+        blocker_codes.extend(delta.diagnostics.iter().cloned());
+        if blocker_codes.is_empty() {
+            blocker_codes.push("surface_delta_not_passable".to_owned());
+        }
+    }
+    blocker_codes.sort();
+    blocker_codes.dedup();
+
+    SurfaceVariantValidationReport {
+        schema_version: 1,
+        profile_id: SCI_FI_CRATE_PROFILE.to_owned(),
+        candidate_id: candidate_id.to_owned(),
+        valid: blocker_codes.is_empty(),
+        checks,
+        blocker_codes,
+        full_ready_status: SurfaceLabStatus::Blocked,
+        full_ready_blocker_codes: static_surface_full_ready_blockers(),
+    }
+}
+
+fn static_surface_full_ready_blockers() -> Vec<String> {
+    vec![
+        "manual_review_pending".to_owned(),
+        "engine_import_proof_missing".to_owned(),
+        "engine_native_package_not_implemented".to_owned(),
+        "surface_manual_review_required".to_owned(),
+    ]
 }
 
 fn changed_material_slots(
@@ -1826,6 +2020,11 @@ mod tests {
                 .contains(&"engine_native_package_not_implemented".to_owned())
         );
         assert!(
+            summary
+                .blocker_codes
+                .contains(&"surface_manual_review_required".to_owned())
+        );
+        assert!(
             !summary
                 .blocker_codes
                 .contains(&"uv_layout_not_implemented".to_owned()),
@@ -1857,6 +2056,7 @@ mod tests {
             SURFACE_PREVIEW_REPORT_FILE,
             SURFACE_VARIANTS_CANDIDATES_FILE,
             SURFACE_VARIANTS_CONTACT_SHEET_FILE,
+            SURFACE_VARIANTS_REPORT_FILE,
             SURFACE_TRIANGLE_COVERAGE_FILE,
             LOD1_PROXY_FILE,
             LOD2_COLLISION_FILE,
@@ -1980,12 +2180,28 @@ mod tests {
                 .join(SURFACE_VARIANTS_CONTACT_SHEET_FILE)
                 .is_file()
         );
+        assert!(temp.path().join(SURFACE_VARIANTS_REPORT_FILE).is_file());
         let variant_candidates: SurfaceMaterialVariantCandidateSet = serde_json::from_str(
             &fs::read_to_string(temp.path().join(SURFACE_VARIANTS_CANDIDATES_FILE))
                 .expect("variant candidates json"),
         )
         .expect("variant candidates decode");
         assert_eq!(variant_candidates.candidates.len(), 6);
+        assert_eq!(
+            variant_candidates
+                .candidates
+                .iter()
+                .map(|candidate| candidate.display_name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Clean Lab White",
+                "Worn Hazard Yellow",
+                "Dark Industrial Metal",
+                "Field Blue Utility",
+                "Graphite Cargo",
+                "Orange Warning Trim",
+            ]
+        );
         assert!(
             variant_candidates
                 .candidates
@@ -2011,6 +2227,11 @@ mod tests {
             assert!(!candidate.surface_delta.shape_delta_leak_detected);
             assert!(!candidate.texture_files.is_empty());
             assert!(
+                temp.path().join(&candidate.material_override_ref).is_file(),
+                "missing {}",
+                candidate.material_override_ref
+            );
+            assert!(
                 temp.path().join(&candidate.textured_preview_ref).is_file(),
                 "missing {}",
                 candidate.textured_preview_ref
@@ -2020,6 +2241,29 @@ mod tests {
                 "missing {}",
                 candidate.surface_delta_ref
             );
+            assert!(
+                temp.path().join(&candidate.validation_ref).is_file(),
+                "missing {}",
+                candidate.validation_ref
+            );
+            let candidate_validation: SurfaceVariantValidationReport = serde_json::from_str(
+                &fs::read_to_string(temp.path().join(&candidate.validation_ref))
+                    .expect("candidate validation json"),
+            )
+            .expect("candidate validation decodes");
+            assert!(candidate_validation.valid, "{candidate_validation:#?}");
+            assert_eq!(
+                candidate_validation.full_ready_status,
+                SurfaceLabStatus::Blocked
+            );
+            for blocker in static_surface_full_ready_blockers() {
+                assert!(
+                    candidate_validation
+                        .full_ready_blocker_codes
+                        .contains(&blocker),
+                    "candidate validation missing {blocker}"
+                );
+            }
             for texture_file in &candidate.texture_files {
                 assert!(
                     temp.path().join(texture_file).is_file(),
@@ -2045,6 +2289,44 @@ mod tests {
                 surface_artifact.triangle_bindings
             );
         }
+
+        let candidate_report: SurfaceCandidateEvidenceReport = serde_json::from_str(
+            &fs::read_to_string(temp.path().join(SURFACE_VARIANTS_REPORT_FILE))
+                .expect("surface candidate report json"),
+        )
+        .expect("surface candidate report decodes");
+        assert!(!candidate_report.visual_foundry_surface_mode_enabled);
+        assert_eq!(candidate_report.candidate_count, 6);
+        assert!(candidate_report.all_candidates_valid);
+        assert_eq!(
+            candidate_report.full_ready_status,
+            SurfaceLabStatus::Blocked
+        );
+        for blocker in static_surface_full_ready_blockers() {
+            assert!(
+                candidate_report.full_ready_blocker_codes.contains(&blocker),
+                "surface candidate report missing {blocker}"
+            );
+        }
+        let missing_texture_validation = surface_variant_validation_report(
+            "missing-texture",
+            &variant_candidates.candidates[0].surface_delta,
+            true,
+            "surface/variants/missing/textured-preview.png",
+            &[],
+            temp.path(),
+        );
+        assert!(!missing_texture_validation.valid);
+        assert!(
+            missing_texture_validation
+                .blocker_codes
+                .contains(&"missing_textured_preview".to_owned())
+        );
+        assert!(
+            missing_texture_validation
+                .blocker_codes
+                .contains(&"missing_texture_payload".to_owned())
+        );
 
         let capabilities: SurfaceCapabilities = serde_json::from_str(
             &fs::read_to_string(temp.path().join(SURFACE_CAPABILITIES_FILE))
@@ -2139,6 +2421,7 @@ mod tests {
             SURFACE_PREVIEW_REPORT_FILE,
             SURFACE_VARIANTS_CANDIDATES_FILE,
             SURFACE_VARIANTS_CONTACT_SHEET_FILE,
+            SURFACE_VARIANTS_REPORT_FILE,
             SURFACE_GLB_FILE,
             SURFACE_GLB_VALIDATION_REPORT_FILE,
         ] {
@@ -2147,6 +2430,23 @@ mod tests {
             let right_bytes = fs::read(right.path().join(file))
                 .unwrap_or_else(|error| panic!("read right {file}: {error}"));
             assert_eq!(left_bytes, right_bytes, "{file} should be deterministic");
+        }
+        for spec in material_variant_specs() {
+            for file_name in [
+                "surface-artifact.json",
+                "material-pack.json",
+                "material-override.json",
+                "textured-preview.png",
+                "surface-delta.json",
+                "validation.json",
+            ] {
+                let file = format!("{SURFACE_VARIANTS_DIR}/{}/{file_name}", spec.slug);
+                let left_bytes = fs::read(left.path().join(&file))
+                    .unwrap_or_else(|error| panic!("read left {file}: {error}"));
+                let right_bytes = fs::read(right.path().join(&file))
+                    .unwrap_or_else(|error| panic!("read right {file}: {error}"));
+                assert_eq!(left_bytes, right_bytes, "{file} should be deterministic");
+            }
         }
         for texture in deterministic_texture_files(left.path()) {
             let relative = texture.strip_prefix(left.path()).expect("relative texture");

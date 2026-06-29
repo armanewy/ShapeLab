@@ -19,13 +19,21 @@ texture payloads.
 
 Per-variant outputs include:
 
+- `material-override.json`
 - `surface-artifact.json`
 - `material-pack.json`
 - `textured-preview.png`
 - `surface-delta.json`
+- `validation.json`
 - `textures/*.png`
 
 The candidate set is written to `surface/variants/candidates.json`, and the
 variant preview contact sheet is written to `surface/variants/contact-sheet.png`.
+The aggregate validation and UI-boundary report is written to
+`surface/variants/surface-candidate-report.json`.
+
 Duplicate-looking or unsupported candidates must be marked with diagnostics; a
 surface delta cannot claim a shape delta.
+
+This is headless evidence only. It does not enable app Surface mode, a material
+editor, broad texturing support, or full game-ready status.
