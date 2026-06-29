@@ -31,6 +31,20 @@ family.
 The target proof is Utility Crate v1. It may add slots and part semantics, but
 it must preserve the direct Make loop and clear clay variation.
 
+Utility Crate v1 proof:
+
+- body, lid, panel fields, trim bands, optional handles, latches, feet/skids,
+  and detail-density providers;
+- exactly seven novice controls: Proportions, Lid Style, Panel Style, Trim
+  Style, Handle Style, Latch Detail, and Detail Density;
+- six candidate strategies: Clean Storage Crate, Reinforced Utility Crate,
+  Compact Carry Crate, Wide Supply Crate, Lidded Field Crate, and Minimal
+  Workshop Crate;
+- richer than Simple Crate through more semantic roles and practical detail;
+- simpler than Cargo Case by omitting vents, corner guards, fastener systems,
+  utility rails, label plates, hinge details, and multi-profile style bias;
+- clay-only evidence in `target/utility-crate-family-v1/`.
+
 ## Rung 2 - Advanced Family
 
 Advanced Family proves that a richer equipment grammar can still remain a
