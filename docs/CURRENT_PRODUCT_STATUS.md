@@ -39,6 +39,24 @@ Rigging, motion, and full game-ready UI work remains blocked.
 - Headless/backend-only work may continue if it does not touch product UI and
   does not overclaim product support.
 
+## Current Allowed Product Claims
+
+- Sci-Fi Crate Make baseline passes.
+- Sci-Fi Crate material-look preview baseline passes.
+- Material looks are preview-only unless a later persistence branch says
+  otherwise.
+- Clean game-ready export is not yet supported.
+- Roman Bridge remains `PreviewOnly`.
+- Broad UV/Texturing/Rigging/Animation UI remains blocked.
+
+## Current Allowed Next Work
+
+- Cargo Case architecture proof.
+- Sci-Fi Crate material persistence/export inclusion, only if explicitly
+  scoped.
+- Stylized Lamp product dogfood pass.
+- Headless backend-only work that does not overclaim.
+
 ## Evidence Interpretation
 
 Passing evidence means the checked contract passed. Product Dogfood Gate v4

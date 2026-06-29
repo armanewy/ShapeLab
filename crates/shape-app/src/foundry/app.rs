@@ -8534,9 +8534,13 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
-        assert!(current_status.contains("SCI-FI CRATE MAKE BASELINE DOGFOOD-ACCEPTABLE"));
+        assert!(
+            current_status
+                .contains("SCI-FI CRATE MAKE BASELINE + MATERIAL-LOOK PREVIEW BASELINE PASS")
+        );
         assert!(current_status.contains("Product Dogfood Gate v4 passed"));
-        assert!(current_status.contains("Sci-Fi Crate visual Surface candidates v0"));
+        assert!(current_status.contains("Surface Candidate Integration Gate"));
+        assert!(current_status.contains("Cargo Case architecture proof"));
         assert!(current_status.contains("Do not start broader user-facing UV/Texturing/Rigging"));
 
         let dogfood_v4 = include_str!(concat!(
@@ -8575,6 +8579,10 @@ mod tests {
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let surface_integration = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+        ));
         let dogfood_v4 = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
@@ -8599,11 +8607,75 @@ mod tests {
             );
         }
 
+        assert!(readme.contains("material-look"));
+        assert!(readme.contains("preview-only"));
+        assert!(current_status.contains("material-look preview baseline passes"));
+        assert!(current_status.contains("Material looks are preview-only"));
+        assert!(surface_integration.contains("PASS - SCI-FI CRATE MAKE BASELINE"));
+        assert!(surface_integration.contains("preview-only"));
         assert!(integration_v2.contains("product-recovery baseline"));
         assert!(integration_v2.to_ascii_lowercase().contains("no-go"));
         assert!(current_status.contains("Roman Bridge HQ is downgraded to `PreviewOnly`"));
         assert!(roman_report.contains("Current catalog recommendation: `PreviewOnly`"));
         assert!(integration_v2.contains("| Roman Timber Bridge HQ | Pass | PreviewOnly |"));
+    }
+
+    #[test]
+    fn promoted_status_docs_keep_preview_only_and_blocked_claims_consistent() {
+        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let current_status = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CURRENT_PRODUCT_STATUS.md"
+        ));
+        let surface_integration = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+        ));
+        let surface_dogfood = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
+        ));
+        let visual_surface = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
+        ));
+
+        for doc in [
+            readme,
+            current_status,
+            surface_integration,
+            surface_dogfood,
+            visual_surface,
+        ] {
+            let lower = doc.to_ascii_lowercase();
+            assert!(
+                lower.contains("preview-only") || lower.contains("preview only"),
+                "surface status docs must keep material looks preview-only: {doc}"
+            );
+            assert!(
+                lower.contains("full game-ready")
+                    && (lower.contains("blocked") || lower.contains("not yet supported")),
+                "surface status docs must block full game-ready claims: {doc}"
+            );
+            for forbidden in [
+                "broad uv/texturing support is approved",
+                "broad texturing support is approved",
+                "rigging/skinning/animation ui is approved",
+                "full game-ready status is approved",
+                "roman bridge is default usable",
+            ] {
+                assert!(
+                    !lower.contains(forbidden),
+                    "status docs must not overclaim unsupported work: {forbidden}"
+                );
+            }
+        }
+
+        assert!(current_status.contains("Current Allowed Product Claims"));
+        assert!(current_status.contains("Clean game-ready export is not yet supported"));
+        assert!(current_status.contains("Current Allowed Next Work"));
+        assert!(current_status.contains("Cargo Case architecture proof"));
+        assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
     }
 
     #[test]
@@ -8614,38 +8686,45 @@ mod tests {
                 include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md")),
             ),
             (
-                "docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
-                )),
-            ),
-            (
-                "docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md"
-                )),
-            ),
-            (
-                "docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
-                )),
-            ),
-            (
-                "docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md"
-                )),
-            ),
-            (
                 "docs/CURRENT_PRODUCT_STATUS.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/../../docs/CURRENT_PRODUCT_STATUS.md"
+                )),
+            ),
+            (
+                "docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+                )),
+            ),
+            (
+                "docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
+                )),
+            ),
+            (
+                "docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
+                )),
+            ),
+            (
+                "docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md"
+                )),
+            ),
+            (
+                "docs/SOURCE_FORMAT_HYGIENE_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SOURCE_FORMAT_HYGIENE_REPORT.md"
                 )),
             ),
         ];
