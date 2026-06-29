@@ -369,7 +369,7 @@ fn control_profile_control(control: &shape_foundry::CustomizerControl) -> Contro
     };
     ControlProfileControl {
         control_id: control.id.clone(),
-        label: control.label.clone(),
+        label: product_safe_catalog_label(&control.label),
         description: "Changes the whole-model result.".to_owned(),
         kind,
         owned_family_slots: control
@@ -404,19 +404,19 @@ fn candidate_strategy_pack_from_customizer(
     let strategies = customizer
         .candidate_strategies
         .iter()
-        .map(|strategy| KitCandidateStrategy {
-            strategy_id: strategy.id.clone(),
-            name: strategy.label.clone(),
-            allowed_controls: strategy
-                .control_ids
-                .iter()
-                .filter(|control_id| visible_controls.contains(control_id.as_str()))
-                .cloned()
-                .collect(),
-            explanation_templates: vec![format!(
-                "Generate a {} whole-model option.",
-                strategy.label
-            )],
+        .map(|strategy| {
+            let name = product_safe_catalog_label(&strategy.label);
+            KitCandidateStrategy {
+                strategy_id: strategy.id.clone(),
+                name: name.clone(),
+                allowed_controls: strategy
+                    .control_ids
+                    .iter()
+                    .filter(|control_id| visible_controls.contains(control_id.as_str()))
+                    .cloned()
+                    .collect(),
+                explanation_templates: vec![format!("Generate a {name} whole-model option.")],
+            }
         })
         .collect::<Vec<_>>();
     let allowed_controls = strategies
@@ -439,6 +439,12 @@ fn candidate_strategy_pack_from_customizer(
             .to_owned(),
         lock_respect_policy: "Candidate generation must not alter locked controls.".to_owned(),
     }
+}
+
+fn product_safe_catalog_label(value: &str) -> String {
+    value
+        .replace("Archetype", "Type")
+        .replace("archetype", "type")
 }
 
 fn quality_gate_profile(profile_id: &str, tier: FoundryKitQualityTier) -> QualityGateProfile {

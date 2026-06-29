@@ -6,6 +6,7 @@
 //! catalog resolution, compilation, candidate generation, and persistence are
 //! implemented in later waves.
 
+pub mod archetype;
 pub mod author_studio;
 pub mod candidate;
 pub mod catalog;
@@ -25,6 +26,7 @@ pub mod session;
 pub mod validation;
 pub mod variation;
 
+pub use archetype::*;
 pub use author_studio::*;
 pub use candidate::*;
 pub use catalog::*;
