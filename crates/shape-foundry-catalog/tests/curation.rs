@@ -49,6 +49,23 @@ fn default_catalog_hides_preview_only_and_hidden_draft_profiles() {
 }
 
 #[test]
+fn scifi_crate_visibility_is_regression_continuity_until_simple_crate_exists() {
+    let metadata =
+        catalog_curation_metadata_for_slug("sci-fi-crate").expect("sci-fi crate curation metadata");
+    let note = metadata.note.to_ascii_lowercase();
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(note.contains("regression"));
+    assert!(note.contains("dogfood"));
+    assert!(note.contains("simple crate"));
+    assert!(
+        catalog_curation_metadata_for_slug("simple-crate").is_none(),
+        "this baseline must not invent Simple Crate catalog metadata"
+    );
+}
+
+#[test]
 fn preview_catalog_shows_preview_only_but_not_hidden_drafts() {
     let preview_slugs = curated_fixture_catalogs_with_labels(true)
         .into_iter()

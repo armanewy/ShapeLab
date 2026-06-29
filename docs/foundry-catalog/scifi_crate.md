@@ -3,6 +3,11 @@
 The public profile ID remains `sci-fi-crate`, but the executable profile is now
 Cargo Case family plus Sci-Fi Industrial style/profile defaults.
 
+Sci-Fi Crate is an advanced regression profile. It is not the flagship product
+proof and must not be polished as the primary product objective. Simple Crate is
+the new novice baseline proof once it exists and passes its own baseline; Cargo
+Case is the advanced equipment-case proof.
+
 ## Architecture
 
 - Family: Cargo Case
@@ -15,6 +20,16 @@ Cargo Case family plus Sci-Fi Industrial style/profile defaults.
 
 Sci-Fi Industrial is not a separate bespoke crate family and must not carry a
 hidden duplicate implementation outside Cargo Case slots.
+
+## Catalog Role
+
+The profile may remain default-visible only while current dogfood evidence says
+the Sci-Fi Crate Make baseline is non-regressed. If that evidence goes stale or
+fails, move the profile to preview/developer catalog visibility until the
+regression baseline is restored.
+
+On this baseline, Simple Crate is not implemented catalog content. Do not add a
+placeholder Simple Crate entry or treat Sci-Fi Crate as the novice crate proof.
 
 ## Sci-Fi Industrial Defaults
 
@@ -56,4 +71,6 @@ cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-di
 ```
 
 That command may package the static prop path, but it does not make full
-game-ready status pass.
+game-ready status pass. `game_ready` must remain false until later manual
+DCC/runtime review, engine import proof, and engine-native package handoff
+exist.

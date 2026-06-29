@@ -7,11 +7,12 @@ Date: 2026-06-29
 `FAMILY FOUNDATION PIVOT RECORDED; SCI-FI CRATE REGRESSION BASELINE PRESERVED; CARGO CASE EQUIPMENT PROOF PASS`
 
 Shape Lab is not being built for any one specific model. Sci-Fi Crate was useful
-as a stress test and Product Dogfood Gate v4 baseline, but Sci-Fi Crate is a
-regression/advanced profile, not the flagship.
+as a stress test and Product Dogfood Gate v4 baseline, but Sci-Fi Crate is an
+advanced regression profile, not the flagship; in the existing family-pivot
+wording, it is a regression/advanced profile, not the flagship.
 
-The next flagship family-authoring proof is Simple Crate. Quality must be
-proven gradually:
+Simple Crate is the next flagship family-authoring proof and the new novice
+baseline proof. Quality must be proven gradually:
 
 ```text
 Simple Crate Primitive
@@ -25,7 +26,8 @@ surface presentation. Surface/material work remains narrow and evidence-backed.
 
 The Surface Candidate Integration Gate passed only for the narrow Sci-Fi Crate
 material-look preview baseline. Material looks are preview-only in this build
-and do not affect export payloads or full game-ready status.
+and do not affect export payloads or full game-ready status. Material evidence
+tied to stale geometry must be disabled or regenerated instead of reused.
 
 Roman Bridge HQ remains `PreviewOnly`. Broad Surface mode, broad
 UV/Texturing/Rigging/Animation UI, material editor work, rigging, skinning,
@@ -43,7 +45,10 @@ cases only. This does not approve broad archetype expansion.
 - Sci-Fi Crate remains a regression profile, advanced profile, material-look
   preview test, and Cargo Case compatibility test.
 - Sci-Fi Crate is not the flagship proof.
-- Simple Crate is the next flagship family-authoring proof.
+- Simple Crate is the next flagship family-authoring proof and the new novice
+  baseline proof.
+- Simple Crate is planned work on this baseline; do not invent a catalog entry
+  before its own implementation and baseline pass exist.
 - Simple Crate Primitive is the next starting point; Utility Crate, Cargo Case,
   and product profiles must follow the maturity ladder.
 - The recorded release-app run stayed in Shape Lab and completed the required
@@ -58,6 +63,9 @@ cases only. This does not approve broad archetype expansion.
 - Clean Utility Case and Sci-Fi Industrial Crate share the Cargo Case family.
 - `Try material looks` is crate-only, preview-only, and backed by generated
   surface-candidate evidence. It does not affect export payloads yet.
+- Stale material-look evidence must be disabled after geometry changes.
+- The Sci-Fi Crate static surface package command remains a regression check,
+  not a full game-ready approval.
 - Do not claim broad UV/texturing, rigging, skinning, animation, or full
   game-ready product support from the current Visual Foundry UI.
 - Broad archetype expansion is forbidden until another family proof exists and
@@ -71,7 +79,8 @@ cases only. This does not approve broad archetype expansion.
 - Sci-Fi Crate Make baseline passes as a regression baseline.
 - Sci-Fi Crate material-look preview baseline passes as a narrow preview-only
   baseline.
-- Simple Crate is the next flagship family-authoring proof.
+- Simple Crate is the next flagship family-authoring proof and the new novice
+  baseline proof.
 - Cargo Case is a proven reusable clay family architecture, scoped to equipment
   cases only.
 - Material looks are preview-only unless a later persistence branch says
@@ -135,6 +144,10 @@ Simple Crate Primitive
 That work must stay narrow:
 
 - start with Simple Crate, not more Sci-Fi Crate polish;
+- make Simple Crate the first/featured novice crate only after it exists and
+  passes its own baseline;
+- keep Sci-Fi Crate default-visible only while current dogfood status says it
+  is non-regressed, otherwise move it to preview/developer visibility;
 - prove visible pure-clay variation before semantic clay, material looks, UVs,
   textures, decals, or export-surface claims;
 - keep material looks preview-only unless persistence/export inclusion is

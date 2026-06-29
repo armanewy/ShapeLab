@@ -8,20 +8,26 @@ explicit modeling workspace, and nested mode switchers are no longer product
 surfaces.
 
 Current dogfood status: Product Dogfood Gate v4 passed the Sci-Fi Crate Make
-baseline, but Sci-Fi Crate is a regression/advanced profile, not the flagship.
-Shape Lab is not being built for any one specific model. The next flagship
-family-authoring proof is Simple Crate, growing through Simple Crate Primitive
--> Utility Crate Family -> Cargo Case -> Product profiles.
+baseline, but Sci-Fi Crate is an advanced regression profile, not the
+flagship. Sci-Fi Crate is a regression/advanced profile, not the flagship.
+Shape Lab is not being built for any one specific model. Simple Crate is the
+next flagship family-authoring proof and the new novice baseline proof, growing
+through Simple Crate Primitive -> Utility Crate Family -> Cargo Case -> Product
+profiles. On this baseline, Simple Crate is still planned work rather than
+implemented catalog content; do not invent it in documentation or metadata
+until its own baseline passes.
 Roman Bridge remains PreviewOnly. Broad UV/Texturing/Rigging/Animation UI
 remains blocked.
 The Sci-Fi Crate material-look path remains a narrow preview-only baseline
 backed by generated surface-candidate evidence; it does not change export
-payloads, and full game-ready status remains blocked.
-Cargo Case remains valid but scoped to equipment cases only: Clean Utility Case
-and Sci-Fi Industrial Crate share one Cargo Case family, controls, roles, and
-semantic clay part groups. This is not a broad archetype library, broad Surface
-mode, material editor, UV/texturing, rigging, animation, or full game-ready
-approval. Clay mesh quality comes before surface or material presentation.
+payloads, stale material evidence must be disabled after geometry changes, and
+full game-ready remains blocked. Cargo Case remains valid but scoped to
+equipment cases only and is the advanced equipment-case proof: Clean Utility
+Case and Sci-Fi Industrial Crate share one Cargo Case family, controls, roles,
+and semantic clay part groups. This is not a broad archetype library, broad
+Surface mode, material editor, UV/texturing, rigging, animation, or full
+game-ready approval. Clay mesh quality comes before surface or material
+presentation.
 The canonical status note is
 [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md).
 
@@ -101,6 +107,7 @@ Release status and scope are documented in:
 - [`docs/FAMILY_FOUNDATION_PIVOT.md`](docs/FAMILY_FOUNDATION_PIVOT.md)
 - [`docs/FAMILY_MATURITY_LADDER.md`](docs/FAMILY_MATURITY_LADDER.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
+- [`docs/SCIFI_CRATE_REGRESSION_ROLE.md`](docs/SCIFI_CRATE_REGRESSION_ROLE.md)
 - [`docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md`](docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md)
 - [`docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md`](docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md)
 - [`docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md`](docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md)
@@ -117,8 +124,12 @@ Release status and scope are documented in:
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- two default novice profiles: Sci-Fi Industrial Crate and Stylized Furniture
-  Lamp
+- current default novice-visible profiles: Sci-Fi Industrial Crate and Stylized
+  Furniture Lamp. Sci-Fi Industrial Crate is visible for regression continuity
+  only while its dogfood status remains current; once Simple Crate exists and
+  passes its baseline, Simple Crate becomes the first/featured novice crate and
+  Sci-Fi Crate should remain advanced/regression-visible or move to the
+  preview/developer catalog if it is no longer non-regressed
 - seventeen installed Visual Foundry kit-backed profiles available to
   preview/developer catalogs, including Roman Timber Bridge HQ, promoted gear
   kits, and the Hero Character preview kit
@@ -139,7 +150,7 @@ recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 Use this pass to make one Sci-Fi Crate and export it through the product UI only
 when validating regressions, Cargo Case compatibility, or narrow material-look
 preview work. Product Dogfood Gate v4 passed this Sci-Fi Crate baseline, but it
-is no longer the flagship proof.
+is an advanced regression profile and no longer the flagship proof.
 
 1. Launch the release app with `cargo run -p shape-app --release`.
 2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
@@ -157,10 +168,10 @@ UV/Texturing, Rigging, animation, or full game-ready product UI.
 
 ## Next Family Proof
 
-Simple Crate is the next flagship family-authoring proof. It starts as a Simple
-Crate Primitive with a small object grammar, few controls, a fast Make loop, and
-visible clay variation. Utility Crate v1 may follow only after the primitive
-reads clearly in clay.
+Simple Crate is the next flagship family-authoring proof and the new novice
+baseline proof. It starts as a Simple Crate Primitive with a small object
+grammar, few controls, a fast Make loop, and visible clay variation. Utility
+Crate v1 may follow only after the primitive reads clearly in clay.
 
 Surface and material work must not lead this proof. Clay mesh quality comes
 first, and no texture or material treatment may mask weak geometry.
