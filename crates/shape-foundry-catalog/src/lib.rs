@@ -37,6 +37,7 @@ use shape_foundry::{
 };
 
 pub mod authoring;
+pub mod cargo_case;
 pub mod expanded_profiles;
 pub mod kits;
 pub mod moba_hero;
