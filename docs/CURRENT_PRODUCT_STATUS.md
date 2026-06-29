@@ -4,14 +4,16 @@ Date: 2026-06-29
 
 ## Verdict
 
-`FAMILY FOUNDATION PIVOT RECORDED; SCI-FI CRATE REGRESSION BASELINE PRESERVED; CARGO CASE EQUIPMENT PROOF PASS`
+`SIMPLE CRATE MAKE BASELINE ACTIVE; FAMILY FOUNDATION PIVOT RECORDED; SCI-FI CRATE REGRESSION BASELINE PRESERVED; CARGO CASE EQUIPMENT PROOF PASS`
 
 Shape Lab is not being built for any one specific model. Sci-Fi Crate was useful
 as a stress test and Product Dogfood Gate v4 baseline, but Sci-Fi Crate is a
 regression/advanced profile, not the flagship.
 
-The next flagship family-authoring proof is Simple Crate. Quality must be
-proven gradually:
+Simple Crate is now the default novice Make baseline and current flagship
+family-authoring proof. The family pivot recorded the earlier controlling
+phrase: Simple Crate is the next flagship family-authoring proof. Quality must
+still be proven gradually:
 
 ```text
 Simple Crate Primitive
@@ -40,10 +42,12 @@ cases only. This does not approve broad archetype expansion.
 ## Current Truth
 
 - Product Dogfood Gate v4 passed for the Sci-Fi Crate Make baseline only.
+- Simple Crate is first in the default novice catalog and is the new novice
+  Make baseline.
 - Sci-Fi Crate remains a regression profile, advanced profile, material-look
   preview test, and Cargo Case compatibility test.
 - Sci-Fi Crate is not the flagship proof.
-- Simple Crate is the next flagship family-authoring proof.
+- Simple Crate is the current flagship family-authoring proof.
 - Simple Crate Primitive is the next starting point; Utility Crate, Cargo Case,
   and product profiles must follow the maturity ladder.
 - The recorded release-app run stayed in Shape Lab and completed the required
@@ -68,10 +72,11 @@ cases only. This does not approve broad archetype expansion.
 ## Current Allowed Product Claims
 
 - Shape Lab is category-general, not built for one specific model.
+- Simple Crate is the default novice Make baseline.
 - Sci-Fi Crate Make baseline passes as a regression baseline.
 - Sci-Fi Crate material-look preview baseline passes as a narrow preview-only
   baseline.
-- Simple Crate is the next flagship family-authoring proof.
+- Simple Crate is the current flagship family-authoring proof.
 - Cargo Case is a proven reusable clay family architecture, scoped to equipment
   cases only.
 - Material looks are preview-only unless a later persistence branch says
@@ -83,7 +88,7 @@ cases only. This does not approve broad archetype expansion.
 ## Current Allowed Next Work
 
 - Simple Crate Primitive v0.
-- Simple Crate Make baseline.
+- Simple Crate Make baseline is active as the novice baseline.
 - Utility Crate v1.
 - Cargo Case ladder reconciliation.
 - Dev-speed improvements.
@@ -101,6 +106,7 @@ future product surface dogfood-stable.
 
 | Evidence | Current Interpretation |
 | --- | --- |
+| Simple Crate Make Baseline | Active novice baseline; first default catalog starter |
 | Product Dogfood Gate v4 | Pass for Sci-Fi Crate regression baseline only |
 | Surface Candidate Integration Gate v0 | Pass for Sci-Fi Crate material-look preview baseline only |
 | Cargo Case Architecture Integration Gate | Pass for Cargo Case base + Clean Utility + Sci-Fi Industrial profiles only |
@@ -122,11 +128,11 @@ No exception is approved.
 
 ## Approved Next Product Step
 
-The approved next product step is the family foundation ladder:
+The approved product ladder remains the family foundation ladder:
 
 ```text
 Simple Crate Primitive
--> Simple Crate Make baseline
+-> Simple Crate Make baseline active
 -> Utility Crate v1
 -> Cargo Case ladder reconciliation
 -> Product profiles
@@ -134,7 +140,7 @@ Simple Crate Primitive
 
 That work must stay narrow:
 
-- start with Simple Crate, not more Sci-Fi Crate polish;
+- keep Simple Crate as the novice baseline, not more Sci-Fi Crate polish;
 - prove visible pure-clay variation before semantic clay, material looks, UVs,
   textures, decals, or export-surface claims;
 - keep material looks preview-only unless persistence/export inclusion is

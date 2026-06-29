@@ -7,11 +7,14 @@ customizer for authored semantic asset families. The old implicit editor,
 explicit modeling workspace, and nested mode switchers are no longer product
 surfaces.
 
-Current dogfood status: Product Dogfood Gate v4 passed the Sci-Fi Crate Make
-baseline, but Sci-Fi Crate is a regression/advanced profile, not the flagship.
-Shape Lab is not being built for any one specific model. The next flagship
-family-authoring proof is Simple Crate, growing through Simple Crate Primitive
--> Utility Crate Family -> Cargo Case -> Product profiles.
+Current dogfood status: Simple Crate is the novice Make baseline. Product
+Dogfood Gate v4 still preserves the Sci-Fi Crate Make regression baseline, but
+Sci-Fi Crate is a regression/advanced profile, not the flagship. Shape Lab is
+not being built for any one specific model. Simple Crate is the current
+flagship family-authoring proof; the pivot recorded it as the next flagship
+family-authoring proof, growing through Simple Crate Primitive -> Utility Crate
+Family -> Cargo Case -> Product profiles.
+Historical pivot wording remains: Simple Crate is the next flagship family-authoring proof.
 Roman Bridge remains PreviewOnly. Broad UV/Texturing/Rigging/Animation UI
 remains blocked.
 The Sci-Fi Crate material-look path remains a narrow preview-only baseline
@@ -31,8 +34,7 @@ The product slice targets a category-independent `Choose -> Make` loop:
 2. Choose an asset family.
 3. Enter Make and let the app prepare the first model and preview.
 4. Try coherent whole-asset ideas.
-5. Choose an idea or focus a visible part, then use contextual controls and
-   locks only when they are clear.
+5. Choose an idea, then adjust a clear control.
 6. Export a single asset or a small family pack while keeping branchable
    history.
 
@@ -101,6 +103,7 @@ Release status and scope are documented in:
 - [`docs/FAMILY_FOUNDATION_PIVOT.md`](docs/FAMILY_FOUNDATION_PIVOT.md)
 - [`docs/FAMILY_MATURITY_LADDER.md`](docs/FAMILY_MATURITY_LADDER.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
+- [`docs/SIMPLE_CRATE_MAKE_BASELINE.md`](docs/SIMPLE_CRATE_MAKE_BASELINE.md)
 - [`docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md`](docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md)
 - [`docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md`](docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md)
 - [`docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md`](docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md)
@@ -117,9 +120,9 @@ Release status and scope are documented in:
 The native app opens a local `egui` desktop workspace with:
 
 - Visual Foundry as the product app and primary novice-facing surface
-- two default novice profiles: Sci-Fi Industrial Crate and Stylized Furniture
-  Lamp
-- seventeen installed Visual Foundry kit-backed profiles available to
+- three default novice profiles: Simple Crate, Sci-Fi Industrial Crate, and
+  Stylized Furniture Lamp
+- eighteen installed Visual Foundry kit-backed profiles available to
   preview/developer catalogs, including Roman Timber Bridge HQ, promoted gear
   kits, and the Hero Character preview kit
 - an asset-family grouped Choose list, Make workspace, candidate tray, focused
@@ -133,6 +136,23 @@ Startup shows the Visual Foundry "Choose what to make" home screen. The Choose
 catalog is a grouped list by asset family, with one Start action per template.
 Pending kits are hidden from the default novice catalog until review approval is
 recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
+
+## Simple Crate Baseline
+
+Use this pass for the default novice dogfood path.
+
+1. Launch the release app with `cargo run -p shape-app --release`.
+2. On Choose, start `Simple Crate`.
+3. In Make, wait for the model and preview to become ready.
+4. Use `Try crate ideas`.
+5. Use one crate idea.
+6. Adjust one crate control.
+7. Add the current crate to Pack.
+8. Open Export.
+
+The baseline copy is intentionally plain: `Try crate ideas`, `Use this crate`,
+`Adjust crate`, `Add to Pack`, and `Export`. Focus Part is not required for
+this path.
 
 ## Sci-Fi Regression Pass
 
@@ -157,10 +177,11 @@ UV/Texturing, Rigging, animation, or full game-ready product UI.
 
 ## Next Family Proof
 
-Simple Crate is the next flagship family-authoring proof. It starts as a Simple
-Crate Primitive with a small object grammar, few controls, a fast Make loop, and
-visible clay variation. Utility Crate v1 may follow only after the primitive
-reads clearly in clay.
+Simple Crate is the current flagship family-authoring proof. It was recorded as
+the next flagship family-authoring proof during the family pivot. It starts as a
+Simple Crate Primitive with a small object grammar, few controls, a fast Make
+loop, and visible clay variation. Utility Crate v1 may follow only after the
+primitive reads clearly in clay.
 
 Surface and material work must not lead this proof. Clay mesh quality comes
 first, and no texture or material treatment may mask weak geometry.

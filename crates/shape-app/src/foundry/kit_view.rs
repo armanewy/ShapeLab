@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn built_in_kit_cards_expose_product_safe_badges() {
         let cards = built_in_kit_card_views();
-        assert_eq!(cards.len(), 17);
+        assert_eq!(cards.len(), 18);
         assert!(cards.iter().all(|card| !card.display_name.is_empty()));
         assert!(cards.iter().all(|card| !card.style_name.is_empty()));
         assert!(cards.iter().all(|card| !card.category_chips.is_empty()));
