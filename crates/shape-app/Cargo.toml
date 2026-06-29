@@ -11,7 +11,10 @@ crossbeam-channel.workspace = true
 eframe.workspace = true
 egui.workspace = true
 env_logger.workspace = true
+image.workspace = true
 rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 shape-asset.workspace = true
 shape-compile.workspace = true
 shape-core.workspace = true
@@ -23,7 +26,5 @@ shape-render.workspace = true
 shape-search.workspace = true
 
 [dev-dependencies]
-serde.workspace = true
-serde_json.workspace = true
 shape-family.workspace = true
 shape-family-compile.workspace = true
