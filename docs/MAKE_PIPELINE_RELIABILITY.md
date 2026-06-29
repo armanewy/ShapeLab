@@ -32,6 +32,20 @@ requests a fresh build. Busy build, preview, and idea-generation requests are
 deduplicated by the reducer so repeated clicks do not create duplicate active
 jobs.
 
+If idea generation exceeds the local timeout, Make shows:
+
+```text
+Still trying ideas.
+```
+
+The visible recovery actions are:
+
+- `Cancel`
+- `Keep waiting`
+
+`Cancel` marks active candidate work stale, records `JobCanceled` in the Make trace,
+clears pending idea cards, and shows `Canceled earlier idea search.` locally in Make.
+
 ## Local Status
 
 The Make inspector owns the local workflow banner. Required banner states are:
@@ -40,6 +54,7 @@ The Make inspector owns the local workflow banner. Required banner states are:
 - `Preparing <asset>`
 - `Trying ideas`
 - `Older result ignored` with `Try again`
+- `Idea search canceled` with `Try again`
 - `No clear focused ideas survived` with recovery actions
 
 The bottom status strip may repeat supporting details, but it is not the primary

@@ -7,7 +7,10 @@ use std::thread;
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use shape_core::Aabb;
-use shape_foundry::{CandidateLegibilityClass, VariationChannel, VariationScope};
+use shape_foundry::{
+    CandidateLegibilityClass, FoundryPreviewDisplayMode, SemanticClayRoleAssignment,
+    VariationChannel, VariationScope,
+};
 use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
@@ -198,26 +201,58 @@ pub struct FoundryPreviewCacheKey {
     pub render_settings: FoundryPreviewRenderSettingsKey,
     /// Requested preview resolution.
     pub resolution: FoundryPreviewResolution,
+    /// Preview display mode.
+    pub display_mode: FoundryPreviewDisplayMode,
+    /// Semantic Clay assignments used by the display mode.
+    pub semantic_clay_assignments: Vec<FoundrySemanticClayAssignmentKey>,
 }
 
 impl FoundryPreviewCacheKey {
     /// Build a cache key from all render-relevant foundry preview inputs.
     #[must_use]
-    pub fn new(
-        document_geometry_fingerprint: impl Into<String>,
-        sampled_control_state: BTreeMap<String, FoundryPreviewControlValue>,
-        provider_choices: BTreeMap<String, String>,
-        camera: &OrbitCamera,
-        render_settings: &RenderSettings,
-        resolution: FoundryPreviewResolution,
-    ) -> Self {
+    fn from_item(item: &FoundryPreviewRequest, render_context: &PreviewRenderContext<'_>) -> Self {
         Self {
-            document_geometry_fingerprint: document_geometry_fingerprint.into(),
-            sampled_control_state,
-            provider_choices,
-            camera: FoundryPreviewCameraKey::from_camera(camera),
-            render_settings: FoundryPreviewRenderSettingsKey::from_settings(render_settings),
-            resolution,
+            document_geometry_fingerprint: item.document_geometry_fingerprint.clone(),
+            sampled_control_state: item.sampled_control_state.clone(),
+            provider_choices: item.provider_choices.clone(),
+            camera: FoundryPreviewCameraKey::from_camera(render_context.camera),
+            render_settings: FoundryPreviewRenderSettingsKey::from_settings(
+                render_context.render_settings,
+            ),
+            resolution: render_context.resolution,
+            display_mode: item.display_mode,
+            semantic_clay_assignments: item
+                .semantic_clay_assignments
+                .iter()
+                .map(FoundrySemanticClayAssignmentKey::from_assignment)
+                .collect(),
+        }
+    }
+}
+
+/// Cache-key-safe Semantic Clay assignment.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FoundrySemanticClayAssignmentKey {
+    /// Family role or semantic part-group ID.
+    pub role_or_part_group: String,
+    /// Product-safe display label.
+    pub display_label: String,
+    /// Canonical neutral gray bits.
+    pub neutral_gray_value: u32,
+    /// Higher priority wins when assignments overlap.
+    pub priority: u8,
+    /// Whether the assignment applies to generated candidates.
+    pub applies_to_candidates: bool,
+}
+
+impl FoundrySemanticClayAssignmentKey {
+    fn from_assignment(assignment: &SemanticClayRoleAssignment) -> Self {
+        Self {
+            role_or_part_group: assignment.role_or_part_group.clone(),
+            display_label: assignment.display_label.clone(),
+            neutral_gray_value: canonical_f32_bits(assignment.neutral_gray_value.clamp(0.0, 1.0)),
+            priority: assignment.priority,
+            applies_to_candidates: assignment.applies_to_candidates,
         }
     }
 }
@@ -553,6 +588,10 @@ pub struct FoundryPreviewRequest {
     pub provider_choices: BTreeMap<String, String>,
     /// Changed-role overlays to draw above this preview.
     pub changed_role_overlays: Vec<FoundryChangedRoleOverlay>,
+    /// Display mode used for this untextured clay preview.
+    pub display_mode: FoundryPreviewDisplayMode,
+    /// Preview-only neutral gray assignments for Semantic Clay.
+    pub semantic_clay_assignments: Vec<SemanticClayRoleAssignment>,
     /// Product-safe variation metadata for future overlays.
     pub variation_metadata: FoundryPreviewVariationMetadata,
 }
@@ -574,8 +613,16 @@ impl FoundryPreviewRequest {
             sampled_control_state: BTreeMap::new(),
             provider_choices: BTreeMap::new(),
             changed_role_overlays: Vec::new(),
+            display_mode: FoundryPreviewDisplayMode::PureClay,
+            semantic_clay_assignments: Vec::new(),
             variation_metadata: FoundryPreviewVariationMetadata::default(),
         }
+    }
+
+    /// Default to Semantic Clay when assignments exist, otherwise Pure Clay.
+    pub fn use_novice_default_display_mode(&mut self) {
+        self.display_mode =
+            FoundryPreviewDisplayMode::novice_default(&self.semantic_clay_assignments);
     }
 }
 
@@ -784,14 +831,7 @@ impl FoundryPreviewCache {
         let mut previews = vec![None; request.items.len()];
         let mut render_jobs_by_key = BTreeMap::<FoundryPreviewCacheKey, RenderJob>::new();
         for (index, item) in request.items.iter().enumerate() {
-            let key = FoundryPreviewCacheKey::new(
-                item.document_geometry_fingerprint.clone(),
-                item.sampled_control_state.clone(),
-                item.provider_choices.clone(),
-                &camera,
-                &render_settings,
-                request.resolution,
-            );
+            let key = FoundryPreviewCacheKey::from_item(item, &render_context);
             if let Some(job) = render_jobs_by_key.get_mut(&key) {
                 job.indices.push(index);
                 self.coalesced_misses = self.coalesced_misses.saturating_add(1);
@@ -814,6 +854,8 @@ impl FoundryPreviewCache {
                         preview_id: item.preview_id.clone(),
                         key,
                         mesh: item.mesh.clone(),
+                        display_mode: item.display_mode,
+                        semantic_clay_assignments: item.semantic_clay_assignments.clone(),
                     },
                 );
             }
@@ -944,6 +986,8 @@ struct RenderJob {
     preview_id: String,
     key: FoundryPreviewCacheKey,
     mesh: TriangleMesh,
+    display_mode: FoundryPreviewDisplayMode,
+    semantic_clay_assignments: Vec<SemanticClayRoleAssignment>,
 }
 
 #[derive(Debug)]
@@ -978,13 +1022,19 @@ fn render_missing_jobs(
 
             let mut rendered = Vec::with_capacity(handles.len());
             for (job, handle) in chunk.iter().zip(handles) {
-                let image = handle
+                let mut image = handle
                     .join()
                     .map_err(|_| FoundryPreviewError::RenderWorkerPanicked)?
                     .map_err(|source| FoundryPreviewError::Render {
                         preview_id: job.preview_id.clone(),
                         source,
                     })?;
+                apply_display_mode(
+                    &mut image,
+                    job.display_mode,
+                    &job.semantic_clay_assignments,
+                    render_settings.background,
+                );
                 rendered.push(RenderJobOutput {
                     indices: job.indices.clone(),
                     key: job.key.clone(),
@@ -997,6 +1047,87 @@ fn render_missing_jobs(
     }
     outputs.sort_by_key(|output| output.indices[0]);
     Ok(outputs)
+}
+
+fn apply_display_mode(
+    image: &mut RenderedImage,
+    mode: FoundryPreviewDisplayMode,
+    assignments: &[SemanticClayRoleAssignment],
+    background: [u8; 4],
+) {
+    match mode {
+        FoundryPreviewDisplayMode::PureClay => {
+            apply_gray_bands(image, &[0.68], background);
+        }
+        FoundryPreviewDisplayMode::SemanticClay => {
+            if assignments.is_empty() {
+                apply_gray_bands(image, &[0.68], background);
+            } else {
+                let grays = assignments
+                    .iter()
+                    .map(|assignment| assignment.neutral_gray_value.clamp(0.0, 1.0))
+                    .collect::<Vec<_>>();
+                apply_gray_bands(image, &grays, background);
+            }
+        }
+        FoundryPreviewDisplayMode::DiagnosticPartColor => {
+            apply_diagnostic_bands(image, background);
+        }
+    }
+}
+
+fn apply_gray_bands(image: &mut RenderedImage, grays: &[f32], background: [u8; 4]) {
+    if image.width == 0 || image.height == 0 || grays.is_empty() {
+        return;
+    }
+    let width = image.width as usize;
+    let band_count = grays.len().max(1);
+    for y in 0..image.height as usize {
+        for x in 0..width {
+            let byte_index = (y * width + x) * 4;
+            let Some(pixel) = image.rgba8.get_mut(byte_index..byte_index + 4) else {
+                continue;
+            };
+            if !pixel_is_foreground(pixel, background) {
+                continue;
+            }
+            let band_index = (x * band_count / width).min(band_count - 1);
+            let gray = (grays[band_index].clamp(0.0, 1.0) * 255.0).round() as u8;
+            pixel[0] = gray;
+            pixel[1] = gray;
+            pixel[2] = gray;
+        }
+    }
+}
+
+fn apply_diagnostic_bands(image: &mut RenderedImage, background: [u8; 4]) {
+    const COLORS: [[u8; 3]; 6] = [
+        [240, 64, 64],
+        [64, 200, 80],
+        [64, 128, 240],
+        [240, 200, 64],
+        [200, 64, 240],
+        [64, 220, 220],
+    ];
+    if image.width == 0 || image.height == 0 {
+        return;
+    }
+    let width = image.width as usize;
+    for y in 0..image.height as usize {
+        for x in 0..width {
+            let byte_index = (y * width + x) * 4;
+            let Some(pixel) = image.rgba8.get_mut(byte_index..byte_index + 4) else {
+                continue;
+            };
+            if !pixel_is_foreground(pixel, background) {
+                continue;
+            }
+            let color = COLORS[(x * COLORS.len() / width).min(COLORS.len() - 1)];
+            pixel[0] = color[0];
+            pixel[1] = color[1];
+            pixel[2] = color[2];
+        }
+    }
 }
 
 fn preview_from_image(

@@ -37,6 +37,7 @@ use shape_foundry::{
 };
 
 pub mod authoring;
+pub mod cargo_case;
 pub mod expanded_profiles;
 pub mod kits;
 pub mod moba_hero;
@@ -386,7 +387,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
             has_visual_direction_evidence: true,
             has_readable_control_evidence: true,
             has_human_showcase_review: false,
-            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes or an explicit exception is approved.",
+            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes.",
         },
         CatalogCurationMetadata {
             profile_slug: "sci-fi-crate",
@@ -809,40 +810,6 @@ fn ratio_slot(
     }
 }
 
-fn runtime_ratio_slot(id: &str, label: &str, role: &str, default: f32) -> FamilyParameterSlot {
-    FamilyParameterSlot {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        target_role: Some(role.to_owned()),
-        kind: FamilyParameterKind::Ratio,
-        range: Some(ParameterRange {
-            minimum: 0.0,
-            maximum: 1.0,
-            step: 0.05,
-        }),
-        default_value: Some(FamilyDefaultValue::Scalar(default)),
-        execution_policy: ParameterExecutionPolicy::RuntimeOnly,
-        topology_changing: false,
-    }
-}
-
-fn advisory_ratio_slot(id: &str, label: &str, role: &str, default: f32) -> FamilyParameterSlot {
-    FamilyParameterSlot {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        target_role: Some(role.to_owned()),
-        kind: FamilyParameterKind::Ratio,
-        range: Some(ParameterRange {
-            minimum: 0.0,
-            maximum: 1.0,
-            step: 0.05,
-        }),
-        default_value: Some(FamilyDefaultValue::Scalar(default)),
-        execution_policy: ParameterExecutionPolicy::AdvisoryOnly,
-        topology_changing: false,
-    }
-}
-
 fn count_slot(
     id: &str,
     label: &str,
@@ -1007,60 +974,6 @@ fn continuous_control(
     }
 }
 
-fn runtime_control(id: &str, label: &str, slot: &str, default: f32) -> CustomizerControl {
-    CustomizerControl {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        section: None,
-        primary: false,
-        visible: false,
-        kind: ControlKind::ContinuousAxis { default },
-        bindings: vec![ControlSlotBinding {
-            slot: slot.to_owned(),
-            slot_policy: ParameterExecutionPolicy::RuntimeOnly,
-            response: ResponseCurve::Linear,
-        }],
-        domain: FeasibleControlDomain {
-            continuous_intervals: vec![ClosedInterval {
-                minimum: 0.0,
-                maximum: 1.0,
-            }],
-            discrete_values: Vec::new(),
-            unavailable_options: BTreeMap::new(),
-            certification: DomainCertification::CertifiedContinuous,
-        },
-        topology_behavior: ControlTopologyBehavior::RuntimeOnly,
-        divergence: shape_foundry::ControlDivergence::Synced,
-    }
-}
-
-fn advisory_control(id: &str, label: &str, slot: &str, default: f32) -> CustomizerControl {
-    CustomizerControl {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        section: None,
-        primary: false,
-        visible: false,
-        kind: ControlKind::ContinuousAxis { default },
-        bindings: vec![ControlSlotBinding {
-            slot: slot.to_owned(),
-            slot_policy: ParameterExecutionPolicy::AdvisoryOnly,
-            response: ResponseCurve::Linear,
-        }],
-        domain: FeasibleControlDomain {
-            continuous_intervals: vec![ClosedInterval {
-                minimum: 0.0,
-                maximum: 1.0,
-            }],
-            discrete_values: Vec::new(),
-            unavailable_options: BTreeMap::new(),
-            certification: DomainCertification::CertifiedContinuous,
-        },
-        topology_behavior: ControlTopologyBehavior::TopologyPreserving,
-        divergence: shape_foundry::ControlDivergence::Synced,
-    }
-}
-
 fn integer_control(
     id: &str,
     label: &str,
@@ -1212,28 +1125,6 @@ fn rounded_box_fragment(
             ("geometry.rounded_box.half_extents.y", 0.05, 5.0, 0.05),
             ("geometry.rounded_box.half_extents.z", 0.05, 5.0, 0.05),
             ("geometry.rounded_box.radius", 0.0, 0.5, 0.01),
-        ],
-    )
-}
-
-fn plate_fragment(
-    id: &str,
-    role: &str,
-    size: [f32; 2],
-    thickness: f32,
-    translation: [f32; 3],
-    operations: Vec<ModelingOperationSpec>,
-) -> RecipeFragment {
-    fragment(
-        id,
-        role,
-        GeometrySource::Plate { size, thickness },
-        translation,
-        operations,
-        &[
-            ("geometry.plate.size.x", 0.05, 5.0, 0.05),
-            ("geometry.plate.size.y", 0.05, 5.0, 0.05),
-            ("geometry.plate.thickness", 0.01, 0.5, 0.01),
         ],
     )
 }
@@ -1659,7 +1550,7 @@ mod tests {
         let mut required_document = fixture.document.clone();
         required_document
             .control_state
-            .insert("body_proportions".to_owned(), ControlValue::Scalar(0.9));
+            .insert("overall_proportions".to_owned(), ControlValue::Scalar(0.9));
         let required = shape_foundry::compile_foundry_document(&required_document, &fixture)
             .expect("required change should compile");
         assert_ne!(
@@ -1672,13 +1563,13 @@ mod tests {
     fn effective_family_request_contains_defaulted_slots() {
         let fixture = scifi_crate::fixture_catalog();
         let mut document = fixture.document.clone();
-        document.control_state.remove("body_proportions");
+        document.control_state.remove("overall_proportions");
 
         let output = shape_foundry::compile_foundry_document(&document, &fixture)
             .expect("defaulted required control should compile");
         assert_eq!(
-            output.family_request.parameters.get("body_proportions"),
-            Some(&shape_family_compile::FamilyValue::Scalar(0.45))
+            output.family_request.parameters.get("overall_proportions"),
+            Some(&shape_family_compile::FamilyValue::Scalar(0.52))
         );
     }
 
@@ -1726,7 +1617,7 @@ mod tests {
             LocalOverrideApplicationStatus::Revalidated
         );
         assert_eq!(
-            output.control_divergence.get("body_proportions"),
+            output.control_divergence.get("overall_proportions"),
             Some(&shape_foundry::ControlDivergence::DivergedByOverride)
         );
         assert_eq!(output.local_override_divergence_reports.len(), 1);
@@ -1736,7 +1627,7 @@ mod tests {
                 .iter()
                 .map(|control| control.control_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["body_proportions"]
+            vec!["overall_proportions"]
         );
     }
 }

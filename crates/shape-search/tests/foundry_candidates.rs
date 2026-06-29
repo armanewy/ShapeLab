@@ -286,7 +286,7 @@ fn foundry_focused_vents_zero_candidates_suggest_detail_mode() {
 #[test]
 fn foundry_focused_part_locked_out_suggests_unlock_controls() {
     let mut fixture = scifi_crate::fixture_catalog();
-    for control_id in ["body_proportions", "structural_heft"] {
+    for control_id in ["overall_proportions", "structural_heft"] {
         fixture.document.foundry_locks.push(FoundryLock {
             target: FoundryLockTarget::Control(control_id.to_owned()),
             mode: FoundryLockMode::SearchProtected,
@@ -374,14 +374,15 @@ fn endpoint_visibility_reports_cover_starter_templates() {
     assert_endpoint_controls_clear(
         &crate_report,
         &[
-            "body_proportions",
+            "overall_proportions",
             "structural_heft",
-            "panel_depth",
+            "panel_complexity",
             "vent_density",
             "handle_style",
+            "trim_style",
             "detail_density",
         ],
-        &["edge_softness"],
+        &[],
     );
 
     let bridge = roman_bridge::fixture_catalog();
@@ -503,7 +504,7 @@ fn expanded_builtin_profiles_generate_six_explore_whole_model_directions() {
 fn locks_and_search_protection_are_honored() {
     let mut fixture = scifi_crate::fixture_catalog();
     fixture.document.foundry_locks.push(FoundryLock {
-        target: FoundryLockTarget::Control("body_proportions".to_owned()),
+        target: FoundryLockTarget::Control("overall_proportions".to_owned()),
         mode: FoundryLockMode::SearchProtected,
         reason: Some("test lock".to_owned()),
     });
@@ -523,7 +524,7 @@ fn locks_and_search_protection_are_honored() {
     for candidate in &output.candidates {
         for command in &candidate.edit.commands {
             if let FoundryCommand::SetControl { control_id, .. } = command {
-                assert_ne!(control_id, "body_proportions");
+                assert_ne!(control_id, "overall_proportions");
                 assert_ne!(control_id, "handle_style");
             }
         }
@@ -620,13 +621,18 @@ fn explore_does_not_return_one_control_provider_role_fallback() {
 fn foundry_visually_duplicate_control_plans_collapse_with_whole_asset_fallback() {
     let mut fixture = scifi_crate::fixture_catalog();
     let mut profile = profile(&fixture);
-    let control = profile
+    let mut control = profile
         .controls
-        .iter_mut()
-        .find(|control| control.id == "advisory_weathering")
-        .expect("fixture should have advisory control");
+        .iter()
+        .find(|control| control.id == "overall_proportions")
+        .expect("fixture should have overall proportions control")
+        .clone();
+    control.id = "advisory_weathering".to_owned();
+    control.label = "Advisory Weathering".to_owned();
+    control.bindings.clear();
     control.visible = true;
     control.primary = true;
+    profile.controls.push(control);
     profile.candidate_strategies.push(CandidateStrategy {
         id: "advisory-only".to_owned(),
         label: "Advisory only".to_owned(),
@@ -822,7 +828,7 @@ fn wrong_scope_preference_profile_is_ignored() {
     let base_request = request(41, FoundryCandidateMode::Explore);
     let base = generate_foundry_candidate_plans(&fixture.document, &fixture, &base_request)
         .expect("base candidates should generate");
-    let mut profile = preference_profile_for_fixture(&fixture, &["body_proportions".to_owned()]);
+    let mut profile = preference_profile_for_fixture(&fixture, &["overall_proportions".to_owned()]);
     profile.scope = FoundryPreferenceScope::new("lamp", "lamp-profile");
     let mut scoped_request = base_request;
     scoped_request.preference_profile = Some(profile);

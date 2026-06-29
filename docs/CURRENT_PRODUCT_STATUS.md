@@ -1,18 +1,27 @@
 # Current Product Status
 
-Date: 2026-06-28
+Date: 2026-06-29
 
 ## Verdict
 
-`SCI-FI CRATE MAKE BASELINE DOGFOOD-ACCEPTABLE`
+`SCI-FI CRATE MAKE BASELINE + MATERIAL-LOOK PREVIEW BASELINE PASS; CARGO CASE ARCHITECTURE PROOF PASS`
 
 Product Dogfood Gate v4 passed for the Sci-Fi Industrial Crate baseline only.
 The approved scope is the default novice `Choose -> Make -> ideas -> focus
 parts -> add to pack -> export` flow for Sci-Fi Crate.
 
+The Surface Candidate Integration Gate also passed for the narrow Sci-Fi Crate
+material-look preview baseline. Material looks are preview-only in this build
+and do not affect export payloads or full game-ready status.
+
 This is not a broad Visual Foundry stability claim. Roman Bridge HQ remains
 `PreviewOnly`, Surface remains limited, and larger user-facing UV/Texturing,
 Rigging, motion, and full game-ready UI work remains blocked.
+
+The Cargo Case architecture proof passed for the equipment-case lane only:
+Cargo Case is a reusable clay base family, Clean Utility Case and Sci-Fi
+Industrial Crate are profiles over that same family, and `sci-fi-crate` remains
+the stable compatibility ID. This does not approve a broad archetype library.
 
 ## Current Truth
 
@@ -27,12 +36,36 @@ Rigging, motion, and full game-ready UI work remains blocked.
 - Roman Bridge HQ remains downgraded to `PreviewOnly`.
 - Do not start broader user-facing UV/Texturing/Rigging integration from this
   result.
-- The only allowed next product step is narrow: Sci-Fi Crate visual Surface
-  candidates v0.
+- Sci-Fi Crate Make baseline + Sci-Fi Crate material-look preview baseline pass.
+- Cargo Case architecture proof passes for equipment cases only.
+- Clean Utility Case and Sci-Fi Industrial Crate share the Cargo Case family.
+- `Try material looks` is crate-only, preview-only, and backed by generated
+  surface-candidate evidence. It does not affect export payloads yet.
 - Do not claim broad texturing, rigging, animation, or full game-ready product
   support from the current Visual Foundry UI.
 - Headless/backend-only work may continue if it does not touch product UI and
   does not overclaim product support.
+
+## Current Allowed Product Claims
+
+- Sci-Fi Crate Make baseline passes.
+- Sci-Fi Crate material-look preview baseline passes.
+- Cargo Case is the first proven reusable clay family architecture, scoped to
+  equipment cases.
+- Material looks are preview-only unless a later persistence branch says
+  otherwise.
+- Clean game-ready export is not yet supported.
+- Roman Bridge remains `PreviewOnly`.
+- Broad UV/Texturing/Rigging/Animation UI remains blocked.
+
+## Current Allowed Next Work
+
+- One more Cargo Case profile, if scoped to the proven family and gated with
+  contact sheets/human review.
+- Sci-Fi Crate material persistence/export inclusion, only if explicitly
+  scoped.
+- Stylized Lamp product dogfood pass.
+- Headless backend-only work that does not overclaim.
 
 ## Evidence Interpretation
 
@@ -43,7 +76,10 @@ or every future product surface dogfood-stable.
 | Evidence | Current Interpretation |
 | --- | --- |
 | Product Dogfood Gate v4 | Pass for Sci-Fi Crate baseline only |
+| Surface Candidate Integration Gate v0 | Pass for Sci-Fi Crate material-look preview baseline only |
+| Cargo Case Architecture Integration Gate | Pass for Cargo Case base + Clean Utility + Sci-Fi Industrial profiles only |
 | Full and 540p v4 video | Required visual evidence for the narrow pass |
+| Material-look release video and screenshots | Required visual evidence for the preview-only material pass |
 | Make trace and latency summary | Useful timing evidence; shows latency follow-up remains |
 | Rust tests, clippy, release build | Required engineering gates; not UX proof by themselves |
 | Starter dogfood benchmark | Useful template evidence; not human review |
@@ -60,15 +96,22 @@ No exception is approved.
 
 ## Approved Next Product Step
 
-The next product step may be:
+The next product steps may be:
 
 ```text
-Sci-Fi Crate visual Surface candidates v0
+Make visual polish
+One more Cargo Case profile
+Sci-Fi Crate material persistence/export inclusion
+Stylized Lamp product dogfood pass
+Roman Bridge pass or continued PreviewOnly decision
 ```
 
 That work must stay narrow:
 
 - use the Sci-Fi Crate baseline only;
+- require matching generated surface-candidate evidence and textured previews;
+- keep material looks preview-only unless persistence/export inclusion is
+  explicitly implemented and reviewed;
 - keep material and texture claims visibly caveated;
 - use visual candidate evidence, not broad Surface mode claims;
 - preserve Product Dogfood Gate v4 evidence paths and hashes;

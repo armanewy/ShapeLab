@@ -419,6 +419,43 @@ pub struct FoundryFoundationDraft {
     pub direct_geometry_payload_attempts: Vec<String>,
 }
 
+/// Archetype materializer report schema version.
+pub const ARCHETYPE_DRAFT_MATERIALIZATION_REPORT_SCHEMA_VERSION: u32 = 1;
+/// The only archetype supported by the v0 draft materializer.
+pub const CARGO_CASE_MATERIALIZER_ARCHETYPE_ID: &str = "cargo-case";
+
+/// Deterministic report for one archetype draft materialization run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchetypeDraftMaterializationReport {
+    /// Report schema version.
+    pub schema_version: u32,
+    /// Archetype ID requested.
+    pub archetype_id: String,
+    /// Generated family ID.
+    pub family_id: String,
+    /// Generated style ID.
+    pub style_id: String,
+    /// Drafts are not publishable.
+    pub publish_allowed: bool,
+    /// Drafts are hidden from novice catalog.
+    pub novice_visible: bool,
+    /// Human review is required.
+    pub human_review_required: bool,
+    /// Showcase is not allowed for drafts.
+    pub showcase_allowed: bool,
+    /// Whether direct geometry payloads are present.
+    pub geometry_payload_present: bool,
+    /// Whether raw vertex payloads are present.
+    pub raw_vertex_payload_present: bool,
+    /// Missing taste-bearing provider work that must be authored/reviewed.
+    pub missing_taste_bearing_providers: Vec<String>,
+    /// Validation issue count.
+    pub validation_issue_count: usize,
+    /// Generated files.
+    pub generated_files: Vec<String>,
+}
+
 /// LLM-callable, SDK-free authoring command contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -925,6 +962,378 @@ pub fn foundation_draft_template(
         rejected_command_attempts: Vec::new(),
         direct_geometry_payload_attempts: Vec::new(),
     }
+}
+
+/// Materialize a structured internal draft from a supported archetype.
+pub fn materialize_archetype_foundation_draft(
+    archetype_id: &str,
+    family_id: &str,
+    style_id: &str,
+) -> Result<FoundryFoundationDraft, String> {
+    let normalized_archetype = archetype_id.trim().replace('_', "-").to_ascii_lowercase();
+    if normalized_archetype != CARGO_CASE_MATERIALIZER_ARCHETYPE_ID {
+        return Err(format!(
+            "unsupported archetype '{archetype_id}'; v0 supports cargo-case only"
+        ));
+    }
+    let family_id = normalize_id(family_id);
+    let style_id = normalize_id(style_id);
+    if family_id.is_empty() || style_id.is_empty() {
+        return Err("family-id and style-id must normalize to non-empty IDs".to_owned());
+    }
+    Ok(cargo_case_archetype_draft(&family_id, &style_id))
+}
+
+/// Build a materialization report for an archetype draft.
+#[must_use]
+pub fn archetype_draft_materialization_report(
+    draft: &FoundryFoundationDraft,
+    generated_files: Vec<String>,
+) -> ArchetypeDraftMaterializationReport {
+    let validation = validate_foundation_draft(draft);
+    ArchetypeDraftMaterializationReport {
+        schema_version: ARCHETYPE_DRAFT_MATERIALIZATION_REPORT_SCHEMA_VERSION,
+        archetype_id: CARGO_CASE_MATERIALIZER_ARCHETYPE_ID.to_owned(),
+        family_id: draft.family_blueprint.family_id.clone(),
+        style_id: draft.style_pack.style_id.clone(),
+        publish_allowed: draft.publish_allowed,
+        novice_visible: matches!(
+            draft.catalog_visibility,
+            FoundationCatalogVisibility::NoviceCatalog
+        ),
+        human_review_required: draft.human_review_required,
+        showcase_allowed: false,
+        geometry_payload_present: !draft.direct_geometry_payload_attempts.is_empty(),
+        raw_vertex_payload_present: draft
+            .direct_geometry_payload_attempts
+            .iter()
+            .any(|attempt| attempt.to_ascii_lowercase().contains("vertex")),
+        missing_taste_bearing_providers: vec![
+            "authored Cargo Case provider geometry choices".to_owned(),
+            "contact sheets and human review before any profile promotion".to_owned(),
+        ],
+        validation_issue_count: validation.issues.len(),
+        generated_files,
+    }
+}
+
+fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundationDraft {
+    let required_roles = [
+        "body",
+        "lid",
+        "panel_fields",
+        "edge_trim",
+        "corner_guards",
+        "base_feet_or_skids",
+    ];
+    let optional_roles = [
+        "handles",
+        "latches",
+        "vents",
+        "fasteners",
+        "reinforcement_bands",
+        "utility_rails",
+        "side_grilles",
+        "label_plate_geometry",
+        "hinge_or_closure_detail",
+    ];
+    let roles = required_roles
+        .iter()
+        .map(|role| DraftFamilyRole {
+            role_id: (*role).to_owned(),
+            label: title_from_id(role),
+            required: true,
+            tags: vec!["cargo_case".to_owned(), "required".to_owned()],
+        })
+        .chain(optional_roles.iter().map(|role| DraftFamilyRole {
+            role_id: (*role).to_owned(),
+            label: title_from_id(role),
+            required: false,
+            tags: vec!["cargo_case".to_owned(), "optional".to_owned()],
+        }))
+        .collect::<Vec<_>>();
+    let provider_slots = roles
+        .iter()
+        .map(|role| DraftProviderSlot {
+            slot_id: format!("{}_slot", role.role_id),
+            role_id: role.role_id.clone(),
+            required: role.required,
+            compatibility_tags: vec!["cargo_case".to_owned()],
+        })
+        .collect::<Vec<_>>();
+    let slot_ids = provider_slots
+        .iter()
+        .map(|slot| slot.slot_id.clone())
+        .collect::<Vec<_>>();
+    let provider_pack_id = format!("{family_id}_draft_providers");
+    let quality_profile_id = format!("{family_id}_draft_quality");
+    let matrix_id = format!("{family_id}_draft_compatibility");
+    let draft_id = format!("{family_id}_cargo_case_archetype_draft");
+
+    FoundryFoundationDraft {
+        schema_version: FOUNDRY_FOUNDATION_DRAFT_SCHEMA_VERSION,
+        draft_id: draft_id.clone(),
+        source_kind: FoundationDraftSourceKind::GeneratedFixture,
+        quality_target: FoundationQualityTarget::Draft,
+        catalog_visibility: FoundationCatalogVisibility::InternalOnly,
+        human_review_required: true,
+        publish_allowed: false,
+        category: "cargo-case".to_owned(),
+        family_blueprint: DraftFamilyBlueprint {
+            family_id: family_id.to_owned(),
+            display_name: title_from_id(family_id),
+            roles,
+            required_roles: required_roles
+                .iter()
+                .map(|role| (*role).to_owned())
+                .collect(),
+            optional_roles: optional_roles
+                .iter()
+                .map(|role| (*role).to_owned())
+                .collect(),
+            sockets: vec![
+                DraftSocket {
+                    socket_id: "lid_to_body".to_owned(),
+                    from_role: "lid".to_owned(),
+                    to_role: "body".to_owned(),
+                    compatibility_tags: vec!["attached".to_owned()],
+                    required: true,
+                },
+                DraftSocket {
+                    socket_id: "handles_to_body".to_owned(),
+                    from_role: "handles".to_owned(),
+                    to_role: "body".to_owned(),
+                    compatibility_tags: vec!["attached".to_owned()],
+                    required: false,
+                },
+            ],
+            export_part_names: required_roles
+                .iter()
+                .map(|role| title_from_id(role))
+                .collect(),
+        },
+        provider_taxonomy: DraftProviderTaxonomy {
+            taxonomy_id: format!("{family_id}_cargo_case_provider_taxonomy"),
+            provider_slots,
+            provider_packs: vec![DraftProviderPack {
+                pack_id: provider_pack_id.clone(),
+                label: format!("{} Cargo Case Draft Providers", title_from_id(family_id)),
+                supplied_slots: slot_ids.clone(),
+                compatibility_tags: vec!["cargo_case".to_owned()],
+            }],
+        },
+        style_pack: DraftStylePack {
+            style_id: style_id.to_owned(),
+            display_name: title_from_id(style_id),
+            bevel_language:
+                "Cargo Case drafts reserve bevel/chamfer language for authored providers."
+                    .to_owned(),
+            proportion_language: "Use visible case proportions without changing topology."
+                .to_owned(),
+            detail_density_policy: "Detail density must operate through declared Cargo Case slots."
+                .to_owned(),
+            silhouette_policy: "Preserve a readable equipment-case silhouette in pure clay."
+                .to_owned(),
+            symmetry_policy: "Default to bilateral case symmetry unless reviewed otherwise."
+                .to_owned(),
+            allowed_provider_tags: vec!["cargo_case".to_owned()],
+            forbidden_provider_tags: vec!["raw_mesh_payload".to_owned()],
+            compatibility_style_ids: Vec::new(),
+        },
+        control_profile: DraftControlProfile {
+            profile_id: format!("{family_id}_cargo_case_controls"),
+            maximum_primary_controls: DEFAULT_MAX_PRIMARY_NOVICE_CONTROLS,
+            controls: cargo_case_draft_controls(),
+        },
+        candidate_strategy_pack: DraftCandidateStrategyPack {
+            pack_id: format!("{family_id}_cargo_case_strategies"),
+            strategies: cargo_case_draft_strategies(),
+            diversity_goals: vec![
+                "whole-asset proportions".to_owned(),
+                "panel/trim/vent/handle provider variation".to_owned(),
+                "detail density endpoints".to_owned(),
+            ],
+        },
+        compatibility_matrix: DraftCompatibilityMatrix {
+            matrix_id,
+            rules: vec![DraftCompatibilityRule {
+                style_id: style_id.to_owned(),
+                provider_pack_id,
+                compatible: true,
+                reason: "Cargo Case archetype draft uses matching cargo_case tags.".to_owned(),
+            }],
+        },
+        quality_gate_profile: Some(DraftQualityGateProfile {
+            profile_id: quality_profile_id,
+            validation_required: true,
+            contact_sheet_required: true,
+            package_required: true,
+            human_review_required: true,
+            adversarial_review_required: true,
+            manual_review_gates: vec![
+                "Pure Clay and Semantic Clay contact sheets required before promotion.".to_owned(),
+                "Human/adversarial review required before catalog visibility.".to_owned(),
+            ],
+        }),
+        test_plan: DraftTestPlan {
+            test_plan_id: format!("{family_id}_cargo_case_test_plan"),
+            tests: vec![
+                "Validate generated draft schema.".to_owned(),
+                "Confirm publish_allowed false and novice_visible false.".to_owned(),
+                "Reject raw geometry or vertex payloads.".to_owned(),
+                "Generate contact sheets before profile promotion.".to_owned(),
+            ],
+        },
+        review_checklist: DraftReviewChecklist {
+            checklist_id: format!("{family_id}_cargo_case_review"),
+            items: vec![
+                "Confirm all required Cargo Case roles are present.".to_owned(),
+                "Confirm taste-bearing providers are authored, not generated as raw vertices."
+                    .to_owned(),
+                "Confirm no novice catalog visibility before human review.".to_owned(),
+            ],
+        },
+        command_log: Vec::new(),
+        rejected_command_attempts: Vec::new(),
+        direct_geometry_payload_attempts: Vec::new(),
+    }
+}
+
+fn cargo_case_draft_controls() -> Vec<DraftControl> {
+    vec![
+        draft_control(
+            "overall_proportions",
+            "Overall Proportions",
+            &["overall_proportions"],
+            &[],
+            ControlProfileTopologyBehavior::TopologyPreserving,
+        ),
+        draft_control(
+            "structural_heft",
+            "Structural Heft",
+            &["structural_heft"],
+            &[],
+            ControlProfileTopologyBehavior::TopologyPreserving,
+        ),
+        draft_control(
+            "panel_complexity",
+            "Panel Complexity",
+            &[],
+            &["panel_fields_slot"],
+            ControlProfileTopologyBehavior::TopologyChanging,
+        ),
+        draft_control(
+            "handle_style",
+            "Handle Style",
+            &[],
+            &["handles_slot"],
+            ControlProfileTopologyBehavior::TopologyChanging,
+        ),
+        draft_control(
+            "vent_density",
+            "Vent Density",
+            &[],
+            &["vents_slot", "side_grilles_slot"],
+            ControlProfileTopologyBehavior::TopologyChanging,
+        ),
+        draft_control(
+            "trim_style",
+            "Trim Style",
+            &[],
+            &["edge_trim_slot", "corner_guards_slot", "utility_rails_slot"],
+            ControlProfileTopologyBehavior::TopologyChanging,
+        ),
+        draft_control(
+            "detail_density",
+            "Detail Density",
+            &[],
+            &[
+                "fasteners_slot",
+                "latches_slot",
+                "hinge_or_closure_detail_slot",
+            ],
+            ControlProfileTopologyBehavior::TopologyChanging,
+        ),
+    ]
+}
+
+fn draft_control(
+    control_id: &str,
+    label: &str,
+    family_slots: &[&str],
+    provider_slots: &[&str],
+    topology_behavior: ControlProfileTopologyBehavior,
+) -> DraftControl {
+    DraftControl {
+        control_id: control_id.to_owned(),
+        label: label.to_owned(),
+        description: format!("{label} must visibly change the Cargo Case clay preview."),
+        kind: if matches!(
+            topology_behavior,
+            ControlProfileTopologyBehavior::TopologyPreserving
+        ) {
+            ControlProfileControlKind::Continuous
+        } else {
+            ControlProfileControlKind::Choice
+        },
+        primary: true,
+        visible: true,
+        owned_family_slots: family_slots.iter().map(|slot| (*slot).to_owned()).collect(),
+        owned_provider_slots: provider_slots
+            .iter()
+            .map(|slot| (*slot).to_owned())
+            .collect(),
+        topology_behavior,
+        visible_effect_expectation: "Visible in Pure Clay before semantic display assistance."
+            .to_owned(),
+    }
+}
+
+fn cargo_case_draft_strategies() -> Vec<DraftCandidateStrategy> {
+    [
+        (
+            "light",
+            "Light",
+            &["overall_proportions", "structural_heft"][..],
+        ),
+        (
+            "reinforced",
+            "Reinforced",
+            &["structural_heft", "trim_style", "detail_density"][..],
+        ),
+        (
+            "compact",
+            "Compact",
+            &["overall_proportions", "handle_style"][..],
+        ),
+        (
+            "wide",
+            "Wide",
+            &["overall_proportions", "panel_complexity"][..],
+        ),
+        (
+            "minimal",
+            "Minimal",
+            &["panel_complexity", "detail_density"][..],
+        ),
+        (
+            "detailed",
+            "Detailed",
+            &["panel_complexity", "vent_density", "detail_density"][..],
+        ),
+    ]
+    .into_iter()
+    .map(|(id, name, controls)| DraftCandidateStrategy {
+        strategy_id: id.to_owned(),
+        name: name.to_owned(),
+        explanation: format!("{name} Cargo Case draft direction through visible controls."),
+        allowed_controls: controls
+            .iter()
+            .map(|control| (*control).to_owned())
+            .collect(),
+        allowed_provider_changes: Vec::new(),
+    })
+    .collect()
 }
 
 /// Return deterministic internal foundation fixtures.
@@ -2283,6 +2692,98 @@ mod tests {
         let report = materialize_foundation_draft_package(&draft)
             .expect_err("materialization should reject invalid kit package");
         assert!(issue_codes(&report).contains("materialized_style_provider_pair_incompatible"));
+    }
+
+    #[test]
+    fn archetype_materializer_cargo_case_draft_is_internal_only() {
+        for (family_id, style_id) in [
+            ("clean-medical-case", "clean-medical"),
+            ("rugged-field-case", "rugged-field"),
+            ("industrial-storage-case", "industrial-storage"),
+        ] {
+            let draft = materialize_archetype_foundation_draft("cargo-case", family_id, style_id)
+                .expect("cargo case archetype materializes");
+            assert!(validate_foundation_draft(&draft).is_valid());
+            assert!(!draft.publish_allowed);
+            assert_eq!(
+                draft.catalog_visibility,
+                FoundationCatalogVisibility::InternalOnly
+            );
+            assert!(draft.human_review_required);
+            assert!(draft.direct_geometry_payload_attempts.is_empty());
+            assert_eq!(draft.control_profile.controls.len(), 7);
+            assert_eq!(
+                draft.family_blueprint.required_roles,
+                vec![
+                    "body",
+                    "lid",
+                    "panel_fields",
+                    "edge_trim",
+                    "corner_guards",
+                    "base_feet_or_skids",
+                ]
+            );
+        }
+        let draft = materialize_archetype_foundation_draft(
+            "cargo-case",
+            "clean-medical-case",
+            "clean-medical",
+        )
+        .expect("cargo case archetype materializes");
+        assert!(validate_foundation_draft(&draft).is_valid());
+        assert_eq!(draft.family_blueprint.family_id, "clean_medical_case");
+        assert_eq!(draft.style_pack.style_id, "clean_medical");
+    }
+
+    #[test]
+    fn archetype_materializer_rejects_invalid_archetype_and_geometry_payloads() {
+        assert!(
+            materialize_archetype_foundation_draft(
+                "span-structure",
+                "clean-medical-case",
+                "clean-medical",
+            )
+            .is_err()
+        );
+        let mut draft = materialize_archetype_foundation_draft(
+            "cargo-case",
+            "clean-medical-case",
+            "clean-medical",
+        )
+        .expect("cargo case archetype materializes");
+        draft
+            .direct_geometry_payload_attempts
+            .push("raw vertex payload".to_owned());
+        let report = validate_foundation_draft(&draft);
+        assert!(issue_codes(&report).contains("direct_geometry_payload_attempt"));
+    }
+
+    #[test]
+    fn archetype_materializer_report_is_deterministic() {
+        let first = materialize_archetype_foundation_draft(
+            "cargo-case",
+            "rugged-field-case",
+            "rugged-field",
+        )
+        .expect("first draft");
+        let second = materialize_archetype_foundation_draft(
+            "cargo-case",
+            "rugged-field-case",
+            "rugged-field",
+        )
+        .expect("second draft");
+        assert_eq!(first, second);
+        let files = vec![
+            "family-blueprint-draft.json".to_owned(),
+            "materialization-report.json".to_owned(),
+        ];
+        let first_report = archetype_draft_materialization_report(&first, files.clone());
+        let second_report = archetype_draft_materialization_report(&second, files);
+        assert_eq!(first_report, second_report);
+        assert!(!first_report.publish_allowed);
+        assert!(!first_report.novice_visible);
+        assert!(first_report.human_review_required);
+        assert!(!first_report.missing_taste_bearing_providers.is_empty());
     }
 
     #[test]

@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use shape_core::Aabb;
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
@@ -41,6 +43,7 @@ use crate::foundry::{
     panels::{customize, directions, history, pack},
     run_foundry_job,
     state::DEFAULT_PREVIEW_PIXELS,
+    trace::MAKE_JOB_TRACE_DIR,
     ui::{
         copy::WORKFLOW_STEPS,
         theme::apply_visual_foundry_theme,
@@ -66,7 +69,10 @@ pub(crate) struct FoundryDesktopApp {
     selected_home_profile_slug: Option<String>,
     recent_projects: Vec<PathBuf>,
     requested_start_window_mode: bool,
+    make_trace_started_at: Instant,
     make_preparation_started_at: Option<Instant>,
+    make_generation_started_at: Option<Instant>,
+    material_looks: MakeMaterialLookState,
     screenshot_scenario: Option<ScreenshotScenario>,
     screenshot_scenario_step: u8,
 }
@@ -97,6 +103,7 @@ enum ScreenshotScenario {
     NoClearFocusedIdeas,
     PackDrawer,
     ExportDrawer,
+    MaterialLooksDogfood,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +167,8 @@ struct MakeCanvasViewState {
     preparation_phase: MakePreparationPhase,
     preparation_timed_out: bool,
     preparation_fallback_visible: bool,
+    idea_generation_timed_out: bool,
+    idea_generation_fallback_visible: bool,
     preview_updating: bool,
     preview_update_required: bool,
     local_banner_title: String,
@@ -174,9 +183,11 @@ struct MakeCanvasViewState {
     focused_part_label: Option<String>,
     focused_part_visible: bool,
     focused_part_actions_visible: bool,
+    quick_template_preview_visible: bool,
     model_ready: bool,
     preview_ready: bool,
     candidate_tray_visible: bool,
+    material_look_tray_visible: bool,
     candidate_tray_state: MakeCandidateTrayState,
     candidate_count: usize,
     candidate_search_finished_empty: bool,
@@ -189,6 +200,106 @@ struct MakeCanvasViewState {
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MakeMaterialLookState {
+    tray_open: bool,
+    evidence: Option<MakeMaterialLookEvidence>,
+    selected_candidate_id: Option<String>,
+    load_error: Option<String>,
+    evidence_report_path: Option<PathBuf>,
+}
+
+impl MakeMaterialLookState {
+    fn clear_for_asset(&mut self) {
+        self.tray_open = false;
+        self.evidence = None;
+        self.selected_candidate_id = None;
+        self.load_error = None;
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MakeMaterialLookEvidence {
+    candidates: Vec<MakeMaterialLookCandidate>,
+    full_ready_blocker_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct MakeMaterialLookCandidate {
+    candidate_id: String,
+    display_name: String,
+    material_override_ref: String,
+    textured_preview_ref: String,
+    surface_delta_ref: String,
+    validation_ref: String,
+    changed_material_slots: Vec<String>,
+    rgba8: Vec<u8>,
+    width: u32,
+    height: u32,
+    visible_surface_pixel_delta: Option<f32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateEvidenceReportFile {
+    schema_version: u32,
+    profile_id: String,
+    visual_foundry_surface_mode_enabled: bool,
+    candidate_count: usize,
+    all_candidates_valid: bool,
+    full_ready_status: String,
+    full_ready_blocker_codes: Vec<String>,
+    candidates: Vec<SurfaceCandidateEvidenceReportRowFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateEvidenceReportRowFile {
+    candidate_id: String,
+    display_name: String,
+    material_override_ref: String,
+    textured_preview_ref: String,
+    surface_delta_ref: String,
+    validation_ref: String,
+    result_class: String,
+    shape_delta_leak_detected: bool,
+    visible_surface_pixel_delta: Option<f32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateSetFile {
+    schema_version: u32,
+    profile_id: String,
+    candidates: Vec<SurfaceCandidateSetRowFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateSetRowFile {
+    candidate_id: String,
+    display_name: String,
+    changed_material_slots: Vec<String>,
+    material_override_ref: String,
+    textured_preview_ref: String,
+    surface_delta_ref: String,
+    validation_ref: String,
+    frozen_mesh_fingerprint: String,
+    preserves_frozen_geometry: bool,
+    full_ready_status: String,
+    blocked_full_ready: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateValidationFile {
+    valid: bool,
+    blocker_codes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SurfaceCandidateDeltaFile {
+    profile_id: String,
+    candidate_id: String,
+    shape_delta_leak_detected: bool,
+    result_class: String,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -225,8 +336,11 @@ const ASSET_PREPARING_REASON: &str = "The asset is preparing. This usually takes
 const PREVIEW_UPDATING_REASON: &str = "Preview is updating...";
 const ACTIVE_IDEA_JOB_REASON: &str = "Finish the current idea search before changing this.";
 const STALE_RESULT_WARNING: &str = "An older result was ignored because you changed the asset.";
+const CANCELED_IDEA_SEARCH_WARNING: &str = "Canceled earlier idea search.";
 const PREPARATION_TIMEOUT_MESSAGE: &str = "Still preparing. You can keep waiting or retry.";
 const PREPARATION_TIMEOUT: Duration = Duration::from_secs(12);
+const IDEA_GENERATION_TIMEOUT_MESSAGE: &str = "Still trying ideas.";
+const IDEA_GENERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const CUSTOMIZE_PRIMARY_CONTROL_LIMIT: usize = 7;
 const MAKE_CONTEXT_INITIAL_CONTROL_LIMIT: usize = 4;
 const CONTROL_FILMSTRIP_LIMIT: usize = 5;
@@ -234,6 +348,29 @@ const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
+const SCI_FI_CRATE_PROFILE_ID: &str = "sci-fi-crate";
+const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/sci-fi-crate/surface/variants/surface-candidate-report.json";
+const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
+const MATERIAL_LOOK_MISSING_MESSAGE: &str = "Material looks are not generated yet.";
+const MATERIAL_LOOK_SECTION_TITLE: &str = "Material looks";
+const MATERIAL_LOOK_SURFACE_ONLY_COPY: &str = "Surface only";
+const MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY: &str = "Geometry unchanged";
+const MATERIAL_LOOK_PREVIEW_ONLY_COPY: &str =
+    "Material looks are preview-only in this build and will not affect export.";
+const MATERIAL_LOOK_EXPORT_INCLUDED_COPY: &str =
+    "Selected material look included in static surface package.";
+const MATERIAL_LOOK_FULL_READY_BLOCKED_COPY: &str =
+    "Full game-ready remains blocked until manual review and engine import proof.";
+const SURFACE_PACKAGE_COMMAND_COPY: &str = "Run static surface package command";
+const SURFACE_PACKAGE_COMMAND: &str = "cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/surface-candidate-evidence-v0/sci-fi-crate";
+const MATERIAL_LOOK_TITLES: [&str; 6] = [
+    "Clean Lab White",
+    "Worn Hazard Yellow",
+    "Dark Industrial Metal",
+    "Field Blue Utility",
+    "Graphite Cargo",
+    "Orange Warning Trim",
+];
 const ACTION_EXPORT: &str = "Export";
 const ACTION_SAVE: &str = "Save";
 const ACTION_UNDO: &str = "Undo";
@@ -252,9 +389,12 @@ const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
+const ACTION_TRY_MATERIAL_LOOKS: &str = "Try material looks";
 const ACTION_TRY_AGAIN: &str = "Try again";
 const ACTION_CHOOSE_TEMPLATE: &str = "Choose Template";
 const ACTION_CHOOSE_ANOTHER_TEMPLATE: &str = "Choose another template";
+const ACTION_CANCEL: &str = "Cancel";
+const ACTION_KEEP_WAITING: &str = "Keep waiting";
 const ACTION_SWITCH: &str = "Switch";
 const ACTION_BRANCH: &str = "Branch";
 const ACTION_ADD_TO_PACK: &str = "Add to Pack";
@@ -276,7 +416,7 @@ const ACTION_CLEAR_FOCUS: &str = "Clear focus";
 const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
-const RENDERED_ACTION_LABELS: [&str; 42] = [
+const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -295,9 +435,12 @@ const RENDERED_ACTION_LABELS: [&str; 42] = [
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_WHOLE_ASSET_RECOVERY,
     ACTION_TRY_MORE_IDEAS,
+    ACTION_TRY_MATERIAL_LOOKS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
     ACTION_CHOOSE_ANOTHER_TEMPLATE,
+    ACTION_CANCEL,
+    ACTION_KEEP_WAITING,
     ACTION_SWITCH,
     ACTION_BRANCH,
     ACTION_ADD_TO_PACK,
@@ -339,7 +482,10 @@ impl Default for FoundryDesktopApp {
             selected_home_profile_slug,
             recent_projects: Vec::new(),
             requested_start_window_mode: false,
+            make_trace_started_at: Instant::now(),
             make_preparation_started_at: None,
+            make_generation_started_at: None,
+            material_looks: MakeMaterialLookState::default(),
             screenshot_scenario: read_screenshot_scenario(),
             screenshot_scenario_step: 0,
         }
@@ -357,9 +503,11 @@ impl FoundryDesktopApp {
             self.requested_start_window_mode = true;
         }
         apply_visual_foundry_theme(&ctx);
+        self.refresh_make_trace_clock();
         self.poll_jobs(&ctx);
         self.poll_home_thumbnail_jobs(&ctx);
         self.refresh_make_preparation_timer();
+        self.refresh_make_generation_timer();
 
         let tokens = VisualFoundryTokens::dark();
         let colors = tokens.colors;
@@ -693,7 +841,15 @@ impl FoundryDesktopApp {
             })
             .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
-        let generating = self.directions_are_generating();
+        let active_candidate_job = self.state.active_jobs.values().any(|request| {
+            matches!(
+                request,
+                FoundryJobRequest::GenerateCandidates { .. }
+                    | FoundryJobRequest::RenderCandidatePreviews { .. }
+            )
+        });
+        let candidate_previews_pending = candidate_previews_are_pending(&self.state.candidates);
+        let generating = active_candidate_job || candidate_previews_pending;
         let compiling_or_editing = self.state.active_jobs.values().any(|request| {
             matches!(
                 request.slot(),
@@ -707,6 +863,8 @@ impl FoundryDesktopApp {
             .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
         let current_asset_job_active = compiling_or_editing || preview_rendering;
         let model_ready = self.state.current_output.is_some() && !compiling_or_editing;
+        let quick_template_preview_visible =
+            self.state.document.is_some() && self.state.current_output.is_none();
         let preview_image_ready = self
             .state
             .current_preview
@@ -741,6 +899,11 @@ impl FoundryDesktopApp {
                 .make_preparation_started_at
                 .is_some_and(|started| started.elapsed() >= PREPARATION_TIMEOUT);
         let preparation_fallback_visible = preparation_timed_out;
+        let idea_generation_timed_out = generating
+            && self
+                .make_generation_started_at
+                .is_some_and(|started| started.elapsed() >= IDEA_GENERATION_TIMEOUT);
+        let idea_generation_fallback_visible = idea_generation_timed_out;
         let local_warning_message = self.make_canvas_local_warning();
         let local_error_message = self.make_canvas_local_error();
         let candidate_search_finished_empty = self.state.candidate_output.is_some()
@@ -756,12 +919,12 @@ impl FoundryDesktopApp {
             MakeCanvasMode::NoAsset
         } else if preparing {
             MakeCanvasMode::PreparingAsset
+        } else if !self.state.candidates.is_empty() {
+            MakeCanvasMode::ReviewingIdeas
         } else if generating && focused_part_label.is_some() {
             MakeCanvasMode::GeneratingFocusedPartIdeas
         } else if generating {
             MakeCanvasMode::GeneratingWholeAssetIdeas
-        } else if !self.state.candidates.is_empty() {
-            MakeCanvasMode::ReviewingIdeas
         } else if focused_part_label.is_some() {
             MakeCanvasMode::FocusedPart
         } else {
@@ -780,15 +943,18 @@ impl FoundryDesktopApp {
                 "Trying ideas from the current {}...",
                 make_busy_asset_noun(&asset_name)
             )),
+            MakeCanvasMode::ReviewingIdeas if candidate_previews_pending => {
+                Some("Rendering previews...".to_owned())
+            }
             _ => None,
         };
         let local_busy_visible = local_busy_label.is_some();
         let candidate_tray_state = if local_error_message.is_some() {
             MakeCandidateTrayState::ErrorWithRecovery
-        } else if generating {
-            MakeCandidateTrayState::GeneratingSkeletons
         } else if !self.state.candidates.is_empty() {
             MakeCandidateTrayState::HasCandidates
+        } else if generating {
+            MakeCandidateTrayState::GeneratingSkeletons
         } else if candidate_search_finished_empty {
             MakeCandidateTrayState::NoCandidatesWithRecovery
         } else {
@@ -803,7 +969,9 @@ impl FoundryDesktopApp {
                 asset_name: &asset_name,
                 preparation_phase,
                 preparation_timed_out,
+                idea_generation_timed_out,
                 preview_updating,
+                candidate_previews_pending,
                 local_busy_label: &local_busy_label,
                 active_group: active_group.as_ref(),
                 candidate_output: self.state.candidate_output.as_deref(),
@@ -863,6 +1031,7 @@ impl FoundryDesktopApp {
             }
         });
         let candidate_tray_visible = self.state.document.is_some();
+        let material_look_tray_visible = self.material_looks.tray_open;
         let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
         let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
             preview_ready
@@ -880,6 +1049,8 @@ impl FoundryDesktopApp {
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
+        } else if idea_generation_fallback_visible {
+            next_action_hint = IDEA_GENERATION_TIMEOUT_MESSAGE.to_owned();
         } else if preview_update_required {
             next_action_hint = "Update preview to keep making changes.".to_owned();
         }
@@ -890,6 +1061,8 @@ impl FoundryDesktopApp {
             preparation_phase,
             preparation_timed_out,
             preparation_fallback_visible,
+            idea_generation_timed_out,
+            idea_generation_fallback_visible,
             preview_updating,
             preview_update_required,
             local_banner_title,
@@ -904,9 +1077,11 @@ impl FoundryDesktopApp {
             focused_part_label,
             focused_part_visible,
             focused_part_actions_visible,
+            quick_template_preview_visible,
             model_ready,
             preview_ready,
             candidate_tray_visible,
+            material_look_tray_visible,
             candidate_tray_state,
             candidate_count: self.state.candidates.len(),
             candidate_search_finished_empty,
@@ -926,6 +1101,8 @@ impl FoundryDesktopApp {
         let status = self.state.status.as_deref()?;
         if status.starts_with("Ignored a background result") {
             Some(STALE_RESULT_WARNING.to_owned())
+        } else if status == CANCELED_IDEA_SEARCH_WARNING {
+            Some(CANCELED_IDEA_SEARCH_WARNING.to_owned())
         } else {
             None
         }
@@ -998,6 +1175,30 @@ impl FoundryDesktopApp {
         }
     }
 
+    fn refresh_make_generation_timer(&mut self) {
+        if self.directions_are_generating() {
+            self.make_generation_started_at
+                .get_or_insert_with(Instant::now);
+        } else {
+            self.make_generation_started_at = None;
+        }
+    }
+
+    fn refresh_make_trace_clock(&mut self) {
+        let elapsed_ms = self.make_trace_started_at.elapsed().as_millis();
+        let elapsed_ms = elapsed_ms.min(u128::from(u64::MAX)) as u64;
+        self.state.set_make_trace_elapsed_ms(elapsed_ms);
+    }
+
+    fn persist_make_job_trace_outputs(&mut self) {
+        if let Err(error) = self
+            .state
+            .write_make_job_trace_outputs(Path::new(MAKE_JOB_TRACE_DIR))
+        {
+            self.state.status = Some(format!("Could not write Make job trace: {error}"));
+        }
+    }
+
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
         if self.state.document.is_none() {
             ("Choose a template to start", StatusTone::Neutral)
@@ -1055,6 +1256,109 @@ impl FoundryDesktopApp {
                     | FoundryJobRequest::RenderCandidatePreviews { .. }
             )
         }) || candidate_previews_are_pending(&self.state.candidates)
+    }
+
+    fn active_profile_is_scifi_crate(&self) -> bool {
+        self.state.document.as_ref().is_some_and(|document| {
+            document
+                .customizer_profile_ref
+                .stable_id
+                .contains(SCI_FI_CRATE_PROFILE_ID)
+                || document
+                    .family_content_ref
+                    .stable_id
+                    .contains(SCI_FI_CRATE_PROFILE_ID)
+                || document.document_id.0.contains(SCI_FI_CRATE_PROFILE_ID)
+        })
+    }
+
+    fn material_look_action_visible(&self, view_state: &MakeCanvasViewState) -> bool {
+        self.active_profile_is_scifi_crate() && view_state.model_ready && view_state.preview_ready
+    }
+
+    fn material_look_report_path(&self) -> PathBuf {
+        self.material_looks
+            .evidence_report_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(SURFACE_CANDIDATE_REPORT_RELATIVE_PATH))
+    }
+
+    fn current_artifact_fingerprint_hex(&self) -> Option<String> {
+        self.state
+            .current_build
+            .as_ref()
+            .map(|build| build.artifact_fingerprint.0.to_hex())
+    }
+
+    fn open_material_looks_panel(&mut self) {
+        self.material_looks.tray_open = true;
+        self.material_looks.load_error = None;
+
+        if !self.active_profile_is_scifi_crate() {
+            self.material_looks.load_error =
+                Some("Material looks are available for Sci-Fi Crate only.".to_owned());
+            self.material_looks.evidence = None;
+            self.material_looks.selected_candidate_id = None;
+            return;
+        }
+
+        let Some(current_fingerprint) = self.current_artifact_fingerprint_hex() else {
+            self.material_looks.load_error =
+                Some("Prepare the Sci-Fi Crate before trying material looks.".to_owned());
+            self.material_looks.evidence = None;
+            self.material_looks.selected_candidate_id = None;
+            return;
+        };
+
+        let report_path = self.material_look_report_path();
+        match load_material_look_evidence(&report_path, Some(current_fingerprint.as_str())) {
+            Ok(evidence) => {
+                if self
+                    .material_looks
+                    .selected_candidate_id
+                    .as_ref()
+                    .is_none_or(|selected| {
+                        !evidence
+                            .candidates
+                            .iter()
+                            .any(|candidate| &candidate.candidate_id == selected)
+                    })
+                {
+                    self.material_looks.selected_candidate_id = evidence
+                        .candidates
+                        .first()
+                        .map(|candidate| candidate.candidate_id.clone());
+                }
+                self.material_looks.evidence = Some(evidence);
+            }
+            Err(error) => {
+                self.material_looks.load_error = Some(error);
+                self.material_looks.evidence = None;
+                self.material_looks.selected_candidate_id = None;
+            }
+        }
+    }
+
+    fn selected_material_look(&self) -> Option<&MakeMaterialLookCandidate> {
+        let evidence = self.material_looks.evidence.as_ref()?;
+        let selected_id = self.material_looks.selected_candidate_id.as_deref();
+        selected_id
+            .and_then(|id| {
+                evidence
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.candidate_id == id)
+            })
+            .or_else(|| evidence.candidates.first())
+    }
+
+    fn material_look_export_copy(&self) -> Option<(&'static str, &'static str)> {
+        self.selected_material_look().map(|_| {
+            (
+                MATERIAL_LOOK_PREVIEW_ONLY_COPY,
+                MATERIAL_LOOK_FULL_READY_BLOCKED_COPY,
+            )
+        })
     }
 
     fn show_home(&mut self, ui: &mut egui::Ui) {
@@ -1346,6 +1650,15 @@ impl FoundryDesktopApp {
             if action_button(ui, &primary).clicked() {
                 self.push_make_primary_action_commands(&mut commands, view_state);
             }
+            if self.material_look_action_visible(view_state)
+                && action_button(
+                    ui,
+                    &ActionSpec::enabled(ACTION_TRY_MATERIAL_LOOKS, ButtonTone::Secondary),
+                )
+                .clicked()
+            {
+                self.open_material_looks_panel();
+            }
         });
         commands
     }
@@ -1493,6 +1806,15 @@ impl FoundryDesktopApp {
                     {
                         commands.push(command);
                     }
+                    if self.material_look_action_visible(view_state)
+                        && action_button(
+                            ui,
+                            &ActionSpec::enabled(ACTION_TRY_MATERIAL_LOOKS, ButtonTone::Secondary),
+                        )
+                        .clicked()
+                    {
+                        self.open_material_looks_panel();
+                    }
                     if action_button(
                         ui,
                         &action_spec(
@@ -1537,6 +1859,10 @@ impl FoundryDesktopApp {
                 });
                 ui.add_space(10.0);
             }
+            if self.material_looks.tray_open {
+                self.show_material_look_inspector_summary(ui);
+                ui.add_space(10.0);
+            }
             if view_state.mode != MakeCanvasMode::ReviewingIdeas
                 || matches!(
                     view_state.local_banner_tone,
@@ -1563,6 +1889,24 @@ impl FoundryDesktopApp {
                     && let Some(command) = self.make_primary_candidate_command()
                 {
                     commands.push(command);
+                }
+                if view_state.idea_generation_fallback_visible {
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_CANCEL, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                    {
+                        commands.push(FoundryAppCommand::CancelIdeaGeneration);
+                    }
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_KEEP_WAITING, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                    {
+                        self.make_generation_started_at = Some(Instant::now());
+                    }
                 }
                 if view_state.preparation_fallback_visible {
                     if action_button(
@@ -1664,6 +2008,320 @@ impl FoundryDesktopApp {
         commands
     }
 
+    fn show_material_look_inspector_summary(&mut self, ui: &mut egui::Ui) {
+        let colors = VisualFoundryTokens::dark().colors;
+        compact_section_header(
+            ui,
+            MATERIAL_LOOK_SURFACE_ONLY_COPY,
+            MATERIAL_LOOK_SECTION_TITLE,
+            MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+        );
+        ui.add_space(6.0);
+
+        if let Some(error) = self.material_looks.load_error.clone() {
+            ui.label(
+                RichText::new(if error == MATERIAL_LOOK_MISSING_MESSAGE {
+                    MATERIAL_LOOK_MISSING_MESSAGE
+                } else {
+                    "Material looks unavailable"
+                })
+                .color(colors.text)
+                .strong(),
+            );
+            ui.label(
+                RichText::new(if error == MATERIAL_LOOK_MISSING_MESSAGE {
+                    SURFACE_PACKAGE_COMMAND_COPY
+                } else {
+                    error.as_str()
+                })
+                .color(colors.text_muted)
+                .small(),
+            );
+            return;
+        }
+
+        let Some(evidence) = self.material_looks.evidence.clone() else {
+            ui.label(
+                RichText::new(MATERIAL_LOOK_MISSING_MESSAGE)
+                    .color(colors.text_muted)
+                    .small(),
+            );
+            return;
+        };
+        if evidence.candidates.is_empty() {
+            ui.label(
+                RichText::new("Material looks unavailable")
+                    .color(colors.text_muted)
+                    .small(),
+            );
+            return;
+        }
+
+        let selected_id = self
+            .material_looks
+            .selected_candidate_id
+            .as_deref()
+            .unwrap_or_else(|| evidence.candidates[0].candidate_id.as_str());
+        let selected_candidate = evidence
+            .candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == selected_id)
+            .unwrap_or(&evidence.candidates[0])
+            .clone();
+        let current_preview = self.state.current_preview.clone();
+        let current_build = self.state.current_build.clone();
+        let texture_cache = &mut self.texture_cache;
+        let preview_edge = (ui.available_width() * 0.18).clamp(54.0, 72.0);
+
+        ui.horizontal_top(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.set_width((ui.available_width() * 0.40).max(120.0));
+                ui.label(
+                    RichText::new("Current Material")
+                        .color(colors.text)
+                        .small()
+                        .strong(),
+                );
+                if let Some(preview) = current_preview.as_ref() {
+                    show_rgba_preview(
+                        ui,
+                        texture_cache,
+                        FoundryPreviewDraw {
+                            preview_id: "material-look-inspector-current",
+                            build: preview.build.as_ref(),
+                            rgba8: &preview.rgba8,
+                            width: preview.width,
+                            height: preview.height,
+                            max_edge: preview_edge,
+                        },
+                    );
+                }
+            });
+            ui.vertical_centered(|ui| {
+                ui.set_width((ui.available_width() * 0.55).max(120.0));
+                ui.label(
+                    RichText::new("Candidate Material")
+                        .color(colors.text)
+                        .small()
+                        .strong(),
+                );
+                let preview_id = format!(
+                    "material-look-inspector-selected-{}",
+                    selected_candidate.candidate_id
+                );
+                show_rgba_preview(
+                    ui,
+                    texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: &preview_id,
+                        build: current_build.as_ref(),
+                        rgba8: &selected_candidate.rgba8,
+                        width: selected_candidate.width,
+                        height: selected_candidate.height,
+                        max_edge: preview_edge,
+                    },
+                );
+            });
+        });
+        ui.label(
+            RichText::new(&selected_candidate.display_name)
+                .color(colors.text)
+                .small()
+                .strong(),
+        );
+        ui.label(
+            RichText::new(MATERIAL_LOOK_PREVIEW_ONLY_COPY)
+                .color(colors.warning)
+                .small(),
+        );
+        ui.add_space(6.0);
+
+        let columns = evidence.candidates.iter().take(3).collect::<Vec<_>>();
+        if !columns.is_empty() {
+            let column_width = ((ui.available_width() - 12.0) / columns.len() as f32).max(84.0);
+            let mut selected = None;
+            ui.horizontal_top(|ui| {
+                for candidate in columns {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(column_width, 132.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            let preview_id =
+                                format!("material-look-inspector-card-{}", candidate.candidate_id);
+                            show_rgba_preview(
+                                ui,
+                                texture_cache,
+                                FoundryPreviewDraw {
+                                    preview_id: &preview_id,
+                                    build: current_build.as_ref(),
+                                    rgba8: &candidate.rgba8,
+                                    width: candidate.width,
+                                    height: candidate.height,
+                                    max_edge: 54.0,
+                                },
+                            );
+                            ui.label(
+                                RichText::new(&candidate.display_name)
+                                    .color(colors.text)
+                                    .small(),
+                            );
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                            {
+                                selected = Some(candidate.candidate_id.clone());
+                            }
+                        },
+                    );
+                }
+            });
+            if let Some(candidate_id) = selected {
+                self.material_looks.selected_candidate_id = Some(candidate_id);
+            }
+        }
+    }
+
+    fn show_material_looks_panel(&mut self, ui: &mut egui::Ui) {
+        compact_section_header(
+            ui,
+            MATERIAL_LOOK_SURFACE_ONLY_COPY,
+            MATERIAL_LOOK_SECTION_TITLE,
+            MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+        );
+        ui.add_space(8.0);
+
+        if let Some(error) = self.material_looks.load_error.clone() {
+            let title = if error == MATERIAL_LOOK_MISSING_MESSAGE {
+                MATERIAL_LOOK_MISSING_MESSAGE
+            } else {
+                "Material looks unavailable"
+            };
+            product_card(ui, false, |ui| {
+                let colors = VisualFoundryTokens::dark().colors;
+                ui.label(RichText::new(title).color(colors.text).strong());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(if error == MATERIAL_LOOK_MISSING_MESSAGE {
+                            "Generate the Sci-Fi Crate surface package before previewing material looks."
+                        } else {
+                            error.as_str()
+                        })
+                        .color(colors.text_muted),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(SURFACE_PACKAGE_COMMAND_COPY)
+                        .color(colors.accent_hover)
+                        .small()
+                        .strong(),
+                );
+                ui.monospace(SURFACE_PACKAGE_COMMAND);
+            });
+            return;
+        }
+
+        let Some(evidence) = self.material_looks.evidence.clone() else {
+            product_compact_empty_state(
+                ui,
+                MATERIAL_LOOK_MISSING_MESSAGE,
+                "Generate the Sci-Fi Crate surface package before previewing material looks.",
+            );
+            return;
+        };
+        if evidence.candidates.is_empty() {
+            product_compact_empty_state(
+                ui,
+                "Material looks unavailable",
+                "The surface package did not include valid material candidates.",
+            );
+            return;
+        }
+
+        let selected_id = self
+            .material_looks
+            .selected_candidate_id
+            .as_deref()
+            .unwrap_or_else(|| evidence.candidates[0].candidate_id.as_str());
+        let selected_candidate = evidence
+            .candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == selected_id)
+            .unwrap_or(&evidence.candidates[0])
+            .clone();
+        if !evidence.full_ready_blocker_codes.is_empty() {
+            ui.label(
+                RichText::new(MATERIAL_LOOK_FULL_READY_BLOCKED_COPY)
+                    .color(VisualFoundryTokens::dark().colors.text_muted)
+                    .small(),
+            );
+            ui.add_space(6.0);
+        }
+        let current_preview = self.state.current_preview.as_ref();
+        let current_build = self.state.current_build.as_ref();
+        let texture_cache = &mut self.texture_cache;
+        let panel_width = ui.available_width();
+        let selected = if panel_width >= 980.0 {
+            let comparison_width = (panel_width * 0.38).clamp(360.0, 580.0);
+            let mut selected = None;
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(comparison_width, ui.available_height().max(280.0)),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        show_material_look_comparison_card(
+                            ui,
+                            texture_cache,
+                            current_preview,
+                            current_build,
+                            &selected_candidate,
+                        );
+                    },
+                );
+                ui.add_space(10.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), ui.available_height().max(280.0)),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        selected = show_material_look_candidate_grid(
+                            ui,
+                            texture_cache,
+                            current_build,
+                            &evidence.candidates,
+                            selected_candidate.candidate_id.as_str(),
+                            true,
+                        );
+                    },
+                );
+            });
+            selected
+        } else {
+            show_material_look_comparison_card(
+                ui,
+                texture_cache,
+                current_preview,
+                current_build,
+                &selected_candidate,
+            );
+            ui.add_space(8.0);
+            show_material_look_candidate_grid(
+                ui,
+                texture_cache,
+                current_build,
+                &evidence.candidates,
+                selected_candidate.candidate_id.as_str(),
+                false,
+            )
+        };
+
+        if let Some(selected) = selected {
+            self.material_looks.selected_candidate_id = Some(selected);
+        }
+    }
+
     fn make_primary_candidate_command(&self) -> Option<FoundryAppCommand> {
         let document = self.state.document.as_ref()?;
         let active_group = self.active_make_part_group();
@@ -1760,6 +2418,10 @@ impl FoundryDesktopApp {
         view_state: &MakeCanvasViewState,
     ) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
+        if self.material_looks.tray_open {
+            self.show_material_looks_panel(ui);
+            ui.add_space(12.0);
+        }
         let generating = matches!(
             view_state.mode,
             MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas
@@ -1805,7 +2467,7 @@ impl FoundryDesktopApp {
             status_banner(
                 ui,
                 StatusBannerSpec {
-                    title: "Older result ignored",
+                    title: make_canvas_warning_title(message),
                     message,
                     tone: BannerTone::Warning,
                 },
@@ -2289,6 +2951,23 @@ impl FoundryDesktopApp {
             ));
             return commands;
         }
+        if let Some((export_copy, full_ready_copy)) = self.material_look_export_copy() {
+            product_card(ui, false, |ui| {
+                let colors = VisualFoundryTokens::dark().colors;
+                ui.label(
+                    RichText::new(MATERIAL_LOOK_SECTION_TITLE)
+                        .color(colors.accent_hover)
+                        .small()
+                        .strong(),
+                );
+                ui.add(egui::Label::new(RichText::new(export_copy).color(colors.warning)).wrap());
+                ui.add(
+                    egui::Label::new(RichText::new(full_ready_copy).color(colors.text_muted))
+                        .wrap(),
+                );
+            });
+            ui.add_space(10.0);
+        }
         let can_export = self.state.current_output.is_some();
         let pack_view = self.state.pack.clone();
         let pack_panel = pack::pack_panel_view(&pack_view);
@@ -2491,6 +3170,7 @@ impl FoundryDesktopApp {
     }
 
     fn show_current_preview_sized(&mut self, ui: &mut egui::Ui, max_edge: f32) {
+        let asset_name = self.current_project_title();
         let preview = self.state.current_preview.as_ref();
         let has_output = self.state.current_output.is_some();
         let rendering_preview = self
@@ -2530,6 +3210,8 @@ impl FoundryDesktopApp {
                     ui.weak("Preview is being prepared.");
                 }
             } else {
+                draw_quick_template_preview(ui, draw_edge, &asset_name);
+                ui.add_space(8.0);
                 ui.weak("Preparing your asset...");
             }
         });
@@ -2565,6 +3247,7 @@ impl FoundryDesktopApp {
     fn apply_commands(&mut self, commands: Vec<FoundryAppCommand>, ctx: &egui::Context) {
         let mut state_changed = false;
         for command in commands {
+            self.refresh_make_trace_clock();
             if matches!(
                 command,
                 FoundryAppCommand::RetryPreparation
@@ -2572,6 +3255,11 @@ impl FoundryDesktopApp {
                     | FoundryAppCommand::RequestPreview { .. }
             ) {
                 self.make_preparation_started_at = Some(Instant::now());
+            }
+            if matches!(command, FoundryAppCommand::RequestCandidates(_)) {
+                self.make_generation_started_at = Some(Instant::now());
+            } else if matches!(command, FoundryAppCommand::CancelIdeaGeneration) {
+                self.make_generation_started_at = None;
             }
             match self.state.handle_command(command) {
                 Ok(effects) => {
@@ -2587,14 +3275,21 @@ impl FoundryDesktopApp {
     }
 
     fn apply_effects(&mut self, effects: Vec<FoundryAppEffect>, ctx: &egui::Context) {
+        let mut trace_changed = false;
         for effect in effects {
             match effect {
-                FoundryAppEffect::StartJob(request) => self.submit_job(*request),
+                FoundryAppEffect::StartJob(request) => {
+                    trace_changed = true;
+                    self.submit_job(*request);
+                }
                 FoundryAppEffect::SaveProject { path, project } => {
                     self.save_project(path, *project);
                 }
                 FoundryAppEffect::LoadProject(path) => self.load_project(path, ctx),
             }
+        }
+        if trace_changed {
+            self.persist_make_job_trace_outputs();
         }
     }
 
@@ -2609,6 +3304,7 @@ impl FoundryDesktopApp {
         }
 
         let mut affected = false;
+        let mut trace_changed = false;
         let mut schedule_preview = false;
         let mut schedule_candidate_previews = None;
 
@@ -2621,6 +3317,7 @@ impl FoundryDesktopApp {
                     break;
                 }
             };
+            self.refresh_make_trace_clock();
             let should_preview = matches!(
                 event,
                 FoundryJobEvent::CompileFinished { .. } | FoundryJobEvent::EditApplied { .. }
@@ -2633,14 +3330,18 @@ impl FoundryDesktopApp {
             };
             if self.state.handle_job_event(event) {
                 affected = true;
+                trace_changed = true;
                 schedule_preview |= should_preview;
                 if let Some(request) = candidate_preview_request {
                     schedule_candidate_previews = Some(request);
                 }
+            } else {
+                trace_changed = true;
             }
         }
 
         if schedule_preview {
+            self.refresh_make_trace_clock();
             let preview_pixels = current_preview_pixels_for_context(ctx);
             match self.state.request_preview(preview_pixels, preview_pixels) {
                 Ok(effects) => self.apply_effects(effects, ctx),
@@ -2648,10 +3349,14 @@ impl FoundryDesktopApp {
             }
         }
         if let Some((request, output)) = schedule_candidate_previews {
+            self.refresh_make_trace_clock();
             match self.state.request_candidate_previews(request, output) {
                 Ok(effects) => self.apply_effects(effects, ctx),
                 Err(error) => self.state.status = Some(error.to_string()),
             }
+        }
+        if trace_changed {
+            self.persist_make_job_trace_outputs();
         }
         if affected {
             self.texture_cache.clear();
@@ -2849,6 +3554,38 @@ impl FoundryDesktopApp {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
+            ScreenshotScenario::MaterialLooksDogfood => {
+                let view_state = self.make_canvas_view_state();
+                if !view_state.model_ready || !view_state.preview_ready {
+                    ctx.request_repaint_after(Duration::from_millis(33));
+                    return commands;
+                }
+                if self.material_looks.evidence.is_none()
+                    && self.material_looks.load_error.is_none()
+                {
+                    self.open_material_looks_panel();
+                    self.drawer = None;
+                    self.screenshot_scenario_step = 2;
+                    ctx.request_repaint_after(Duration::from_millis(900));
+                    return commands;
+                }
+                if let Some(evidence) = self.material_looks.evidence.as_ref()
+                    && self.screenshot_scenario_step < 5
+                {
+                    let index = (self.screenshot_scenario_step.saturating_sub(2) as usize)
+                        .min(evidence.candidates.len().saturating_sub(1));
+                    self.material_looks.selected_candidate_id = evidence
+                        .candidates
+                        .get(index)
+                        .map(|candidate| candidate.candidate_id.clone());
+                    self.drawer = None;
+                    self.screenshot_scenario_step += 1;
+                    ctx.request_repaint_after(Duration::from_millis(900));
+                    return commands;
+                }
+                self.drawer = Some(FoundryDrawer::Export);
+                self.complete_screenshot_scenario(scenario);
+            }
         }
         if self.screenshot_scenario_step != u8::MAX {
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -2920,13 +3657,17 @@ impl FoundryDesktopApp {
         match FoundryProjectFile::load(&path) {
             Ok(project_file) => match self.state.replace_loaded_project(project_file) {
                 Ok(effects) => {
+                    self.make_trace_started_at = Instant::now();
+                    self.state.set_make_trace_elapsed_ms(0);
                     self.jobs.reset();
                     self.texture_cache.clear();
+                    self.material_looks.clear_for_asset();
                     self.state.status = Some(format!("Loaded {}", path.display()));
                     self.tab = FoundryTab::Make;
                     self.drawer = None;
                     self.remember_recent_project(path.clone());
                     self.make_preparation_started_at = Some(Instant::now());
+                    self.make_generation_started_at = None;
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -2936,8 +3677,11 @@ impl FoundryDesktopApp {
     }
 
     fn load_fixture(&mut self, fixture: FoundryFixtureCatalog, ctx: &egui::Context) {
+        self.make_trace_started_at = Instant::now();
+        self.make_generation_started_at = None;
         self.jobs.reset();
         self.texture_cache.clear();
+        self.material_looks.clear_for_asset();
         match FoundryAppState::new(fixture.document) {
             Ok(mut state) => match state.request_build() {
                 Ok(effects) => {
@@ -2946,6 +3690,7 @@ impl FoundryDesktopApp {
                     self.tab = FoundryTab::Make;
                     self.drawer = None;
                     self.make_preparation_started_at = Some(Instant::now());
+                    self.make_generation_started_at = None;
                     self.apply_effects(effects, ctx);
                 }
                 Err(error) => self.state.status = Some(error.to_string()),
@@ -3510,22 +4255,34 @@ fn make_canvas_layout(available: egui::Vec2, view_state: &MakeCanvasViewState) -
     let available_width = available.x.max(1.0);
     let available_height = available.y.max(1.0);
     let stacked_columns = available_width < 900.0;
-    let inline_ideas =
-        make_canvas_uses_inline_ideas(view_state) && !stacked_columns && available_width >= 1240.0;
+    let inline_ideas = make_canvas_uses_inline_ideas(view_state)
+        && !view_state.material_look_tray_visible
+        && !stacked_columns
+        && available_width >= 1240.0;
     let content_gap = if available_width >= 1280.0 {
         14.0
     } else {
         10.0
     };
     let compact_ideas = make_canvas_uses_compact_ideas(view_state);
-    let requested_tray_height = if inline_ideas || !view_state.candidate_tray_visible {
+    let requested_tray_height = if inline_ideas
+        || (!view_state.candidate_tray_visible && !view_state.material_look_tray_visible)
+    {
         0.0
+    } else if view_state.material_look_tray_visible {
+        (available_height * 0.52).clamp(330.0, 440.0)
     } else if compact_ideas {
         (available_height * 0.13).clamp(88.0, 128.0)
     } else {
         (available_height * 0.38).clamp(240.0, 420.0)
     };
-    let min_top_height = if stacked_columns { 520.0 } else { 390.0 };
+    let min_top_height = if view_state.material_look_tray_visible {
+        if stacked_columns { 360.0 } else { 320.0 }
+    } else if stacked_columns {
+        520.0
+    } else {
+        390.0
+    };
     let max_tray_height = (available_height - min_top_height - content_gap).max(0.0);
     let tray_height = requested_tray_height.min(max_tray_height);
     let tray_gap = if tray_height > 0.0 { content_gap } else { 0.0 };
@@ -3683,6 +4440,7 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "no_clear_focused_ideas" => Some(ScreenshotScenario::NoClearFocusedIdeas),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
+        "material_looks_dogfood" => Some(ScreenshotScenario::MaterialLooksDogfood),
         _ => None,
     }
 }
@@ -3761,6 +4519,11 @@ fn screenshot_scenario_assertion(
             view_state.export_drawer_visible,
             scenario,
             "export_drawer_visible",
+        ),
+        ScreenshotScenario::MaterialLooksDogfood => require_screenshot_state(
+            view_state.export_drawer_visible && view_state.model_ready && view_state.preview_ready,
+            scenario,
+            "material look export drawer visible",
         ),
     }
 }
@@ -4155,6 +4918,16 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Trying ideas",
         "Current asset",
         "Try ideas, then use controls below to tune the current asset.",
+        MATERIAL_LOOK_SECTION_TITLE,
+        MATERIAL_LOOK_SURFACE_ONLY_COPY,
+        MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+        "Current Material",
+        "Candidate Material",
+        MATERIAL_LOOK_PREVIEW_ONLY_COPY,
+        MATERIAL_LOOK_EXPORT_INCLUDED_COPY,
+        MATERIAL_LOOK_FULL_READY_BLOCKED_COPY,
+        MATERIAL_LOOK_MISSING_MESSAGE,
+        SURFACE_PACKAGE_COMMAND_COPY,
         "Pick a template or open a project before making changes.",
         "Preview could not be rendered for this idea.",
         "Preview this idea before using it.",
@@ -4233,6 +5006,7 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_RECOVERY, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_MORE_IDEAS, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_TRY_MATERIAL_LOOKS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
@@ -4305,7 +5079,9 @@ struct MakeCanvasBannerContext<'a> {
     asset_name: &'a str,
     preparation_phase: MakePreparationPhase,
     preparation_timed_out: bool,
+    idea_generation_timed_out: bool,
     preview_updating: bool,
+    candidate_previews_pending: bool,
     local_busy_label: &'a Option<String>,
     active_group: Option<&'a directions::DirectionPartGroup>,
     candidate_output: Option<&'a FoundryCandidateOutput>,
@@ -4319,7 +5095,9 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         asset_name,
         preparation_phase,
         preparation_timed_out,
+        idea_generation_timed_out,
         preview_updating,
+        candidate_previews_pending,
         local_busy_label,
         active_group,
         candidate_output,
@@ -4328,7 +5106,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     } = context;
     if let Some(message) = local_warning_message {
         return (
-            "Older result ignored".to_owned(),
+            make_canvas_warning_title(message).to_owned(),
             format!("{message} Try again when you are ready."),
             BannerTone::Warning,
         );
@@ -4363,11 +5141,19 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             };
             (format!("Preparing {asset_name}"), message, BannerTone::Info)
         }
-        MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas => (
-            "Trying ideas".to_owned(),
-            local_busy_label
-                .clone()
-                .unwrap_or_else(|| "Trying ideas from the current asset...".to_owned()),
+        MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas => {
+            let message = if idea_generation_timed_out {
+                IDEA_GENERATION_TIMEOUT_MESSAGE.to_owned()
+            } else {
+                local_busy_label
+                    .clone()
+                    .unwrap_or_else(|| "Trying ideas from the current asset...".to_owned())
+            };
+            ("Trying ideas".to_owned(), message, BannerTone::Info)
+        }
+        MakeCanvasMode::ReviewingIdeas if candidate_previews_pending => (
+            "Rendering previews".to_owned(),
+            "Candidate shells are ready. Use an idea after its preview renders.".to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::ReviewingIdeas => (
@@ -4421,6 +5207,14 @@ fn no_candidates_recovery_copy(
         "No clear ideas survived".to_owned(),
         format!("{reason} Try again or adjust the current asset."),
     )
+}
+
+fn make_canvas_warning_title(message: &str) -> &'static str {
+    if message == CANCELED_IDEA_SEARCH_WARNING {
+        "Idea search canceled"
+    } else {
+        "Older result ignored"
+    }
 }
 
 fn no_candidates_reason_copy(candidate_output: Option<&FoundryCandidateOutput>) -> &'static str {
@@ -5230,6 +6024,421 @@ fn start_template_button(ui: &mut egui::Ui) -> egui::Response {
         .inner
 }
 
+fn load_material_look_evidence(
+    report_path: &Path,
+    current_artifact_fingerprint: Option<&str>,
+) -> Result<MakeMaterialLookEvidence, String> {
+    if !report_path.is_file() {
+        return Err(MATERIAL_LOOK_MISSING_MESSAGE.to_owned());
+    }
+    let variants_dir = report_path
+        .parent()
+        .ok_or_else(|| "Material look report path is invalid.".to_owned())?;
+    let package_root = package_root_for_surface_candidate_report(report_path)
+        .ok_or_else(|| "Material look package path is invalid.".to_owned())?;
+    let report: SurfaceCandidateEvidenceReportFile = read_json_file(report_path)?;
+    if report.schema_version != 1 {
+        return Err("Material look report schema is not supported.".to_owned());
+    }
+    if report.profile_id != SCI_FI_CRATE_PROFILE_ID {
+        return Err("Material looks are available for Sci-Fi Crate only.".to_owned());
+    }
+    if report.visual_foundry_surface_mode_enabled {
+        return Err("Material look report overclaims Surface mode readiness.".to_owned());
+    }
+    if !report.all_candidates_valid || report.candidate_count != MATERIAL_LOOK_TITLES.len() {
+        return Err("Material look report does not contain six valid candidates.".to_owned());
+    }
+    if report.full_ready_status != "blocked" {
+        return Err("Material look package must keep full game-ready status blocked.".to_owned());
+    }
+    if !full_ready_blockers_are_honest(&report.full_ready_blocker_codes) {
+        return Err("Material look package is missing required game-ready blockers.".to_owned());
+    }
+
+    let candidate_set: SurfaceCandidateSetFile =
+        read_json_file(&variants_dir.join(SURFACE_CANDIDATE_SET_FILE))?;
+    if candidate_set.schema_version == 0 || candidate_set.profile_id != SCI_FI_CRATE_PROFILE_ID {
+        return Err("Material look candidate set is not for Sci-Fi Crate.".to_owned());
+    }
+    let candidate_rows = candidate_set
+        .candidates
+        .into_iter()
+        .map(|candidate| (candidate.candidate_id.clone(), candidate))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut candidates = Vec::with_capacity(report.candidates.len());
+    for (index, row) in report.candidates.iter().enumerate() {
+        let Some(expected_title) = MATERIAL_LOOK_TITLES.get(index) else {
+            return Err("Material look report contains unexpected candidates.".to_owned());
+        };
+        if row.display_name != *expected_title {
+            return Err("Material look candidate titles do not match the approved set.".to_owned());
+        }
+        if row.shape_delta_leak_detected {
+            return Err("Material look evidence detected a shape change.".to_owned());
+        }
+        if row.result_class == "unsupported" || row.result_class == "duplicate_looking" {
+            return Err("Material look evidence is not visually usable.".to_owned());
+        }
+        let set_row = candidate_rows.get(&row.candidate_id).ok_or_else(|| {
+            format!(
+                "Material look candidate {} is missing from the candidate set.",
+                row.display_name
+            )
+        })?;
+        validate_matching_candidate_refs(row, set_row)?;
+        if !package_root.join(&row.material_override_ref).is_file() {
+            return Err("Material look material override evidence is missing.".to_owned());
+        }
+        if !set_row.preserves_frozen_geometry {
+            return Err("Material look candidate does not preserve frozen geometry.".to_owned());
+        }
+        if set_row.full_ready_status != "blocked" || !set_row.blocked_full_ready {
+            return Err(
+                "Material look candidate must remain blocked from full game-ready.".to_owned(),
+            );
+        }
+        if let Some(fingerprint) = current_artifact_fingerprint
+            && set_row.frozen_mesh_fingerprint != fingerprint
+        {
+            return Err("Material looks do not match this crate build.".to_owned());
+        }
+
+        let validation_path = package_root.join(&row.validation_ref);
+        let validation: SurfaceCandidateValidationFile = read_json_file(&validation_path)?;
+        if !validation.valid || !validation.blocker_codes.is_empty() {
+            return Err("Material look candidate validation did not pass.".to_owned());
+        }
+        let delta_path = package_root.join(&row.surface_delta_ref);
+        let delta: SurfaceCandidateDeltaFile = read_json_file(&delta_path)?;
+        if delta.profile_id != SCI_FI_CRATE_PROFILE_ID
+            || delta.candidate_id != row.candidate_id
+            || delta.shape_delta_leak_detected
+            || delta.result_class == "unsupported"
+        {
+            return Err("Material look surface delta is not material-only.".to_owned());
+        }
+
+        let preview_path = package_root.join(&row.textured_preview_ref);
+        let preview_bytes = fs::read(&preview_path).map_err(|error| {
+            format!(
+                "Material look textured preview is missing: {} ({error})",
+                preview_path.display()
+            )
+        })?;
+        let preview = image::load_from_memory(&preview_bytes)
+            .map_err(|error| format!("Material look textured preview could not load: {error}"))?
+            .to_rgba8();
+        let width = preview.width();
+        let height = preview.height();
+        if width == 0 || height == 0 {
+            return Err("Material look textured preview is empty.".to_owned());
+        }
+
+        candidates.push(MakeMaterialLookCandidate {
+            candidate_id: row.candidate_id.clone(),
+            display_name: row.display_name.clone(),
+            material_override_ref: row.material_override_ref.clone(),
+            textured_preview_ref: row.textured_preview_ref.clone(),
+            surface_delta_ref: row.surface_delta_ref.clone(),
+            validation_ref: row.validation_ref.clone(),
+            changed_material_slots: set_row.changed_material_slots.clone(),
+            rgba8: preview.into_raw(),
+            width,
+            height,
+            visible_surface_pixel_delta: row.visible_surface_pixel_delta,
+        });
+    }
+
+    Ok(MakeMaterialLookEvidence {
+        candidates,
+        full_ready_blocker_codes: report.full_ready_blocker_codes,
+    })
+}
+
+fn package_root_for_surface_candidate_report(report_path: &Path) -> Option<PathBuf> {
+    let variants_dir = report_path.parent()?;
+    let surface_dir = variants_dir.parent()?;
+    surface_dir.parent().map(Path::to_path_buf)
+}
+
+fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not parse {}: {error}", path.display()))
+}
+
+fn full_ready_blockers_are_honest(blockers: &[String]) -> bool {
+    [
+        "manual_review_pending",
+        "engine_import_proof_missing",
+        "engine_native_package_not_implemented",
+        "surface_manual_review_required",
+    ]
+    .into_iter()
+    .all(|required| blockers.iter().any(|blocker| blocker == required))
+}
+
+fn validate_matching_candidate_refs(
+    report: &SurfaceCandidateEvidenceReportRowFile,
+    candidate: &SurfaceCandidateSetRowFile,
+) -> Result<(), String> {
+    if report.display_name != candidate.display_name
+        || report.material_override_ref != candidate.material_override_ref
+        || report.textured_preview_ref != candidate.textured_preview_ref
+        || report.surface_delta_ref != candidate.surface_delta_ref
+        || report.validation_ref != candidate.validation_ref
+    {
+        Err("Material look report and candidate set disagree.".to_owned())
+    } else if report.material_override_ref.trim().is_empty()
+        || report.textured_preview_ref.trim().is_empty()
+        || report.surface_delta_ref.trim().is_empty()
+        || report.validation_ref.trim().is_empty()
+    {
+        Err("Material look evidence has missing file references.".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn show_material_look_comparison_card(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_preview: Option<&FoundryPreviewImage>,
+    current_build: Option<&FoundryBuildStamp>,
+    selected_candidate: &MakeMaterialLookCandidate,
+) {
+    product_card(ui, true, |ui| {
+        let colors = VisualFoundryTokens::dark().colors;
+        ui.horizontal_wrapped(|ui| {
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(MATERIAL_LOOK_SURFACE_ONLY_COPY, StatusTone::Ready),
+            );
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY, StatusTone::Ready),
+            );
+        });
+        ui.add_space(6.0);
+        let preview_edge = (ui.available_width() * 0.22).clamp(88.0, 132.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.set_width(preview_edge + 24.0);
+                ui.label(
+                    RichText::new("Current Material")
+                        .color(colors.text)
+                        .strong(),
+                );
+                if let Some(preview) = current_preview {
+                    show_rgba_preview(
+                        ui,
+                        texture_cache,
+                        FoundryPreviewDraw {
+                            preview_id: "material-look-current-comparison",
+                            build: preview.build.as_ref(),
+                            rgba8: &preview.rgba8,
+                            width: preview.width,
+                            height: preview.height,
+                            max_edge: preview_edge,
+                        },
+                    );
+                } else {
+                    ui.label(RichText::new("Preview pending").color(colors.text_muted));
+                }
+            });
+            ui.add_space(10.0);
+            ui.vertical_centered(|ui| {
+                ui.set_width(preview_edge + 24.0);
+                ui.label(
+                    RichText::new("Candidate Material")
+                        .color(colors.text)
+                        .strong(),
+                );
+                let preview_id = format!(
+                    "material-look-selected-comparison-{}",
+                    selected_candidate.candidate_id
+                );
+                show_rgba_preview(
+                    ui,
+                    texture_cache,
+                    FoundryPreviewDraw {
+                        preview_id: &preview_id,
+                        build: current_build,
+                        rgba8: &selected_candidate.rgba8,
+                        width: selected_candidate.width,
+                        height: selected_candidate.height,
+                        max_edge: preview_edge,
+                    },
+                );
+            });
+        });
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(&selected_candidate.display_name)
+                .color(colors.text)
+                .strong(),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(material_look_changed_summary(selected_candidate))
+                    .color(colors.text_muted)
+                    .small(),
+            )
+            .wrap(),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(MATERIAL_LOOK_PREVIEW_ONLY_COPY)
+                .color(colors.warning)
+                .small(),
+        );
+        ui.label(
+            RichText::new(MATERIAL_LOOK_FULL_READY_BLOCKED_COPY)
+                .color(colors.text_muted)
+                .small(),
+        );
+    });
+}
+
+fn show_material_look_candidate_grid(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    candidates: &[MakeMaterialLookCandidate],
+    selected_candidate_id: &str,
+    compact: bool,
+) -> Option<String> {
+    let mut selected = None;
+    let columns = if compact {
+        if ui.available_width() >= 760.0 { 3 } else { 2 }
+    } else if ui.available_width() >= 760.0 {
+        3
+    } else {
+        2
+    };
+    let preview_edge = if compact { 96.0 } else { 156.0 };
+    for row in candidates.chunks(columns) {
+        ui.columns(row.len(), |uis| {
+            for (column, candidate) in uis.iter_mut().zip(row) {
+                let is_selected = candidate.candidate_id == selected_candidate_id;
+                product_card(column, is_selected, |ui| {
+                    let colors = VisualFoundryTokens::dark().colors;
+                    ui.label(
+                        RichText::new(&candidate.display_name)
+                            .color(colors.text)
+                            .strong(),
+                    );
+                    ui.add_space(6.0);
+                    let preview_id = format!("material-look-card-{}", candidate.candidate_id);
+                    show_rgba_preview(
+                        ui,
+                        texture_cache,
+                        FoundryPreviewDraw {
+                            preview_id: &preview_id,
+                            build: current_build,
+                            rgba8: &candidate.rgba8,
+                            width: candidate.width,
+                            height: candidate.height,
+                            max_edge: preview_edge,
+                        },
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let _ = status_pill(
+                            ui,
+                            StatusPillSpec::new(MATERIAL_LOOK_SURFACE_ONLY_COPY, StatusTone::Ready),
+                        );
+                        let _ = status_pill(
+                            ui,
+                            StatusPillSpec::new(
+                                MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+                                StatusTone::Ready,
+                            ),
+                        );
+                    });
+                    if !compact {
+                        ui.add_space(6.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(material_look_changed_summary(candidate))
+                                    .color(colors.text_muted)
+                                    .small(),
+                            )
+                            .wrap(),
+                        );
+                        if let Some(delta) = candidate.visible_surface_pixel_delta {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Visible material difference {:.1}%",
+                                    delta * 100.0
+                                ))
+                                .color(colors.text_subtle)
+                                .small(),
+                            );
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_SELECT, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                    {
+                        selected = Some(candidate.candidate_id.clone());
+                    }
+                });
+            }
+        });
+        ui.add_space(8.0);
+    }
+    selected
+}
+
+fn material_look_changed_summary(candidate: &MakeMaterialLookCandidate) -> String {
+    let labels = candidate
+        .changed_material_slots
+        .iter()
+        .filter_map(|slot| material_look_slot_summary_label(slot))
+        .collect::<BTreeSet<_>>();
+    if labels.is_empty() {
+        "Changes the visible finish while keeping the crate shape fixed.".to_owned()
+    } else {
+        format!(
+            "Changes {} while keeping the crate shape fixed.",
+            human_join(labels.into_iter().collect::<Vec<_>>().as_slice())
+        )
+    }
+}
+
+fn material_look_slot_summary_label(slot: &str) -> Option<&'static str> {
+    match slot {
+        "painted_metal_body" => Some("body finish"),
+        "dark_recesses_and_vents" => Some("recess contrast"),
+        "exposed_edge_trim" => Some("edge trim"),
+        "fasteners_and_mounts" => Some("fasteners"),
+        "handle_grip" => Some("handle finish"),
+        "fallback_hard_surface" => Some("secondary surfaces"),
+        _ => None,
+    }
+}
+
+fn human_join(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        _ => {
+            let mut joined = items[..items.len() - 1].join(", ");
+            joined.push_str(", and ");
+            joined.push_str(items[items.len() - 1]);
+            joined
+        }
+    }
+}
+
 fn show_visible_direction_ideas_board(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -5607,9 +6816,7 @@ fn direction_grid_columns(width: f32) -> usize {
 }
 
 fn compact_direction_grid_columns(width: f32) -> usize {
-    if width >= 1120.0 {
-        3
-    } else if width >= 560.0 {
+    if width >= 560.0 {
         3
     } else if width >= 380.0 {
         2
@@ -6863,6 +8070,85 @@ struct FoundryPreviewDraw<'a> {
     max_edge: f32,
 }
 
+fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, asset_name: &str) {
+    let edge = max_edge.clamp(180.0, 360.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(edge, edge), egui::Sense::hover());
+    let colors = VisualFoundryTokens::dark().colors;
+    let painter = ui.painter();
+    painter.rect_filled(rect, 8.0, colors.panel_elevated);
+    painter.rect_stroke(
+        rect,
+        8.0,
+        egui::Stroke::new(1.0, colors.stroke),
+        egui::StrokeKind::Inside,
+    );
+
+    let center = rect.center();
+    let name = asset_name.to_ascii_lowercase();
+    if name.contains("lamp") {
+        let shade = egui::Rect::from_center_size(
+            center + egui::vec2(0.0, -edge * 0.15),
+            egui::vec2(edge * 0.42, edge * 0.18),
+        );
+        painter.rect_filled(shade, 4.0, colors.accent_soft);
+        painter.line_segment(
+            [
+                center + egui::vec2(0.0, -edge * 0.05),
+                center + egui::vec2(0.0, edge * 0.22),
+            ],
+            egui::Stroke::new(3.0, colors.accent_hover),
+        );
+        painter.circle_filled(
+            center + egui::vec2(0.0, edge * 0.28),
+            edge * 0.12,
+            colors.panel,
+        );
+    } else if name.contains("bridge") {
+        let deck = egui::Rect::from_center_size(
+            center + egui::vec2(0.0, -edge * 0.08),
+            egui::vec2(edge * 0.62, edge * 0.08),
+        );
+        painter.rect_filled(deck, 3.0, colors.accent_soft);
+        for offset in [-0.22, 0.0, 0.22] {
+            let arch = egui::Rect::from_center_size(
+                center + egui::vec2(edge * offset, edge * 0.14),
+                egui::vec2(edge * 0.18, edge * 0.28),
+            );
+            painter.rect_stroke(
+                arch,
+                edge * 0.08,
+                egui::Stroke::new(3.0, colors.accent_hover),
+                egui::StrokeKind::Inside,
+            );
+        }
+    } else {
+        let body = egui::Rect::from_center_size(center, egui::vec2(edge * 0.56, edge * 0.42));
+        painter.rect_filled(body, 6.0, colors.accent_soft);
+        painter.rect_stroke(
+            body,
+            6.0,
+            egui::Stroke::new(2.0, colors.accent_hover),
+            egui::StrokeKind::Inside,
+        );
+        for x in [-0.18, 0.18] {
+            let handle = egui::Rect::from_center_size(
+                center + egui::vec2(edge * x, -edge * 0.28),
+                egui::vec2(edge * 0.16, edge * 0.08),
+            );
+            painter.rect_filled(handle, 3.0, colors.panel);
+        }
+        for x in [-0.20, 0.0, 0.20] {
+            painter.line_segment(
+                [
+                    center + egui::vec2(edge * x, -edge * 0.12),
+                    center + egui::vec2(edge * x, edge * 0.12),
+                ],
+                egui::Stroke::new(1.5, colors.stroke),
+            );
+        }
+    }
+}
+
 fn show_rgba_preview(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
@@ -7049,7 +8335,7 @@ mod tests {
 
         assert_eq!(family_names, sorted_family_names);
         assert!(family_names.contains(&"Bridge"));
-        assert!(family_names.contains(&"Crate"));
+        assert!(family_names.contains(&"Cargo Case"));
         assert!(family_names.contains(&"Lamp"));
         assert!(!family_names.contains(&"Hero Character"));
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
@@ -7248,9 +8534,13 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
-        assert!(current_status.contains("SCI-FI CRATE MAKE BASELINE DOGFOOD-ACCEPTABLE"));
+        assert!(
+            current_status
+                .contains("SCI-FI CRATE MAKE BASELINE + MATERIAL-LOOK PREVIEW BASELINE PASS")
+        );
         assert!(current_status.contains("Product Dogfood Gate v4 passed"));
-        assert!(current_status.contains("Sci-Fi Crate visual Surface candidates v0"));
+        assert!(current_status.contains("Surface Candidate Integration Gate"));
+        assert!(current_status.contains("Cargo Case architecture proof"));
         assert!(current_status.contains("Do not start broader user-facing UV/Texturing/Rigging"));
 
         let dogfood_v4 = include_str!(concat!(
@@ -7289,6 +8579,10 @@ mod tests {
             "/../../docs/CURRENT_PRODUCT_STATUS.md"
         ));
         let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let surface_integration = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+        ));
         let dogfood_v4 = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
@@ -7313,11 +8607,203 @@ mod tests {
             );
         }
 
+        assert!(readme.contains("material-look"));
+        assert!(readme.contains("preview-only"));
+        assert!(current_status.contains("material-look preview baseline passes"));
+        assert!(current_status.contains("Material looks are preview-only"));
+        assert!(surface_integration.contains("PASS - SCI-FI CRATE MAKE BASELINE"));
+        assert!(surface_integration.contains("preview-only"));
         assert!(integration_v2.contains("product-recovery baseline"));
         assert!(integration_v2.to_ascii_lowercase().contains("no-go"));
         assert!(current_status.contains("Roman Bridge HQ is downgraded to `PreviewOnly`"));
         assert!(roman_report.contains("Current catalog recommendation: `PreviewOnly`"));
         assert!(integration_v2.contains("| Roman Timber Bridge HQ | Pass | PreviewOnly |"));
+    }
+
+    #[test]
+    fn promoted_status_docs_keep_preview_only_and_blocked_claims_consistent() {
+        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+        let current_status = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CURRENT_PRODUCT_STATUS.md"
+        ));
+        let surface_integration = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+        ));
+        let surface_dogfood = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
+        ));
+        let visual_surface = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
+        ));
+
+        for doc in [
+            readme,
+            current_status,
+            surface_integration,
+            surface_dogfood,
+            visual_surface,
+        ] {
+            let lower = doc.to_ascii_lowercase();
+            assert!(
+                lower.contains("preview-only") || lower.contains("preview only"),
+                "surface status docs must keep material looks preview-only: {doc}"
+            );
+            assert!(
+                lower.contains("full game-ready")
+                    && (lower.contains("blocked") || lower.contains("not yet supported")),
+                "surface status docs must block full game-ready claims: {doc}"
+            );
+            for forbidden in [
+                "broad uv/texturing support is approved",
+                "broad texturing support is approved",
+                "rigging/skinning/animation ui is approved",
+                "full game-ready status is approved",
+                "roman bridge is default usable",
+            ] {
+                assert!(
+                    !lower.contains(forbidden),
+                    "status docs must not overclaim unsupported work: {forbidden}"
+                );
+            }
+        }
+
+        assert!(current_status.contains("Current Allowed Product Claims"));
+        assert!(current_status.contains("Clean game-ready export is not yet supported"));
+        assert!(current_status.contains("Current Allowed Next Work"));
+        assert!(current_status.contains("Cargo Case architecture proof"));
+        assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
+    }
+
+    #[test]
+    fn cargo_case_strategy_docs_define_anti_abstraction_gate() {
+        let strategy = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CARGO_CASE_FOUNDATION_STRATEGY.md"
+        ));
+        let quality_gate = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CARGO_CASE_CLAY_QUALITY_GATE.md"
+        ));
+
+        assert!(strategy.contains("internal/pro authoring grammar"));
+        assert!(strategy.contains("not a user product"));
+        assert!(strategy.contains("not visible in novice Visual Foundry"));
+        assert!(strategy.contains("Clean Utility Case profile"));
+        assert!(strategy.contains("Sci-Fi Industrial Case profile"));
+        assert!(strategy.contains("same Cargo Case family"));
+        assert!(strategy.contains("Sci-Fi Industrial Crate is Cargo Case family"));
+        assert!(strategy.contains("Direct novice catalog publication from drafts is forbidden"));
+        assert!(strategy.contains("material-look evidence must be marked stale and regenerated"));
+        assert!(strategy.contains("No runtime LLM SDK is required"));
+
+        for role in [
+            "body",
+            "lid",
+            "panel_fields",
+            "edge_trim",
+            "corner_guards",
+            "base_feet_or_skids",
+            "handles",
+            "vents",
+            "label_plate_geometry",
+            "hinge_or_closure_detail",
+        ] {
+            assert!(
+                strategy.contains(role),
+                "Cargo Case strategy must define role {role}"
+            );
+        }
+
+        for control in [
+            "Overall Proportions",
+            "Structural Heft",
+            "Panel Complexity",
+            "Handle Style",
+            "Vent Density",
+            "Trim Style",
+            "Detail Density",
+        ] {
+            assert!(
+                strategy.contains(control),
+                "Cargo Case strategy must define primary control {control}"
+            );
+        }
+
+        assert!(quality_gate.contains("Pure Clay pass/fail must be recorded separately"));
+        assert!(quality_gate.contains("semantic grays are viewport display materials only"));
+        assert!(quality_gate.contains("semantic grays are not UV/texturing/material support"));
+        assert!(quality_gate.contains("at least four visible whole-asset ideas"));
+        assert!(quality_gate.contains("human/adversarial review"));
+
+        for doc in [strategy, quality_gate] {
+            let lower = doc.to_ascii_lowercase();
+            for forbidden in [
+                "uv/texturing/material support is approved",
+                "broad uv/texturing support is approved",
+                "rigging/skinning/animation support is approved",
+                "runtime llm sdk is now required",
+            ] {
+                assert!(
+                    !lower.contains(forbidden),
+                    "Cargo Case docs must not overclaim unsupported work: {forbidden}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn semantic_clay_docs_keep_preview_display_separate_from_material_support() {
+        let docs = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SEMANTIC_CLAY_PREVIEW_MODE.md"
+        ));
+        let lower = docs.to_ascii_lowercase();
+
+        assert!(docs.contains("untextured display shading only"));
+        assert!(docs.contains("Pure Clay remains the strict mesh gate"));
+        assert!(docs.contains("Quality reports must record Pure Clay pass/fail separately"));
+        assert!(docs.contains("DiagnosticPartColor: developer/author diagnostic mode only"));
+        assert!(lower.contains("does not imply uv/texturing support"));
+        assert!(lower.contains("affect export payloads"));
+
+        for forbidden in [
+            "uv/texturing support is approved",
+            "texture files are supported",
+            "material editor is supported",
+            "broad surface mode is approved",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "Semantic Clay docs must not overclaim material or texturing support: {forbidden}"
+            );
+        }
+
+        assert_eq!(
+            shape_foundry::FoundryPreviewDisplayMode::novice_default(&[]),
+            shape_foundry::FoundryPreviewDisplayMode::PureClay
+        );
+        let assignments = vec![shape_foundry::SemanticClayRoleAssignment::new(
+            "body",
+            "Primary Mass",
+            0.72,
+            10,
+            true,
+        )];
+        assert_eq!(
+            shape_foundry::FoundryPreviewDisplayMode::novice_default(&assignments),
+            shape_foundry::FoundryPreviewDisplayMode::SemanticClay
+        );
+        assert!(
+            !shape_foundry::FoundryPreviewDisplayMode::DiagnosticPartColor.default_novice_safe()
+        );
+        let strings = product_visible_strings_for_default_shell().join("\n");
+        assert!(!strings.contains("DiagnosticPartColor"));
+        assert!(!strings.contains("Surface mode"));
+        assert!(!strings.contains("Texturing"));
     }
 
     #[test]
@@ -7328,38 +8814,45 @@ mod tests {
                 include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md")),
             ),
             (
-                "docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
-                )),
-            ),
-            (
-                "docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md"
-                )),
-            ),
-            (
-                "docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
-                )),
-            ),
-            (
-                "docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/STARTER_TEMPLATE_DOGFOOD_BENCHMARK_V2.md"
-                )),
-            ),
-            (
                 "docs/CURRENT_PRODUCT_STATUS.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/../../docs/CURRENT_PRODUCT_STATUS.md"
+                )),
+            ),
+            (
+                "docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+                )),
+            ),
+            (
+                "docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
+                )),
+            ),
+            (
+                "docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
+                )),
+            ),
+            (
+                "docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md"
+                )),
+            ),
+            (
+                "docs/SOURCE_FORMAT_HYGIENE_REPORT.md",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../docs/SOURCE_FORMAT_HYGIENE_REPORT.md"
                 )),
             ),
         ];
@@ -7496,6 +8989,12 @@ mod tests {
         assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL));
         assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION));
         assert!(strings.contains(&STATIC_PROP_FULL_READY_BLOCKED_NOTE));
+        assert!(strings.contains(&ACTION_TRY_MATERIAL_LOOKS));
+        assert!(strings.contains(&MATERIAL_LOOK_SECTION_TITLE));
+        assert!(strings.contains(&MATERIAL_LOOK_SURFACE_ONLY_COPY));
+        assert!(strings.contains(&MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY));
+        assert!(strings.contains(&MATERIAL_LOOK_PREVIEW_ONLY_COPY));
+        assert!(strings.contains(&MATERIAL_LOOK_FULL_READY_BLOCKED_COPY));
 
         let joined = strings.join("\n").to_ascii_lowercase();
         for overclaim in [
@@ -7518,6 +9017,199 @@ mod tests {
             assert!(
                 !joined.contains(overclaim),
                 "export copy should not overclaim {overclaim}: {joined}"
+            );
+        }
+    }
+
+    #[test]
+    fn material_look_evidence_loader_requires_valid_scifi_package() {
+        let root = temp_material_look_package_root("valid-material-looks");
+        let report = write_test_material_look_evidence(
+            &root,
+            TestMaterialLookEvidenceOptions {
+                frozen_mesh_fingerprint: "crate-fingerprint",
+                ..TestMaterialLookEvidenceOptions::default()
+            },
+        );
+
+        let evidence = load_material_look_evidence(&report, Some("crate-fingerprint"))
+            .expect("valid evidence loads");
+
+        assert_eq!(evidence.candidates.len(), MATERIAL_LOOK_TITLES.len());
+        assert!(full_ready_blockers_are_honest(
+            &evidence.full_ready_blocker_codes
+        ));
+        for (candidate, title) in evidence.candidates.iter().zip(MATERIAL_LOOK_TITLES) {
+            assert_eq!(candidate.display_name, title);
+            assert!(
+                candidate
+                    .textured_preview_ref
+                    .ends_with("textured-preview.png")
+            );
+            assert!(
+                candidate
+                    .material_override_ref
+                    .ends_with("material-override.json")
+            );
+            assert!(candidate.surface_delta_ref.ends_with("surface-delta.json"));
+            assert!(candidate.validation_ref.ends_with("validation.json"));
+            assert_eq!(candidate.width, 2);
+            assert_eq!(candidate.height, 2);
+            assert_eq!(candidate.rgba8.len(), 16);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn material_look_evidence_loader_rejects_missing_mismatch_and_shape_delta() {
+        let missing_root = temp_material_look_package_root("missing-material-looks");
+        let missing_report = missing_root.join("surface/variants/surface-candidate-report.json");
+        assert_eq!(
+            load_material_look_evidence(&missing_report, None).expect_err("missing rejects"),
+            MATERIAL_LOOK_MISSING_MESSAGE
+        );
+
+        let mismatch_root = temp_material_look_package_root("mismatch-material-looks");
+        let mismatch_report = write_test_material_look_evidence(
+            &mismatch_root,
+            TestMaterialLookEvidenceOptions {
+                frozen_mesh_fingerprint: "expected-fingerprint",
+                ..TestMaterialLookEvidenceOptions::default()
+            },
+        );
+        assert!(
+            load_material_look_evidence(&mismatch_report, Some("different-fingerprint"))
+                .expect_err("mismatch rejects")
+                .contains("do not match")
+        );
+
+        let leak_root = temp_material_look_package_root("shape-delta-material-looks");
+        let leak_report = write_test_material_look_evidence(
+            &leak_root,
+            TestMaterialLookEvidenceOptions {
+                frozen_mesh_fingerprint: "crate-fingerprint",
+                shape_delta_leak: true,
+                ..TestMaterialLookEvidenceOptions::default()
+            },
+        );
+        assert!(
+            load_material_look_evidence(&leak_report, Some("crate-fingerprint"))
+                .expect_err("shape delta rejects")
+                .contains("shape change")
+        );
+
+        let _ = std::fs::remove_dir_all(missing_root);
+        let _ = std::fs::remove_dir_all(mismatch_root);
+        let _ = std::fs::remove_dir_all(leak_root);
+    }
+
+    #[test]
+    fn material_look_action_is_scifi_only_and_open_uses_recovery_copy() {
+        let ctx = egui::Context::default();
+        let mut crate_app = ready_visible_state_test_app();
+        let visible = crate_app.make_canvas_view_state();
+        assert!(crate_app.material_look_action_visible(&visible));
+
+        let missing_root = temp_material_look_package_root("missing-action-material-looks");
+        crate_app.material_looks.evidence_report_path =
+            Some(missing_root.join("surface/variants/surface-candidate-report.json"));
+        crate_app.open_material_looks_panel();
+        assert!(crate_app.material_looks.tray_open);
+        assert_eq!(
+            crate_app.material_looks.load_error.as_deref(),
+            Some(MATERIAL_LOOK_MISSING_MESSAGE)
+        );
+
+        let mut bridge_app = FoundryDesktopApp::default();
+        bridge_app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
+        assert!(!bridge_app.active_profile_is_scifi_crate());
+
+        let mut lamp_app = FoundryDesktopApp::default();
+        lamp_app.load_fixture(
+            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            &ctx,
+        );
+        assert!(!lamp_app.active_profile_is_scifi_crate());
+
+        let _ = std::fs::remove_dir_all(missing_root);
+    }
+
+    #[test]
+    fn selecting_material_look_is_preview_only_and_preserves_geometry_state() {
+        let mut app = ready_visible_state_test_app();
+        let fingerprint = app
+            .current_artifact_fingerprint_hex()
+            .expect("build fingerprint");
+        let root = temp_material_look_package_root("select-material-looks");
+        let report = write_test_material_look_evidence(
+            &root,
+            TestMaterialLookEvidenceOptions {
+                frozen_mesh_fingerprint: fingerprint.as_str(),
+                ..TestMaterialLookEvidenceOptions::default()
+            },
+        );
+        let before_build = app.state.current_build.clone();
+        let before_controls = app.state.controls.clone();
+
+        app.material_looks.evidence_report_path = Some(report);
+        app.open_material_looks_panel();
+        let second_id = app
+            .material_looks
+            .evidence
+            .as_ref()
+            .expect("evidence")
+            .candidates[1]
+            .candidate_id
+            .clone();
+        app.material_looks.selected_candidate_id = Some(second_id);
+
+        assert_eq!(app.state.current_build, before_build);
+        assert_eq!(app.state.controls, before_controls);
+        assert_eq!(
+            app.material_look_export_copy(),
+            Some((
+                MATERIAL_LOOK_PREVIEW_ONLY_COPY,
+                MATERIAL_LOOK_FULL_READY_BLOCKED_COPY
+            ))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn material_look_copy_avoids_internal_surface_terms_and_overclaims() {
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n").to_ascii_lowercase();
+
+        for required in [
+            ACTION_TRY_MATERIAL_LOOKS,
+            MATERIAL_LOOK_SECTION_TITLE,
+            MATERIAL_LOOK_SURFACE_ONLY_COPY,
+            MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+            "Current Material",
+            "Candidate Material",
+            MATERIAL_LOOK_MISSING_MESSAGE,
+        ] {
+            assert!(
+                strings.contains(&required),
+                "missing material look copy {required}"
+            );
+        }
+
+        for forbidden in [
+            "surfaceartifact",
+            "uv set",
+            "material slot id",
+            "texture file path",
+            "gltf primitive",
+            "rigging",
+            "animation",
+            "game-ready surface",
+        ] {
+            assert!(
+                !joined.contains(forbidden),
+                "material look copy leaked {forbidden}: {joined}"
             );
         }
     }
@@ -7950,6 +9642,13 @@ mod tests {
             )
             .is_ok()
         );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::MaterialLooksDogfood,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -7960,6 +9659,7 @@ mod tests {
 
         assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
         assert!(!visible.primary_action_enabled);
+        assert!(visible.quick_template_preview_visible);
         assert_eq!(
             visible.primary_action_disabled_reason.as_deref(),
             Some(ASSET_PREPARING_REASON)
@@ -8000,6 +9700,7 @@ mod tests {
             visible.preparation_phase,
             MakePreparationPhase::RenderingPreview
         );
+        assert!(!visible.quick_template_preview_visible);
         assert!(visible.preview_update_required);
         assert_eq!(visible.local_banner_message, "Rendering preview");
 
@@ -8095,6 +9796,21 @@ mod tests {
     }
 
     #[test]
+    fn make_canvas_responsive_layout_expands_material_looks_tray() {
+        let mut app = ready_visible_state_test_app();
+        app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
+        app.material_looks.tray_open = true;
+        let visible = app.make_canvas_view_state();
+
+        let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
+
+        assert!(visible.material_look_tray_visible);
+        assert!(!layout.inline_ideas);
+        assert!(layout.tray_height >= 330.0);
+        assert!(layout.top_height >= 320.0);
+    }
+
+    #[test]
     fn make_canvas_responsive_layout_preview_edge_uses_available_viewport_without_overgrowing() {
         assert_eq!(make_stage_preview_edge(1400.0, 900.0), 520.0);
         assert_eq!(make_stage_preview_edge(260.0, 220.0), 180.0);
@@ -8131,11 +9847,19 @@ mod tests {
         let mut pending_card = test_candidate_card("candidate-pending", false, None);
         pending_card.validation_label = "Preview pending".to_owned();
         pending_card.preview_failure = Some("Preview rendering for this direction.".to_owned());
+        pending_card.rgba8.clear();
+        pending_card.width = 0;
+        pending_card.height = 0;
+        pending_card.camera = None;
+        pending_card.selectable = false;
         app.state.candidates = vec![pending_card];
+        let visible = app.make_canvas_view_state();
+        assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
         assert_eq!(
-            app.make_canvas_view_state().candidate_tray_state,
-            MakeCandidateTrayState::GeneratingSkeletons
+            visible.candidate_tray_state,
+            MakeCandidateTrayState::HasCandidates
         );
+        assert_eq!(visible.local_banner_title, "Rendering previews");
 
         app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
         assert_eq!(
@@ -8193,6 +9917,58 @@ mod tests {
     }
 
     #[test]
+    fn compiled_candidate_shells_show_before_all_previews_render() {
+        let mut app = ready_visible_state_test_app();
+        let mut pending_card = test_candidate_card("candidate-pending", true, None);
+        pending_card.validation_label = "Preview pending".to_owned();
+        pending_card.preview_failure = Some("Preview rendering for this direction.".to_owned());
+        pending_card.rgba8.clear();
+        pending_card.width = 0;
+        pending_card.height = 0;
+        pending_card.camera = None;
+        pending_card.selectable = false;
+        app.state.selected_candidate = Some(pending_card.id.clone());
+        app.state.candidates = vec![pending_card];
+
+        let pending_visible = app.make_canvas_view_state();
+
+        assert_eq!(pending_visible.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(
+            pending_visible.candidate_tray_state,
+            MakeCandidateTrayState::HasCandidates
+        );
+        assert_eq!(pending_visible.local_banner_title, "Rendering previews");
+        assert_eq!(
+            pending_visible.local_banner_message,
+            "Candidate shells are ready. Use an idea after its preview renders."
+        );
+        assert!(!pending_visible.selected_comparison_visible);
+        assert!(!pending_visible.primary_action_enabled);
+        assert!(app.accept_visible_candidate_command().is_none());
+
+        let mut pending_card = test_candidate_card("candidate-pending", false, None);
+        pending_card.validation_label = "Preview pending".to_owned();
+        pending_card.preview_failure = Some("Preview rendering for this direction.".to_owned());
+        pending_card.rgba8.clear();
+        pending_card.width = 0;
+        pending_card.height = 0;
+        pending_card.camera = None;
+        pending_card.selectable = false;
+        let ready_card = test_candidate_card("candidate-ready", true, None);
+        app.state.selected_candidate = Some(ready_card.id.clone());
+        app.state.candidates = vec![pending_card, ready_card];
+
+        let mixed_visible = app.make_canvas_view_state();
+
+        assert_eq!(mixed_visible.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(mixed_visible.local_banner_title, "Rendering previews");
+        assert!(mixed_visible.selected_comparison_visible);
+        assert!(!mixed_visible.primary_action_enabled);
+        assert!(make_canvas_candidate_actions_enabled(&mixed_visible));
+        assert!(app.accept_visible_candidate_command().is_some());
+    }
+
+    #[test]
     fn stale_result_warning_is_local_and_recoverable_with_try_again() {
         let mut app = ready_visible_state_test_app();
         app.state.status =
@@ -8242,6 +10018,79 @@ mod tests {
             1
         );
         assert!(!app.make_canvas_view_state().primary_action_enabled);
+    }
+
+    #[test]
+    fn idea_generation_timeout_recovery_actions_are_visible() {
+        let mut app = ready_visible_state_test_app();
+        app.state
+            .request_candidates(FoundryCandidateRequest {
+                seed: 1,
+                proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
+                result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            })
+            .expect("candidate job schedules");
+        app.make_generation_started_at =
+            Some(Instant::now() - IDEA_GENERATION_TIMEOUT - Duration::from_secs(1));
+
+        let visible = app.make_canvas_view_state();
+
+        assert!(visible.idea_generation_timed_out);
+        assert!(visible.idea_generation_fallback_visible);
+        assert_eq!(
+            visible.local_banner_message,
+            IDEA_GENERATION_TIMEOUT_MESSAGE
+        );
+        assert_eq!(visible.next_action_hint, IDEA_GENERATION_TIMEOUT_MESSAGE);
+        let labels = rendered_action_labels_for_default_shell();
+        assert!(labels.contains(&ACTION_CANCEL));
+        assert!(labels.contains(&ACTION_KEEP_WAITING));
+    }
+
+    #[test]
+    fn cancel_idea_generation_cancels_active_job_with_local_warning() {
+        let mut app = ready_visible_state_test_app();
+        let request = FoundryCandidateRequest {
+            seed: 1,
+            proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
+            result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::complete_look(),
+        };
+        let effects = app
+            .state
+            .request_candidates(request)
+            .expect("candidate job schedules");
+        let job_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                FoundryAppEffect::StartJob(job) => Some(job.job_id()),
+                _ => None,
+            })
+            .expect("candidate job id");
+
+        let cancel_effects = app
+            .state
+            .handle_command(FoundryAppCommand::CancelIdeaGeneration)
+            .expect("cancel succeeds");
+        let visible = app.make_canvas_view_state();
+
+        assert!(cancel_effects.is_empty());
+        assert!(!app.state.active_jobs.contains_key(&job_id));
+        assert!(app.state.stale_jobs.contains(&job_id));
+        assert_eq!(app.state.make_job_trace.summary().total_jobs_canceled, 1);
+        assert_eq!(
+            visible.local_warning_message.as_deref(),
+            Some(CANCELED_IDEA_SEARCH_WARNING)
+        );
+        assert_eq!(visible.local_banner_title, "Idea search canceled");
+        assert!(visible.local_banner_message.contains(ACTION_TRY_AGAIN));
     }
 
     #[test]
@@ -8494,7 +10343,10 @@ mod tests {
     fn compact_filmstrip_does_not_hide_remaining_options() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
-        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            &ctx,
+        );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
@@ -8728,7 +10580,7 @@ mod tests {
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if default_customize_controls(&app.state.controls)
-                .any(|control| control.id == "body_proportions")
+                .any(|control| control.id == "overall_proportions")
             {
                 break;
             }
@@ -8738,8 +10590,10 @@ mod tests {
         let default_ids = default_customize_controls(&app.state.controls)
             .map(|control| control.id.as_str())
             .collect::<Vec<_>>();
-        assert!(default_ids.contains(&"body_proportions"));
-        assert!(!default_ids.contains(&"has_trim"));
+        assert!(default_ids.contains(&"overall_proportions"));
+        assert!(default_ids.contains(&"structural_heft"));
+        assert!(default_ids.contains(&"panel_complexity"));
+        assert!(default_ids.contains(&"handle_style"));
         assert!(!default_ids.contains(&"runtime_wear"));
         assert!(!default_ids.contains(&"advisory_weathering"));
         assert!(
@@ -8902,6 +10756,176 @@ mod tests {
             advanced_path: None,
             help: None,
         }
+    }
+
+    #[derive(Clone, Copy)]
+    struct TestMaterialLookEvidenceOptions<'a> {
+        frozen_mesh_fingerprint: &'a str,
+        profile_id: &'a str,
+        shape_delta_leak: bool,
+        missing_preview: bool,
+        full_ready_status: &'a str,
+    }
+
+    impl Default for TestMaterialLookEvidenceOptions<'_> {
+        fn default() -> Self {
+            Self {
+                frozen_mesh_fingerprint: "crate-fingerprint",
+                profile_id: SCI_FI_CRATE_PROFILE_ID,
+                shape_delta_leak: false,
+                missing_preview: false,
+                full_ready_status: "blocked",
+            }
+        }
+    }
+
+    fn write_test_material_look_evidence(
+        root: &Path,
+        options: TestMaterialLookEvidenceOptions<'_>,
+    ) -> PathBuf {
+        let variants_dir = root.join("surface/variants");
+        std::fs::create_dir_all(&variants_dir).expect("variants dir");
+        let candidate_ids = [
+            "clean-lab-white",
+            "worn-hazard-yellow",
+            "dark-industrial-metal",
+            "field-blue-utility",
+            "graphite-cargo",
+            "orange-warning-trim",
+        ];
+        let blockers = [
+            "manual_review_pending",
+            "engine_import_proof_missing",
+            "engine_native_package_not_implemented",
+            "surface_manual_review_required",
+        ];
+        let mut report_rows = Vec::new();
+        let mut candidate_rows = Vec::new();
+        for (index, (candidate_id, display_name)) in
+            candidate_ids.iter().zip(MATERIAL_LOOK_TITLES).enumerate()
+        {
+            let variant_dir = variants_dir.join(candidate_id);
+            std::fs::create_dir_all(&variant_dir).expect("variant dir");
+            let rel_dir = format!("surface/variants/{candidate_id}");
+            let material_override_ref = format!("{rel_dir}/material-override.json");
+            let textured_preview_ref = format!("{rel_dir}/textured-preview.png");
+            let surface_delta_ref = format!("{rel_dir}/surface-delta.json");
+            let validation_ref = format!("{rel_dir}/validation.json");
+            let shape_delta = options.shape_delta_leak && index == 0;
+
+            std::fs::write(
+                root.join(&material_override_ref),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "schema_version": 1,
+                    "profile_id": options.profile_id,
+                    "candidate_id": candidate_id,
+                    "display_name": display_name
+                }))
+                .expect("material override json"),
+            )
+            .expect("material override writes");
+            if !(options.missing_preview && index == 0) {
+                let pixel = image::Rgba([
+                    32_u8.saturating_add((index as u8).saturating_mul(24)),
+                    96,
+                    160,
+                    255,
+                ]);
+                let preview = image::RgbaImage::from_pixel(2, 2, pixel);
+                preview
+                    .save(root.join(&textured_preview_ref))
+                    .expect("preview writes");
+            }
+            std::fs::write(
+                root.join(&surface_delta_ref),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "schema_version": 1,
+                    "profile_id": options.profile_id,
+                    "candidate_id": candidate_id,
+                    "shape_delta_leak_detected": shape_delta,
+                    "result_class": "clear"
+                }))
+                .expect("delta json"),
+            )
+            .expect("delta writes");
+            std::fs::write(
+                root.join(&validation_ref),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "valid": !(shape_delta || options.missing_preview && index == 0),
+                    "blocker_codes": []
+                }))
+                .expect("validation json"),
+            )
+            .expect("validation writes");
+
+            report_rows.push(serde_json::json!({
+                "candidate_id": candidate_id,
+                "display_name": display_name,
+                "material_override_ref": material_override_ref,
+                "textured_preview_ref": textured_preview_ref,
+                "surface_delta_ref": surface_delta_ref,
+                "validation_ref": validation_ref,
+                "result_class": "clear",
+                "shape_delta_leak_detected": shape_delta,
+                "visible_surface_pixel_delta": 0.05
+            }));
+            candidate_rows.push(serde_json::json!({
+                "candidate_id": candidate_id,
+                "display_name": display_name,
+                "changed_material_slots": [
+                    "painted_metal_body",
+                    "dark_recesses_and_vents",
+                    "exposed_edge_trim",
+                    "fasteners_and_mounts",
+                    "handle_grip",
+                    "fallback_hard_surface"
+                ],
+                "material_override_ref": material_override_ref,
+                "textured_preview_ref": textured_preview_ref,
+                "surface_delta_ref": surface_delta_ref,
+                "validation_ref": validation_ref,
+                "frozen_mesh_fingerprint": options.frozen_mesh_fingerprint,
+                "preserves_frozen_geometry": !shape_delta,
+                "full_ready_status": options.full_ready_status,
+                "blocked_full_ready": options.full_ready_status == "blocked"
+            }));
+        }
+
+        std::fs::write(
+            variants_dir.join(SURFACE_CANDIDATE_SET_FILE),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "profile_id": options.profile_id,
+                "candidates": candidate_rows
+            }))
+            .expect("candidate set json"),
+        )
+        .expect("candidate set writes");
+        let report_path = variants_dir.join("surface-candidate-report.json");
+        std::fs::write(
+            &report_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "profile_id": options.profile_id,
+                "visual_foundry_surface_mode_enabled": false,
+                "candidate_count": MATERIAL_LOOK_TITLES.len(),
+                "all_candidates_valid": !options.missing_preview,
+                "full_ready_status": options.full_ready_status,
+                "full_ready_blocker_codes": blockers,
+                "candidates": report_rows
+            }))
+            .expect("report json"),
+        )
+        .expect("report writes");
+        report_path
+    }
+
+    fn temp_material_look_package_root(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("shape-lab-{name}-{}-{nanos}", std::process::id()))
     }
 
     fn temp_foundry_project_path(name: &str) -> PathBuf {

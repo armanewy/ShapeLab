@@ -482,12 +482,18 @@ pub struct SurfaceMaterialVariantCandidate {
     pub surface_artifact_ref: String,
     /// Package-relative material pack override.
     pub material_pack_ref: String,
+    /// Package-relative material override summary.
+    #[serde(default)]
+    pub material_override_ref: String,
     /// Package-relative textured preview PNG.
     pub textured_preview_ref: String,
     /// Package-relative preview PNG, duplicated for future UI metadata readers.
     pub preview_path: String,
     /// Package-relative surface delta report.
     pub surface_delta_ref: String,
+    /// Package-relative candidate validation report.
+    #[serde(default)]
+    pub validation_ref: String,
     /// Embedded surface-only delta report.
     pub surface_delta: SurfaceVisualDeltaReport,
     /// Package-relative texture files emitted for this candidate.
@@ -833,6 +839,19 @@ pub fn validate_surface_material_variant_candidate_set(
             "surface_variant_texture_files_missing",
             "Surface variant records generated texture files.",
             "Surface variant candidates must record generated texture files.",
+        );
+        builder.require_non_empty(
+            format!(
+                "candidates.{}.material_override_ref",
+                candidate.candidate_id
+            ),
+            &candidate.material_override_ref,
+            "missing_surface_variant_material_override_ref",
+        );
+        builder.require_non_empty(
+            format!("candidates.{}.validation_ref", candidate.candidate_id),
+            &candidate.validation_ref,
+            "missing_surface_variant_validation_ref",
         );
         builder.require(
             format!("candidate_{}_surface_delta_matches", candidate.candidate_id),
@@ -2443,11 +2462,15 @@ mod tests {
                     "surface/variants/variant-{index}/surface-artifact.json"
                 ),
                 material_pack_ref: format!("surface/variants/variant-{index}/material-pack.json"),
+                material_override_ref: format!(
+                    "surface/variants/variant-{index}/material-override.json"
+                ),
                 textured_preview_ref: format!(
                     "surface/variants/variant-{index}/textured-preview.png"
                 ),
                 preview_path: format!("surface/variants/variant-{index}/textured-preview.png"),
                 surface_delta_ref: format!("surface/variants/variant-{index}/surface-delta.json"),
+                validation_ref: format!("surface/variants/variant-{index}/validation.json"),
                 surface_delta: SurfaceVisualDeltaReport {
                     schema_version: SURFACE_VISUAL_DELTA_REPORT_SCHEMA_VERSION,
                     profile_id: "sci-fi-crate".to_owned(),
@@ -2481,6 +2504,18 @@ mod tests {
         };
 
         assert!(validate_surface_material_variant_candidate_set(&set).is_ready());
+
+        let mut missing_texture_set = set.clone();
+        missing_texture_set.candidates[0].texture_files.clear();
+        let report = validate_surface_material_variant_candidate_set(&missing_texture_set);
+        assert!(!report.is_ready());
+        assert!(
+            report
+                .blockers
+                .iter()
+                .any(|issue| issue.code == "surface_variant_texture_files_missing"),
+            "{report:#?}"
+        );
     }
 
     #[test]
@@ -2504,6 +2539,9 @@ mod tests {
                     material_pack_ref: format!(
                         "surface/variants/variant-{index}/material-pack.json"
                     ),
+                    material_override_ref: format!(
+                        "surface/variants/variant-{index}/material-override.json"
+                    ),
                     textured_preview_ref: format!(
                         "surface/variants/variant-{index}/textured-preview.png"
                     ),
@@ -2511,6 +2549,7 @@ mod tests {
                     surface_delta_ref: format!(
                         "surface/variants/variant-{index}/surface-delta.json"
                     ),
+                    validation_ref: format!("surface/variants/variant-{index}/validation.json"),
                     surface_delta: SurfaceVisualDeltaReport {
                         schema_version: SURFACE_VISUAL_DELTA_REPORT_SCHEMA_VERSION,
                         profile_id: "sci-fi-crate".to_owned(),

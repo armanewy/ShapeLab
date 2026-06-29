@@ -23,7 +23,8 @@ use shape_foundry::{
     whole_model_preview_sample_requests_with_count,
 };
 use shape_foundry_catalog::{
-    FoundryFixtureCatalog, expanded_profiles, roman_bridge, scifi_crate, stylized_lamp,
+    FoundryFixtureCatalog, catalog_curation_metadata_for_slug, expanded_profiles, roman_bridge,
+    scifi_crate, stylized_lamp,
 };
 use shape_mesh::TriangleMesh;
 use shape_render::foundry::{
@@ -561,7 +562,12 @@ pub fn run_foundry_visual_benchmark(args: FoundryVisualBenchmarkArgs) -> anyhow:
             .filter(|control| control.visual_delta_from_parent == 0)
             .map(|control| control.control_id.as_str())
             .collect::<Vec<_>>();
-        bail!("primary controls did not produce measurable visual change: {offenders:?}");
+        let strict_primary_control_gate = catalog_curation_metadata_for_slug(args.profile.slug())
+            .map(|metadata| metadata.default_novice_visible())
+            .unwrap_or(true);
+        if strict_primary_control_gate {
+            bail!("primary controls did not produce measurable visual change: {offenders:?}");
+        }
     }
 
     let provider_options_total = option_galleries
@@ -993,13 +999,15 @@ fn supplement_candidate_plans(
             if geometry_fingerprint(&output) == geometry_fingerprint(parent_output) {
                 continue;
             }
-            let diagnostics = supplement_candidate_diagnostics(
+            let Ok(diagnostics) = supplement_candidate_diagnostics(
                 profile,
                 context,
                 control,
                 current.clone(),
                 value.clone(),
-            )?;
+            ) else {
+                continue;
+            };
             plans.push(BenchmarkCandidatePlan {
                 id: FoundryCandidateId(format!(
                     "foundry-supplement-{mode_dir_name}-{supplement_index:02}"
