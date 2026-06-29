@@ -7,12 +7,12 @@ mod foundry;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use foundry::{
     FoundryAppCommand, FoundryAppEffect, FoundryAppState, FoundryAppStateError, FoundryJobEvent,
-    FoundryJobRequest, FoundryPackView, run_foundry_job,
+    FoundryJobRequest, FoundryPackView, MAKE_JOB_TRACE_DIR, MakeJobTraceEventKind, run_foundry_job,
 };
 use serde::Serialize;
 use shape_asset::{
@@ -41,12 +41,12 @@ use shape_foundry::{
     FoundryCommand, FoundryConformanceSummary, FoundryDocumentId, FoundryEdit, FoundryLock,
     FoundryLockMode, FoundryLockTarget, FoundryPackDocument, FoundryPackExportProfile,
     FoundryPreferenceEvent, FoundryProjectRevisionProgram, ProviderOverride, ResponseCurve,
-    VariationIntent, document_catalog_refs,
+    VariationChannel, VariationIntent, document_catalog_refs,
 };
 use shape_project::foundry::FoundryProjectFile;
 use shape_render::foundry::FoundryPreviewCache;
 use shape_search::foundry::{
-    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_plans,
+    FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_draft_plans,
 };
 
 #[test]
@@ -156,6 +156,392 @@ fn candidate_job_mode_comes_from_explicit_candidate_request() {
         panic!("expected one candidate job effect");
     };
     assert_eq!(job.candidate_mode(), Some(FoundryCandidateMode::Explore));
+}
+
+#[test]
+fn starting_scifi_crate_records_template_build_and_preview_trace() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = FoundryAppState::new(fixture.document.clone()).expect("fixture state");
+
+    let build_request = start_job(state.request_build().expect("build should schedule"));
+    let build_event = run_fixture_job(build_request, &fixture);
+    assert!(state.handle_job_event(build_event));
+    let preview_request = start_job(
+        state
+            .request_preview(512, 512)
+            .expect("preview should schedule"),
+    );
+
+    assert!(matches!(
+        preview_request,
+        FoundryJobRequest::RenderPreview { .. }
+    ));
+    assert_trace_order(
+        &state,
+        &[
+            MakeJobTraceEventKind::TemplateStarted,
+            MakeJobTraceEventKind::BuildQueued,
+            MakeJobTraceEventKind::PreviewQueued,
+        ],
+    );
+}
+
+#[test]
+fn equivalent_preview_job_is_reused_without_queueing_second_job() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+
+    let first = state
+        .request_preview(512, 512)
+        .expect("first preview should schedule");
+    assert!(start_job_optional(first).is_some());
+    let second = state
+        .request_preview(512, 512)
+        .expect("second equivalent preview should be reused");
+
+    assert!(second.is_empty());
+    let summary = state.make_job_trace.summary();
+    assert_eq!(summary.reused_job_count, 1);
+    assert_eq!(summary.coalesced_job_count, 1);
+    assert_eq!(summary.duplicate_preview_jobs, 1);
+}
+
+#[test]
+fn equivalent_candidate_job_is_reused_without_queueing_second_job() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    let request = FoundryCandidateRequest {
+        seed: 77,
+        proposal_count: 12,
+        result_count: 4,
+        mode: FoundryCandidateMode::Explore,
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: VariationIntent::default(),
+    };
+
+    let first = state
+        .request_candidates(request.clone())
+        .expect("candidate generation should schedule");
+    assert!(start_job_optional(first).is_some());
+    let second = state
+        .request_candidates(request)
+        .expect("equivalent candidate generation should be reused");
+
+    assert!(second.is_empty());
+    let summary = state.make_job_trace.summary();
+    assert_eq!(summary.reused_job_count, 1);
+    assert_eq!(summary.coalesced_job_count, 1);
+    assert_eq!(summary.duplicate_candidate_jobs, 1);
+}
+
+#[test]
+fn stale_result_records_local_trace_event() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+
+    let accepted = state.handle_job_event(FoundryJobEvent::Failed {
+        job_id: 99,
+        message: "late job failed".to_owned(),
+    });
+
+    assert!(!accepted);
+    assert!(state.make_job_trace.events.iter().any(|event| {
+        event.event_kind == MakeJobTraceEventKind::JobIgnoredAsStale
+            && event.job_id == Some(99)
+            && event.ignored_as_stale
+    }));
+    assert_eq!(
+        state.make_job_trace.summary().total_jobs_ignored_as_stale,
+        1
+    );
+}
+
+#[test]
+fn candidate_job_records_started_and_finished_events() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    let request = FoundryCandidateRequest {
+        seed: 77,
+        proposal_count: 12,
+        result_count: 4,
+        mode: FoundryCandidateMode::Explore,
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: VariationIntent::default(),
+    };
+
+    let candidate_request = start_job(
+        state
+            .request_candidates(request)
+            .expect("candidate generation should schedule"),
+    );
+    let candidate_event = run_fixture_job(candidate_request, &fixture);
+    let preview_request = match &candidate_event {
+        FoundryJobEvent::CandidatesGenerated {
+            request, output, ..
+        } => {
+            assert!(state.handle_job_event(candidate_event.clone()));
+            start_job(
+                state
+                    .request_candidate_previews(request.clone(), output.as_ref().clone())
+                    .expect("candidate preview should schedule"),
+            )
+        }
+        other => panic!("expected candidate generation, got {other:?}"),
+    };
+    let preview_event = run_fixture_job(preview_request, &fixture);
+    assert!(state.handle_job_event(preview_event));
+
+    assert!(
+        state
+            .make_job_trace
+            .events
+            .iter()
+            .any(|event| { event.event_kind == MakeJobTraceEventKind::CandidateStarted })
+    );
+    assert!(
+        state
+            .make_job_trace
+            .events
+            .iter()
+            .any(|event| { event.event_kind == MakeJobTraceEventKind::CandidateFinished })
+    );
+}
+
+#[test]
+fn latency_summary_serializes_deterministically() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let state = compiled_fixture_state(&fixture);
+    let summary = state.make_job_trace.summary();
+
+    let first = serde_json::to_string_pretty(&summary).expect("summary should serialize");
+    let second = serde_json::to_string_pretty(&summary).expect("summary should serialize again");
+
+    assert_eq!(first, second);
+    assert!(first.contains("time_to_first_build_started_ms"));
+    assert!(first.contains("time_to_first_visible_model_ms"));
+    assert!(first.contains("time_to_first_skeleton_idea_tray_ms"));
+    assert!(first.contains("time_to_first_candidate_shell_ms"));
+    assert!(first.contains("time_to_first_candidate_preview_ms"));
+    assert!(first.contains("reused_job_count"));
+    assert!(first.contains("coalesced_job_count"));
+}
+
+#[test]
+fn trace_contains_no_absolute_paths_or_mesh_payloads() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let state = compiled_fixture_state(&fixture);
+    let trace_json =
+        serde_json::to_string_pretty(&state.make_job_trace.events).expect("trace should serialize");
+    let cwd = std::env::current_dir().expect("cwd");
+    let cwd = cwd.to_string_lossy();
+
+    assert!(!trace_json.contains(cwd.as_ref()));
+    assert!(!trace_json.contains("/Users/"));
+    assert!(!trace_json.contains("vertices"));
+    assert!(!trace_json.contains("triangles"));
+    assert!(!trace_json.contains("rgba8"));
+}
+
+#[test]
+fn make_job_trace_dogfood_hook_writes_trace_files() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+
+    state.set_make_trace_elapsed_ms(120);
+    let preview_request = start_job(
+        state
+            .request_preview(512, 512)
+            .expect("preview should schedule"),
+    );
+    let preview_event = run_fixture_job(preview_request, &fixture);
+    state.set_make_trace_elapsed_ms(220);
+    assert!(state.handle_job_event(preview_event));
+
+    run_candidate_cycle(
+        &mut state,
+        &fixture,
+        FoundryCandidateRequest {
+            seed: 77,
+            proposal_count: 12,
+            result_count: 4,
+            mode: FoundryCandidateMode::Explore,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::default(),
+        },
+        CandidateCycleTimes {
+            queued_ms: 300,
+            compiled_ms: 620,
+            render_queued_ms: 640,
+            rendered_ms: 940,
+        },
+    );
+
+    assert!(
+        state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetFocusPartGroup {
+                group_id: "handles".to_owned(),
+            }))
+            .expect("focus should apply")
+            .is_empty()
+    );
+    run_candidate_cycle(
+        &mut state,
+        &fixture,
+        FoundryCandidateRequest {
+            seed: 78,
+            proposal_count: 12,
+            result_count: 4,
+            mode: FoundryCandidateMode::Refine,
+            strategy_id: None,
+            preference_profile: None,
+            variation_intent: VariationIntent::focus_part_shape("handles", "Handles"),
+        },
+        CandidateCycleTimes {
+            queued_ms: 1_100,
+            compiled_ms: 1_430,
+            render_queued_ms: 1_450,
+            rendered_ms: 1_780,
+        },
+    );
+
+    state.set_make_trace_elapsed_ms(1_900);
+    let pack_effects = state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::AddCurrentToPack {
+            pack_id: "dogfood-pack".to_owned(),
+            member_id: "sci-fi-crate-baseline".to_owned(),
+        }))
+        .expect("add to pack should schedule");
+    let pack_event = run_fixture_job(start_job(pack_effects), &fixture);
+    state.set_make_trace_elapsed_ms(2_050);
+    assert!(state.handle_job_event(pack_event));
+
+    let summary = state.make_job_trace.summary();
+    assert_eq!(summary.time_to_first_visible_model_ms, Some(0));
+    assert!(summary.time_to_first_preview_ready_ms.is_some());
+    assert_eq!(summary.time_to_first_skeleton_idea_tray_ms, Some(300));
+    assert_eq!(summary.time_to_first_candidate_shell_ms, Some(620));
+    assert_eq!(summary.time_to_first_candidate_preview_ms, Some(940));
+    assert!(summary.time_to_first_selectable_candidate_ms.is_some());
+    assert_eq!(summary.total_jobs_ignored_as_stale, 0);
+    assert!(!state.make_job_trace.events.iter().any(|event| {
+        event.event_kind == MakeJobTraceEventKind::JobIgnoredAsStale
+            || event.message.contains("Ignored a background result")
+    }));
+
+    let out_dir = workspace_root().join(MAKE_JOB_TRACE_DIR);
+    state
+        .write_make_job_trace_outputs(&out_dir)
+        .expect("trace files should write");
+
+    assert!(out_dir.join("make-job-trace.json").is_file());
+    assert!(out_dir.join("make-latency-summary.json").is_file());
+
+    let out_dir = workspace_root().join("target/make-latency-followup-v4");
+    state
+        .write_make_job_trace_outputs(&out_dir)
+        .expect("v4 follow-up trace files should write");
+
+    assert!(out_dir.join("make-job-trace.json").is_file());
+    assert!(out_dir.join("make-latency-summary.json").is_file());
+}
+
+fn run_candidate_cycle(
+    state: &mut FoundryAppState,
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    request: FoundryCandidateRequest,
+    times: CandidateCycleTimes,
+) {
+    state.set_make_trace_elapsed_ms(times.queued_ms);
+    let candidate_request = start_job(
+        state
+            .request_candidates(request)
+            .expect("candidate generation should schedule"),
+    );
+    let candidate_event = run_fixture_job(candidate_request, fixture);
+    let preview_request = match &candidate_event {
+        FoundryJobEvent::CandidatesGenerated {
+            request, output, ..
+        } => {
+            state.set_make_trace_elapsed_ms(times.compiled_ms);
+            assert!(state.handle_job_event(candidate_event.clone()));
+            state.set_make_trace_elapsed_ms(times.render_queued_ms);
+            start_job(
+                state
+                    .request_candidate_previews(request.clone(), output.as_ref().clone())
+                    .expect("candidate preview should schedule"),
+            )
+        }
+        other => panic!("expected candidate generation, got {other:?}"),
+    };
+    let preview_event = run_fixture_job(preview_request, fixture);
+    state.set_make_trace_elapsed_ms(times.rendered_ms);
+    assert!(state.handle_job_event(preview_event));
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CandidateCycleTimes {
+    queued_ms: u64,
+    compiled_ms: u64,
+    render_queued_ms: u64,
+    rendered_ms: u64,
+}
+
+#[test]
+fn focused_candidate_command_sets_part_intent() {
+    let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
+    let effects = state
+        .handle_command(FoundryAppCommand::run(
+            FoundryCommand::GenerateFocusedPartCandidates {
+                group_id: "handles".to_owned(),
+                channels: vec![VariationChannel::Shape],
+                mode: "refine".to_owned(),
+            },
+        ))
+        .expect("focused command should schedule");
+    let job = start_job(effects);
+    let FoundryJobRequest::GenerateCandidates { request, .. } = job else {
+        panic!("expected candidate job");
+    };
+    assert_eq!(
+        request.variation_intent.scope.semantic_part_group_id(),
+        Some("handles")
+    );
+    assert_eq!(
+        request.variation_intent.channels,
+        vec![VariationChannel::Shape]
+    );
+}
+
+#[test]
+fn make_job_trace_dogfood_hook_candidate_compile_only_path_remains_supported() {
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+    let request = FoundryCandidateRequest {
+        seed: 77,
+        proposal_count: 12,
+        result_count: 4,
+        mode: FoundryCandidateMode::Explore,
+        strategy_id: None,
+        preference_profile: None,
+        variation_intent: VariationIntent::default(),
+    };
+    let candidate_request = start_job(
+        state
+            .request_candidates(request)
+            .expect("candidate generation should schedule"),
+    );
+    let candidate_event = run_fixture_job(candidate_request, &fixture);
+    assert!(state.handle_job_event(candidate_event));
+
+    assert!(
+        state
+            .make_job_trace
+            .events
+            .iter()
+            .any(|event| event.event_kind == MakeJobTraceEventKind::CandidateCompiled)
+    );
 }
 
 #[test]
@@ -300,23 +686,26 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
 }
 
 #[test]
-fn stale_job_event_is_rejected_without_touching_current_job() {
+fn equivalent_build_job_is_reused_without_queueing_second_job() {
     let mut state = FoundryAppState::new(minimal_foundry_document()).expect("valid state");
-    state.request_build().expect("first build should schedule");
-    state.request_build().expect("second build should schedule");
+    let first = state.request_build().expect("first build should schedule");
+    assert!(start_job_optional(first).is_some());
 
-    let accepted = state.handle_job_event(FoundryJobEvent::Failed {
-        job_id: 1,
-        message: "old compile failed".to_owned(),
-    });
+    let second = state
+        .request_build()
+        .expect("second equivalent build should be reused");
 
-    assert!(!accepted);
-    assert!(state.stale_jobs.contains(&1));
-    assert!(state.active_jobs.contains_key(&2));
-    assert_eq!(
-        state.status.as_deref(),
-        Some("Ignored a background result because newer work is active.")
-    );
+    assert!(second.is_empty());
+    assert!(state.active_jobs.contains_key(&1));
+    assert!(!state.active_jobs.contains_key(&2));
+    assert!(state.make_job_trace.events.iter().any(|event| {
+        event.event_kind == MakeJobTraceEventKind::JobReused
+            && event.job_slot.as_deref() == Some("CompileCurrent")
+    }));
+    let summary = state.make_job_trace.summary();
+    assert_eq!(summary.reused_job_count, 1);
+    assert_eq!(summary.coalesced_job_count, 1);
+    assert_eq!(summary.duplicate_build_jobs, 1);
 }
 
 #[test]
@@ -376,7 +765,7 @@ fn replacing_project_preserves_monotonic_job_ids_and_rejects_old_events() {
 }
 
 #[test]
-fn edit_completion_stales_jobs_scheduled_from_previous_document() {
+fn build_request_while_edit_runs_is_blocked_and_traced() {
     let fixture = RuntimeFixture::new();
     let mut state = FoundryAppState::new(fixture.document.clone()).expect("valid state");
     let edit_effects = state
@@ -387,12 +776,15 @@ fn edit_completion_stales_jobs_scheduled_from_previous_document() {
         .expect("edit should schedule");
     let edit_request = start_job(edit_effects);
 
-    let stale_build_effects = state
+    let blocked_build_effects = state
         .request_build()
-        .expect("old-source build should still be schedulable while edit runs");
-    let stale_build_request = start_job(stale_build_effects);
-    assert_eq!(stale_build_request.job_id(), 2);
-    assert!(state.active_jobs.contains_key(&2));
+        .expect("old-source build should not queue while edit runs");
+    assert!(blocked_build_effects.is_empty());
+    assert!(state.active_jobs.contains_key(&1));
+    assert!(state.make_job_trace.events.iter().any(|event| {
+        event.event_kind == MakeJobTraceEventKind::UserActionBlocked
+            && event.message.contains("Build request blocked")
+    }));
 
     let edit_event = run_foundry_job(
         edit_request,
@@ -401,22 +793,6 @@ fn edit_completion_stales_jobs_scheduled_from_previous_document() {
     );
     assert!(state.handle_job_event(edit_event));
 
-    assert!(state.stale_jobs.contains(&2));
-    assert!(!state.active_jobs.contains_key(&2));
-    assert_eq!(
-        state
-            .document
-            .as_ref()
-            .and_then(|document| document.control_state.get("radius")),
-        Some(&ControlValue::Scalar(0.2))
-    );
-
-    let stale_event = run_foundry_job(
-        stale_build_request,
-        &fixture.catalog,
-        &mut FoundryPreviewCache::default(),
-    );
-    assert!(!state.handle_job_event(stale_event));
     assert_eq!(
         state
             .document
@@ -509,7 +885,7 @@ fn candidate_generation_job_returns_pending_cards_before_preview_rendering() {
 
 #[test]
 fn candidate_preview_job_renders_preview_images_for_cards() {
-    let fixture = RuntimeFixture::new();
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
     let request = FoundryCandidateRequest {
         seed: 33,
         proposal_count: 12,
@@ -519,7 +895,7 @@ fn candidate_preview_job_renders_preview_images_for_cards() {
         preference_profile: None,
         variation_intent: VariationIntent::default(),
     };
-    let output = generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
+    let output = generate_foundry_candidate_draft_plans(&fixture.document, &fixture, &request)
         .expect("candidate generation should succeed");
     let output_count = output.candidates.len();
     let preview_request = FoundryJobRequest::RenderCandidatePreviews {
@@ -531,7 +907,7 @@ fn candidate_preview_job_renders_preview_images_for_cards() {
 
     let event = run_foundry_job(
         preview_request,
-        &fixture.catalog,
+        &fixture,
         &mut FoundryPreviewCache::default(),
     );
     let FoundryJobEvent::CandidatePreviewsRendered {
@@ -558,7 +934,7 @@ fn candidate_preview_job_renders_preview_images_for_cards() {
 
 #[test]
 fn candidate_preview_failures_are_isolated_to_their_cards() {
-    let fixture = RuntimeFixture::new();
+    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
     let request = FoundryCandidateRequest {
         seed: 51,
         proposal_count: 12,
@@ -568,9 +944,8 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
         preference_profile: None,
         variation_intent: VariationIntent::default(),
     };
-    let mut output =
-        generate_foundry_candidate_plans(&fixture.document, &fixture.catalog, &request)
-            .expect("candidate generation should succeed");
+    let mut output = generate_foundry_candidate_draft_plans(&fixture.document, &fixture, &request)
+        .expect("candidate generation should succeed");
     assert!(
         output.candidates.len() > 1,
         "fixture should return multiple candidates for isolation coverage"
@@ -582,7 +957,7 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
         &output,
         Some(request.mode),
         None,
-        &fixture.catalog,
+        &fixture,
         &mut FoundryPreviewCache::default(),
     )
     .expect("preview failures should not fail candidate card generation");
@@ -1285,6 +1660,43 @@ fn start_job(effects: Vec<FoundryAppEffect>) -> FoundryJobRequest {
             _ => None,
         })
         .expect("start job effect")
+}
+
+fn start_job_optional(effects: Vec<FoundryAppEffect>) -> Option<FoundryJobRequest> {
+    effects.into_iter().find_map(|effect| match effect {
+        FoundryAppEffect::StartJob(job) => Some(*job),
+        _ => None,
+    })
+}
+
+fn assert_trace_order(state: &FoundryAppState, expected: &[MakeJobTraceEventKind]) {
+    let mut cursor = 0;
+    for event in &state.make_job_trace.events {
+        if event.event_kind == expected[cursor] {
+            cursor += 1;
+            if cursor == expected.len() {
+                return;
+            }
+        }
+    }
+    panic!(
+        "trace did not contain expected ordered events {:?}; trace was {:?}",
+        expected,
+        state
+            .make_job_trace
+            .events
+            .iter()
+            .map(|event| event.event_kind)
+            .collect::<Vec<_>>()
+    );
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("shape-app lives two levels below the workspace")
+        .to_path_buf()
 }
 
 fn compiled_fixture_state(

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use shape_asset::RevisionId;
 use shape_core::Aabb;
@@ -29,6 +29,12 @@ use super::commands::{FoundryAppCommand, FoundryAppEffect};
 use super::jobs::{
     FoundryJobEvent, FoundryJobRequest, FoundryJobSlot, candidate_cards_from_output,
 };
+use super::trace::{
+    MakeJobTrace, MakeJobTraceEventInput, MakeJobTraceEventKind, build_trace_stamp,
+    document_asset_name, document_trace_stamp, queued_kind_for_request, request_asset_name,
+    request_trace_stamp, started_kind_for_request, trace_event, trace_event_for_request,
+    trigger_action_for_request,
+};
 use super::view_model::{
     FoundryCandidateCard, FoundryControlPresentation, FoundryControlView, FoundryOptionCard,
     FoundryPackView,
@@ -36,6 +42,7 @@ use super::view_model::{
 
 const FIRST_JOB_ID: u64 = 1;
 pub(crate) const DEFAULT_PREVIEW_PIXELS: u32 = 512;
+const CANCELED_IDEA_SEARCH_STATUS: &str = "Canceled earlier idea search.";
 
 /// Last rendered current-document preview.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +116,8 @@ pub(crate) struct FoundryAppState {
     pub advanced_recipe_open: bool,
     /// Last recoverable status or error message.
     pub status: Option<String>,
+    /// Local-only Make job trace for diagnostics and dogfood runs.
+    pub make_job_trace: MakeJobTrace,
     next_job_id: u64,
 }
 
@@ -141,6 +150,7 @@ impl Default for FoundryAppState {
             read_only: false,
             advanced_recipe_open: false,
             status: None,
+            make_job_trace: MakeJobTrace::default(),
             next_job_id: FIRST_JOB_ID,
         }
     }
@@ -178,6 +188,7 @@ impl FoundryAppState {
         };
         state.refresh_from_document_snapshot();
         state.refresh_project_flags();
+        state.record_template_started();
         Ok(state)
     }
 
@@ -198,6 +209,7 @@ impl FoundryAppState {
         };
         state.refresh_from_document_snapshot();
         state.refresh_project_flags();
+        state.record_state_transition("Loaded project into Make.");
         Ok(state)
     }
 
@@ -226,6 +238,7 @@ impl FoundryAppState {
                 self.schedule_apply_edit(FoundryEdit { label, commands })
             }
             FoundryAppCommand::RequestCandidates(request) => self.request_candidates(request),
+            FoundryAppCommand::CancelIdeaGeneration => self.cancel_idea_generation(),
             FoundryAppCommand::PreviewControlValue { control_id, value } => {
                 self.preview_control_value(control_id, value)
             }
@@ -250,28 +263,56 @@ impl FoundryAppState {
     /// Apply a background job event. Returns true when the event affected state.
     pub(crate) fn handle_job_event(&mut self, event: FoundryJobEvent) -> bool {
         let job_id = event.job_id();
-        let Some(request) = self.active_jobs.get(&job_id).cloned() else {
+        let Some(active_request) = self.active_jobs.get(&job_id).cloned() else {
             self.stale_jobs.insert(job_id);
             self.status =
                 Some("Ignored a background result because newer work is active.".to_owned());
+            self.record_stale_result(
+                job_id,
+                None,
+                None,
+                None,
+                "Ignored a background result because newer work is active.",
+            );
             return false;
         };
-        if !self.request_source_is_current(&request) {
+        if !self.request_source_is_current(&active_request) {
             self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
             self.status = Some("Ignored a background result because the model changed.".to_owned());
+            self.record_stale_result(
+                job_id,
+                Some(active_request.slot()),
+                request_trace_stamp(&active_request),
+                request_asset_name(&active_request),
+                "Ignored a background result because the model changed.",
+            );
             return false;
         }
-        if !job_event_matches_request(&event, &request) {
+        if !job_event_matches_request(&event, &active_request) {
             self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
             self.status =
                 Some("Ignored a background result that no longer matches the request.".to_owned());
+            self.record_stale_result(
+                job_id,
+                Some(active_request.slot()),
+                request_trace_stamp(&active_request),
+                request_asset_name(&active_request),
+                "Ignored a background result that no longer matches the request.",
+            );
             return false;
         }
 
         let accepted = match event {
             FoundryJobEvent::CompileFinished { output, .. } => {
+                self.record_job_finished(
+                    MakeJobTraceEventKind::BuildFinished,
+                    &active_request,
+                    Some(build_trace_stamp(&output.build_stamp)),
+                    Some(document_asset_name(&output.document)),
+                    "Build finished.",
+                );
                 self.apply_compilation_output(*output);
                 true
             }
@@ -284,6 +325,13 @@ impl FoundryAppState {
                 build,
                 ..
             } => {
+                self.record_job_finished(
+                    MakeJobTraceEventKind::PreviewFinished,
+                    &active_request,
+                    build.as_ref().map(build_trace_stamp),
+                    request_asset_name(&active_request),
+                    "Preview finished.",
+                );
                 self.current_preview = Some(FoundryPreviewImage {
                     preview_id,
                     rgba8,
@@ -295,12 +343,19 @@ impl FoundryAppState {
                 true
             }
             FoundryJobEvent::CandidatesGenerated {
-                request,
+                request: candidate_request,
                 output,
                 cards,
                 ..
             } => {
-                self.apply_candidates_generated(request, *output, cards);
+                self.record_job_finished(
+                    MakeJobTraceEventKind::CandidateCompiled,
+                    &active_request,
+                    request_trace_stamp(&active_request),
+                    self.document.as_ref().map(document_asset_name),
+                    "Candidate plans compiled.",
+                );
+                self.apply_candidates_generated(candidate_request, *output, cards);
                 true
             }
             FoundryJobEvent::CandidatePreviewsRendered {
@@ -308,10 +363,31 @@ impl FoundryAppState {
                 rejected_count,
                 ..
             } => {
+                self.record_job_finished(
+                    MakeJobTraceEventKind::CandidateRendered,
+                    &active_request,
+                    request_trace_stamp(&active_request),
+                    request_asset_name(&active_request),
+                    "Candidate previews rendered.",
+                );
+                self.record_job_finished(
+                    MakeJobTraceEventKind::CandidateFinished,
+                    &active_request,
+                    request_trace_stamp(&active_request),
+                    request_asset_name(&active_request),
+                    "Candidate search finished.",
+                );
                 self.apply_candidate_previews(cards, rejected_count);
                 true
             }
             FoundryJobEvent::EditApplied { edit, output, .. } => {
+                self.record_job_finished(
+                    MakeJobTraceEventKind::BuildFinished,
+                    &active_request,
+                    Some(build_trace_stamp(&output.build_stamp)),
+                    Some(document_asset_name(&output.document)),
+                    "Edit build finished.",
+                );
                 self.apply_edit_output(*edit, *output);
                 self.stale_obsolete_active_jobs_except(job_id);
                 true
@@ -352,6 +428,14 @@ impl FoundryAppState {
                 true
             }
             FoundryJobEvent::Failed { message, .. } => {
+                let event_kind = failed_kind_for_request(&active_request);
+                self.record_job_finished(
+                    event_kind,
+                    &active_request,
+                    request_trace_stamp(&active_request),
+                    request_asset_name(&active_request),
+                    message.clone(),
+                );
                 self.status = Some(message);
                 true
             }
@@ -362,16 +446,29 @@ impl FoundryAppState {
 
     /// Request a current-document compilation job.
     pub(crate) fn request_build(&mut self) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
-        if self.active_jobs.values().any(|request| {
-            matches!(
-                request.slot(),
-                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
-            )
-        }) {
+        let document = self.current_document()?.clone();
+        if let Some(active_request) = self
+            .active_jobs
+            .values()
+            .find(|request| {
+                matches!(
+                    request.slot(),
+                    FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
+                )
+            })
+            .cloned()
+        {
+            if equivalent_build_request(&active_request, &document) {
+                self.record_job_reused(&active_request, "Equivalent build job already active.");
+            } else {
+                self.record_user_action_blocked(
+                    &active_request,
+                    "Build request blocked while another build is active.",
+                );
+            }
             return Ok(Vec::new());
         }
 
-        let document = self.current_document()?.clone();
         let job_id = self.allocate_job_id()?;
         Ok(self.schedule_job(FoundryJobRequest::CompileCurrent {
             job_id,
@@ -395,19 +492,27 @@ impl FoundryAppState {
         width: u32,
         height: u32,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
-        if self
-            .active_jobs
-            .values()
-            .any(|request| request.slot() == FoundryJobSlot::RenderPreview)
-        {
-            return Ok(Vec::new());
-        }
-
         let output = self
             .current_output
             .as_ref()
             .ok_or(FoundryAppStateError::MissingCurrentOutput)?
             .clone();
+        if let Some(active_request) = self
+            .active_jobs
+            .values()
+            .find(|request| request.slot() == FoundryJobSlot::RenderPreview)
+            .cloned()
+        {
+            if equivalent_preview_request(&active_request, &output.build_stamp, width, height) {
+                self.record_job_reused(&active_request, "Equivalent preview job already active.");
+            } else {
+                self.record_user_action_blocked(
+                    &active_request,
+                    "Preview request blocked while another preview is active.",
+                );
+            }
+            return Ok(Vec::new());
+        }
         if self.current_preview.as_ref().is_some_and(|preview| {
             preview.width == width
                 && preview.height == height
@@ -430,17 +535,25 @@ impl FoundryAppState {
         &mut self,
         mut request: FoundryCandidateRequest,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
-        if self
-            .active_jobs
-            .values()
-            .any(|request| request.slot() == FoundryJobSlot::GenerateCandidates)
-        {
-            return Ok(Vec::new());
-        }
-
         let document = self.current_document()?.clone();
         if request.preference_profile.is_none() {
             request.preference_profile = self.preference_profile_for_current_scope();
+        }
+        if let Some(active_request) = self
+            .active_jobs
+            .values()
+            .find(|request| request.slot() == FoundryJobSlot::GenerateCandidates)
+            .cloned()
+        {
+            if equivalent_candidate_request(&active_request, &document, &request) {
+                self.record_job_reused(&active_request, "Equivalent candidate job already active.");
+            } else {
+                self.record_user_action_blocked(
+                    &active_request,
+                    "Candidate request blocked while another idea search is active.",
+                );
+            }
+            return Ok(Vec::new());
         }
         let job_id = self.allocate_job_id()?;
         Ok(self.schedule_job(FoundryJobRequest::GenerateCandidates {
@@ -457,6 +570,25 @@ impl FoundryAppState {
         output: FoundryCandidateOutput,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
         let document = self.current_document()?.clone();
+        if let Some(active_request) = self
+            .active_jobs
+            .values()
+            .find(|request| request.slot() == FoundryJobSlot::GenerateCandidates)
+            .cloned()
+        {
+            if equivalent_candidate_request(&active_request, &document, &request) {
+                self.record_job_reused(
+                    &active_request,
+                    "Equivalent candidate preview job already active.",
+                );
+            } else {
+                self.record_user_action_blocked(
+                    &active_request,
+                    "Candidate preview request blocked while another idea job is active.",
+                );
+            }
+            return Ok(Vec::new());
+        }
         let job_id = self.allocate_job_id()?;
         Ok(
             self.schedule_job(FoundryJobRequest::RenderCandidatePreviews {
@@ -475,6 +607,25 @@ impl FoundryAppState {
         value: ControlValue,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
         let document = self.current_document()?.clone();
+        if let Some(active_request) = self
+            .active_jobs
+            .values()
+            .find(|request| request.slot() == FoundryJobSlot::RenderPreview)
+            .cloned()
+        {
+            if equivalent_control_preview_request(&active_request, &document, &control_id, &value) {
+                self.record_job_reused(
+                    &active_request,
+                    "Equivalent control preview job already active.",
+                );
+            } else {
+                self.record_user_action_blocked(
+                    &active_request,
+                    "Control preview blocked while another preview is active.",
+                );
+            }
+            return Ok(Vec::new());
+        }
         let job_id = self.allocate_job_id()?;
         Ok(self.schedule_job(FoundryJobRequest::PreviewControlValue {
             job_id,
@@ -484,6 +635,20 @@ impl FoundryAppState {
             width: DEFAULT_PREVIEW_PIXELS,
             height: DEFAULT_PREVIEW_PIXELS,
         }))
+    }
+
+    /// Cancel active idea generation and return to the last stable Make state.
+    pub(crate) fn cancel_idea_generation(
+        &mut self,
+    ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let canceled_count = self.stale_active_jobs_in_slot(FoundryJobSlot::GenerateCandidates);
+        self.clear_candidates();
+        self.status = Some(if canceled_count > 0 {
+            CANCELED_IDEA_SEARCH_STATUS.to_owned()
+        } else {
+            "No idea search is running.".to_owned()
+        });
+        Ok(Vec::new())
     }
 
     /// Replace state after a project load completes.
@@ -891,28 +1056,50 @@ impl FoundryAppState {
         }
     }
 
+    /// Set the app-relative trace clock used for subsequently recorded events.
+    pub(crate) fn set_make_trace_elapsed_ms(&mut self, elapsed_ms: u64) {
+        self.make_job_trace.set_elapsed_ms(elapsed_ms);
+    }
+
+    /// Write the local Make trace and latency summary JSON files.
+    pub(crate) fn write_make_job_trace_outputs(&self, dir: &Path) -> std::io::Result<()> {
+        self.make_job_trace.write_outputs(dir)
+    }
+
     fn schedule_job(&mut self, request: FoundryJobRequest) -> Vec<FoundryAppEffect> {
-        self.stale_active_jobs_in_slot(request.slot());
+        let canceled_count = self.stale_active_jobs_in_slot(request.slot());
         let job_id = request.job_id();
         self.active_jobs.insert(job_id, request.clone());
+        self.record_job_queued_and_started(&request, canceled_count > 0);
         vec![FoundryAppEffect::StartJob(Box::new(request))]
     }
 
-    fn stale_active_jobs_in_slot(&mut self, slot: FoundryJobSlot) {
+    fn stale_active_jobs_in_slot(&mut self, slot: FoundryJobSlot) -> usize {
         let stale = self
             .active_jobs
-            .iter()
-            .filter_map(|(job_id, request)| (request.slot() == slot).then_some(*job_id))
+            .values()
+            .filter_map(|request| (request.slot() == slot).then_some(request.clone()))
             .collect::<Vec<_>>();
-        for job_id in stale {
+        for request in &stale {
+            let job_id = request.job_id();
             self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
+            self.record_job_canceled(request, "Canceled previous job in the same slot.");
         }
+        stale.len()
     }
 
     fn stale_all_active_jobs(&mut self) {
-        self.stale_jobs.extend(self.active_jobs.keys().copied());
+        let stale = self.active_jobs.values().cloned().collect::<Vec<_>>();
+        self.stale_jobs
+            .extend(stale.iter().map(FoundryJobRequest::job_id));
         self.active_jobs.clear();
+        for request in stale {
+            self.record_job_canceled(
+                &request,
+                "Canceled active job because user action invalidated it.",
+            );
+        }
     }
 
     fn stale_obsolete_active_jobs_except(&mut self, retained_job_id: u64) {
@@ -921,13 +1108,171 @@ impl FoundryAppState {
             .iter()
             .filter_map(|(job_id, request)| {
                 (*job_id != retained_job_id && !self.request_source_is_current(request))
-                    .then_some(*job_id)
+                    .then_some(request.clone())
             })
             .collect::<Vec<_>>();
-        for job_id in stale {
+        for request in stale {
+            let job_id = request.job_id();
             self.active_jobs.remove(&job_id);
             self.stale_jobs.insert(job_id);
+            self.record_job_canceled(
+                &request,
+                "Canceled obsolete job after newer build finished.",
+            );
         }
+    }
+
+    fn record_template_started(&mut self) {
+        if let Some(document) = &self.document {
+            self.make_job_trace
+                .record(trace_event(MakeJobTraceEventInput {
+                    elapsed_ms: self.make_job_trace.elapsed_ms(),
+                    event_kind: MakeJobTraceEventKind::TemplateStarted,
+                    job_id: None,
+                    slot: None,
+                    stamp: Some(document_trace_stamp(document)),
+                    asset_name: Some(document_asset_name(document)),
+                    trigger_action: Some("StartTemplate".to_owned()),
+                    queue_depth: self.active_jobs.len(),
+                    canceled_previous_job: false,
+                    ignored_as_stale: false,
+                    message: "Template started.".to_owned(),
+                }));
+        }
+    }
+
+    fn record_state_transition(&mut self, message: &str) {
+        let (stamp, asset_name) = self
+            .document
+            .as_ref()
+            .map(|document| {
+                (
+                    Some(document_trace_stamp(document)),
+                    Some(document_asset_name(document)),
+                )
+            })
+            .unwrap_or((None, None));
+        self.make_job_trace
+            .record(trace_event(MakeJobTraceEventInput {
+                elapsed_ms: self.make_job_trace.elapsed_ms(),
+                event_kind: MakeJobTraceEventKind::StateTransition,
+                job_id: None,
+                slot: None,
+                stamp,
+                asset_name,
+                trigger_action: None,
+                queue_depth: self.active_jobs.len(),
+                canceled_previous_job: false,
+                ignored_as_stale: false,
+                message: message.to_owned(),
+            }));
+    }
+
+    fn record_job_queued_and_started(
+        &mut self,
+        request: &FoundryJobRequest,
+        canceled_previous_job: bool,
+    ) {
+        let queue_depth = self.active_jobs.len();
+        let queued_kind = queued_kind_for_request(request);
+        let started_kind = started_kind_for_request(request);
+        self.make_job_trace.record(trace_event_for_request(
+            self.make_job_trace.elapsed_ms(),
+            queued_kind,
+            request,
+            queue_depth,
+            canceled_previous_job,
+            format!("{} queued.", trigger_action_for_request(request)),
+        ));
+        self.make_job_trace.record(trace_event_for_request(
+            self.make_job_trace.elapsed_ms(),
+            started_kind,
+            request,
+            queue_depth,
+            canceled_previous_job,
+            format!("{} started.", trigger_action_for_request(request)),
+        ));
+    }
+
+    fn record_job_finished(
+        &mut self,
+        event_kind: MakeJobTraceEventKind,
+        request: &FoundryJobRequest,
+        stamp: Option<String>,
+        asset_name: Option<String>,
+        message: impl Into<String>,
+    ) {
+        self.make_job_trace
+            .record(trace_event(MakeJobTraceEventInput {
+                elapsed_ms: self.make_job_trace.elapsed_ms(),
+                event_kind,
+                job_id: Some(request.job_id()),
+                slot: Some(request.slot()),
+                stamp,
+                asset_name,
+                trigger_action: Some(trigger_action_for_request(request).to_owned()),
+                queue_depth: self.active_jobs.len(),
+                canceled_previous_job: false,
+                ignored_as_stale: false,
+                message: message.into(),
+            }));
+    }
+
+    fn record_job_canceled(&mut self, request: &FoundryJobRequest, message: &str) {
+        self.make_job_trace.record(trace_event_for_request(
+            self.make_job_trace.elapsed_ms(),
+            MakeJobTraceEventKind::JobCanceled,
+            request,
+            self.active_jobs.len(),
+            true,
+            message,
+        ));
+    }
+
+    fn record_job_reused(&mut self, request: &FoundryJobRequest, message: &str) {
+        self.make_job_trace.record(trace_event_for_request(
+            self.make_job_trace.elapsed_ms(),
+            MakeJobTraceEventKind::JobReused,
+            request,
+            self.active_jobs.len(),
+            false,
+            message,
+        ));
+    }
+
+    fn record_user_action_blocked(&mut self, request: &FoundryJobRequest, message: &str) {
+        self.make_job_trace.record(trace_event_for_request(
+            self.make_job_trace.elapsed_ms(),
+            MakeJobTraceEventKind::UserActionBlocked,
+            request,
+            self.active_jobs.len(),
+            false,
+            message,
+        ));
+    }
+
+    fn record_stale_result(
+        &mut self,
+        job_id: u64,
+        slot: Option<FoundryJobSlot>,
+        stamp: Option<String>,
+        asset_name: Option<String>,
+        message: &str,
+    ) {
+        self.make_job_trace
+            .record(trace_event(MakeJobTraceEventInput {
+                elapsed_ms: self.make_job_trace.elapsed_ms(),
+                event_kind: MakeJobTraceEventKind::JobIgnoredAsStale,
+                job_id: Some(job_id),
+                slot,
+                stamp,
+                asset_name,
+                trigger_action: None,
+                queue_depth: self.active_jobs.len(),
+                canceled_previous_job: false,
+                ignored_as_stale: true,
+                message: message.to_owned(),
+            }));
     }
 
     fn allocate_job_id(&mut self) -> Result<u64, FoundryAppStateError> {
@@ -1344,6 +1689,95 @@ fn document_sources_match(left: &FoundryAssetDocument, right: &FoundryAssetDocum
         && left.foundry_locks == right.foundry_locks
         && left.local_recipe_overrides == right.local_recipe_overrides
         && left.seed == right.seed
+}
+
+fn equivalent_build_request(
+    active_request: &FoundryJobRequest,
+    document: &FoundryAssetDocument,
+) -> bool {
+    match active_request {
+        FoundryJobRequest::CompileCurrent {
+            document: active_document,
+            ..
+        } => document_sources_match(active_document, document),
+        _ => false,
+    }
+}
+
+fn equivalent_preview_request(
+    active_request: &FoundryJobRequest,
+    build: &FoundryBuildStamp,
+    width: u32,
+    height: u32,
+) -> bool {
+    match active_request {
+        FoundryJobRequest::RenderPreview {
+            output,
+            width: active_width,
+            height: active_height,
+            ..
+        } => output.build_stamp == *build && *active_width == width && *active_height == height,
+        _ => false,
+    }
+}
+
+fn equivalent_control_preview_request(
+    active_request: &FoundryJobRequest,
+    document: &FoundryAssetDocument,
+    control_id: &str,
+    value: &ControlValue,
+) -> bool {
+    match active_request {
+        FoundryJobRequest::PreviewControlValue {
+            document: active_document,
+            control_id: active_control_id,
+            value: active_value,
+            ..
+        } => {
+            document_sources_match(active_document, document)
+                && active_control_id == control_id
+                && active_value == value
+        }
+        _ => false,
+    }
+}
+
+fn equivalent_candidate_request(
+    active_request: &FoundryJobRequest,
+    document: &FoundryAssetDocument,
+    request: &FoundryCandidateRequest,
+) -> bool {
+    match active_request {
+        FoundryJobRequest::GenerateCandidates {
+            document: active_document,
+            request: active_request,
+            ..
+        }
+        | FoundryJobRequest::RenderCandidatePreviews {
+            document: active_document,
+            request: active_request,
+            ..
+        } => document_sources_match(active_document, document) && active_request == request,
+        _ => false,
+    }
+}
+
+fn failed_kind_for_request(request: &FoundryJobRequest) -> MakeJobTraceEventKind {
+    match request {
+        FoundryJobRequest::CompileCurrent { .. } | FoundryJobRequest::ApplyEdit { .. } => {
+            MakeJobTraceEventKind::BuildFailed
+        }
+        FoundryJobRequest::RenderPreview { .. } | FoundryJobRequest::PreviewControlValue { .. } => {
+            MakeJobTraceEventKind::PreviewFailed
+        }
+        FoundryJobRequest::GenerateCandidates { .. }
+        | FoundryJobRequest::RenderCandidatePreviews { .. } => {
+            MakeJobTraceEventKind::CandidateFailed
+        }
+        FoundryJobRequest::CompilePack { .. }
+        | FoundryJobRequest::ExportPack { .. }
+        | FoundryJobRequest::Export { .. } => MakeJobTraceEventKind::StateTransition,
+    }
 }
 
 fn candidate_request_from_command(request: GenerateCandidatesRequest) -> FoundryCandidateRequest {
