@@ -12,6 +12,7 @@ pub(crate) mod jobs;
 pub(crate) mod kit_view;
 pub(crate) mod panels;
 pub(crate) mod state;
+pub(crate) mod trace;
 pub(crate) mod ui;
 pub(crate) mod view_model;
 
@@ -26,6 +27,11 @@ pub(crate) use panels::history::{
 };
 #[allow(unused_imports)]
 pub(crate) use state::{FoundryAppState, FoundryAppStateError, FoundryPreviewImage};
+#[allow(unused_imports)]
+pub(crate) use trace::{
+    MAKE_JOB_TRACE_DIR, MAKE_JOB_TRACE_FILE, MAKE_LATENCY_SUMMARY_FILE, MakeJobTrace,
+    MakeJobTraceEvent, MakeJobTraceEventKind, MakeLatencySummary,
+};
 #[allow(unused_imports)]
 pub(crate) use view_model::{
     FoundryCandidateCard, FoundryControlView, FoundryOptionCard, FoundryPackView,

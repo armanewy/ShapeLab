@@ -34,6 +34,8 @@ pub(crate) enum FoundryAppCommand {
     },
     /// Request candidate generation with an explicit native search policy.
     RequestCandidates(FoundryCandidateRequest),
+    /// Cancel active idea generation without changing the current model.
+    CancelIdeaGeneration,
     /// Render a non-persistent preview for a control value.
     PreviewControlValue {
         /// Control to sample.

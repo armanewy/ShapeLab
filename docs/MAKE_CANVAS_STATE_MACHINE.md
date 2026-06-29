@@ -95,6 +95,9 @@ After compile completion, the host requests the current preview automatically.
 The visible preparation phase is `Preparing model`, then `Rendering preview`,
 then `Ready`.
 
+Before the first full build finishes, Make may show a deterministic quick
+template preview so the stage is not blank.
+
 Make does not expose novice-facing `Build Asset` or `Refresh Preview` actions.
 When the current preview is stale, missing, or rendering, the visible copy is
 `Preview is updating...`; the manual recovery action is `Update preview`.
@@ -122,6 +125,20 @@ While ideas are generating:
 - option actions are disabled;
 - candidate acceptance is disabled;
 - Pack and Export are disabled when the current build is stale.
+
+If idea generation exceeds the local timeout, `idea_generation_fallback_visible`
+is true. The banner copy is:
+
+```text
+Still trying ideas.
+```
+
+The visible recovery actions are `Cancel` and `Keep waiting`. Canceling records
+the candidate job as canceled in the trace and shows:
+
+```text
+Canceled earlier idea search.
+```
 
 The candidate tray renders from `candidate_tray_state`:
 
