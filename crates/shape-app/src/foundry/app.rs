@@ -8679,6 +8679,83 @@ mod tests {
     }
 
     #[test]
+    fn cargo_case_strategy_docs_define_anti_abstraction_gate() {
+        let strategy = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CARGO_CASE_FOUNDATION_STRATEGY.md"
+        ));
+        let quality_gate = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/CARGO_CASE_CLAY_QUALITY_GATE.md"
+        ));
+
+        assert!(strategy.contains("internal/pro authoring grammar"));
+        assert!(strategy.contains("not a user product"));
+        assert!(strategy.contains("not visible in novice Visual Foundry"));
+        assert!(strategy.contains("Clean Utility Case profile"));
+        assert!(strategy.contains("Sci-Fi Industrial Case profile"));
+        assert!(strategy.contains("same Cargo Case family"));
+        assert!(strategy.contains("Sci-Fi Industrial Crate is Cargo Case family"));
+        assert!(strategy.contains("Direct novice catalog publication from drafts is forbidden"));
+        assert!(strategy.contains("material-look evidence must be marked stale and regenerated"));
+        assert!(strategy.contains("No runtime LLM SDK is required"));
+
+        for role in [
+            "body",
+            "lid",
+            "panel_fields",
+            "edge_trim",
+            "corner_guards",
+            "base_feet_or_skids",
+            "handles",
+            "vents",
+            "label_plate_geometry",
+            "hinge_or_closure_detail",
+        ] {
+            assert!(
+                strategy.contains(role),
+                "Cargo Case strategy must define role {role}"
+            );
+        }
+
+        for control in [
+            "Overall Proportions",
+            "Structural Heft",
+            "Panel Complexity",
+            "Handle Style",
+            "Vent Density",
+            "Trim Style",
+            "Detail Density",
+        ] {
+            assert!(
+                strategy.contains(control),
+                "Cargo Case strategy must define primary control {control}"
+            );
+        }
+
+        assert!(quality_gate.contains("Pure Clay pass/fail must be recorded separately"));
+        assert!(quality_gate.contains("semantic grays are viewport display materials only"));
+        assert!(quality_gate.contains("semantic grays are not UV/texturing/material support"));
+        assert!(quality_gate.contains("at least four visible whole-asset ideas"));
+        assert!(quality_gate.contains("human/adversarial review"));
+
+        for doc in [strategy, quality_gate] {
+            let lower = doc.to_ascii_lowercase();
+            for forbidden in [
+                "uv/texturing/material support is approved",
+                "broad uv/texturing support is approved",
+                "rigging/skinning/animation support is approved",
+                "runtime llm sdk is now required",
+            ] {
+                assert!(
+                    !lower.contains(forbidden),
+                    "Cargo Case docs must not overclaim unsupported work: {forbidden}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn source_and_markdown_hygiene_targets_are_audit_friendly() {
         let targets = [
             (
