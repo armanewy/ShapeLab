@@ -46,6 +46,7 @@ pub mod scifi_crate;
 pub mod showcase_gear;
 pub mod simple_crate;
 pub mod stylized_lamp;
+pub mod utility_crate;
 
 pub use authoring::*;
 pub use kits::*;
@@ -327,6 +328,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
         ("Roman Timber Bridge HQ", roman_bridge::hq_fixture_catalog()),
         ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
         ("Simple Crate", simple_crate::fixture_catalog()),
+        ("Utility Crate", utility_crate::fixture_catalog()),
         ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
         (
             "Market Stall Kit",
@@ -400,6 +402,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
             note: "Sci-Fi Crate has authored clay legibility evidence for directions and controls.",
         },
         simple_crate::curation_metadata(),
+        utility_crate::curation_metadata(),
         CatalogCurationMetadata {
             profile_slug: "stylized-lamp",
             state: CatalogCurationState::Usable,
