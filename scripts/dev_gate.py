@@ -19,6 +19,38 @@ FMT: Command = ("cargo", "fmt", "--all", "--check")
 PYTHON: str = os.environ.get("PYTHON", sys.executable or "python3")
 
 
+def cargo(*args: str) -> Command:
+    return ("cargo", *args)
+
+
+CATALOG_FOUNDRY_ADJACENCY_TESTS: tuple[Command, ...] = (
+    cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
+    cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"),
+)
+
+BUILD_PROFILE_RELEASE_EXPORT_PATHS: tuple[str, ...] = (
+    ".cargo/",
+    "packaging/",
+    "crates/shape-app/Cargo.toml",
+    "crates/shape-cli/Cargo.toml",
+    "crates/shape-cli/src/game_ready_static.rs",
+    "crates/shape-compile/src/export/",
+    "scripts/package_macos_app.sh",
+    "scripts/run_shape_app.ps1",
+)
+
+STATIC_SURFACE_PACKAGE_PATHS: tuple[str, ...] = (
+    "crates/shape-cli/src/game_ready_static.rs",
+    "crates/shape-gamekit/src/surface.rs",
+    "crates/shape-render/src/surface_preview.rs",
+)
+
+PRODUCT_CODE_PATHS: tuple[str, ...] = (
+    "crates/",
+    "packaging/",
+)
+
+
 @dataclass(frozen=True)
 class GatePlan:
     """Commands selected for a gate tier."""
@@ -26,10 +58,6 @@ class GatePlan:
     tier: str
     changed_paths: tuple[str, ...]
     commands: tuple[Command, ...]
-
-
-def cargo(*args: str) -> Command:
-    return ("cargo", *args)
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -116,9 +144,38 @@ def docs_status_commands() -> list[Command]:
     ]
 
 
+def is_catalog_test_path(path: str, test_name: str) -> bool:
+    return path in {
+        f"crates/shape-foundry-catalog/src/{test_name}.rs",
+        f"crates/shape-foundry-catalog/tests/{test_name}.rs",
+    }
+
+
+def touches_static_surface_package(path: str) -> bool:
+    return path in STATIC_SURFACE_PACKAGE_PATHS or path.startswith(
+        "crates/shape-gamekit/src/surface/"
+    )
+
+
+def touches_branch_release_stack(path: str) -> bool:
+    return (
+        path in {"Cargo.toml", "Cargo.lock"}
+        or any(path.startswith(prefix) for prefix in BUILD_PROFILE_RELEASE_EXPORT_PATHS)
+    )
+
+
+def touches_product_code(path: str) -> bool:
+    return (
+        path in {"Cargo.toml", "Cargo.lock"}
+        or any(path.startswith(prefix) for prefix in PRODUCT_CODE_PATHS)
+    )
+
+
 def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
-    commands: list[Command] = [FMT]
+    commands: list[Command] = [] if tier == "inner" else [FMT]
     path_set = set(paths)
+    static_surface_package_changed = any(touches_static_surface_package(path) for path in path_set)
+    branch_release_stack_changed = any(touches_branch_release_stack(path) for path in path_set)
 
     for path in sorted(path_set):
         crate = rust_crate_from_path(path)
@@ -176,10 +233,24 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
             if "surface" in path:
                 commands.append(cargo("test", "-p", "shape-render", "surface", "--jobs", "1"))
 
-        if path in {
-            "crates/shape-foundry-catalog/src/scifi_crate.rs",
-            "crates/shape-foundry-catalog/tests/scifi_crate.rs",
-        }:
+        for catalog_test in ("simple_crate", "utility_crate", "cargo_case"):
+            if is_catalog_test_path(path, catalog_test):
+                commands.extend(
+                    [
+                        cargo(
+                            "test",
+                            "-p",
+                            "shape-foundry-catalog",
+                            "--test",
+                            catalog_test,
+                            "--jobs",
+                            "1",
+                        ),
+                        *CATALOG_FOUNDRY_ADJACENCY_TESTS,
+                    ]
+                )
+
+        if is_catalog_test_path(path, "scifi_crate"):
             commands.extend(
                 [
                     cargo(
@@ -194,11 +265,10 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                     cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
                 ]
             )
+            if static_surface_package_changed:
+                commands.append(cargo("test", "-p", "shape-cli", "game_ready_static", "--jobs", "1"))
 
-        if path in {
-            "crates/shape-foundry-catalog/src/roman_bridge.rs",
-            "crates/shape-foundry-catalog/tests/roman_bridge.rs",
-        }:
+        if is_catalog_test_path(path, "roman_bridge"):
             commands.append(
                 cargo(
                     "test",
@@ -211,10 +281,7 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                 )
             )
 
-        if path in {
-            "crates/shape-foundry-catalog/src/stylized_lamp.rs",
-            "crates/shape-foundry-catalog/tests/stylized_lamp.rs",
-        }:
+        if is_catalog_test_path(path, "stylized_lamp"):
             commands.append(
                 cargo(
                     "test",
@@ -249,11 +316,15 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
         }:
             commands.append(cargo("check", "-p", crate))
 
+    if tier == "branch" and branch_release_stack_changed:
+        commands.append(cargo("build", "--release", "--workspace"))
+
     return dedupe(commands)
 
 
-def integration_commands() -> tuple[Command, ...]:
-    return (
+def integration_commands(paths: Iterable[str]) -> tuple[Command, ...]:
+    path_tuple = tuple(paths)
+    commands: list[Command] = [
         FMT,
         cargo("test", "-p", "shape-app", "--lib", "foundry", "--jobs", "1"),
         cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
@@ -262,8 +333,10 @@ def integration_commands() -> tuple[Command, ...]:
         cargo("test", "-p", "shape-foundry-catalog", "--test", "roman_bridge", "--jobs", "1"),
         cargo("test", "-p", "shape-foundry-catalog", "--test", "stylized_lamp", "--jobs", "1"),
         cargo("clippy", "--workspace", "--all-targets", "--", "-D", "warnings"),
-        cargo("build", "--release", "--workspace"),
-    )
+    ]
+    if not path_tuple or any(touches_product_code(path) for path in path_tuple):
+        commands.append(cargo("build", "--release", "--workspace"))
+    return tuple(commands)
 
 
 def release_commands() -> tuple[Command, ...]:
@@ -278,7 +351,7 @@ def release_commands() -> tuple[Command, ...]:
 def select_plan(tier: str, paths: Iterable[str]) -> GatePlan:
     path_tuple = tuple(sorted(set(paths)))
     if tier == "integration":
-        commands = integration_commands()
+        commands = integration_commands(path_tuple)
     elif tier == "release":
         commands = release_commands()
     elif path_tuple:
