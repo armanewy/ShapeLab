@@ -7,12 +7,15 @@ Date: 2026-06-29
 `PASS`
 
 Cargo Case is the first proven reusable family architecture in Shape Lab, scoped
-to clay equipment cases. The proof covers one executable base family, two
+to clay equipment cases only. The proof covers one executable base family, two
 distinct product profiles, shared controls/roles/semantic groups, and current
 Sci-Fi Crate compatibility boundaries.
 
 This does not prove a broad archetype system. Future archetypes still require
-their own vertical proof before novice catalog exposure.
+their own vertical proof before novice catalog exposure. After the family
+foundation pivot, Simple Crate is the next flagship family-authoring proof;
+Cargo Case remains an equipment-case proof and Sci-Fi Crate remains a
+regression/advanced profile, not the flagship.
 
 ## Proof Answers
 
@@ -57,15 +60,17 @@ Human gate result:
 ## Existing Product Baseline
 
 - The stable `sci-fi-crate` profile ID is preserved.
-- The Sci-Fi Crate Make dogfood baseline remains the narrow approved product
-  baseline.
+- The Sci-Fi Crate Make dogfood baseline remains approved as regression
+  evidence, not as the flagship product proof.
+- Simple Crate is the next flagship family-authoring proof.
+- Cargo Case remains valid but scoped to equipment cases only.
 - Material looks remain preview-only unless a later scoped branch adds
   persistence/export inclusion.
 - Static surface package generation is preserved, but full game-ready status
   remains blocked.
 - Roman Bridge remains `PreviewOnly`.
-- No broad Surface, UV/Texturing, Rigging, animation, or game-ready UI claim is
-  added.
+- No broad Surface, UV/Texturing, Rigging, skinning, animation, or game-ready UI
+  claim is added.
 
 ## Material-Look Compatibility
 
@@ -89,9 +94,12 @@ inject raw vertices, bypass validation, or require a runtime LLM SDK.
 
 Allowed next work:
 
-- one more Cargo Case profile, to further test family reuse;
-- Stylized Lamp product dogfood pass;
-- Sci-Fi Crate material persistence/export inclusion only if explicitly scoped.
+- Simple Crate Primitive v0;
+- Simple Crate Make baseline;
+- Utility Crate v1;
+- Cargo Case ladder reconciliation;
+- Sci-Fi Crate regression and material-look compatibility checks only when
+  needed.
 
-Do not use this proof to start broad archetype, UV/Texturing, rigging, or
-animation UI work.
+Do not use this proof to start broad archetype expansion, broad Surface mode,
+UV/Texturing, rigging, skinning, or animation UI work.

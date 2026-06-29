@@ -1,45 +1,57 @@
 # Next Product Step After Dogfood v4
 
-Product Dogfood Gate v4 passed for the Sci-Fi Crate Make baseline only.
+Product Dogfood Gate v4 passed for the Sci-Fi Crate Make baseline only. That
+result is preserved as regression evidence, not as the next flagship direction.
 
 ## Current Status
 
 Sci-Fi Crate visual Surface candidates v0 passed as a preview-only baseline.
 The Cargo Case architecture proof also passed for the equipment-case lane:
-Cargo Case now supports both Clean Utility Case and Sci-Fi Industrial Crate as
+Cargo Case supports both Clean Utility Case and Sci-Fi Industrial Crate as
 profiles over one reusable clay base family.
+
+Shape Lab is not being built for one specific model. Sci-Fi Crate is a
+regression/advanced profile, not the flagship. Simple Crate is the next
+flagship family-authoring proof.
+
+Roman Bridge remains PreviewOnly. Broad UV/Texturing/Rigging/Animation UI
+remains blocked.
 
 ## Allowed Next Steps
 
-1. One more Cargo Case profile, if it stays inside the proven family and uses
-   contact-sheet plus human review gates.
-2. Sci-Fi Crate material persistence/export inclusion, only if explicitly
-   scoped.
-3. Stylized Lamp product dogfood pass.
-4. Roman Bridge pass or continued PreviewOnly decision.
+1. Simple Crate Primitive v0.
+2. Simple Crate Make baseline.
+3. Utility Crate v1.
+4. Cargo Case ladder reconciliation.
+5. Dev-speed improvements.
+6. Headless backend work that does not overclaim product support.
 
 Scope:
 
-- stay inside Sci-Fi Crate;
-- require headless material-only candidate evidence before any app UI exposure;
-- show visual material/surface candidate differences only when the app can
-  render them clearly;
-- keep the first app exposure preview-only unless project persistence and export
-  inclusion are implemented and reviewed;
-- keep all Surface, UV, texture, and game-ready claims caveated;
+- start from a simple object grammar;
+- keep controls few until the clay variation is visibly useful;
+- keep the Make loop fast;
+- prove clay mesh quality before UV/texturing/materials;
+- keep Surface/material work narrow, preview-only or headless, and
+  evidence-backed;
 - preserve the `Choose -> Make -> ideas -> focus -> pack/export` loop;
 - rerun Product Dogfood Gate v4 if the Make flow changes materially.
 
-For Cargo Case follow-up, stay inside the declared Cargo Case roles, controls,
-and provider slots. Do not use the proof to begin broad archetype expansion.
+For Cargo Case follow-up, stay inside the declared equipment-case roles,
+controls, and provider slots. Cargo Case remains valid but scoped to equipment
+cases only. Do not use it to begin broad archetype expansion.
 
 ## Follow-Up Work
 
-1. Make visual polish.
-2. One more Cargo Case profile or Stylized Lamp product pass.
-3. Sci-Fi Crate material persistence/export inclusion, if explicitly scoped.
-4. Lamp and Roman Bridge product passes.
-5. Broader UV/Texturing/Rigging only after separate dogfood evidence.
+1. Simple Crate Primitive v0.
+2. Simple Crate Make baseline.
+3. Utility Crate v1.
+4. Cargo Case ladder reconciliation.
+5. Sci-Fi Crate regression and material-look compatibility checks only when
+   needed.
+
+The detailed allowed and blocked list is in
+`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`.
 
 ## Current Latency Follow-Up
 
@@ -57,8 +69,13 @@ and coalesced jobs.
 
 ## Still Prohibited
 
+- Broad archetype library.
+- Broad Surface mode.
+- Material editor.
 - Broad user-facing UV/Texturing UI.
-- Rigging or animation UI.
+- Rigging, skinning, or animation UI.
+- New profile explosion.
+- More Sci-Fi Crate polish unless needed for regression.
 - Motion/gameplay claims.
 - Full game-ready status.
 - Roman Bridge or Lamp product-pass claims without their own gates.

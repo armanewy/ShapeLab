@@ -2,10 +2,12 @@
 
 Date: 2026-06-29
 
-This strategy is the anti-abstraction gate for the next Foundry architecture
-work. The rule is to prove one rich reusable family first. Do not build a broad
-archetype system until Cargo Case proves it can produce two distinct,
-high-quality clay profiles: Clean Utility Case and Sci-Fi Industrial Case.
+This strategy is the anti-abstraction gate for Foundry architecture work. Cargo
+Case proved one rich reusable equipment-case family with two distinct,
+high-quality clay profiles: Clean Utility Case and Sci-Fi Industrial Case. That
+proof remains scoped to equipment cases only. Do not build a broad archetype
+system until another family proof exists beyond Cargo Case and passes its own
+clay, catalog, contact-sheet, and human review gates.
 
 This document is a contract and planning gate only. It does not add geometry,
 runtime LLM integration, UV/texturing, rigging, animation, or game-ready export
@@ -110,7 +112,7 @@ authoring language.
 
 ## Proof Requirement
 
-The system is not proven until it produces both:
+The Cargo Case equipment-family proof is recorded because it produces both:
 
 - Clean Utility Case profile.
 - Sci-Fi Industrial Case profile.

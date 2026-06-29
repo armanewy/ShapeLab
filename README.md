@@ -7,17 +7,21 @@ customizer for authored semantic asset families. The old implicit editor,
 explicit modeling workspace, and nested mode switchers are no longer product
 surfaces.
 
-Current dogfood status: Product Dogfood Gate v4 passes the Sci-Fi Crate
-Make baseline only. Treat Visual Foundry as dogfood-acceptable for that narrow
-`Choose -> Make -> ideas -> pack/export` flow, while Roman Bridge remains
-PreviewOnly and broader user-facing UV/Texturing/Rigging UI remains no-go.
-The Sci-Fi Crate material-look path is implemented as a narrow preview-only
-baseline backed by generated surface-candidate evidence; it does not change
-export payloads, and full game-ready status remains blocked.
-Cargo Case is the first proven reusable clay family architecture, scoped to
-equipment cases: Clean Utility Case and Sci-Fi Industrial Crate share one Cargo
-Case family, controls, roles, and semantic clay part groups. This is not a broad
-archetype, UV/texturing, rigging, animation, or full game-ready approval.
+Current dogfood status: Product Dogfood Gate v4 passed the Sci-Fi Crate Make
+baseline, but Sci-Fi Crate is a regression/advanced profile, not the flagship.
+Shape Lab is not being built for any one specific model. The next flagship
+family-authoring proof is Simple Crate, growing through Simple Crate Primitive
+-> Utility Crate Family -> Cargo Case -> Product profiles.
+Roman Bridge remains PreviewOnly. Broad UV/Texturing/Rigging/Animation UI
+remains blocked.
+The Sci-Fi Crate material-look path remains a narrow preview-only baseline
+backed by generated surface-candidate evidence; it does not change export
+payloads, and full game-ready status remains blocked.
+Cargo Case remains valid but scoped to equipment cases only: Clean Utility Case
+and Sci-Fi Industrial Crate share one Cargo Case family, controls, roles, and
+semantic clay part groups. This is not a broad archetype library, broad Surface
+mode, material editor, UV/texturing, rigging, animation, or full game-ready
+approval. Clay mesh quality comes before surface or material presentation.
 The canonical status note is
 [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md).
 
@@ -94,6 +98,9 @@ Release status and scope are documented in:
 - [`docs/RELEASE_CANDIDATE_MANUAL_GATE.md`](docs/RELEASE_CANDIDATE_MANUAL_GATE.md)
 - [`docs/PRODUCT_DOGFOOD_GATE_V4.md`](docs/PRODUCT_DOGFOOD_GATE_V4.md)
 - [`docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md`](docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md)
+- [`docs/FAMILY_FOUNDATION_PIVOT.md`](docs/FAMILY_FOUNDATION_PIVOT.md)
+- [`docs/FAMILY_MATURITY_LADDER.md`](docs/FAMILY_MATURITY_LADDER.md)
+- [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md`](docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md)
 - [`docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md`](docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md)
 - [`docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md`](docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md)
@@ -127,11 +134,12 @@ catalog is a grouped list by asset family, with one Start action per template.
 Pending kits are hidden from the default novice catalog until review approval is
 recorded; set `SHAPE_LAB_PREVIEW_CATALOG=1` for internal preview catalog work.
 
-## Manual Dogfood Pass 1
+## Sci-Fi Regression Pass
 
-Use this pass to make one Sci-Fi Crate and export it through the product UI.
-Product Dogfood Gate v4 has passed this Sci-Fi Crate baseline only; repeat this
-pass when validating regressions or new visual Surface candidate work.
+Use this pass to make one Sci-Fi Crate and export it through the product UI only
+when validating regressions, Cargo Case compatibility, or narrow material-look
+preview work. Product Dogfood Gate v4 passed this Sci-Fi Crate baseline, but it
+is no longer the flagship proof.
 
 1. Launch the release app with `cargo run -p shape-app --release`.
 2. On Choose, find the `Crate` family group and start `Sci-Fi Industrial Crate`.
@@ -146,6 +154,16 @@ During this pass, the app should not expose raw provider IDs, semantic IDs,
 compiler/decompiler wording, scalar paths, or internal kit planning labels in the
 asset-user UI. Passing this flow does not approve broader Surface,
 UV/Texturing, Rigging, animation, or full game-ready product UI.
+
+## Next Family Proof
+
+Simple Crate is the next flagship family-authoring proof. It starts as a Simple
+Crate Primitive with a small object grammar, few controls, a fast Make loop, and
+visible clay variation. Utility Crate v1 may follow only after the primitive
+reads clearly in clay.
+
+Surface and material work must not lead this proof. Clay mesh quality comes
+first, and no texture or material treatment may mask weak geometry.
 
 ## Architecture
 
@@ -355,8 +373,9 @@ publishing, and app-store publishing are not implemented.
 - LLM integration, LLM geometry generation, or direct LLM recipe mutation
 - General Blender integration beyond the decompiler reconstruction script
 - General imported mesh editing without known vertex correspondence
-- Broad UV/texturing, rigging, or animation beyond the headless Sci-Fi Crate
-  Surface Lab static-prop package
+- Broad Surface mode, broad UV/texturing, rigging, skinning, or animation
+  beyond narrow evidence-backed preview/headless paths
 - Materials or marketplace publishing workflows
+- Material editor or profile explosion before another family proof exists
 - GPU compute or a custom GPU viewport
 - Cloud or collaborative features
