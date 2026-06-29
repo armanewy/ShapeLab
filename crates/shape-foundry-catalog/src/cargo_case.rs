@@ -23,17 +23,22 @@ use crate::{
 pub const CARGO_CASE_BASE_SLUG: &str = "cargo-case-base";
 /// Clean Utility Case profile slug.
 pub const CLEAN_UTILITY_CASE_SLUG: &str = "clean-utility-case";
+/// Compatibility slug for the Sci-Fi Industrial Crate product profile.
+pub const SCI_FI_CRATE_SLUG: &str = "sci-fi-crate";
 /// Cargo Case family ID.
 pub const CARGO_CASE_FAMILY_ID: &str = "cargo_case";
 /// Base style ID for neutral Cargo Case proof renders.
 pub const CARGO_CASE_BASE_STYLE_ID: &str = "cargo_case_base";
 /// Clean Utility style ID for the Cargo Case family.
 pub const CLEAN_UTILITY_CASE_STYLE_ID: &str = "clean_utility_case";
+/// Sci-Fi Industrial style ID for the Cargo Case family.
+pub const SCI_FI_INDUSTRIAL_CASE_STYLE_ID: &str = "sci_fi_industrial";
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum CargoCaseProfileKind {
     Base,
     CleanUtility,
+    SciFiIndustrial,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -52,6 +57,7 @@ impl CargoCaseProfileKind {
         match self {
             Self::Base => CARGO_CASE_BASE_SLUG,
             Self::CleanUtility => CLEAN_UTILITY_CASE_SLUG,
+            Self::SciFiIndustrial => SCI_FI_CRATE_SLUG,
         }
     }
 
@@ -59,6 +65,7 @@ impl CargoCaseProfileKind {
         match self {
             Self::Base => "cargo-case-base-doc",
             Self::CleanUtility => "clean-utility-case-doc",
+            Self::SciFiIndustrial => "sci-fi-crate-doc",
         }
     }
 
@@ -66,6 +73,7 @@ impl CargoCaseProfileKind {
         match self {
             Self::Base => CARGO_CASE_BASE_STYLE_ID,
             Self::CleanUtility => CLEAN_UTILITY_CASE_STYLE_ID,
+            Self::SciFiIndustrial => SCI_FI_INDUSTRIAL_CASE_STYLE_ID,
         }
     }
 
@@ -73,6 +81,7 @@ impl CargoCaseProfileKind {
         match self {
             Self::Base => "Cargo Case Base",
             Self::CleanUtility => "Clean Utility Case",
+            Self::SciFiIndustrial => "Sci-Fi Industrial",
         }
     }
 
@@ -96,6 +105,15 @@ impl CargoCaseProfileKind {
                 trim_style: "clean",
                 detail_density: "low_detail",
             },
+            Self::SciFiIndustrial => CargoCaseControlDefaults {
+                overall_proportions: 0.52,
+                structural_heft: 0.42,
+                panel_complexity: "deep_framed_panel",
+                handle_style: "side_rail",
+                vent_density: "dense_grille",
+                trim_style: "reinforced_edge_trim",
+                detail_density: "high_detail",
+            },
         }
     }
 
@@ -105,6 +123,12 @@ impl CargoCaseProfileKind {
             Self::CleanUtility => vec![
                 "cargo-case".to_owned(),
                 "clean-utility".to_owned(),
+                "clay".to_owned(),
+            ],
+            Self::SciFiIndustrial => vec![
+                "cargo-case".to_owned(),
+                "sci-fi".to_owned(),
+                "industrial".to_owned(),
                 "clay".to_owned(),
             ],
         }
@@ -137,6 +161,29 @@ impl CargoCaseProfileKind {
                 ("vents".to_owned(), "none_sparse_vents".to_owned()),
                 ("fasteners".to_owned(), "low_fasteners".to_owned()),
             ]),
+            Self::SciFiIndustrial => BTreeMap::from([
+                ("body".to_owned(), "cargo_case_body".to_owned()),
+                ("lid".to_owned(), "raised_lid".to_owned()),
+                ("panel_fields".to_owned(), "deep_framed_panel".to_owned()),
+                ("edge_trim".to_owned(), "reinforced_edge_trim".to_owned()),
+                (
+                    "corner_guards".to_owned(),
+                    "chamfered_armor_block".to_owned(),
+                ),
+                ("base_feet_or_skids".to_owned(), "low_case_skids".to_owned()),
+                ("handles".to_owned(), "side_rail_handle".to_owned()),
+                ("vents".to_owned(), "dense_grille_vents".to_owned()),
+                ("fasteners".to_owned(), "high_fasteners".to_owned()),
+                ("latches".to_owned(), "latch_pair".to_owned()),
+                (
+                    "label_plate_geometry".to_owned(),
+                    "center_label_plate".to_owned(),
+                ),
+                (
+                    "hinge_or_closure_detail".to_owned(),
+                    "rear_hinge_detail".to_owned(),
+                ),
+            ]),
         }
     }
 
@@ -156,6 +203,14 @@ impl CargoCaseProfileKind {
                 ("clean-storage-case", "Clean Storage Case"),
                 ("reinforced-utility", "Reinforced Utility"),
                 ("minimal-field-case", "Minimal Field Case"),
+            ],
+            Self::SciFiIndustrial => vec![
+                ("light-industrial", "Light Industrial"),
+                ("reinforced-cargo", "Reinforced Cargo"),
+                ("compact-vented", "Compact Vented"),
+                ("wide-equipment-case", "Wide Equipment Case"),
+                ("minimal-industrial", "Minimal Industrial"),
+                ("detailed-utility-case", "Detailed Utility Case"),
             ],
         }
     }
@@ -243,6 +298,12 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
 #[must_use]
 pub fn clean_utility_fixture_catalog() -> FoundryFixtureCatalog {
     fixture_catalog_for(CargoCaseProfileKind::CleanUtility)
+}
+
+/// Build the Sci-Fi Industrial Crate profile from the Cargo Case family.
+#[must_use]
+pub fn sci_fi_industrial_fixture_catalog() -> FoundryFixtureCatalog {
+    fixture_catalog_for(CargoCaseProfileKind::SciFiIndustrial)
 }
 
 fn fixture_catalog_for(profile_kind: CargoCaseProfileKind) -> FoundryFixtureCatalog {
@@ -350,6 +411,7 @@ fn fixture_catalog_for(profile_kind: CargoCaseProfileKind) -> FoundryFixtureCata
         compatible_style_kits: vec![
             CARGO_CASE_BASE_STYLE_ID.to_owned(),
             CLEAN_UTILITY_CASE_STYLE_ID.to_owned(),
+            SCI_FI_INDUSTRIAL_CASE_STYLE_ID.to_owned(),
         ],
         tags: vec!["cargo-case".to_owned(), "equipment-case".to_owned()],
     });
@@ -523,7 +585,7 @@ fn fixture_catalog_for(profile_kind: CargoCaseProfileKind) -> FoundryFixtureCata
                 Vec::new(),
             ),
             panel_assembly("shallow_recessed_panel", 0.055, 0.36),
-            panel_assembly("deep_framed_panel", 0.08, 0.52),
+            panel_assembly("deep_framed_panel", 0.065, 0.42),
             trim_assembly("clean_edge_trim", 0.055, 0.055),
             trim_assembly("utility_rail_trim", 0.075, 0.095),
             trim_assembly("reinforced_edge_trim", 0.095, 0.085),
@@ -893,7 +955,7 @@ fn trim_assembly(id: &str, rail: f32, depth: f32) -> RecipeFragment {
                 None,
                 "top trim rail",
                 [0.74, depth, rail],
-                [0.0, 0.66, 0.60],
+                [0.0, 0.66, 0.78],
             ),
             box_part(
                 92,
@@ -901,7 +963,7 @@ fn trim_assembly(id: &str, rail: f32, depth: f32) -> RecipeFragment {
                 None,
                 "bottom trim rail",
                 [0.74, depth, rail],
-                [0.0, 0.66, -0.66],
+                [0.0, 0.66, -0.78],
             ),
             box_part(
                 94,

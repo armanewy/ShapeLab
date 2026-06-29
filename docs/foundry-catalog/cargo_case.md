@@ -85,3 +85,29 @@ Clean Utility candidate strategies:
 - Clean Storage Case
 - Reinforced Utility
 - Minimal Field Case
+
+## Sci-Fi Industrial Crate Profile
+
+Sci-Fi Industrial Crate keeps the public `sci-fi-crate` profile ID while using
+Cargo Case family plus Sci-Fi Industrial style/profile defaults. It shares the
+same Cargo Case family grammar, role set, control vocabulary, provider slots,
+candidate strategy template shape, and clay metadata as Clean Utility Case.
+
+Sci-Fi Industrial defaults:
+
+- deep framed panel fields
+- high detail density
+- dense vents
+- side rail handles
+- reinforced edge trim
+- chamfered armor-block corner guards
+- medium structural heft with reinforced detail providers
+
+Sci-Fi Industrial candidate strategies:
+
+- Light Industrial
+- Reinforced Cargo
+- Compact Vented
+- Wide Equipment Case
+- Minimal Industrial
+- Detailed Utility Case
