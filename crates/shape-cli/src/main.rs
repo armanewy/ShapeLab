@@ -74,6 +74,7 @@ use shape_search::foundry::{
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
+mod foundry_cli;
 mod foundry_foundation_cli;
 mod foundry_kit_cli;
 mod foundry_visual_benchmark;
@@ -121,6 +122,8 @@ enum Command {
     CompileAsset(CompileAssetArgs),
     /// Build a foundry document through the conformance-checked headless compiler.
     FoundryBuild(FoundryBuildArgs),
+    /// Internal/pro Foundry authoring commands.
+    Foundry(foundry_cli::FoundryArgs),
     /// Create a typed Foundry Author profile template.
     FoundryNewProfile(FoundryNewProfileArgs),
     /// Validate a typed Foundry Author profile package.
@@ -644,6 +647,7 @@ fn main() -> anyhow::Result<()> {
         Command::InspectAsset(args) => run_inspect_asset(args),
         Command::CompileAsset(args) => run_compile_asset(args),
         Command::FoundryBuild(args) => run_foundry_build(args),
+        Command::Foundry(args) => foundry_cli::run_foundry(args),
         Command::FoundryNewProfile(args) => run_foundry_new_profile(args),
         Command::FoundryValidateProfile(args) => run_foundry_validate_profile(args),
         Command::FoundryPreviewProfile(args) => run_foundry_preview_profile(args),

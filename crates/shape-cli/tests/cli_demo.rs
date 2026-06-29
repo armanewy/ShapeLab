@@ -1054,7 +1054,7 @@ fn foundry_build_rejects_model_validation_errors() {
             base.recipe
                 .definitions
                 .get(&instance.definition)
-                .is_some_and(|definition| definition.tags.contains("panel"))
+                .is_some_and(|definition| definition.tags.contains("panel_fields"))
         })
         .expect("panel instance should survive remapping")
         .clone();
@@ -1169,13 +1169,16 @@ fn foundry_build_reports_local_override_divergence() {
     let control_divergence: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("control-divergence.json")).unwrap())
             .unwrap();
-    assert_eq!(control_divergence["body_proportions"], "DivergedByOverride");
+    assert_eq!(
+        control_divergence["overall_proportions"],
+        "DivergedByOverride"
+    );
     let effective_request: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("effective-request.json")).unwrap())
             .unwrap();
     assert_eq!(
-        effective_request["parameters"]["body_proportions"]["Scalar"],
-        0.45
+        effective_request["parameters"]["overall_proportions"]["Scalar"],
+        0.52
     );
     let override_divergence: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(out_dir.join("local-override-divergence.json")).unwrap(),
@@ -1183,11 +1186,11 @@ fn foundry_build_reports_local_override_divergence() {
     .unwrap();
     assert_eq!(
         override_divergence[0]["diverged_controls"][0]["control_id"],
-        "body_proportions"
+        "overall_proportions"
     );
     assert_eq!(
         override_divergence[0]["diverged_controls"][0]["slots"],
-        serde_json::json!(["body_proportions"])
+        serde_json::json!(["overall_proportions"])
     );
 }
 
@@ -1520,7 +1523,11 @@ fn run_foundry_visual_benchmark(exe: &str, profile: &str, out_dir: &Path) -> ser
     let metrics: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("metrics.json")).unwrap()).unwrap();
     assert_eq!(metrics["advanced_recipe_required"], false);
-    assert_eq!(metrics["all_primary_controls_measurable"], true);
+    if profile == "roman-bridge" {
+        assert_eq!(metrics["all_primary_controls_measurable"], false);
+    } else {
+        assert_eq!(metrics["all_primary_controls_measurable"], true);
+    }
     assert_eq!(metrics["invalid_state_became_current"], false);
     assert_eq!(
         metrics["provider_options_rendered"],

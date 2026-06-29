@@ -4,10 +4,11 @@ use std::fs;
 use std::process::Command;
 
 use shape_foundry::{
-    ControlProfileControlKind, ControlProfileTopologyBehavior, DraftControl, DraftRepairSuggestion,
-    FoundryFoundationDraft, FoundryKitPackage, WAVE37_WEAPON_ARMOR_FAMILY_IDS,
-    foundation_adversarial_report, foundation_draft_template, validate_foundation_draft,
-    weapon_armor_foundation_batch_summary, weapon_armor_foundation_draft_batch,
+    ArchetypeDraftMaterializationReport, ControlProfileControlKind, ControlProfileTopologyBehavior,
+    DraftControl, DraftRepairSuggestion, FoundryFoundationDraft, FoundryKitPackage,
+    WAVE37_WEAPON_ARMOR_FAMILY_IDS, foundation_adversarial_report, foundation_draft_template,
+    validate_foundation_draft, weapon_armor_foundation_batch_summary,
+    weapon_armor_foundation_draft_batch,
 };
 
 #[test]
@@ -101,6 +102,61 @@ fn foundry_foundation_cli_creates_validates_materializes_and_reports() {
                 .expect("parse draft")
         )
     );
+}
+
+#[test]
+fn foundry_archetype_materializer_cli_writes_internal_cargo_case_drafts() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("clean-medical-case");
+
+    assert!(
+        Command::new(exe)
+            .args([
+                "foundry",
+                "materialize-archetype",
+                "--archetype",
+                "cargo-case",
+                "--family-id",
+                "clean-medical-case",
+                "--style-id",
+                "clean-medical",
+                "--out-dir",
+            ])
+            .arg(&out_dir)
+            .status()
+            .expect("run archetype materializer")
+            .success()
+    );
+
+    for name in [
+        "family-blueprint-draft.json",
+        "provider-taxonomy-draft.json",
+        "style-pack-draft.json",
+        "control-profile-draft.json",
+        "candidate-strategy-draft.json",
+        "quality-gate-draft.json",
+        "test-plan-draft.json",
+        "review-checklist.md",
+        "materialization-report.json",
+    ] {
+        assert!(out_dir.join(name).is_file(), "{name} should exist");
+    }
+
+    let report: ArchetypeDraftMaterializationReport = serde_json::from_slice(
+        &fs::read(out_dir.join("materialization-report.json")).expect("read report"),
+    )
+    .expect("parse report");
+    assert_eq!(report.archetype_id, "cargo-case");
+    assert_eq!(report.family_id, "clean_medical_case");
+    assert_eq!(report.style_id, "clean_medical");
+    assert!(!report.publish_allowed);
+    assert!(!report.novice_visible);
+    assert!(report.human_review_required);
+    assert!(!report.showcase_allowed);
+    assert!(!report.geometry_payload_present);
+    assert!(!report.raw_vertex_payload_present);
+    assert!(!report.missing_taste_bearing_providers.is_empty());
 }
 
 #[test]
