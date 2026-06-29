@@ -4605,11 +4605,12 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
 
         for control_id in [
-            "body_proportions",
+            "overall_proportions",
             "structural_heft",
-            "panel_depth",
+            "panel_complexity",
             "vent_density",
             "handle_style",
+            "trim_style",
             "detail_density",
         ] {
             assert!(
@@ -4624,14 +4625,6 @@ mod tests {
                     .find(|row| row.control_id == control_id)
             );
         }
-        assert!(matches!(
-            rows.get("edge_softness"),
-            Some(
-                CandidateLegibilityClass::SubtleButExplainable
-                    | CandidateLegibilityClass::Clear
-                    | CandidateLegibilityClass::Strong
-            )
-        ));
     }
 
     #[test]

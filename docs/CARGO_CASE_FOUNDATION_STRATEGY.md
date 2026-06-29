@@ -144,6 +144,11 @@ If Cargo Case migration changes the frozen mesh fingerprint, existing
 material-look evidence must be marked stale and regenerated. It must not be
 silently reused against changed geometry.
 
+Prompt 5 implementation note: `sci-fi-crate` now routes through Cargo Case
+family plus Sci-Fi Industrial style/profile defaults. Existing material-look
+preview evidence for the older bespoke geometry is stale unless regenerated
+against the Cargo Case output.
+
 ## LLM And Internal Author Policy
 
 Internal agents may draft archetype, family, style, and provider specs. They may
