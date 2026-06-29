@@ -10,6 +10,10 @@
   animation. The headless Sci-Fi Crate static-prop package is the narrow
   exception: Surface Lab v1 emits deterministic UV/material/texture evidence
   for that one profile only.
+- Cargo Case is the first proven reusable clay family architecture, but only
+  for equipment-case profiles. It does not prove a broad archetype system, and
+  archetype materializer outputs remain internal drafts until validation,
+  contact sheets, and human/adversarial review pass.
 - Product Dogfood Gate v4 approves only the Sci-Fi Crate Make baseline. It does
   not approve broader Surface, UV/Texturing, Rigging, animation, or full
   game-ready product UI.
