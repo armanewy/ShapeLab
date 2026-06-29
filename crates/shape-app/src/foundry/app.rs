@@ -200,6 +200,10 @@ struct MakeCanvasViewState {
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
+    simple_crate_baseline: bool,
+    try_ideas_action_label: &'static str,
+    use_candidate_action_label: &'static str,
+    adjust_heading_label: &'static str,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -321,8 +325,7 @@ const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 6] = [
     HomeTemplateFilter::Environment,
 ];
 
-const HOME_SUBTITLE: &str =
-    "Start with an asset template, then make whole-asset and part-focused ideas.";
+const HOME_SUBTITLE: &str = "Start with an asset template, then make clear whole-asset ideas.";
 const NEED_PROJECT_REASON: &str = "Choose a template or open a project first.";
 const NEED_SAVE_LOCATION_REASON: &str =
     "Use Save Project first to choose where this project is saved.";
@@ -348,6 +351,7 @@ const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
+const SIMPLE_CRATE_PROFILE_ID: &str = "simple-crate";
 const SCI_FI_CRATE_PROFILE_ID: &str = "sci-fi-crate";
 const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/sci-fi-crate/surface/variants/surface-candidate-report.json";
 const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
@@ -386,6 +390,7 @@ const ACTION_SWITCH_TO_REVISION: &str = "Switch to revision";
 const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
 const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
+const ACTION_TRY_CRATE_IDEAS: &str = "Try crate ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
@@ -405,6 +410,7 @@ const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
+const ACTION_USE_THIS_CRATE: &str = "Use this crate";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
@@ -416,7 +422,8 @@ const ACTION_CLEAR_FOCUS: &str = "Clear focus";
 const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
-const RENDERED_ACTION_LABELS: [&str; 45] = [
+const ACTION_ADJUST_CRATE: &str = "Adjust crate";
+const RENDERED_ACTION_LABELS: [&str; 47] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -432,6 +439,7 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
     ACTION_TRY_WHOLE_ASSET_IDEAS,
+    ACTION_TRY_CRATE_IDEAS,
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_WHOLE_ASSET_RECOVERY,
     ACTION_TRY_MORE_IDEAS,
@@ -451,6 +459,7 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EXPORT_PACK,
     ACTION_SELECT,
     ACTION_CHOOSE_DIRECTION,
+    ACTION_USE_THIS_CRATE,
     ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
@@ -841,6 +850,22 @@ impl FoundryDesktopApp {
             })
             .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
+        let simple_crate_baseline = self.active_profile_is_simple_crate();
+        let try_ideas_action_label = if simple_crate_baseline {
+            ACTION_TRY_CRATE_IDEAS
+        } else {
+            ACTION_TRY_WHOLE_ASSET_IDEAS
+        };
+        let use_candidate_action_label = if simple_crate_baseline {
+            ACTION_USE_THIS_CRATE
+        } else {
+            ACTION_CHOOSE_DIRECTION
+        };
+        let adjust_heading_label = if simple_crate_baseline {
+            ACTION_ADJUST_CRATE
+        } else {
+            "Adjust"
+        };
         let active_candidate_job = self.state.active_jobs.values().any(|request| {
             matches!(
                 request,
@@ -977,6 +1002,7 @@ impl FoundryDesktopApp {
                 candidate_output: self.state.candidate_output.as_deref(),
                 local_warning_message: local_warning_message.as_deref(),
                 local_error_message: local_error_message.as_deref(),
+                simple_crate_baseline,
             });
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
@@ -990,7 +1016,7 @@ impl FoundryDesktopApp {
             (MakeCanvasMode::GeneratingWholeAssetIdeas, _)
             | (MakeCanvasMode::GeneratingFocusedPartIdeas, _) => ACTION_GENERATING_IDEAS.to_owned(),
             (MakeCanvasMode::NoAsset, _) => ACTION_CHOOSE_TEMPLATE.to_owned(),
-            (MakeCanvasMode::ReviewingIdeas, _) => ACTION_CHOOSE_DIRECTION.to_owned(),
+            (MakeCanvasMode::ReviewingIdeas, _) => use_candidate_action_label.to_owned(),
             _ if focused_no_candidates_recovery_visible => {
                 ACTION_TRY_WHOLE_ASSET_RECOVERY.to_owned()
             }
@@ -998,7 +1024,7 @@ impl FoundryDesktopApp {
                 "Try {} ideas",
                 singular_part_copy(label).to_ascii_lowercase()
             ),
-            _ => ACTION_TRY_WHOLE_ASSET_IDEAS.to_owned(),
+            _ => try_ideas_action_label.to_owned(),
         };
         let primary_action_enabled = match mode {
             MakeCanvasMode::NoAsset => true,
@@ -1046,6 +1072,7 @@ impl FoundryDesktopApp {
             &mode,
             focused_part_label.as_deref(),
             selected_comparison_visible,
+            simple_crate_baseline,
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
@@ -1094,6 +1121,10 @@ impl FoundryDesktopApp {
             local_warning_message,
             local_error_message,
             next_action_hint,
+            simple_crate_baseline,
+            try_ideas_action_label,
+            use_candidate_action_label,
+            adjust_heading_label,
         }
     }
 
@@ -1258,18 +1289,23 @@ impl FoundryDesktopApp {
         }) || candidate_previews_are_pending(&self.state.candidates)
     }
 
-    fn active_profile_is_scifi_crate(&self) -> bool {
+    fn active_profile_matches(&self, profile_id: &str) -> bool {
         self.state.document.as_ref().is_some_and(|document| {
             document
                 .customizer_profile_ref
                 .stable_id
-                .contains(SCI_FI_CRATE_PROFILE_ID)
-                || document
-                    .family_content_ref
-                    .stable_id
-                    .contains(SCI_FI_CRATE_PROFILE_ID)
-                || document.document_id.0.contains(SCI_FI_CRATE_PROFILE_ID)
+                .contains(profile_id)
+                || document.family_content_ref.stable_id.contains(profile_id)
+                || document.document_id.0.contains(profile_id)
         })
+    }
+
+    fn active_profile_is_simple_crate(&self) -> bool {
+        self.active_profile_matches(SIMPLE_CRATE_PROFILE_ID)
+    }
+
+    fn active_profile_is_scifi_crate(&self) -> bool {
+        self.active_profile_matches(SCI_FI_CRATE_PROFILE_ID)
     }
 
     fn material_look_action_visible(&self, view_state: &MakeCanvasViewState) -> bool {
@@ -1796,7 +1832,7 @@ impl FoundryDesktopApp {
                             ui,
                             &action_spec(
                                 make_canvas_candidate_actions_enabled(view_state),
-                                ACTION_TRY_MORE_IDEAS,
+                                view_state.try_ideas_action_label,
                                 ButtonTone::Secondary,
                                 build_actions_reason,
                             ),
@@ -1950,7 +1986,11 @@ impl FoundryDesktopApp {
                 }
             });
             ui.add_space(12.0);
-            ui.label(RichText::new("Adjust").color(colors.text).strong());
+            ui.label(
+                RichText::new(view_state.adjust_heading_label)
+                    .color(colors.text)
+                    .strong(),
+            );
             ui.add_space(6.0);
             let active_group = self.active_make_part_group();
             let control_sections =
@@ -2325,11 +2365,16 @@ impl FoundryDesktopApp {
     fn make_primary_candidate_command(&self) -> Option<FoundryAppCommand> {
         let document = self.state.document.as_ref()?;
         let active_group = self.active_make_part_group();
-        let variation_intent = active_group
-            .as_ref()
-            .map_or_else(VariationIntent::complete_look, |group| {
-                VariationIntent::focus_part_shape(&group.group_id, &group.label)
-            });
+        let variation_intent = active_group.as_ref().map_or_else(
+            || {
+                if self.active_profile_is_simple_crate() {
+                    VariationIntent::whole_asset_shape()
+                } else {
+                    VariationIntent::complete_look()
+                }
+            },
+            |group| VariationIntent::focus_part_shape(&group.group_id, &group.label),
+        );
         Some(FoundryAppCommand::RequestCandidates(
             FoundryCandidateRequest {
                 seed: document.seed,
@@ -2348,10 +2393,9 @@ impl FoundryDesktopApp {
     }
 
     fn make_whole_asset_candidate_command(&self) -> Option<FoundryAppCommand> {
-        self.state
-            .document
-            .as_ref()
-            .map(|_| make_whole_asset_candidate_request(&self.state))
+        self.state.document.as_ref().map(|_| {
+            make_whole_asset_candidate_request(&self.state, self.active_profile_is_simple_crate())
+        })
     }
 
     fn make_focused_recovery_commands(&self) -> Vec<FoundryAppCommand> {
@@ -2440,7 +2484,10 @@ impl FoundryDesktopApp {
                 .unwrap_or("Trying ideas from the current asset...")
                 .to_owned()
         } else {
-            direction_board_count_label(view_state.candidate_count)
+            direction_board_count_label(
+                view_state.candidate_count,
+                view_state.simple_crate_baseline,
+            )
         };
         if make_canvas_uses_compact_ideas(view_state) {
             compact_section_header(
@@ -2527,7 +2574,11 @@ impl FoundryDesktopApp {
                 } else {
                     (
                         "Ready to try ideas",
-                        "Try ideas or focus a part when the asset is ready.",
+                        if view_state.simple_crate_baseline {
+                            "Try crate ideas when the crate is ready."
+                        } else {
+                            "Try ideas or focus a part when the asset is ready."
+                        },
                     )
                 };
                 product_compact_empty_state(ui, title, message);
@@ -2553,14 +2604,17 @@ impl FoundryDesktopApp {
         commands.extend(show_visible_direction_ideas_board(
             ui,
             texture_cache,
-            current_build,
-            current_preview,
-            &self.state.candidates,
-            make_canvas_candidate_actions_enabled(view_state),
-            view_state
-                .primary_action_disabled_reason
-                .as_deref()
-                .unwrap_or(ACTIVE_IDEA_JOB_REASON),
+            VisibleDirectionIdeasBoard {
+                current_build,
+                current_preview,
+                candidates: &self.state.candidates,
+                actions_enabled: make_canvas_candidate_actions_enabled(view_state),
+                disabled_reason: view_state
+                    .primary_action_disabled_reason
+                    .as_deref()
+                    .unwrap_or(ACTIVE_IDEA_JOB_REASON),
+                use_candidate_label: view_state.use_candidate_action_label,
+            },
         ));
         commands
     }
@@ -3431,14 +3485,14 @@ impl FoundryDesktopApp {
             }
             ScreenshotScenario::GeneratingWholeAssetIdeas => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(&self.state));
+                    commands.push(make_whole_asset_candidate_request(&self.state, false));
                     self.screenshot_scenario_step = 2;
                 }
             }
             ScreenshotScenario::GeneratedWholeAssetIdeas
             | ScreenshotScenario::SelectedComparison => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(&self.state));
+                    commands.push(make_whole_asset_candidate_request(&self.state, false));
                     self.screenshot_scenario_step = 2;
                 } else if !self.state.candidates.is_empty() && self.state.active_jobs.is_empty() {
                     let target_candidate = match scenario {
@@ -4576,7 +4630,10 @@ fn screenshot_part_group(
         .find(|group| group.group_id == group_id && group.focusable)
 }
 
-fn make_whole_asset_candidate_request(state: &FoundryAppState) -> FoundryAppCommand {
+fn make_whole_asset_candidate_request(
+    state: &FoundryAppState,
+    shape_only: bool,
+) -> FoundryAppCommand {
     let seed = state.document.as_ref().map_or(0, |document| document.seed);
     FoundryAppCommand::RequestCandidates(FoundryCandidateRequest {
         seed,
@@ -4585,7 +4642,11 @@ fn make_whole_asset_candidate_request(state: &FoundryAppState) -> FoundryAppComm
         mode: FoundryCandidateMode::Explore,
         strategy_id: None,
         preference_profile: None,
-        variation_intent: VariationIntent::complete_look(),
+        variation_intent: if shape_only {
+            VariationIntent::whole_asset_shape()
+        } else {
+            VariationIntent::complete_look()
+        },
     })
 }
 
@@ -4618,6 +4679,7 @@ fn project_file_title(path: &Path) -> String {
 
 fn asset_title_from_id(document_id: &str) -> &'static str {
     match document_id {
+        id if id.contains("simple-crate") => "Simple Crate",
         id if id.contains("roman-bridge") => "Roman Timber Bridge",
         id if id.contains("sci-fi-crate") => "Sci-Fi Industrial Crate",
         id if id.contains("stylized-lamp") => "Stylized Furniture Lamp",
@@ -4690,6 +4752,9 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 
 fn profile_description(slug: &str) -> &'static str {
     match slug {
+        "simple-crate" => {
+            "A plain clay crate with a body, lid, trim, feet, and five easy controls."
+        }
         "roman-bridge" => {
             "A reinforced timber bridge with supports, bracing, railings, and span controls."
         }
@@ -4838,8 +4903,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Recent Projects",
         "Start",
         "Try ideas",
+        ACTION_TRY_CRATE_IDEAS,
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
+        ACTION_USE_THIS_CRATE,
+        ACTION_ADJUST_CRATE,
         "Handles",
         "Focused: Handles",
         "Try handle ideas",
@@ -4913,6 +4981,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No matching templates",
         "Make asset",
         "Use the model as the workspace: try ideas, focus parts, tune controls, and compare.",
+        "Try crate ideas, adjust crate, Add to Pack, or Export.",
         "Current Asset",
         "Ideas",
         "Trying ideas",
@@ -5003,6 +5072,7 @@ pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static s
 pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'static>> {
     vec![
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_TRY_CRATE_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_RECOVERY, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_MORE_IDEAS, ButtonTone::Secondary),
@@ -5013,6 +5083,7 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled("Try handle ideas", ButtonTone::Primary),
         ActionSpec::enabled("Try vent ideas", ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_USE_THIS_CRATE, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
@@ -5087,6 +5158,7 @@ struct MakeCanvasBannerContext<'a> {
     candidate_output: Option<&'a FoundryCandidateOutput>,
     local_warning_message: Option<&'a str>,
     local_error_message: Option<&'a str>,
+    simple_crate_baseline: bool,
 }
 
 fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, String, BannerTone) {
@@ -5103,6 +5175,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         candidate_output,
         local_warning_message,
         local_error_message,
+        simple_crate_baseline,
     } = context;
     if let Some(message) = local_warning_message {
         return (
@@ -5157,8 +5230,16 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Info,
         ),
         MakeCanvasMode::ReviewingIdeas => (
-            "Ideas ready".to_owned(),
-            "Compare the selected idea, then use it or reject it.".to_owned(),
+            if simple_crate_baseline {
+                "Crate ideas ready".to_owned()
+            } else {
+                "Ideas ready".to_owned()
+            },
+            if simple_crate_baseline {
+                "Use this crate, or reject it.".to_owned()
+            } else {
+                "Compare the selected idea, then use it or reject it.".to_owned()
+            },
             BannerTone::Success,
         ),
         MakeCanvasMode::PackDrawerOpen => (
@@ -5176,11 +5257,21 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             "The current asset needs attention.".to_owned(),
             BannerTone::Error,
         ),
-        MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => (
-            "Ready to try ideas".to_owned(),
-            "Try ideas, focus a part, or tune controls.".to_owned(),
-            BannerTone::Success,
-        ),
+        MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
+            if simple_crate_baseline && matches!(mode, MakeCanvasMode::Ready) {
+                (
+                    "Ready".to_owned(),
+                    "Try crate ideas, adjust crate, Add to Pack, or Export.".to_owned(),
+                    BannerTone::Success,
+                )
+            } else {
+                (
+                    "Ready to try ideas".to_owned(),
+                    "Try ideas, focus a part, or tune controls.".to_owned(),
+                    BannerTone::Success,
+                )
+            }
+        }
     }
 }
 
@@ -5242,10 +5333,16 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::PreparingAsset => ASSET_PREPARING_REASON,
         MakeCanvasMode::GeneratingWholeAssetIdeas => "Trying ideas from the current asset.",
         MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas for the focused part.",
+        MakeCanvasMode::ReviewingIdeas if view_state.simple_crate_baseline => {
+            "Use this crate, or try another idea."
+        }
         MakeCanvasMode::ReviewingIdeas => "Compare the selected idea against the current asset.",
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
+        MakeCanvasMode::Ready if view_state.simple_crate_baseline => {
+            "Try crate ideas or adjust crate."
+        }
         MakeCanvasMode::Ready => "Try ideas, focus a part, or tune controls.",
         MakeCanvasMode::Error => "The current asset needs attention.",
     }
@@ -5255,6 +5352,7 @@ fn make_canvas_next_action_hint(
     mode: &MakeCanvasMode,
     focused_part_label: Option<&str>,
     selected_comparison_visible: bool,
+    simple_crate_baseline: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => "Start with a template from Choose.".to_owned(),
@@ -5272,6 +5370,9 @@ fn make_canvas_next_action_hint(
         }
         (MakeCanvasMode::GeneratingWholeAssetIdeas, _, _) => {
             "Watch this area for new ideas.".to_owned()
+        }
+        (MakeCanvasMode::ReviewingIdeas, _, true) if simple_crate_baseline => {
+            "Use this crate, or reject it.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) => {
             "Compare the selected idea, then use it or reject it.".to_owned()
@@ -5295,6 +5396,9 @@ fn make_canvas_next_action_hint(
             "Choose an export option when readiness is clear.".to_owned()
         }
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
+        (MakeCanvasMode::Ready, _, _) if simple_crate_baseline => {
+            "Try crate ideas, adjust crate, Add to Pack, or Export.".to_owned()
+        }
         (MakeCanvasMode::Ready, _, _) => {
             "Try ideas, focus a part, add to pack, or export.".to_owned()
         }
@@ -5527,9 +5631,13 @@ fn product_panel_message(message: &str, fallback: &str) -> String {
     }
 }
 
-fn direction_board_count_label(count: usize) -> String {
+fn direction_board_count_label(count: usize, simple_crate_baseline: bool) -> String {
     if count == 0 {
-        "Try ideas from the current asset.".to_owned()
+        if simple_crate_baseline {
+            "Try crate ideas.".to_owned()
+        } else {
+            "Try ideas from the current asset.".to_owned()
+        }
     } else {
         format!("Found {count} clear ideas")
     }
@@ -6439,33 +6547,34 @@ fn human_join(items: &[&str]) -> String {
     }
 }
 
+struct VisibleDirectionIdeasBoard<'a> {
+    current_build: Option<&'a FoundryBuildStamp>,
+    current_preview: Option<&'a FoundryPreviewImage>,
+    candidates: &'a [crate::foundry::view_model::FoundryCandidateCard],
+    actions_enabled: bool,
+    disabled_reason: &'a str,
+    use_candidate_label: &'a str,
+}
+
 fn show_visible_direction_ideas_board(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
-    current_build: Option<&FoundryBuildStamp>,
-    current_preview: Option<&FoundryPreviewImage>,
-    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
-    actions_enabled: bool,
-    disabled_reason: &str,
+    board: VisibleDirectionIdeasBoard<'_>,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     commands.extend(show_selected_candidate_comparison_compact(
         ui,
         texture_cache,
-        current_build,
-        current_preview,
-        candidates,
-        actions_enabled,
-        disabled_reason,
+        &board,
     ));
     ui.add_space(8.0);
     commands.extend(show_direction_candidate_grid_compact(
         ui,
         texture_cache,
-        current_build,
-        candidates,
-        actions_enabled,
-        disabled_reason,
+        board.current_build,
+        board.candidates,
+        board.actions_enabled,
+        board.disabled_reason,
     ));
     commands
 }
@@ -6473,21 +6582,18 @@ fn show_visible_direction_ideas_board(
 fn show_selected_candidate_comparison_compact(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
-    current_build: Option<&FoundryBuildStamp>,
-    current_preview: Option<&FoundryPreviewImage>,
-    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
-    actions_enabled: bool,
-    disabled_reason: &str,
+    board: &VisibleDirectionIdeasBoard<'_>,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
-    let Some(candidate) = candidates
+    let Some(candidate) = board
+        .candidates
         .iter()
         .find(|candidate| candidate.selected)
-        .or_else(|| candidates.first())
+        .or_else(|| board.candidates.first())
     else {
         return commands;
     };
-    let Some(current_preview) = current_preview else {
+    let Some(current_preview) = board.current_preview else {
         return commands;
     };
     if candidate.rgba8.is_empty() || current_preview.rgba8.is_empty() {
@@ -6528,7 +6634,7 @@ fn show_selected_candidate_comparison_compact(
                             texture_cache,
                             FoundryPreviewDraw {
                                 preview_id: &preview_id,
-                                build: current_build,
+                                build: board.current_build,
                                 rgba8: &candidate.rgba8,
                                 width: candidate.width,
                                 height: candidate.height,
@@ -6568,13 +6674,13 @@ fn show_selected_candidate_comparison_compact(
                     if action_button(
                         ui,
                         &action_spec(
-                            actions_enabled && candidate.selectable,
-                            ACTION_CHOOSE_DIRECTION,
+                            board.actions_enabled && candidate.selectable,
+                            board.use_candidate_label,
                             ButtonTone::Primary,
-                            if actions_enabled {
+                            if board.actions_enabled {
                                 choose_reason.as_str()
                             } else {
-                                disabled_reason
+                                board.disabled_reason
                             },
                         ),
                     )
@@ -6585,10 +6691,10 @@ fn show_selected_candidate_comparison_compact(
                     if action_button(
                         ui,
                         &action_spec(
-                            actions_enabled,
+                            board.actions_enabled,
                             ACTION_REJECT,
                             ButtonTone::Secondary,
-                            disabled_reason,
+                            board.disabled_reason,
                         ),
                     )
                     .clicked()
@@ -8281,14 +8387,16 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 17);
-        assert_eq!(default_product_home_profile_count(), 2);
+        assert_eq!(installed_product_kit_count(), 18);
+        assert_eq!(default_product_home_profile_count(), 3);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
             .iter()
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
+        assert_eq!(default_profiles[0].fixture.slug, "simple-crate");
+        assert!(default_labels.contains(&"Simple Crate"));
         assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
         assert!(default_labels.contains(&"Stylized Furniture Lamp"));
         assert!(!default_labels.contains(&"Roman Timber Bridge"));
@@ -8301,7 +8409,8 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 16);
+        assert_eq!(profiles.len(), 17);
+        assert!(labels.contains(&"Simple Crate"));
         assert!(labels.contains(&"Roman Timber Bridge"));
         assert!(labels.contains(&"Roman Timber Bridge HQ"));
         assert!(labels.contains(&"Sci-Fi Industrial Crate"));
@@ -10241,7 +10350,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
 
-        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+        app.load_fixture(shape_foundry_catalog::simple_crate::fixture_catalog(), &ctx);
 
         assert_eq!(app.tab, FoundryTab::Make);
         assert!(
@@ -10261,6 +10370,146 @@ mod tests {
 
         assert!(app.state.current_output.is_some());
         assert!(app.state.current_preview.is_some());
+    }
+
+    #[test]
+    fn simple_crate_make_baseline_flow_is_plain_and_complete() {
+        let fixture = shape_foundry_catalog::simple_crate::fixture_catalog();
+        let mut app = simple_crate_ready_state_test_app();
+        let ready = app.make_canvas_view_state();
+
+        assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert_eq!(ready.primary_action_label, ACTION_TRY_CRATE_IDEAS);
+        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_CRATE);
+        assert!(ready.next_action_hint.contains("adjust crate"));
+        assert!(!app.material_look_action_visible(&ready));
+        assert!(
+            app.state
+                .document
+                .as_ref()
+                .map(directions::direction_part_groups_for_document)
+                .is_some_and(|groups| groups.is_empty())
+        );
+
+        let request_command = app
+            .make_primary_candidate_command()
+            .expect("request command");
+        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
+            panic!("expected candidate request command");
+        };
+        assert_eq!(
+            request.variation_intent.channels,
+            vec![shape_foundry::VariationChannel::Shape]
+        );
+        for forbidden_channel in [
+            shape_foundry::VariationChannel::Surface,
+            shape_foundry::VariationChannel::Rig,
+            shape_foundry::VariationChannel::Motion,
+        ] {
+            assert!(
+                !request
+                    .variation_intent
+                    .channels
+                    .contains(&forbidden_channel)
+            );
+        }
+
+        let candidate_effects = app
+            .state
+            .handle_command(request_command)
+            .expect("Try crate ideas schedules");
+        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
+        let (preview_request, candidate_output) = match &candidate_event {
+            FoundryJobEvent::CandidatesGenerated {
+                request, output, ..
+            } => {
+                assert!(
+                    !output.candidates.is_empty(),
+                    "Try crate ideas should yield candidates"
+                );
+                (request.clone(), output.as_ref().clone())
+            }
+            other => panic!("expected generated candidates, got {other:?}"),
+        };
+        assert!(app.state.handle_job_event(candidate_event));
+
+        let preview_effects = app
+            .state
+            .request_candidate_previews(preview_request, candidate_output)
+            .expect("candidate previews schedule");
+        let preview_event = run_fixture_effect(preview_effects, &fixture);
+        assert!(app.state.handle_job_event(preview_event));
+
+        let reviewing = app.make_canvas_view_state();
+        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_CRATE);
+        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_CRATE);
+        assert!(reviewing.selected_comparison_visible);
+        assert!(
+            app.state
+                .candidates
+                .iter()
+                .any(|candidate| !candidate.rgba8.is_empty())
+        );
+
+        let build_before_accept = app.state.current_build.clone();
+        let accept_effects = app
+            .state
+            .handle_command(
+                app.accept_visible_candidate_command()
+                    .expect("selectable crate idea"),
+            )
+            .expect("Use this crate schedules");
+        let accept_event = run_fixture_effect(accept_effects, &fixture);
+        assert!(app.state.handle_job_event(accept_event));
+        assert_ne!(app.state.current_build, build_before_accept);
+        assert!(app.state.candidates.is_empty());
+
+        let adjust_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "edge_softness".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(0.55),
+            }))
+            .expect("adjust crate schedules");
+        let adjust_event = run_fixture_effect(adjust_effects, &fixture);
+        assert!(app.state.handle_job_event(adjust_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("edge_softness")),
+            Some(&shape_foundry::ControlValue::Scalar(0.55))
+        );
+
+        let pack_effects = app
+            .state
+            .handle_command(app.add_current_to_pack_command().expect("pack command"))
+            .expect("Add to Pack schedules");
+        let pack_event = run_fixture_effect(pack_effects, &fixture);
+        assert!(app.state.handle_job_event(pack_event));
+        assert_eq!(app.state.pack.members.len(), 1);
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(app.make_canvas_view_state().pack_drawer_visible);
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(app.make_canvas_view_state().export_drawer_visible);
+
+        let simple_make_copy = [
+            ready.primary_action_label.as_str(),
+            reviewing.primary_action_label.as_str(),
+            ready.adjust_heading_label,
+            ACTION_ADD_TO_PACK,
+            ACTION_EXPORT,
+        ]
+        .join("\n")
+        .to_ascii_lowercase();
+        for forbidden in ["surface", "material", "rig", "motion", "focus part"] {
+            assert!(
+                !simple_make_copy.contains(forbidden),
+                "Simple Crate baseline copy must not expose {forbidden}: {simple_make_copy}"
+            );
+        }
     }
 
     #[test]
@@ -10768,6 +11017,37 @@ mod tests {
         app.state.current_output = Some(Box::new(output));
         app.state.current_preview = Some(test_preview_image_for_build("current", Some(build)));
         app
+    }
+
+    fn simple_crate_ready_state_test_app() -> FoundryDesktopApp {
+        let fixture = shape_foundry_catalog::simple_crate::fixture_catalog();
+        let mut app = FoundryDesktopApp {
+            tab: FoundryTab::Make,
+            state: FoundryAppState::new(fixture.document.clone()).expect("fixture state"),
+            ..FoundryDesktopApp::default()
+        };
+        let output =
+            compile_foundry_document(app.state.document.as_ref().expect("document"), &fixture)
+                .expect("fixture compiles");
+        let build = output.build_stamp.clone();
+        app.state.current_build = Some(build.clone());
+        app.state.current_output = Some(Box::new(output));
+        app.state.current_preview = Some(test_preview_image_for_build("current", Some(build)));
+        app
+    }
+
+    fn run_fixture_effect(
+        effects: Vec<FoundryAppEffect>,
+        fixture: &FoundryFixtureCatalog,
+    ) -> FoundryJobEvent {
+        let [FoundryAppEffect::StartJob(job)] = effects.as_slice() else {
+            panic!("expected exactly one start job effect, got {effects:?}");
+        };
+        run_foundry_job(
+            job.as_ref().clone(),
+            fixture,
+            &mut FoundryPreviewCache::default(),
+        )
     }
 
     fn test_preview_image(preview_id: &str) -> FoundryPreviewImage {

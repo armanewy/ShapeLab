@@ -1,7 +1,9 @@
 //! Headless product UI gate for the Visual Foundry app shell.
 
 use shape_foundry::{ControlKind, compile_foundry_document};
-use shape_foundry_catalog::{FoundryFixtureCatalog, roman_bridge, scifi_crate, stylized_lamp};
+use shape_foundry_catalog::{
+    FoundryFixtureCatalog, roman_bridge, scifi_crate, simple_crate, stylized_lamp,
+};
 
 use crate::foundry::{
     app::rendered_action_labels_for_default_shell,
@@ -73,8 +75,8 @@ impl ProductUiGateReport {
             && !self.default_raw_technical_terms_visible
             && self.product_home_profiles > 0
             && self.product_home_profiles < self.installed_kit_count
-            && self.installed_kit_count == 17
-            && self.developer_preview_kit_count == 16
+            && self.installed_kit_count == 18
+            && self.developer_preview_kit_count == 17
             && self.directions_board_gate
             && self.customize_deck_gate
             && self.pack_gate
@@ -213,6 +215,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
 
 fn core_profile_fixtures() -> Vec<(&'static str, FoundryFixtureCatalog)> {
     vec![
+        ("Simple Crate", simple_crate::fixture_catalog()),
         ("Roman Timber Bridge HQ", roman_bridge::hq_fixture_catalog()),
         ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
         ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
@@ -270,8 +273,8 @@ mod tests {
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
         assert!(report.product_home_profiles < report.installed_kit_count);
-        assert_eq!(report.installed_kit_count, 17);
-        assert_eq!(report.developer_preview_kit_count, 16);
+        assert_eq!(report.installed_kit_count, 18);
+        assert_eq!(report.developer_preview_kit_count, 17);
         assert_eq!(report.direction_candidate_slots, 6);
         assert_eq!(
             report.direction_modes,

@@ -299,8 +299,14 @@ fn simple_crate_catalog_visibility_follows_dogfood_gate() {
     let novice_slugs = curated_fixture_catalogs_with_labels(false)
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
-        .collect::<BTreeSet<_>>();
-    assert!(novice_slugs.contains(simple_crate::SIMPLE_CRATE_SLUG));
+        .collect::<Vec<_>>();
+    assert_eq!(
+        novice_slugs.first().map(String::as_str),
+        Some(simple_crate::SIMPLE_CRATE_SLUG),
+        "Simple Crate should be the featured novice starter"
+    );
+    assert!(novice_slugs.contains(&simple_crate::SIMPLE_CRATE_SLUG.to_owned()));
+    assert!(novice_slugs.contains(&"sci-fi-crate".to_owned()));
 }
 
 #[test]
@@ -308,6 +314,7 @@ fn simple_crate_docs_do_not_claim_surface_material_or_motion_scope() {
     let docs = [
         include_str!("../../../docs/foundry-catalog/simple_crate.md"),
         include_str!("../../../docs/SIMPLE_CRATE_PRIMITIVE_V0_REPORT.md"),
+        include_str!("../../../docs/SIMPLE_CRATE_MAKE_BASELINE.md"),
     ]
     .join("\n")
     .to_ascii_lowercase();
