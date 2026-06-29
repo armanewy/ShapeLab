@@ -8756,6 +8756,57 @@ mod tests {
     }
 
     #[test]
+    fn semantic_clay_docs_keep_preview_display_separate_from_material_support() {
+        let docs = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/SEMANTIC_CLAY_PREVIEW_MODE.md"
+        ));
+        let lower = docs.to_ascii_lowercase();
+
+        assert!(docs.contains("untextured display shading only"));
+        assert!(docs.contains("Pure Clay remains the strict mesh gate"));
+        assert!(docs.contains("Quality reports must record Pure Clay pass/fail separately"));
+        assert!(docs.contains("DiagnosticPartColor: developer/author diagnostic mode only"));
+        assert!(lower.contains("does not imply uv/texturing support"));
+        assert!(lower.contains("affect export payloads"));
+
+        for forbidden in [
+            "uv/texturing support is approved",
+            "texture files are supported",
+            "material editor is supported",
+            "broad surface mode is approved",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "Semantic Clay docs must not overclaim material or texturing support: {forbidden}"
+            );
+        }
+
+        assert_eq!(
+            shape_foundry::FoundryPreviewDisplayMode::novice_default(&[]),
+            shape_foundry::FoundryPreviewDisplayMode::PureClay
+        );
+        let assignments = vec![shape_foundry::SemanticClayRoleAssignment::new(
+            "body",
+            "Primary Mass",
+            0.72,
+            10,
+            true,
+        )];
+        assert_eq!(
+            shape_foundry::FoundryPreviewDisplayMode::novice_default(&assignments),
+            shape_foundry::FoundryPreviewDisplayMode::SemanticClay
+        );
+        assert!(
+            !shape_foundry::FoundryPreviewDisplayMode::DiagnosticPartColor.default_novice_safe()
+        );
+        let strings = product_visible_strings_for_default_shell().join("\n");
+        assert!(!strings.contains("DiagnosticPartColor"));
+        assert!(!strings.contains("Surface mode"));
+        assert!(!strings.contains("Texturing"));
+    }
+
+    #[test]
     fn source_and_markdown_hygiene_targets_are_audit_friendly() {
         let targets = [
             (
