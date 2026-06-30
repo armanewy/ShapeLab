@@ -525,10 +525,14 @@ fn readable_preview_camera_for_output(
     aspect_ratio: f32,
 ) -> Option<OrbitCamera> {
     let family_id = output.catalog.customizer_profile.family_id.as_str();
+    let box_like = family_id.contains("box_primitive")
+        || family_id.contains("lidded_box")
+        || family_id.contains("trimmed_box");
     let panel_like = family_id.contains("flat_panel")
         || family_id.contains("hinged_panel")
         || family_id.contains("handled_panel");
-    panel_like.then(|| fit_camera_to_bounds_from_angles(bounds, 35.0, 20.0, aspect_ratio))
+    (box_like || panel_like)
+        .then(|| fit_camera_to_bounds_from_angles(bounds, 35.0, 20.0, aspect_ratio))
 }
 
 fn export_foundry_pack(

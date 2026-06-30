@@ -2670,27 +2670,7 @@ impl FoundryDesktopApp {
                 return commands;
             }
             MakeCandidateTrayState::EmptyReady => {
-                let (title, message) = if view_state.mode == MakeCanvasMode::PreparingAsset {
-                    (
-                        "Ideas unlock when ready",
-                        "The asset can be adjusted while the preview prepares.",
-                    )
-                } else {
-                    (
-                        "Ready to try ideas",
-                        if view_state.lidded_box_baseline {
-                            "Try lidded box ideas when the box is ready."
-                        } else if view_state.hinged_panel_baseline {
-                            "Try hinged panel ideas when the panel is ready."
-                        } else if view_state.flat_panel_baseline {
-                            "Try panel ideas when the panel is ready."
-                        } else if view_state.simple_box_make_baseline {
-                            "Try box ideas when the box is ready."
-                        } else {
-                            "Try ideas or focus a part when the asset is ready."
-                        },
-                    )
-                };
+                let (title, message) = empty_candidate_tray_copy(view_state);
                 product_compact_empty_state(ui, title, message);
                 return commands;
             }
@@ -5268,6 +5248,32 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
                 )
             }
         }
+    }
+}
+
+fn empty_candidate_tray_copy(view_state: &MakeCanvasViewState) -> (&'static str, &'static str) {
+    if view_state.mode == MakeCanvasMode::PreparingAsset {
+        (
+            "Ideas unlock when ready",
+            "The asset can be adjusted while the preview prepares.",
+        )
+    } else {
+        (
+            "Ready to try ideas",
+            if view_state.lidded_box_baseline {
+                "Try lidded box ideas when the box is ready."
+            } else if view_state.handled_panel_baseline {
+                "Try handled panel ideas when the panel is ready."
+            } else if view_state.hinged_panel_baseline {
+                "Try hinged panel ideas when the panel is ready."
+            } else if view_state.flat_panel_baseline {
+                "Try panel ideas when the panel is ready."
+            } else if view_state.simple_box_make_baseline {
+                "Try box ideas when the box is ready."
+            } else {
+                "Try ideas or focus a part when the asset is ready."
+            },
+        )
     }
 }
 
@@ -10738,6 +10744,16 @@ mod tests {
         assert!(ready.next_action_hint.contains("Try handled panel ideas"));
         assert!(ready.next_action_hint.contains("handle"));
         assert!(ready.next_action_hint.contains("proportions"));
+        let (empty_tray_title, empty_tray_message) = empty_candidate_tray_copy(&ready);
+        assert_eq!(empty_tray_title, "Ready to try ideas");
+        assert_eq!(
+            empty_tray_message,
+            "Try handled panel ideas when the panel is ready."
+        );
+        assert!(
+            !empty_tray_message.contains("box"),
+            "Handled Panel empty tray copy must stay panel-specific: {empty_tray_message}"
+        );
         assert!(!app.material_look_action_visible(&ready));
         assert!(!ready.material_look_tray_visible);
         assert_eq!(app.material_look_export_copy(), None);

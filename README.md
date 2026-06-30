@@ -10,11 +10,10 @@ and one visible lid seam feature, plus upright panel proofs with one visible
 hinge-edge feature and one visible handle feature. The active built-in Visual
 Foundry catalog contains only these five profiles.
 
-This branch starts from the Box Primitive and Lidded Box baselines and proves a
-second primitive kernel with Flat Panel Primitive and Hinged Panel. It does not
-claim Door naming, Door behavior, open/close motion, surface/material workflow,
-UV/texturing, rigging, animation, runtime LLM integration, or public catalog
-publishing.
+The current mainline has two proven primitive kernel directions: box-like
+objects and upright panel-like objects. It does not claim Door naming, Door
+behavior, open/close motion, surface/material workflow, UV/texturing, rigging,
+animation, runtime LLM integration, or public catalog publishing.
 
 The product slice targets a narrow `Choose -> Make` loop:
 
@@ -96,6 +95,10 @@ clippy unless the branch touches build/profile/release/export code.
   `target/handled-panel-make-baseline-gate/`.
 - The second-kernel Flat Panel integration gate passed with release-app
   regression evidence under `target/second-kernel-flat-panel-integration/`.
+- The Object Intent + Handled Panel integration checkpoint recorded release-app
+  regression evidence under
+  `target/object-intent-handled-panel-integration/`.
+  Full workspace gates were paused before merge at user request.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
 - The next allowed visible feature is still a later Door cue, not Door motion;
@@ -113,5 +116,6 @@ Status details are documented in:
 - [`docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md`](docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md)
 - [`docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`](docs/HINGED_PANEL_MAKE_BASELINE_GATE.md)
 - [`docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`](docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md)
+- [`docs/OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_REPORT.md`](docs/OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_REPORT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

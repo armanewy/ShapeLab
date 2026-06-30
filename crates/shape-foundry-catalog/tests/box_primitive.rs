@@ -763,6 +763,12 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
     assert!(hinged_panel_metadata.default_novice_visible());
     assert!(hinged_panel_metadata.note.contains("Hinge Edge"));
 
+    let handled_panel_metadata = catalog_curation_metadata_for_slug(flat_panel::HANDLED_PANEL_SLUG)
+        .expect("handled panel metadata");
+    assert_eq!(handled_panel_metadata.state, CatalogCurationState::Usable);
+    assert!(handled_panel_metadata.default_novice_visible());
+    assert!(handled_panel_metadata.note.contains("Handle / Knob"));
+
     let all_slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
@@ -774,6 +780,7 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
+            flat_panel::HANDLED_PANEL_SLUG,
         ]
     );
 
@@ -788,6 +795,7 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
+            flat_panel::HANDLED_PANEL_SLUG,
         ]
     );
 
@@ -802,6 +810,7 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
+            flat_panel::HANDLED_PANEL_SLUG,
         ]
     );
 
@@ -816,6 +825,7 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
+            flat_panel::HANDLED_PANEL_SLUG,
         ]
     );
 }

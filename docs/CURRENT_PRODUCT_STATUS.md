@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Verdict
 
-`HANDLED_PANEL_MAKE_BASELINE_PROVEN`
+`OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_PAUSED`
 
 Shape Lab has one honest box-like ladder and a second primitive kernel proof.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -66,6 +66,11 @@ Door, does not open or close, and does not claim rigging or animation.
   tests on 2026-06-30.
 - The Handled Panel Make baseline gate passed release-app Computer Use
   validation on 2026-06-30.
+- The Object Intent + Handled Panel integration checkpoint recorded release-app
+  Computer Use regression validation on 2026-06-30. Full workspace gates were
+  paused before merge at user request.
+- Box Primitive and Lidded Box current previews use the direct clay readability
+  render path so box edges and the lid seam remain legible in the Make stage.
 - No public catalog publishing is approved.
 - No Door naming, surface/material, UV/texturing, rigging, animation, runtime
   LLM, or game-ready UI is approved.
@@ -127,6 +132,9 @@ Door, does not open or close, and does not claim rigging or animation.
 - The two-kernel integration has evidence under
   `target/second-kernel-flat-panel-integration/` and in
   `docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`.
+- The Object Intent + Handled Panel integration checkpoint has evidence under
+  `target/object-intent-handled-panel-integration/` and in
+  `docs/OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_REPORT.md`.
 
 ## Allowed Next Work
 

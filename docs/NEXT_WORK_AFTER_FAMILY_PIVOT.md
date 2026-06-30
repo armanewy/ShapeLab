@@ -89,6 +89,15 @@ docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md
 target/handled-panel-make-baseline-gate/
 ```
 
+The Object Intent + Handled Panel integration checkpoint recorded release-app
+Computer Use regression validation on 2026-06-30. Full workspace gates were
+paused before merge at user request. Evidence is recorded in:
+
+```text
+docs/OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_REPORT.md
+target/object-intent-handled-panel-integration/
+```
+
 ## Preferred Next Step
 
 Stop the box ladder. Door Handle / Knob has now passed as one visible feature.
