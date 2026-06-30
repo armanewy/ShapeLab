@@ -26,18 +26,27 @@ See [`BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS
 
 ## Preferred Next Step
 
-The next visible feature branch should add exactly one user-visible concept:
+The next branch should prove the single new user-visible concept in Make:
 
-- Lid Seam module for Box Primitive.
+- Lidded Box Make baseline.
 
-Do not add multiple modules in one branch.
+Lid Seam Feature Module v0 has local visual evidence in:
+
+```text
+target/lid-seam-feature-module-v0/
+docs/LID_SEAM_FEATURE_MODULE_V0.md
+```
+
+Do not add another module in the Make gate.
 
 Repair-loop polish may still happen as non-feature stabilization, but it must
-not displace the next visible object step: Box Primitive -> Lidded Box.
+not displace the next visible object step: prove Box Primitive -> Lidded Box
+end to end.
 
 ## Continuing Criteria
 
 - The object reads as a box.
+- The lid seam is visible in pure clay.
 - Every idea visibly differs.
 - No UI copy claims a non-box family, surface/material, UV, rigging, animation,
   runtime LLM, or game-ready support.
@@ -47,6 +56,8 @@ not displace the next visible object step: Box Primitive -> Lidded Box.
 
 - Any non-box naming before visual-readability evidence exists.
 - Any non-box built-in model profile.
+- Trim Band before the Lidded Box Make gate passes.
+- Feet / Skids before the Trim Band gate passes.
 - Broad archetype library work.
 - Surface/material editor work.
 - UV/texturing UI.

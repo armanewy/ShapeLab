@@ -11,7 +11,8 @@ use shape_compile::{
 use shape_family::AssetFamilySchema;
 use shape_foundry::{
     CandidateLegibilityClass, ControlKind, ControlValue, CustomizerProfile,
-    FoundryCompilationOutput, compile_foundry_document,
+    FoundryCompilationOutput, compile_foundry_document, lid_seam_feature_module_contract,
+    validate_feature_module_contract,
 };
 use shape_foundry_catalog::{
     CatalogCurationState, FoundryFixtureCatalog, box_primitive, built_in_catalog_curation_metadata,
@@ -25,22 +26,34 @@ fn payload<T: DeserializeOwned>(fixture: &FoundryFixtureCatalog, id: &str) -> T 
 }
 
 fn family(fixture: &FoundryFixtureCatalog) -> AssetFamilySchema {
-    payload(fixture, "box-primitive-family")
+    payload(fixture, &format!("{}-family", fixture.slug))
 }
 
 fn profile(fixture: &FoundryFixtureCatalog) -> CustomizerProfile {
-    payload(fixture, "box-primitive-profile")
+    payload(fixture, &format!("{}-profile", fixture.slug))
 }
 
 fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
     let fixture = box_primitive::fixture_catalog();
+    compile_fixture_with(&fixture, overrides)
+}
+
+fn compile_lidded_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    let fixture = box_primitive::lidded_box_fixture_catalog();
+    compile_fixture_with(&fixture, overrides)
+}
+
+fn compile_fixture_with(
+    fixture: &FoundryFixtureCatalog,
+    overrides: &[(&str, ControlValue)],
+) -> FoundryCompilationOutput {
     let mut document = fixture.document.clone();
     for (control, value) in overrides {
         document
             .control_state
             .insert((*control).to_owned(), value.clone());
     }
-    compile_foundry_document(&document, &fixture).expect("box primitive variant compiles")
+    compile_foundry_document(&document, fixture).expect("fixture variant compiles")
 }
 
 fn assert_valid_model(output: &FoundryCompilationOutput) {
@@ -85,6 +98,24 @@ fn box_primitive_validates_exports_and_has_only_body_role() {
         "package verification should pass: {verification:#?}"
     );
     fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn box_primitive_without_lid_seam_remains_unchanged() {
+    let output = compile_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "body").len(), 1);
+    assert!(role_instances(&output, "lid_seam").is_empty());
+    assert_eq!(
+        output
+            .catalog
+            .customizer_profile
+            .controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Proportions", "Edge Softness"]
+    );
 }
 
 #[test]
@@ -187,6 +218,221 @@ fn box_primitive_candidate_strategies_match_baseline_ideas() {
             .iter()
             .all(|strategy| { strategy.label.contains("Box") && !strategy.control_ids.is_empty() })
     );
+}
+
+#[test]
+fn lidded_box_includes_lid_seam_module_contract() {
+    let contract = lid_seam_feature_module_contract();
+    let report = validate_feature_module_contract(&contract);
+    assert!(
+        report.is_valid(),
+        "Lid Seam module contract should validate: {report:#?}"
+    );
+    assert_eq!(contract.module_id, box_primitive::LID_SEAM_MODULE_ID);
+    assert_eq!(contract.owns_controls, vec!["lid_height"]);
+    assert!(
+        contract
+            .quality_gates
+            .iter()
+            .any(|gate| gate.id == "seam-visible-in-pure-clay")
+    );
+    assert!(
+        contract
+            .quality_gates
+            .iter()
+            .any(|gate| gate.id == "not-material-stripe")
+    );
+}
+
+#[test]
+fn lidded_box_validates_exports_and_has_only_lid_seam_feature_role() {
+    let output = compile_lidded_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "body").len(), 1);
+    assert_eq!(role_instances(&output, "lid_seam").len(), 1);
+    for forbidden_role in [
+        "trim_band",
+        "feet_or_skids",
+        "panel",
+        "handle",
+        "latch",
+        "vent",
+    ] {
+        assert!(
+            role_instances(&output, forbidden_role).is_empty(),
+            "Lidded Box must not expose {forbidden_role}"
+        );
+    }
+
+    let package_dir = std::env::temp_dir().join(format!(
+        "shape-lab-lidded-box-export-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&package_dir);
+    write_model_package(&output.recipe, &output.artifact, &package_dir).expect("write package");
+    let verification = verify_model_package(&package_dir).expect("verify package");
+    assert!(
+        verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads,
+        "package verification should pass: {verification:#?}"
+    );
+    fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn lidded_box_controls_and_copy_are_honest() {
+    let fixture = box_primitive::lidded_box_fixture_catalog();
+    let family = family(&fixture);
+    let profile = profile(&fixture);
+
+    assert_eq!(fixture.slug, box_primitive::LIDDED_BOX_SLUG);
+    assert_eq!(family.id, box_primitive::LIDDED_BOX_FAMILY_ID);
+    assert_eq!(family.display_name, "Lidded Box");
+    assert_eq!(family.summary, "A simple box with a visible lid seam.");
+    assert_eq!(profile.family_id, box_primitive::LIDDED_BOX_FAMILY_ID);
+    assert_eq!(
+        profile.style_id.as_deref(),
+        Some(box_primitive::LIDDED_BOX_STYLE_ID)
+    );
+    assert_eq!(
+        family
+            .part_roles
+            .iter()
+            .map(|role| role.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body", "lid_seam"]
+    );
+
+    let primary = profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+    assert_eq!(primary.len(), 3);
+    assert_eq!(
+        primary
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Proportions", "Edge Softness", "Lid Seam"]
+    );
+
+    let strategy_copy = profile
+        .candidate_strategies
+        .iter()
+        .map(|strategy| strategy.label.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Low Lid Box",
+            "Raised Lid Box",
+            "Compact Lidded Box",
+            "Wide Lidded Box",
+            "Flat Storage Box",
+            "Soft-Edged Lidded Box",
+        ]
+    );
+    let visible_copy = [
+        family.display_name.as_str(),
+        family.summary.as_str(),
+        strategy_copy.as_str(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    for forbidden in [
+        "crate",
+        "case",
+        "trim",
+        "feet",
+        "skid",
+        "panel",
+        "handle",
+        "vent",
+        "latch",
+        "uv",
+        "texture",
+        "material",
+        "rig",
+        "animation",
+    ] {
+        assert!(
+            !visible_copy.contains(forbidden),
+            "Lidded Box copy must not claim {forbidden}: {visible_copy}"
+        );
+    }
+}
+
+#[test]
+fn lidded_box_lid_seam_endpoint_is_visible_in_pure_clay() {
+    let fixture = box_primitive::lidded_box_fixture_catalog();
+    let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
+        .expect("endpoint report should generate");
+
+    assert_eq!(report.controls.len(), 3);
+    let lid_row = report
+        .controls
+        .iter()
+        .find(|row| row.control_id == "lid_height")
+        .expect("Lid Seam endpoint row");
+    assert!(
+        matches!(
+            lid_row.legibility_class,
+            CandidateLegibilityClass::Strong
+                | CandidateLegibilityClass::Clear
+                | CandidateLegibilityClass::SubtleButExplainable
+        ),
+        "Lid Seam endpoint should be visible: {lid_row:#?}"
+    );
+}
+
+#[test]
+fn lidded_box_candidate_ideas_compile_to_distinct_shapes() {
+    let variants = [
+        (
+            "Low Lid Box",
+            vec![("lid_height", ControlValue::Scalar(0.0))],
+        ),
+        (
+            "Raised Lid Box",
+            vec![("lid_height", ControlValue::Scalar(1.0))],
+        ),
+        (
+            "Compact Lidded Box",
+            vec![(
+                "proportions",
+                ControlValue::Choice("compact_box".to_owned()),
+            )],
+        ),
+        (
+            "Wide Lidded Box",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Flat Storage Box",
+            vec![("proportions", ControlValue::Choice("flat_box".to_owned()))],
+        ),
+        (
+            "Soft-Edged Lidded Box",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+    ];
+
+    let mut fingerprints = BTreeSet::new();
+    for (label, overrides) in variants {
+        let output = compile_lidded_with(&overrides);
+        assert_valid_model(&output);
+        assert!(
+            fingerprints.insert(output.build_stamp.artifact_fingerprint.0.to_hex()),
+            "{label} should produce a distinct compiled lidded box"
+        );
+    }
 }
 
 #[test]

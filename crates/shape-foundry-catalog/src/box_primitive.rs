@@ -20,12 +20,31 @@ pub const BOX_PRIMITIVE_SLUG: &str = "box-primitive";
 pub const BOX_PRIMITIVE_FAMILY_ID: &str = "box_primitive";
 /// Neutral clay style ID for Box Primitive.
 pub const BOX_PRIMITIVE_STYLE_ID: &str = "box_primitive_clay";
+/// Lidded Box preview profile slug.
+pub const LIDDED_BOX_SLUG: &str = "lidded-box";
+/// Lidded Box preview family ID.
+pub const LIDDED_BOX_FAMILY_ID: &str = "lidded_box";
+/// Neutral clay style ID for Lidded Box.
+pub const LIDDED_BOX_STYLE_ID: &str = "lidded_box_clay";
+/// Internal Lid Seam module ID.
+pub const LID_SEAM_MODULE_ID: &str = "lid-seam";
 
 #[derive(Debug, Copy, Clone)]
 struct BoxProportion {
     choice: &'static str,
     provider: &'static str,
     half_extents: [f32; 3],
+}
+
+#[derive(Debug, Copy, Clone)]
+struct LiddedBoxProportion {
+    choice: &'static str,
+    body_provider: &'static str,
+    seam_provider: &'static str,
+    body_half_extents: [f32; 3],
+    lid_half_extents: [f32; 3],
+    body_translation: [f32; 3],
+    lid_translation: [f32; 3],
 }
 
 const PROPORTIONS: [BoxProportion; 4] = [
@@ -48,6 +67,45 @@ const PROPORTIONS: [BoxProportion; 4] = [
         choice: "flat_box",
         provider: "flat_body",
         half_extents: [1.30, 0.26, 0.78],
+    },
+];
+
+const LIDDED_PROPORTIONS: [LiddedBoxProportion; 4] = [
+    LiddedBoxProportion {
+        choice: "compact_box",
+        body_provider: "compact_lidded_body",
+        seam_provider: "compact_lid_seam",
+        body_half_extents: [0.78, 0.48, 0.58],
+        lid_half_extents: [0.64, 0.08, 0.055],
+        body_translation: [0.0, 0.48, 0.0],
+        lid_translation: [0.0, 0.74, 0.637],
+    },
+    LiddedBoxProportion {
+        choice: "wide_box",
+        body_provider: "wide_lidded_body",
+        seam_provider: "wide_lid_seam",
+        body_half_extents: [1.28, 0.42, 0.56],
+        lid_half_extents: [1.08, 0.08, 0.055],
+        body_translation: [0.0, 0.42, 0.0],
+        lid_translation: [0.0, 0.65, 0.617],
+    },
+    LiddedBoxProportion {
+        choice: "tall_box",
+        body_provider: "tall_lidded_body",
+        seam_provider: "tall_lid_seam",
+        body_half_extents: [0.62, 0.78, 0.48],
+        lid_half_extents: [0.50, 0.08, 0.055],
+        body_translation: [0.0, 0.78, 0.0],
+        lid_translation: [0.0, 1.20, 0.537],
+    },
+    LiddedBoxProportion {
+        choice: "flat_box",
+        body_provider: "flat_lidded_body",
+        seam_provider: "flat_lid_seam",
+        body_half_extents: [1.30, 0.26, 0.78],
+        lid_half_extents: [1.10, 0.08, 0.055],
+        body_translation: [0.0, 0.26, 0.0],
+        lid_translation: [0.0, 0.40, 0.837],
     },
 ];
 
@@ -192,6 +250,133 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
     })
 }
 
+/// Build the preview Lidded Box fixture catalog.
+///
+/// This is not included in the default novice catalog until the Make baseline
+/// gate explicitly surfaces it.
+#[must_use]
+pub fn lidded_box_fixture_catalog() -> FoundryFixtureCatalog {
+    let family = family_schema(FamilySchemaSpec {
+        id: LIDDED_BOX_FAMILY_ID,
+        display_name: "Lidded Box",
+        summary: "A simple box with a visible lid seam.",
+        roles: vec![
+            role("body", RoleMultiplicity::Single, true),
+            role("lid_seam", RoleMultiplicity::Single, true),
+        ],
+        allowed_operations: vec![
+            AllowedOperationKind::Primitive,
+            AllowedOperationKind::Array,
+            AllowedOperationKind::Transform,
+            AllowedOperationKind::Bevel,
+        ],
+        parameter_slots: vec![
+            choice_slot(
+                "proportions",
+                "Proportions",
+                "body",
+                LIDDED_PROPORTIONS
+                    .iter()
+                    .map(|proportion| proportion.choice.to_owned())
+                    .collect(),
+            ),
+            crate::ratio_slot(
+                "edge_softness",
+                "Edge Softness",
+                "body",
+                0.0,
+                1.0,
+                0.05,
+                0.35,
+            ),
+            crate::ratio_slot("lid_height", "Lid Seam", "lid_seam", 0.0, 1.0, 0.05, 0.35),
+        ],
+        compatible_style_kits: vec![LIDDED_BOX_STYLE_ID.to_owned()],
+        tags: vec![
+            "lidded-box".to_owned(),
+            "lid-seam".to_owned(),
+            "clay".to_owned(),
+        ],
+    });
+
+    let style = style_kit(
+        LIDDED_BOX_STYLE_ID,
+        "Lidded Box Clay",
+        LIDDED_BOX_FAMILY_ID,
+        &lidded_style_prototypes(),
+        vec![
+            "lidded-box".to_owned(),
+            "lid-seam".to_owned(),
+            "clay".to_owned(),
+        ],
+    );
+
+    let family_impl = family_implementation(
+        LIDDED_BOX_FAMILY_ID,
+        "Lidded Box family",
+        lidded_parameter_bindings(),
+    );
+
+    let style_impl = style_implementation(
+        LIDDED_BOX_STYLE_ID,
+        LIDDED_BOX_FAMILY_ID,
+        lidded_default_provider_map(),
+        lidded_recipe_fragments(),
+    );
+
+    let mut profile = crate::customizer_profile(
+        LIDDED_BOX_FAMILY_ID,
+        LIDDED_BOX_STYLE_ID,
+        vec![
+            choice_control(
+                "proportions",
+                "Proportions",
+                "proportions",
+                &["compact_box", "wide_box", "tall_box", "flat_box"],
+            ),
+            continuous_control(
+                "edge_softness",
+                "Edge Softness",
+                "edge_softness",
+                0.35,
+                0.0,
+                1.0,
+            ),
+            continuous_control("lid_height", "Lid Seam", "lid_height", 0.35, 0.0, 1.0),
+        ],
+    );
+    profile.candidate_strategies = vec![
+        strategy("low-lid-box", "Low Lid Box", &["lid_height"]),
+        strategy("raised-lid-box", "Raised Lid Box", &["lid_height"]),
+        strategy("compact-lidded-box", "Compact Lidded Box", &["proportions"]),
+        strategy("wide-lidded-box", "Wide Lidded Box", &["proportions"]),
+        strategy("flat-storage-box", "Flat Storage Box", &["proportions"]),
+        strategy(
+            "soft-edged-lidded-box",
+            "Soft-Edged Lidded Box",
+            &["edge_softness"],
+        ),
+    ];
+
+    build_fixture_catalog(FixtureCatalogSpec {
+        slug: LIDDED_BOX_SLUG,
+        document_id: "lidded-box-doc",
+        family,
+        style,
+        family_implementation: family_impl,
+        style_implementation: style_impl,
+        customizer_profile: profile,
+        control_state: BTreeMap::from([
+            (
+                "proportions".to_owned(),
+                ControlValue::Choice("compact_box".to_owned()),
+            ),
+            ("edge_softness".to_owned(), ControlValue::Scalar(0.35)),
+            ("lid_height".to_owned(), ControlValue::Scalar(0.35)),
+        ]),
+    })
+}
+
 fn style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> {
     PROPORTIONS
         .into_iter()
@@ -199,8 +384,31 @@ fn style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> {
         .collect()
 }
 
+fn lidded_style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> {
+    LIDDED_PROPORTIONS
+        .into_iter()
+        .flat_map(|proportion| {
+            [
+                (proportion.body_provider, "Closed lower box body", "body"),
+                (
+                    proportion.seam_provider,
+                    "Raised clay line for visible lid seam",
+                    "lid_seam",
+                ),
+            ]
+        })
+        .collect()
+}
+
 fn default_provider_map() -> BTreeMap<String, String> {
     BTreeMap::from([("body".to_owned(), "compact_body".to_owned())])
+}
+
+fn lidded_default_provider_map() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("body".to_owned(), "compact_lidded_body".to_owned()),
+        ("lid_seam".to_owned(), "compact_lid_seam".to_owned()),
+    ])
 }
 
 fn parameter_bindings() -> Vec<ParameterBinding> {
@@ -220,6 +428,69 @@ fn parameter_bindings() -> Vec<ParameterBinding> {
             "geometry.rounded_box.radius",
             0.004,
             0.16,
+        ),
+    ]
+}
+
+fn lidded_parameter_bindings() -> Vec<ParameterBinding> {
+    vec![
+        ParameterBinding::ChoiceToPrototype {
+            slot: "proportions".to_owned(),
+            role: "body".to_owned(),
+            choices: LIDDED_PROPORTIONS
+                .into_iter()
+                .map(|proportion| {
+                    (
+                        proportion.choice.to_owned(),
+                        proportion.body_provider.to_owned(),
+                    )
+                })
+                .collect(),
+        },
+        ParameterBinding::ChoiceToPrototype {
+            slot: "proportions".to_owned(),
+            role: "lid_seam".to_owned(),
+            choices: LIDDED_PROPORTIONS
+                .into_iter()
+                .map(|proportion| {
+                    (
+                        proportion.choice.to_owned(),
+                        proportion.seam_provider.to_owned(),
+                    )
+                })
+                .collect(),
+        },
+        definition_binding(
+            "edge_softness",
+            "body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.radius",
+            0.004,
+            0.16,
+        ),
+        definition_binding(
+            "edge_softness",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.radius",
+            0.003,
+            0.028,
+        ),
+        definition_binding(
+            "lid_height",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.y",
+            0.055,
+            0.145,
+        ),
+        definition_binding(
+            "lid_height",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.x",
+            0.45,
+            0.92,
         ),
     ]
 }
@@ -263,6 +534,32 @@ fn recipe_fragments() -> Vec<RecipeFragment> {
                 [0.0, proportion.half_extents[1], 0.0],
                 Vec::new(),
             )
+        })
+        .collect()
+}
+
+fn lidded_recipe_fragments() -> Vec<RecipeFragment> {
+    LIDDED_PROPORTIONS
+        .into_iter()
+        .flat_map(|proportion| {
+            [
+                rounded_box_fragment(
+                    proportion.body_provider,
+                    "body",
+                    proportion.body_half_extents,
+                    0.05,
+                    proportion.body_translation,
+                    Vec::new(),
+                ),
+                rounded_box_fragment(
+                    proportion.seam_provider,
+                    "lid_seam",
+                    proportion.lid_half_extents,
+                    0.035,
+                    proportion.lid_translation,
+                    Vec::new(),
+                ),
+            ]
         })
         .collect()
 }

@@ -493,27 +493,33 @@ The next milestone is not a crate.
 It is:
 
 ```text
-Box Primitive baseline cleanup
+Lidded Box Make baseline gate
 ```
 
 Required flow:
 
 ```text
-Choose Box Primitive
+Choose Lidded Box
 → Make ready
-→ Try box ideas
-→ Use one box idea
-→ Adjust Proportions or Edge Softness
+→ Try lidded box ideas
+→ Use one lidded box idea
+→ Adjust Lid Seam, Proportions, or Edge Softness
 → Add to Pack
 → Export
 ```
 
 Pass criteria:
 
-- user agrees it looks like a box
+- user can see the lid seam in pure clay
+- object still reads as a box
 - no crate language appears
 - no parts/focus chips appear
 - no material/surface distractions appear
 - ideas visibly differ
 - buttons and next actions are clear
 - export remains truthful
+
+Lid Seam Feature Module v0 has local visual evidence in
+`docs/LID_SEAM_FEATURE_MODULE_V0.md`. The next branch should expose and prove
+that single feature in Make. Do not add Trim Band, Feet / Skids, panels,
+handles, latches, materials, or Family Studio public UI in that gate.

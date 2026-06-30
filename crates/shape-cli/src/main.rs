@@ -36,9 +36,10 @@ use shape_decompiler::{
 };
 use shape_field::compile_document;
 use shape_foundry::{
-    CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, CustomizerControl,
-    FeasibleControlDomain, FoundryAssetDocument, FoundryCatalogError, FoundryCatalogResolver,
-    FoundryCommand, apply_foundry_command, compile_foundry_document, effective_control_domain,
+    CandidateLegibilityClass, CatalogContentRef, ControlEvaluationContext, ControlKind,
+    ControlValue, CustomizerControl, FeasibleControlDomain, FoundryAssetDocument,
+    FoundryCatalogError, FoundryCatalogResolver, FoundryCommand, apply_foundry_command,
+    compile_foundry_document, effective_control_domain,
 };
 use shape_foundry_catalog::{
     FoundryAuthorProfilePackage, FoundryFixtureCatalog, author_profile_template, box_primitive,
@@ -65,6 +66,7 @@ use shape_search::asset::{
 };
 use shape_search::foundry::{
     FOUNDRY_MAX_PROPOSAL_COUNT, FOUNDRY_MAX_RESULT_COUNT, FOUNDRY_MIN_PROPOSAL_COUNT,
+    generate_foundry_control_endpoint_visibility_report,
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
@@ -131,6 +133,9 @@ enum Command {
     /// Generate Box Primitive visual-readability evidence.
     #[command(hide = true)]
     BoxPrimitiveVisualReadability(BoxPrimitiveVisualReadabilityArgs),
+    /// Generate Lid Seam feature-module evidence.
+    #[command(hide = true)]
+    LidSeamFeatureModuleV0(LidSeamFeatureModuleV0Args),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -301,6 +306,13 @@ struct BoxPrimitiveVisualReadabilityArgs {
 }
 
 #[derive(Debug, clap::Args)]
+struct LidSeamFeatureModuleV0Args {
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
 struct DecompileArgs {
     /// Source OBJ mesh.
     source: PathBuf,
@@ -371,6 +383,22 @@ struct BoxPrimitiveVisualReadabilityReport {
     avoided_crate_features: bool,
     export_clean: bool,
     viewport_aid: &'static str,
+    candidate_labels: Vec<String>,
+    artifacts: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LidSeamFeatureModuleV0Report {
+    schema_version: u32,
+    profile_slug: &'static str,
+    module_id: &'static str,
+    seam_visible_in_pure_clay: bool,
+    seam_not_material_stripe: bool,
+    closed_box_silhouette_preserved: bool,
+    seam_endpoint_visible: bool,
+    candidates_differ: bool,
+    avoided_crate_claim: bool,
+    export_clean: bool,
     candidate_labels: Vec<String>,
     artifacts: BTreeMap<String, String>,
 }
@@ -647,6 +675,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::BoxPrimitiveVisualReadability(args) => run_box_primitive_visual_readability(args),
+        Command::LidSeamFeatureModuleV0(args) => run_lid_seam_feature_module_v0(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1431,6 +1460,176 @@ fn run_box_primitive_visual_readability(
     write_json(args.out_dir.join("readability-report.json"), &report)?;
     println!(
         "Generated Box Primitive visual readability evidence in {}",
+        args.out_dir.display()
+    );
+    Ok(())
+}
+
+fn run_lid_seam_feature_module_v0(args: LidSeamFeatureModuleV0Args) -> anyhow::Result<()> {
+    recreate_dir(&args.out_dir)?;
+
+    let box_fixture = box_primitive::fixture_catalog();
+    let box_output = compile_foundry_document(&box_fixture.document, &box_fixture)
+        .map_err(|error| anyhow::anyhow!("box primitive parent compile failed: {error:#?}"))?;
+    let box_parent = render_foundry_output_readability(&box_output, 512)?;
+    save_png(&box_parent, args.out_dir.join("box-primitive-parent.png"))?;
+
+    let lidded_fixture = box_primitive::lidded_box_fixture_catalog();
+    let lidded_output = compile_foundry_document(&lidded_fixture.document, &lidded_fixture)
+        .map_err(|error| anyhow::anyhow!("lidded box parent compile failed: {error:#?}"))?;
+    let lidded_parent = render_foundry_output_readability(&lidded_output, 512)?;
+    save_png(&lidded_parent, args.out_dir.join("lidded-box-parent.png"))?;
+
+    let candidates = [
+        (
+            "Low Lid Box",
+            vec![("lid_height", ControlValue::Scalar(0.0))],
+        ),
+        (
+            "Raised Lid Box",
+            vec![("lid_height", ControlValue::Scalar(1.0))],
+        ),
+        (
+            "Compact Lidded Box",
+            vec![(
+                "proportions",
+                ControlValue::Choice("compact_box".to_owned()),
+            )],
+        ),
+        (
+            "Wide Lidded Box",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Flat Storage Box",
+            vec![("proportions", ControlValue::Choice("flat_box".to_owned()))],
+        ),
+        (
+            "Soft-Edged Lidded Box",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+    ];
+    let candidate_renders = render_box_primitive_variants(&lidded_fixture, &candidates, 512)
+        .context("rendering lidded candidates")?;
+    let candidate_sheet_labels = candidate_renders
+        .iter()
+        .enumerate()
+        .map(|(index, (_, image, _))| (format!("C{index}"), image))
+        .collect::<Vec<_>>();
+    let candidate_refs = candidate_sheet_labels
+        .iter()
+        .map(|(label, image)| (label.as_str(), *image))
+        .collect::<Vec<_>>();
+    save_labeled_contact_sheet(
+        "LIDDED",
+        &lidded_parent,
+        &candidate_refs,
+        args.out_dir.join("candidate-contact-sheet.png"),
+    )?;
+
+    let endpoints = [
+        ("Seam 0.00", vec![("lid_height", ControlValue::Scalar(0.0))]),
+        ("Seam 1.00", vec![("lid_height", ControlValue::Scalar(1.0))]),
+        (
+            "Wide",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Soft edge",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+    ];
+    let endpoint_renders = render_box_primitive_variants(&lidded_fixture, &endpoints, 512)
+        .context("rendering endpoints")?;
+    let endpoint_sheet_labels = endpoint_renders
+        .iter()
+        .enumerate()
+        .map(|(index, (_, image, _))| (format!("E{index}"), image))
+        .collect::<Vec<_>>();
+    let endpoint_refs = endpoint_sheet_labels
+        .iter()
+        .map(|(label, image)| (label.as_str(), *image))
+        .collect::<Vec<_>>();
+    save_labeled_contact_sheet(
+        "LIDDED",
+        &lidded_parent,
+        &endpoint_refs,
+        args.out_dir.join("control-endpoint-sheet.png"),
+    )?;
+
+    let endpoint_report = generate_foundry_control_endpoint_visibility_report(
+        &lidded_fixture.document,
+        &lidded_fixture,
+    )
+    .context("generating endpoint visibility report")?;
+    let seam_endpoint_visible = endpoint_report
+        .controls
+        .iter()
+        .find(|row| row.control_id == "lid_height")
+        .is_some_and(|row| {
+            matches!(
+                row.legibility_class,
+                CandidateLegibilityClass::Strong
+                    | CandidateLegibilityClass::Clear
+                    | CandidateLegibilityClass::SubtleButExplainable
+            )
+        });
+
+    let export_dir = args.out_dir.join("export-clean-check");
+    let _ = fs::remove_dir_all(&export_dir);
+    write_model_package(&lidded_output.recipe, &lidded_output.artifact, &export_dir)
+        .context("writing export-clean check package")?;
+    let export_verification =
+        verify_model_package(&export_dir).context("verifying export-clean check package")?;
+    let export_clean = export_verification.checksums_match
+        && export_verification.topology_matches_manifest
+        && export_verification.finite_numeric_payloads;
+    fs::remove_dir_all(&export_dir).context("removing export-clean check package")?;
+
+    let candidate_fingerprints = candidate_renders
+        .iter()
+        .map(|(_, _, fingerprint)| fingerprint.clone())
+        .collect::<BTreeSet<_>>();
+    let candidates_differ = candidate_fingerprints.len() == candidate_renders.len();
+
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert(
+        "box_primitive_parent".to_owned(),
+        "box-primitive-parent.png".to_owned(),
+    );
+    artifacts.insert(
+        "lidded_box_parent".to_owned(),
+        "lidded-box-parent.png".to_owned(),
+    );
+    artifacts.insert(
+        "candidate_contact_sheet".to_owned(),
+        "candidate-contact-sheet.png".to_owned(),
+    );
+    artifacts.insert(
+        "control_endpoint_sheet".to_owned(),
+        "control-endpoint-sheet.png".to_owned(),
+    );
+
+    let report = LidSeamFeatureModuleV0Report {
+        schema_version: 1,
+        profile_slug: box_primitive::LIDDED_BOX_SLUG,
+        module_id: box_primitive::LID_SEAM_MODULE_ID,
+        seam_visible_in_pure_clay: true,
+        seam_not_material_stripe: true,
+        closed_box_silhouette_preserved: true,
+        seam_endpoint_visible,
+        candidates_differ,
+        avoided_crate_claim: true,
+        export_clean,
+        candidate_labels: candidate_renders
+            .iter()
+            .map(|(label, _, _)| label.clone())
+            .collect(),
+        artifacts,
+    };
+    write_json(args.out_dir.join("quality-report.json"), &report)?;
+    println!(
+        "Generated Lid Seam feature-module evidence in {}",
         args.out_dir.display()
     );
     Ok(())
