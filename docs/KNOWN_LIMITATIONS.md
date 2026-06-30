@@ -2,26 +2,32 @@
 
 ## Catalog
 
-- The active built-in Visual Foundry catalog contains only Box Primitive.
+- The active built-in Visual Foundry catalog contains only Box Primitive and
+  Lidded Box.
 - Box Primitive is intentionally a simple closed box-like clay volume.
+- Lidded Box is Box Primitive plus one visible Lid Seam feature.
 - Box Primitive must not be described as a richer non-box family.
-- The only novice controls are Proportions and Edge Softness.
+- Lidded Box must not be described as a crate.
 
 ## Unsupported Workflows
 
 - General Visual Foundry assets do not have UVs, materials, texturing, rigging,
   skinning, animation, runtime LLM behavior, or full game-ready export support.
-- Surface/material preview workflows are not part of the Box Primitive baseline.
+- Surface/material preview workflows are not part of the Box Primitive or
+  Lidded Box baseline.
 
 ## Evidence
 
 - The Box Primitive screenshot/manual visual gate passed on 2026-06-30.
-- Richer box-family features must be added one visible module at a time after
-  the Box Primitive baseline pass.
+- The Lidded Box Make baseline gate passed on 2026-06-30.
+- Trim Band is the next allowed visible box feature.
+- After Trimmed Box passes, stop the box ladder and prove Stool Primitive
+  before Family Studio Lite.
 
 ## Product Boundaries
 
 - Box Primitive does not prove a broad archetype library.
+- Lidded Box does not prove a broad archetype library.
 - Box Primitive does not prove procedural authoring for every object category.
 - Box Primitive does not approve public catalog publishing.
 - Box Primitive does not approve imported mesh editing.

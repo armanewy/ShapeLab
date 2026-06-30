@@ -265,8 +265,8 @@ graph says those modules are available and the quality gates pass.
 The product should grow through a ladder, not a feature explosion.
 
 Storage Crate, Cargo Case, and Sci-Fi Industrial work are future ladder
-examples, not the current flagship. The current flagship baseline is Box
-Primitive only.
+examples, not the current flagship. The current flagship baseline is the small
+Box ladder: Box Primitive and Lidded Box.
 
 ### Rung 0 — Box Primitive
 
@@ -306,55 +306,81 @@ Gate:
 - object still reads as a box
 - no crate claim yet
 
-### Rung 2 — Trimmed / Supported Box
+### Rung 2 — Trimmed Box
 
-Purpose: add one more visible feature at a time.
+Purpose: add exactly one more visible feature after Lidded Box.
 
-Potential modules:
+Allowed:
 
 - trim band
-- feet or skids
 
 Gate:
 
-- each module visibly changes the object
+- trim band is visible in pure clay
+- trim does not look like a material stripe
 - no new dead-end UI states
 - no hidden technical terms
 
-### Rung 3 — Storage Crate / Utility Crate
+### Rung 3 — Stool Primitive
 
-Purpose: earn the word crate.
+Purpose: prove the family-authoring protocol is not a box generator.
+
+Allowed:
+
+- seat shape
+- seat proportions
+- leg count
+- leg thickness
+- edge softness
+
+Gate:
+
+- object reads as a stool, not a box
+- legs reach the support plane
+- stool appears stable
+- at least four ideas are visually distinct
+- the same user-facing kit workflow can drive the second kernel
+
+### Rung 4 — Family Studio Lite
+
+Purpose: expose the reusable-kit authoring flow after two kernels work.
+
+User-facing flow:
+
+- Create reusable kit
+- Start from Box Primitive or Stool Primitive
+- What stays the same?
+- What can change?
+- Test variations
+- Save Draft / Use Personally
+
+Gate:
+
+- users do not see kernel/module/provider/slot language
+- validators/renderers decide legality and visibility
+- failed visual gates stop feature growth
+
+### Future — Storage Crate / Utility Crate and Cargo Case
+
+Purpose: earn richer object names only after the box and stool proofs.
 
 Potential modules:
 
+- feet or skids
 - panel fields
 - handles
 - latches
-
-Gate:
-
-- human reviewer agrees it reads as a crate or storage crate
-- at least four ideas are visually distinct
-- module suggestions are deterministic and explainable
-
-### Rung 4 — Cargo Case
-
-Purpose: advanced equipment-case proof.
-
-Potential modules:
-
 - corner guards
 - reinforcement bands
-- fasteners
-- optional vents
 
 Gate:
 
-- pure clay reads
-- semantic clay clarifies but does not hide weak geometry
+- human reviewer agrees the name is visually earned
+- at least four ideas are visually distinct
+- module suggestions are deterministic and explainable
 - no hidden bespoke profile fork
 
-### Rung 5 — Profiles and styles
+### Future — Profiles and styles
 
 Purpose: apply style policies over proven family modules.
 
@@ -461,7 +487,10 @@ Every user-visible concept needs its own pass.
 
 - Box Primitive must work before Lid Seam.
 - Lid Seam must work before Trim Band.
-- Trim Band must work before Feet / Skids.
+- Trim Band must work before Stool Primitive.
+- Stool Primitive must work before Family Studio Lite.
+- Feet / Skids and crate language remain blocked until after the Stool
+  Primitive proof.
 - No branch may add multiple visible object concepts without a prior visual
   gate.
 - If a visual gate fails, stop and fix; do not add architecture to compensate.
@@ -474,6 +503,9 @@ Gate it.
 Add Lid Seam.
 Gate it.
 Add Trim Band.
+Gate it.
+Stop the box ladder.
+Add Stool Primitive.
 Gate it.
 ```
 
@@ -493,19 +525,19 @@ The next milestone is not a crate.
 It is:
 
 ```text
-Lidded Box Make baseline gate
+Trim Band Feature Module v0
 ```
 
-Required flow:
+Current proven flow:
 
 ```text
 Choose Lidded Box
-→ Make ready
-→ Try lidded box ideas
-→ Use one lidded box idea
-→ Adjust Lid Seam, Proportions, or Edge Softness
-→ Add to Pack
-→ Export
+-> Make ready
+-> Try lidded box ideas
+-> Use this box
+-> Adjust Lid Seam, Proportions, or Edge Softness
+-> Add to Pack
+-> Export Lidded Box
 ```
 
 Pass criteria:
@@ -519,7 +551,8 @@ Pass criteria:
 - buttons and next actions are clear
 - export remains truthful
 
-Lid Seam Feature Module v0 has local visual evidence in
-`docs/LID_SEAM_FEATURE_MODULE_V0.md`. The next branch should expose and prove
-that single feature in Make. Do not add Trim Band, Feet / Skids, panels,
-handles, latches, materials, or Family Studio public UI in that gate.
+Lid Seam Feature Module v0 and the Lidded Box Make baseline have local evidence
+in `docs/LID_SEAM_FEATURE_MODULE_V0.md` and
+`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`. The next branch may add Trim Band as
+exactly one visible feature. Do not add Feet / Skids, panels, handles, latches,
+materials, crate language, or Family Studio public UI in that gate.

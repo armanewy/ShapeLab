@@ -2,9 +2,10 @@
 
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
-The current product baseline is **Box Primitive**. It is intentionally small:
-a closed clay box-like volume with readable proportions and edge softness.
-The active built-in Visual Foundry catalog contains only this profile.
+The current product baseline is the small **Box ladder**: Box Primitive and
+Lidded Box. It is intentionally small: closed clay box-like volumes with
+readable proportions, edge softness, and one visible lid seam feature.
+The active built-in Visual Foundry catalog contains only these two profiles.
 
 This branch starts fresh from the Box Primitive baseline. It does not claim a
 non-box model family, surface/material workflow, UV/texturing, rigging,
@@ -12,11 +13,11 @@ animation, runtime LLM integration, or public catalog publishing.
 
 The product slice targets a narrow `Choose -> Make` loop:
 
-1. Choose `Box Primitive`.
+1. Choose `Box Primitive` or `Lidded Box`.
 2. Enter Make and wait for the box and preview to become ready.
-3. Try box ideas.
+3. Try box ideas or lidded box ideas.
 4. Use one box idea.
-5. Adjust Proportions or Edge Softness.
+5. Adjust Proportions, Edge Softness, or Lid Seam when present.
 6. Add the current box to Pack.
 7. Export.
 
@@ -56,8 +57,11 @@ clippy unless the branch touches build/profile/release/export code.
 ## Current Scope
 
 - Box Primitive is the novice baseline.
-- The built-in catalog and curation metadata are Box Primitive only.
+- Lidded Box is Box Primitive plus one visible Lid Seam feature.
+- The built-in catalog and curation metadata contain only Box Primitive and
+  Lidded Box.
 - Box Primitive has two controls: Proportions and Edge Softness.
+- Lidded Box has three controls: Proportions, Edge Softness, and Lid Seam.
 - The app may create, vary, pack, and export a box-like asset.
 - The Box Primitive screenshot/manual visual gate passed with release-app
   evidence under `target/box-primitive-dogfood-gate/`.
@@ -65,10 +69,12 @@ clippy unless the branch touches build/profile/release/export code.
   `target/box-primitive-ui-truth-pass/screenshots/`.
 - The Box Primitive visual-readability gate passed with evidence under
   `target/box-primitive-visual-readability/`.
+- The Lidded Box Make baseline gate passed with evidence under
+  `target/lidded-box-make-baseline-gate/`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- Richer box-family features must be added later one visible module at a time,
-  after the Box Primitive baseline gate.
+- The next visible feature may be Trim Band. After Trimmed Box passes, stop the
+  box ladder and prove Stool Primitive before Family Studio Lite.
 
 Status details are documented in:
 
@@ -76,5 +82,6 @@ Status details are documented in:
 - [`docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md)
 - [`docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md`](docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md)
 - [`docs/BOX_PRIMITIVE_VISUAL_READABILITY.md`](docs/BOX_PRIMITIVE_VISUAL_READABILITY.md)
+- [`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`](docs/LIDDED_BOX_MAKE_BASELINE_GATE.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

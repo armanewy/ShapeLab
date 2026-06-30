@@ -315,13 +315,19 @@ pub fn headless_fixture_catalogs() -> Vec<FoundryFixtureCatalog> {
 /// Return every built-in headless fixture catalog with its product label.
 #[must_use]
 pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixtureCatalog)> {
-    vec![("Box Primitive", box_primitive::fixture_catalog())]
+    vec![
+        ("Box Primitive", box_primitive::fixture_catalog()),
+        ("Lidded Box", box_primitive::lidded_box_fixture_catalog()),
+    ]
 }
 
 /// Return product-catalog curation metadata for every built-in profile.
 #[must_use]
 pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
-    vec![box_primitive::curation_metadata()]
+    vec![
+        box_primitive::curation_metadata(),
+        box_primitive::lidded_box_curation_metadata(),
+    ]
 }
 
 /// Return curation metadata for one built-in profile slug.
@@ -1087,7 +1093,7 @@ mod tests {
 
     #[test]
     fn choose_visible_fixtures_keep_default_parts_visually_connected() {
-        let visible_slugs = BTreeSet::from(["box-primitive"]);
+        let visible_slugs = BTreeSet::from(["box-primitive", "lidded-box"]);
         for fixture in headless_fixture_catalogs()
             .into_iter()
             .filter(|fixture| visible_slugs.contains(fixture.slug.as_str()))

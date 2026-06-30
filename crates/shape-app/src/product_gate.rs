@@ -1,7 +1,7 @@
 //! Headless product UI gate for the Visual Foundry app shell.
 
 use shape_foundry::{ControlKind, compile_foundry_document};
-use shape_foundry_catalog::{FoundryFixtureCatalog, box_primitive};
+use shape_foundry_catalog::{FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels};
 
 use crate::foundry::{
     app::rendered_action_labels_for_default_shell,
@@ -73,8 +73,8 @@ impl ProductUiGateReport {
             && !self.default_raw_technical_terms_visible
             && self.product_home_profiles > 0
             && self.product_home_profiles == self.installed_kit_count
-            && self.installed_kit_count == 1
-            && self.developer_preview_kit_count == 1
+            && self.installed_kit_count == self.core_profiles.len()
+            && self.developer_preview_kit_count == self.installed_kit_count
             && self.directions_board_gate
             && self.customize_deck_gate
             && self.pack_gate
@@ -178,7 +178,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         && visible_strings.contains(&"Current asset ready")
         && visible_strings.contains(&"Prepare the current asset before exporting.");
     let disabled_states_have_reasons = [
-        "Choose Box Primitive or open a project first.",
+        "Choose a starting point or open a project first.",
         "Prepare the current model first.",
         "Add at least one asset before exporting a pack.",
         "This option is not available right now.",
@@ -212,7 +212,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
 }
 
 fn core_profile_fixtures() -> Vec<(&'static str, FoundryFixtureCatalog)> {
-    vec![("Box Primitive", box_primitive::fixture_catalog())]
+    built_in_fixture_catalogs_with_labels()
 }
 
 fn profile_gate(
@@ -266,8 +266,8 @@ mod tests {
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
         assert_eq!(report.product_home_profiles, report.installed_kit_count);
-        assert_eq!(report.installed_kit_count, 1);
-        assert_eq!(report.developer_preview_kit_count, 1);
+        assert_eq!(report.installed_kit_count, 2);
+        assert_eq!(report.developer_preview_kit_count, 2);
         assert_eq!(report.direction_candidate_slots, 6);
         assert_eq!(
             report.direction_modes,

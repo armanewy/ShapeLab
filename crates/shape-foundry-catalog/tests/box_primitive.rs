@@ -500,35 +500,69 @@ fn box_primitive_baseline_ideas_compile_to_distinct_boxes() {
 }
 
 #[test]
-fn box_primitive_is_the_only_builtin_catalog_profile() {
-    let metadata = catalog_curation_metadata_for_slug(box_primitive::BOX_PRIMITIVE_SLUG)
+fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
+    let box_metadata = catalog_curation_metadata_for_slug(box_primitive::BOX_PRIMITIVE_SLUG)
         .expect("box metadata");
-    assert_eq!(metadata.state, CatalogCurationState::Usable);
-    assert!(metadata.default_novice_visible());
+    assert_eq!(box_metadata.state, CatalogCurationState::Usable);
+    assert!(box_metadata.default_novice_visible());
+
+    let lidded_metadata = catalog_curation_metadata_for_slug(box_primitive::LIDDED_BOX_SLUG)
+        .expect("lidded box metadata");
+    assert_eq!(lidded_metadata.state, CatalogCurationState::Usable);
+    assert!(lidded_metadata.default_novice_visible());
+    assert!(
+        lidded_metadata
+            .note
+            .contains("Box Primitive plus one visible Lid Seam")
+    );
 
     let all_slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
         .collect::<Vec<_>>();
-    assert_eq!(all_slugs, vec![box_primitive::BOX_PRIMITIVE_SLUG]);
+    assert_eq!(
+        all_slugs,
+        vec![
+            box_primitive::BOX_PRIMITIVE_SLUG,
+            box_primitive::LIDDED_BOX_SLUG,
+        ]
+    );
 
     let curation_slugs = built_in_catalog_curation_metadata()
         .into_iter()
         .map(|metadata| metadata.profile_slug.to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(curation_slugs, vec![box_primitive::BOX_PRIMITIVE_SLUG]);
+    assert_eq!(
+        curation_slugs,
+        vec![
+            box_primitive::BOX_PRIMITIVE_SLUG,
+            box_primitive::LIDDED_BOX_SLUG,
+        ]
+    );
 
     let novice_slugs = curated_fixture_catalogs_with_labels(false)
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
         .collect::<Vec<_>>();
-    assert_eq!(novice_slugs, vec![box_primitive::BOX_PRIMITIVE_SLUG]);
+    assert_eq!(
+        novice_slugs,
+        vec![
+            box_primitive::BOX_PRIMITIVE_SLUG,
+            box_primitive::LIDDED_BOX_SLUG,
+        ]
+    );
 
     let preview_slugs = curated_fixture_catalogs_with_labels(true)
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
         .collect::<Vec<_>>();
-    assert_eq!(preview_slugs, vec![box_primitive::BOX_PRIMITIVE_SLUG]);
+    assert_eq!(
+        preview_slugs,
+        vec![
+            box_primitive::BOX_PRIMITIVE_SLUG,
+            box_primitive::LIDDED_BOX_SLUG,
+        ]
+    );
 }
 
 fn role_instances(output: &FoundryCompilationOutput, role: &str) -> Vec<PartInstanceId> {

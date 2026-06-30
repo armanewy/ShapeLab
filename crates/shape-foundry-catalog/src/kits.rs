@@ -532,7 +532,9 @@ fn provider_slot_id(role_id: &str) -> String {
 
 fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
-        box_primitive::BOX_PRIMITIVE_SLUG => FoundryKitQualityTier::Usable,
+        box_primitive::BOX_PRIMITIVE_SLUG | box_primitive::LIDDED_BOX_SLUG => {
+            FoundryKitQualityTier::Usable
+        }
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -540,6 +542,7 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
 fn product_category_chips(slug: &str) -> Vec<String> {
     match slug {
         box_primitive::BOX_PRIMITIVE_SLUG => vec!["Primitive", "Box"],
+        box_primitive::LIDDED_BOX_SLUG => vec!["Box", "Lidded"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -550,6 +553,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
 fn normalize_kit_slug(slug: &str) -> String {
     match slug {
         "box" | "box_primitive" => box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
+        "lidded_box" => box_primitive::LIDDED_BOX_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -563,7 +567,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 1);
+        assert_eq!(packages.len(), 2);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -586,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn box_primitive_kit_is_the_only_usable_builtin() {
+    fn box_family_kits_are_usable_builtins() {
         let package =
             built_in_foundry_kit_package(box_primitive::BOX_PRIMITIVE_SLUG).expect("box kit");
         assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Usable);
@@ -595,6 +599,18 @@ mod tests {
             Some(box_primitive::BOX_PRIMITIVE_SLUG)
         );
         assert_eq!(package.kit.category_chips, vec!["Primitive", "Box"]);
+
+        let lidded_package =
+            built_in_foundry_kit_package(box_primitive::LIDDED_BOX_SLUG).expect("lidded kit");
+        assert_eq!(
+            lidded_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            lidded_package.kit.source_profile_slug.as_deref(),
+            Some(box_primitive::LIDDED_BOX_SLUG)
+        );
+        assert_eq!(lidded_package.kit.category_chips, vec!["Box", "Lidded"]);
     }
 
     #[test]

@@ -193,7 +193,8 @@ struct MakeCanvasViewState {
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
-    box_primitive_baseline: bool,
+    simple_box_make_baseline: bool,
+    lidded_box_baseline: bool,
     try_ideas_action_label: &'static str,
     use_candidate_action_label: &'static str,
     adjust_heading_label: &'static str,
@@ -304,11 +305,28 @@ enum HomeTemplateFilter {
     All,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum MakeProfileKind {
+    BoxPrimitive,
+    LiddedBox,
+    Other,
+}
+
+impl MakeProfileKind {
+    const fn simple_box_make_baseline(self) -> bool {
+        matches!(self, Self::BoxPrimitive | Self::LiddedBox)
+    }
+
+    const fn is_lidded_box(self) -> bool {
+        matches!(self, Self::LiddedBox)
+    }
+}
+
 const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 0] = [];
 
 const HOME_SUBTITLE: &str = "A simple clay box for testing the Make loop.";
 const HOME_CONTROL_COPY: &str = "You can vary proportions and edge softness.";
-const NEED_PROJECT_REASON: &str = "Choose Box Primitive or open a project first.";
+const NEED_PROJECT_REASON: &str = "Choose a starting point or open a project first.";
 const NEED_SAVE_LOCATION_REASON: &str =
     "Use Save Project first to choose where this project is saved.";
 const NEED_MODEL_REASON: &str = "Prepare the current model first.";
@@ -334,6 +352,7 @@ const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
+const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/box-primitive/surface/variants/surface-candidate-report.json";
 const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
 const MATERIAL_LOOK_MISSING_MESSAGE: &str = "Material looks are not generated yet.";
@@ -351,6 +370,8 @@ const SURFACE_PACKAGE_COMMAND: &str =
     "Surface packages are not part of the Box Primitive baseline.";
 const BOX_PRIMITIVE_EXPORT_TITLE: &str = "Export Box Primitive";
 const BOX_PRIMITIVE_EXPORT_DETAIL: &str = "Exports the current clay box asset.";
+const LIDDED_BOX_EXPORT_TITLE: &str = "Export Lidded Box";
+const LIDDED_BOX_EXPORT_DETAIL: &str = "Exports the current clay lidded box asset.";
 const BOX_PRIMITIVE_EXPORT_LIMITATION: &str =
     "This is not a textured, rigged, animated, or game-ready package.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
@@ -377,12 +398,13 @@ const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
 const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 const ACTION_TRY_BOX_IDEAS: &str = "Try box ideas";
+const ACTION_TRY_LIDDED_BOX_IDEAS: &str = "Try lidded box ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
 const ACTION_TRY_MATERIAL_LOOKS: &str = "Try material looks";
 const ACTION_TRY_AGAIN: &str = "Try again";
-const ACTION_CHOOSE_TEMPLATE: &str = "Choose Box Primitive";
+const ACTION_CHOOSE_TEMPLATE: &str = "Choose a starting point";
 const ACTION_CHOOSE_ANOTHER_TEMPLATE: &str = "Choose another starting point";
 const ACTION_CANCEL: &str = "Cancel";
 const ACTION_KEEP_WAITING: &str = "Keep waiting";
@@ -397,6 +419,7 @@ const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_CLOSE_DRAWER: &str = "Close drawer";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
+const ACTION_USE_THIS_BOX: &str = "Use this box";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
@@ -409,7 +432,8 @@ const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
 const ACTION_ADJUST_BOX: &str = "Adjust box";
-const RENDERED_ACTION_LABELS: [&str; 39] = [
+const ACTION_ADJUST_LID_SEAM: &str = "Adjust lid seam";
+const RENDERED_ACTION_LABELS: [&str; 42] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -425,6 +449,7 @@ const RENDERED_ACTION_LABELS: [&str; 39] = [
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
     ACTION_TRY_BOX_IDEAS,
+    ACTION_TRY_LIDDED_BOX_IDEAS,
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
@@ -442,6 +467,7 @@ const RENDERED_ACTION_LABELS: [&str; 39] = [
     ACTION_CLOSE_DRAWER,
     ACTION_SELECT,
     ACTION_CHOOSE_DIRECTION,
+    ACTION_USE_THIS_BOX,
     ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
@@ -449,6 +475,7 @@ const RENDERED_ACTION_LABELS: [&str; 39] = [
     ACTION_RETRY_PREPARATION,
     ACTION_UPDATE_PREVIEW,
     ACTION_ADJUST_BOX,
+    ACTION_ADJUST_LID_SEAM,
 ];
 
 impl Default for FoundryDesktopApp {
@@ -831,17 +858,23 @@ impl FoundryDesktopApp {
             })
             .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
-        let box_primitive_baseline = self.active_profile_is_box_primitive();
-        let try_ideas_action_label = if box_primitive_baseline {
-            ACTION_TRY_BOX_IDEAS
-        } else {
-            ACTION_TRY_WHOLE_ASSET_IDEAS
+        let active_profile_kind = self.active_make_profile_kind();
+        let simple_box_make_baseline = active_profile_kind.simple_box_make_baseline();
+        let lidded_box_baseline = active_profile_kind.is_lidded_box();
+        let try_ideas_action_label = match active_profile_kind {
+            MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
+            MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
+            MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
         };
-        let use_candidate_action_label = ACTION_CHOOSE_DIRECTION;
-        let adjust_heading_label = if box_primitive_baseline {
-            ACTION_ADJUST_BOX
+        let use_candidate_action_label = if lidded_box_baseline {
+            ACTION_USE_THIS_BOX
         } else {
-            "Adjust"
+            ACTION_CHOOSE_DIRECTION
+        };
+        let adjust_heading_label = match active_profile_kind {
+            MakeProfileKind::BoxPrimitive => ACTION_ADJUST_BOX,
+            MakeProfileKind::LiddedBox => ACTION_ADJUST_LID_SEAM,
+            MakeProfileKind::Other => "Adjust",
         };
         let active_candidate_job = self.state.active_jobs.values().any(|request| {
             matches!(
@@ -979,7 +1012,8 @@ impl FoundryDesktopApp {
                 candidate_output: self.state.candidate_output.as_deref(),
                 local_warning_message: local_warning_message.as_deref(),
                 local_error_message: local_error_message.as_deref(),
-                box_primitive_baseline,
+                simple_box_make_baseline,
+                lidded_box_baseline,
             });
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
@@ -1034,7 +1068,7 @@ impl FoundryDesktopApp {
             }
         });
         let candidate_tray_visible = self.state.document.is_some();
-        let material_look_tray_visible = self.material_looks.tray_open && !box_primitive_baseline;
+        let material_look_tray_visible = self.material_looks.tray_open && !simple_box_make_baseline;
         let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
         let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
             preview_ready
@@ -1049,7 +1083,8 @@ impl FoundryDesktopApp {
             &mode,
             focused_part_label.as_deref(),
             selected_comparison_visible,
-            box_primitive_baseline,
+            simple_box_make_baseline,
+            lidded_box_baseline,
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
@@ -1098,7 +1133,8 @@ impl FoundryDesktopApp {
             local_warning_message,
             local_error_message,
             next_action_hint,
-            box_primitive_baseline,
+            simple_box_make_baseline,
+            lidded_box_baseline,
             try_ideas_action_label,
             use_candidate_action_label,
             adjust_heading_label,
@@ -1209,7 +1245,7 @@ impl FoundryDesktopApp {
 
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
         if self.state.document.is_none() {
-            ("Choose Box Primitive", StatusTone::Neutral)
+            ("Choose starting point", StatusTone::Neutral)
         } else if self.state.project_path.is_none() {
             ("Not saved", StatusTone::Warning)
         } else if self.state.dirty {
@@ -1235,7 +1271,7 @@ impl FoundryDesktopApp {
         } else if self.state.document.is_some() {
             "Preparing model"
         } else {
-            "Choose Box Primitive"
+            "Choose starting point"
         }
     }
 
@@ -1277,8 +1313,14 @@ impl FoundryDesktopApp {
         })
     }
 
-    fn active_profile_is_box_primitive(&self) -> bool {
-        self.active_profile_matches(BOX_PRIMITIVE_PROFILE_ID)
+    fn active_make_profile_kind(&self) -> MakeProfileKind {
+        if self.active_profile_matches(BOX_PRIMITIVE_PROFILE_ID) {
+            MakeProfileKind::BoxPrimitive
+        } else if self.active_profile_matches(LIDDED_BOX_PROFILE_ID) {
+            MakeProfileKind::LiddedBox
+        } else {
+            MakeProfileKind::Other
+        }
     }
 
     fn material_look_action_visible(&self, view_state: &MakeCanvasViewState) -> bool {
@@ -1355,7 +1397,7 @@ impl FoundryDesktopApp {
     }
 
     fn material_look_export_copy(&self) -> Option<(&'static str, &'static str)> {
-        if self.active_profile_is_box_primitive() {
+        if self.active_make_profile_kind().simple_box_make_baseline() {
             return None;
         }
         self.selected_material_look().map(|_| {
@@ -1366,13 +1408,21 @@ impl FoundryDesktopApp {
         })
     }
 
+    fn current_export_copy(&self) -> (&'static str, &'static str) {
+        if self.active_make_profile_kind().is_lidded_box() {
+            (LIDDED_BOX_EXPORT_TITLE, LIDDED_BOX_EXPORT_DETAIL)
+        } else {
+            (BOX_PRIMITIVE_EXPORT_TITLE, BOX_PRIMITIVE_EXPORT_DETAIL)
+        }
+    }
+
     fn show_home(&mut self, ui: &mut egui::Ui) {
         let profiles = self.home_profiles.as_slice();
         if profiles.is_empty() {
             product_empty_state(
                 ui,
-                "Box Primitive is not available",
-                "Open a saved project, or enable the Box Primitive baseline.",
+                "Starting point is not available",
+                "Open a saved project, or enable the box starting points.",
             );
             return;
         }
@@ -1415,7 +1465,7 @@ impl FoundryDesktopApp {
                         product_empty_state(
                             ui,
                             "No matching starting point",
-                            "Change the search to choose Box Primitive.",
+                            "Change the search to choose Box Primitive or Lidded Box.",
                         );
                     }
                 },
@@ -1434,7 +1484,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive or open a project before making changes.",
+                "Choose Box Primitive, Lidded Box, or open a project before making changes.",
             ));
             return commands;
         }
@@ -1991,7 +2041,7 @@ impl FoundryDesktopApp {
                                 control,
                                 actions_enabled,
                                 disabled_reason,
-                                !view_state.box_primitive_baseline,
+                                !view_state.simple_box_make_baseline,
                             ));
                             ui.add_space(8.0);
                         }
@@ -2007,7 +2057,7 @@ impl FoundryDesktopApp {
                                             control,
                                             actions_enabled,
                                             disabled_reason,
-                                            !view_state.box_primitive_baseline,
+                                            !view_state.simple_box_make_baseline,
                                         ));
                                         ui.add_space(8.0);
                                     }
@@ -2452,7 +2502,8 @@ impl FoundryDesktopApp {
         } else {
             direction_board_count_label(
                 view_state.candidate_count,
-                view_state.box_primitive_baseline,
+                view_state.simple_box_make_baseline,
+                view_state.lidded_box_baseline,
             )
         };
         if make_canvas_uses_compact_ideas(view_state) {
@@ -2540,7 +2591,9 @@ impl FoundryDesktopApp {
                 } else {
                     (
                         "Ready to try ideas",
-                        if view_state.box_primitive_baseline {
+                        if view_state.lidded_box_baseline {
+                            "Try lidded box ideas when the box is ready."
+                        } else if view_state.simple_box_make_baseline {
                             "Try box ideas when the box is ready."
                         } else {
                             "Try ideas or focus a part when the asset is ready."
@@ -2789,7 +2842,7 @@ impl FoundryDesktopApp {
                     commands.extend(self.show_choose_asset_empty_state(
                         ui,
                         "Choose an asset first",
-                        "Choose Box Primitive or open a project before adjusting.",
+                        "Choose Box Primitive, Lidded Box, or open a project before adjusting.",
                     ));
                 } else {
                     ui.add_space(10.0);
@@ -2955,12 +3008,13 @@ impl FoundryDesktopApp {
 
     fn show_export(&mut self, ui: &mut egui::Ui) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
+        let (export_title, export_detail) = self.current_export_copy();
         section_header(
             ui,
             SectionHeaderSpec {
                 eyebrow: "Export",
-                title: BOX_PRIMITIVE_EXPORT_TITLE,
-                subtitle: Some(BOX_PRIMITIVE_EXPORT_DETAIL),
+                title: export_title,
+                subtitle: Some(export_detail),
             },
         );
         ui.add_space(10.0);
@@ -2968,7 +3022,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive or open a project before exporting.",
+                "Choose Box Primitive, Lidded Box, or open a project before exporting.",
             ));
             return commands;
         }
@@ -3085,7 +3139,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive or open a project before starting a pack.",
+                "Choose Box Primitive, Lidded Box, or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -4501,6 +4555,7 @@ fn project_file_title(path: &Path) -> String {
 fn asset_title_from_id(document_id: &str) -> &'static str {
     match document_id {
         id if id.contains("box-primitive") => "Box Primitive",
+        id if id.contains("lidded-box") => "Lidded Box",
         _ => "Shape Lab Project",
     }
 }
@@ -4564,8 +4619,20 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 fn profile_description(slug: &str) -> &'static str {
     match slug {
         "box-primitive" => HOME_SUBTITLE,
-        _ => "A Box Primitive starting point ready for box idea generation.",
+        "lidded-box" => "A simple box with a visible lid seam.",
+        _ => "A box starting point ready for idea generation.",
     }
+}
+
+fn profile_control_copy(slug: &str) -> &'static str {
+    match slug {
+        "lidded-box" => "You can vary proportions, edge softness, and lid seam.",
+        _ => HOME_CONTROL_COPY,
+    }
+}
+
+fn is_box_ladder_profile(slug: &str) -> bool {
+    matches!(slug, BOX_PRIMITIVE_PROFILE_ID | LIDDED_BOX_PROFILE_ID)
 }
 
 #[derive(Clone)]
@@ -4672,6 +4739,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Make",
         "Export",
         "Start with Box Primitive",
+        "Lidded Box",
         "Project",
         "Open Project",
         "Save Project",
@@ -4681,9 +4749,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Recent Projects",
         "Start",
         ACTION_TRY_BOX_IDEAS,
+        ACTION_TRY_LIDDED_BOX_IDEAS,
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
         ACTION_CHOOSE_DIRECTION,
+        ACTION_USE_THIS_BOX,
         "Add to Pack",
         "Open Pack",
         "Open Export",
@@ -4707,7 +4777,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Ideas",
         "Save",
         "Undo",
-        "Choose Box Primitive",
+        "Choose starting point",
         "Not saved",
         "Saved",
         "Unsaved",
@@ -4716,7 +4786,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Working",
         "Model ready",
         "Preparing model",
-        "Choose Box Primitive",
+        "Choose starting point",
         "Ready",
         "Preview available",
         "Preparing",
@@ -4728,17 +4798,25 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Needs a model first",
         HOME_SUBTITLE,
         HOME_CONTROL_COPY,
+        "A simple box with a visible lid seam.",
+        "You can vary proportions, edge softness, and lid seam.",
         "Start with Box Primitive.",
+        "Choose a box starting point.",
+        "Start with Box Primitive, or choose Lidded Box.",
+        "Lidded Box is Box Primitive with one visible lid seam.",
         "Preview building",
         "No matching starting point",
         "Make asset",
         "Use the model as the workspace: try box ideas, tune controls, and compare.",
         "Try box ideas, adjust box, Add to Pack, or Export.",
+        "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export.",
+        "Lidded box ideas ready",
+        "Use this box, or reject it.",
         "Current Asset",
         "Ideas",
         "Trying ideas",
         "Current asset",
-        "Choose Box Primitive or open a project before making changes.",
+        "Choose Box Primitive, Lidded Box, or open a project before making changes.",
         "Preview could not be rendered for this idea.",
         "Preview this idea before using it.",
         "Project history",
@@ -4747,7 +4825,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Project step",
         "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Choose Box Primitive or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, or open a project before adjusting.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -4758,6 +4836,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Export ready",
         BOX_PRIMITIVE_EXPORT_TITLE,
         BOX_PRIMITIVE_EXPORT_DETAIL,
+        LIDDED_BOX_EXPORT_TITLE,
+        LIDDED_BOX_EXPORT_DETAIL,
         BOX_PRIMITIVE_EXPORT_LIMITATION,
         "Current Asset",
         "Export options",
@@ -4790,10 +4870,10 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No pack workspace is open.",
         "Preview is being prepared.",
         "Primary control",
-        "Box Primitive is not available",
-        "Open a saved project, or enable the Box Primitive baseline.",
-        "Choose Box Primitive or open a project before exporting.",
-        "Choose Box Primitive or open a project before starting a pack.",
+        "Starting point is not available",
+        "Open a saved project, or enable the box starting points.",
+        "Choose Box Primitive, Lidded Box, or open a project before exporting.",
+        "Choose Box Primitive, Lidded Box, or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -4811,11 +4891,13 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
     vec![
         ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_BOX_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_TRY_LIDDED_BOX_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_USE_THIS_BOX, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UNLOCK_CONTROLS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
@@ -4886,7 +4968,8 @@ struct MakeCanvasBannerContext<'a> {
     candidate_output: Option<&'a FoundryCandidateOutput>,
     local_warning_message: Option<&'a str>,
     local_error_message: Option<&'a str>,
-    box_primitive_baseline: bool,
+    simple_box_make_baseline: bool,
+    lidded_box_baseline: bool,
 }
 
 fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, String, BannerTone) {
@@ -4903,7 +4986,8 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         candidate_output,
         local_warning_message,
         local_error_message,
-        box_primitive_baseline,
+        simple_box_make_baseline,
+        lidded_box_baseline,
     } = context;
     if let Some(message) = local_warning_message {
         return (
@@ -4929,7 +5013,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     match mode {
         MakeCanvasMode::NoAsset => (
             "Choose an asset".to_owned(),
-            "Choose Box Primitive or open a project before making changes.".to_owned(),
+            "Choose Box Primitive, Lidded Box, or open a project before making changes.".to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::PreparingAsset => {
@@ -4958,12 +5042,16 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Info,
         ),
         MakeCanvasMode::ReviewingIdeas => (
-            if box_primitive_baseline {
+            if lidded_box_baseline {
+                "Lidded box ideas ready".to_owned()
+            } else if simple_box_make_baseline {
                 "Box ideas ready".to_owned()
             } else {
                 "Ideas ready".to_owned()
             },
-            if box_primitive_baseline {
+            if lidded_box_baseline {
+                "Use this box, or reject it.".to_owned()
+            } else if simple_box_make_baseline {
                 "Use this idea, or reject it.".to_owned()
             } else {
                 "Compare the selected idea, then use it or reject it.".to_owned()
@@ -4986,7 +5074,14 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Error,
         ),
         MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
-            if box_primitive_baseline && matches!(mode, MakeCanvasMode::Ready) {
+            if lidded_box_baseline && matches!(mode, MakeCanvasMode::Ready) {
+                (
+                    "Ready".to_owned(),
+                    "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
+                        .to_owned(),
+                    BannerTone::Success,
+                )
+            } else if simple_box_make_baseline && matches!(mode, MakeCanvasMode::Ready) {
                 (
                     "Ready".to_owned(),
                     "Try box ideas, adjust box, Add to Pack, or Export.".to_owned(),
@@ -5046,7 +5141,7 @@ fn no_candidates_reason_copy(candidate_output: Option<&FoundryCandidateOutput>) 
 
 fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
     match view_state.mode {
-        MakeCanvasMode::NoAsset => "Choose Box Primitive first.",
+        MakeCanvasMode::NoAsset => "Choose a starting point first.",
         MakeCanvasMode::PreparingAsset if view_state.preparation_timed_out => {
             PREPARATION_TIMEOUT_MESSAGE
         }
@@ -5054,14 +5149,20 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::PreparingAsset => ASSET_PREPARING_REASON,
         MakeCanvasMode::GeneratingWholeAssetIdeas => "Trying ideas from the current asset.",
         MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas for the focused part.",
-        MakeCanvasMode::ReviewingIdeas if view_state.box_primitive_baseline => {
+        MakeCanvasMode::ReviewingIdeas if view_state.lidded_box_baseline => {
+            "Use this box, or try another idea."
+        }
+        MakeCanvasMode::ReviewingIdeas if view_state.simple_box_make_baseline => {
             "Use this idea, or try another idea."
         }
         MakeCanvasMode::ReviewingIdeas => "Compare the selected idea against the current asset.",
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
-        MakeCanvasMode::Ready if view_state.box_primitive_baseline => {
+        MakeCanvasMode::Ready if view_state.lidded_box_baseline => {
+            "Try lidded box ideas or adjust lid seam."
+        }
+        MakeCanvasMode::Ready if view_state.simple_box_make_baseline => {
             "Try box ideas or adjust box."
         }
         MakeCanvasMode::Ready => "Try ideas, focus a part, or tune controls.",
@@ -5073,10 +5174,11 @@ fn make_canvas_next_action_hint(
     mode: &MakeCanvasMode,
     focused_part_label: Option<&str>,
     selected_comparison_visible: bool,
-    box_primitive_baseline: bool,
+    simple_box_make_baseline: bool,
+    lidded_box_baseline: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
-        (MakeCanvasMode::NoAsset, _, _) => "Start with Box Primitive from Choose.".to_owned(),
+        (MakeCanvasMode::NoAsset, _, _) => "Choose Box Primitive or Lidded Box first.".to_owned(),
         (MakeCanvasMode::PreparingAsset, _, _) => {
             "Wait for the model and preview to finish preparing.".to_owned()
         }
@@ -5092,7 +5194,10 @@ fn make_canvas_next_action_hint(
         (MakeCanvasMode::GeneratingWholeAssetIdeas, _, _) => {
             "Watch this area for new ideas.".to_owned()
         }
-        (MakeCanvasMode::ReviewingIdeas, _, true) if box_primitive_baseline => {
+        (MakeCanvasMode::ReviewingIdeas, _, true) if lidded_box_baseline => {
+            "Use this box, or reject it.".to_owned()
+        }
+        (MakeCanvasMode::ReviewingIdeas, _, true) if simple_box_make_baseline => {
             "Use this idea, or reject it.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) => {
@@ -5117,7 +5222,11 @@ fn make_canvas_next_action_hint(
             "Choose an export option when readiness is clear.".to_owned()
         }
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
-        (MakeCanvasMode::Ready, _, _) if box_primitive_baseline => {
+        (MakeCanvasMode::Ready, _, _) if lidded_box_baseline => {
+            "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
+                .to_owned()
+        }
+        (MakeCanvasMode::Ready, _, _) if simple_box_make_baseline => {
             "Try box ideas, adjust box, Add to Pack, or Export.".to_owned()
         }
         (MakeCanvasMode::Ready, _, _) => {
@@ -5352,9 +5461,15 @@ fn product_panel_message(message: &str, fallback: &str) -> String {
     }
 }
 
-fn direction_board_count_label(count: usize, box_primitive_baseline: bool) -> String {
+fn direction_board_count_label(
+    count: usize,
+    simple_box_make_baseline: bool,
+    lidded_box_baseline: bool,
+) -> String {
     if count == 0 {
-        if box_primitive_baseline {
+        if lidded_box_baseline {
+            "Try lidded box ideas.".to_owned()
+        } else if simple_box_make_baseline {
             "Try box ideas.".to_owned()
         } else {
             "Try ideas from the current asset.".to_owned()
@@ -5430,6 +5545,11 @@ fn show_home_browser_panel(
 ) {
     let colors = VisualFoundryTokens::dark().colors;
     let single_profile_mode = profiles.len() == 1 && HOME_TEMPLATE_FILTERS.is_empty();
+    let box_ladder_mode = !profiles.is_empty()
+        && HOME_TEMPLATE_FILTERS.is_empty()
+        && profiles
+            .iter()
+            .all(|profile| is_box_ladder_profile(&profile.fixture.slug));
     product_card(ui, false, |ui| {
         ui.set_min_height(ui.available_height().max(420.0));
         if single_profile_mode {
@@ -5472,49 +5592,71 @@ fn show_home_browser_panel(
                 ui,
                 SectionHeaderSpec {
                     eyebrow: "Choose",
-                    title: "Choose what to make",
-                    subtitle: Some(HOME_SUBTITLE),
+                    title: if box_ladder_mode {
+                        "Choose a box starting point."
+                    } else {
+                        "Choose what to make"
+                    },
+                    subtitle: Some(if box_ladder_mode {
+                        "Start with Box Primitive, or choose Lidded Box."
+                    } else {
+                        HOME_SUBTITLE
+                    }),
                 },
             );
             ui.add_space(8.0);
             ui.label(
-                RichText::new("Choose the Box Primitive starting point below.")
-                    .color(colors.text_muted)
-                    .small(),
+                RichText::new(if box_ladder_mode {
+                    "Lidded Box is Box Primitive with one visible lid seam."
+                } else {
+                    "Choose the Box Primitive starting point below."
+                })
+                .color(colors.text_muted)
+                .small(),
             );
             ui.add_space(12.0);
-            let response = ui.add_sized(
-                [ui.available_width(), 32.0],
-                egui::TextEdit::singleline(search_query)
-                    .hint_text("Search starting point...")
-                    .desired_width(f32::INFINITY),
-            );
-            if response.changed() {
-                *selected_slug =
-                    default_filtered_home_profile_slug(profiles, search_query, *filter);
-            }
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                for option in HOME_TEMPLATE_FILTERS {
-                    if home_filter_button(ui, option, *filter).clicked() {
-                        *filter = option;
-                        *selected_slug =
-                            default_filtered_home_profile_slug(profiles, search_query, *filter);
-                    }
+            if !box_ladder_mode {
+                let response = ui.add_sized(
+                    [ui.available_width(), 32.0],
+                    egui::TextEdit::singleline(search_query)
+                        .hint_text("Search starting point...")
+                        .desired_width(f32::INFINITY),
+                );
+                if response.changed() {
+                    *selected_slug =
+                        default_filtered_home_profile_slug(profiles, search_query, *filter);
                 }
-            });
-            normalize_home_selection(profiles, search_query, *filter, selected_slug);
-            ui.add_space(12.0);
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    for option in HOME_TEMPLATE_FILTERS {
+                        if home_filter_button(ui, option, *filter).clicked() {
+                            *filter = option;
+                            *selected_slug =
+                                default_filtered_home_profile_slug(profiles, search_query, *filter);
+                        }
+                    }
+                });
+                ui.add_space(12.0);
+            }
+            let selection_query = if box_ladder_mode {
+                ""
+            } else {
+                search_query.as_str()
+            };
+            normalize_home_selection(profiles, selection_query, *filter, selected_slug);
 
-            let filtered_indices = filtered_home_profile_indices(profiles, search_query, *filter);
-            let count_label = home_profile_count_label(filtered_indices.len());
-            ui.label(
-                RichText::new(count_label)
-                    .color(colors.text_subtle)
-                    .small()
-                    .strong(),
-            );
-            ui.add_space(6.0);
+            let filtered_indices =
+                filtered_home_profile_indices(profiles, selection_query, *filter);
+            if !box_ladder_mode {
+                let count_label = home_profile_count_label(filtered_indices.len());
+                ui.label(
+                    RichText::new(count_label)
+                        .color(colors.text_subtle)
+                        .small()
+                        .strong(),
+                );
+                ui.add_space(6.0);
+            }
             egui::ScrollArea::vertical()
                 .id_salt("foundry_home_template_list")
                 .auto_shrink([false, false])
@@ -5537,6 +5679,10 @@ fn show_home_browser_panel(
                         ui.add_space(6.0);
                     }
                 });
+            if box_ladder_mode {
+                *search_query = String::new();
+                *filter = HomeTemplateFilter::All;
+            }
         }
     });
 }
@@ -5638,7 +5784,7 @@ fn show_home_selected_template_stage(
                 RichText::new(format!(
                     "{} {}",
                     profile_description(&profile.fixture.slug),
-                    HOME_CONTROL_COPY
+                    profile_control_copy(&profile.fixture.slug)
                 ))
                 .color(colors.text_muted),
             )
@@ -8019,8 +8165,8 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 1);
-        assert_eq!(default_product_home_profile_count(), 1);
+        assert_eq!(installed_product_kit_count(), 2);
+        assert_eq!(default_product_home_profile_count(), 2);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -8028,7 +8174,8 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
         assert_eq!(default_profiles[0].fixture.slug, "box-primitive");
-        assert_eq!(default_labels, vec!["Box Primitive"]);
+        assert_eq!(default_profiles[1].fixture.slug, "lidded-box");
+        assert_eq!(default_labels, vec!["Box Primitive", "Lidded Box"]);
 
         let profiles = product_home_profiles(true);
         let labels = profiles
@@ -8036,23 +8183,26 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 1);
-        assert_eq!(labels, vec!["Box Primitive"]);
+        assert_eq!(profiles.len(), 2);
+        assert_eq!(labels, vec!["Box Primitive", "Lidded Box"]);
         assert!(!labels.iter().any(|label| label.contains("MVP")));
     }
 
     #[test]
-    fn choose_screen_single_profile_mode_has_no_category_filters_or_catalog_count() {
+    fn choose_screen_box_ladder_mode_has_no_category_filters_or_catalog_count() {
         let profiles = product_home_profiles(false);
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
 
-        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles.len(), 2);
         assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
+        assert_eq!(profiles[1].fixture.slug, LIDDED_BOX_PROFILE_ID);
         assert!(HOME_TEMPLATE_FILTERS.is_empty());
-        assert!(strings.contains(&"Start with Box Primitive."));
+        assert!(strings.contains(&"Choose a box starting point."));
         assert!(strings.contains(&HOME_SUBTITLE));
         assert!(strings.contains(&HOME_CONTROL_COPY));
+        assert!(strings.contains(&"A simple box with a visible lid seam."));
+        assert!(strings.contains(&"You can vary proportions, edge softness, and lid seam."));
 
         for hidden in [
             "Props",
@@ -8062,12 +8212,13 @@ mod tests {
             "Environment",
             "18 templates",
             "1 starting point",
+            "2 starting points",
             "Search starting point...",
             "Choose what to make",
         ] {
             assert!(
                 !joined.contains(hidden),
-                "single-profile Choose copy should not expose {hidden}: {joined}"
+                "box-ladder Choose copy should not expose {hidden}: {joined}"
             );
         }
     }
@@ -8084,7 +8235,7 @@ mod tests {
         sorted_family_names.sort_unstable();
 
         assert_eq!(family_names, sorted_family_names);
-        assert_eq!(family_names, vec!["Box Primitive"]);
+        assert_eq!(family_names, vec!["Box Primitive", "Lidded Box"]);
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
         assert!(
             groups
@@ -8127,10 +8278,12 @@ mod tests {
         normalize_home_selection(&profiles, "", HomeTemplateFilter::All, &mut selected_slug);
 
         assert_eq!(selected_slug.as_deref(), Some("box-primitive"));
-        assert!(
+        assert_eq!(
             filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::All)
                 .iter()
-                .all(|index| profiles[*index].fixture.slug == "box-primitive")
+                .map(|index| profiles[*index].fixture.slug.as_str())
+                .collect::<Vec<_>>(),
+            vec!["box-primitive", "lidded-box"]
         );
     }
 
@@ -8138,9 +8291,11 @@ mod tests {
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
         let groups = product_home_profile_groups(profiles);
-        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].family_id, "box_primitive");
+        assert_eq!(groups[1].family_id, "lidded_box");
         assert_eq!(groups[0].profiles.len(), 1);
+        assert_eq!(groups[1].profiles.len(), 1);
     }
 
     #[test]
@@ -9748,6 +9903,174 @@ mod tests {
     }
 
     #[test]
+    fn lidded_box_make_baseline_flow_is_plain_and_complete() {
+        let fixture = shape_foundry_catalog::box_primitive::lidded_box_fixture_catalog();
+        let mut app = ready_fixture_state_test_app(fixture.clone());
+        let ready = app.make_canvas_view_state();
+
+        assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.simple_box_make_baseline);
+        assert!(ready.lidded_box_baseline);
+        assert_eq!(ready.primary_action_label, ACTION_TRY_LIDDED_BOX_IDEAS);
+        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_LID_SEAM);
+        assert!(ready.next_action_hint.contains("adjust lid seam"));
+        assert!(ready.next_action_hint.contains("proportions"));
+        assert!(!app.material_look_action_visible(&ready));
+        assert!(!ready.material_look_tray_visible);
+        assert_eq!(app.material_look_export_copy(), None);
+        assert_eq!(
+            app.current_export_copy(),
+            (LIDDED_BOX_EXPORT_TITLE, LIDDED_BOX_EXPORT_DETAIL)
+        );
+        assert!(
+            app.state
+                .current_output
+                .as_ref()
+                .expect("compiled lidded output")
+                .catalog
+                .customizer_profile
+                .controls
+                .iter()
+                .any(|control| control.id == "lid_height" && control.label == "Lid Seam"),
+            "Lidded Box Make should expose the Lid Seam control"
+        );
+        let groups = app
+            .state
+            .document
+            .as_ref()
+            .map(directions::direction_part_groups_for_document)
+            .expect("lidded document has direction groups");
+        assert!(
+            groups.is_empty(),
+            "Lidded Box should not expose part focus chips"
+        );
+
+        let request_command = app
+            .make_primary_candidate_command()
+            .expect("request command");
+        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
+            panic!("expected candidate request command");
+        };
+        assert_eq!(
+            request.variation_intent.channels,
+            vec![shape_foundry::VariationChannel::CompleteLook]
+        );
+
+        let candidate_effects = app
+            .state
+            .handle_command(request_command)
+            .expect("Try lidded box ideas schedules");
+        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
+        let (preview_request, candidate_output) = match &candidate_event {
+            FoundryJobEvent::CandidatesGenerated {
+                request, output, ..
+            } => {
+                assert!(
+                    !output.candidates.is_empty(),
+                    "Try lidded box ideas should yield candidates: {:?} {:?}",
+                    output.diagnostics,
+                    output.reliability_report
+                );
+                assert!(
+                    output
+                        .candidates
+                        .iter()
+                        .any(|candidate| !candidate.changed_controls.is_empty()),
+                    "Try lidded box ideas should yield at least one changed candidate"
+                );
+                (request.clone(), output.as_ref().clone())
+            }
+            other => panic!("expected generated candidates, got {other:?}"),
+        };
+        assert!(app.state.handle_job_event(candidate_event));
+
+        let preview_effects = app
+            .state
+            .request_candidate_previews(preview_request, candidate_output)
+            .expect("candidate previews schedule");
+        let preview_event = run_fixture_effect(preview_effects, &fixture);
+        assert!(app.state.handle_job_event(preview_event));
+
+        let reviewing = app.make_canvas_view_state();
+        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(reviewing.next_action_hint, "Use this box, or reject it.");
+        assert!(reviewing.selected_comparison_visible);
+        assert!(
+            app.state
+                .candidates
+                .iter()
+                .any(|candidate| !candidate.rgba8.is_empty())
+        );
+
+        let build_before_accept = app.state.current_build.clone();
+        let accept_effects = app
+            .state
+            .handle_command(
+                app.accept_visible_candidate_command()
+                    .expect("selectable lidded box idea"),
+            )
+            .expect("Use this box schedules");
+        let accept_event = run_fixture_effect(accept_effects, &fixture);
+        assert!(app.state.handle_job_event(accept_event));
+        assert_ne!(app.state.current_build, build_before_accept);
+        assert!(app.state.candidates.is_empty());
+
+        let adjust_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "lid_height".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(0.8),
+            }))
+            .expect("adjust lid seam schedules");
+        let adjust_event = run_fixture_effect(adjust_effects, &fixture);
+        assert!(app.state.handle_job_event(adjust_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("lid_height")),
+            Some(&shape_foundry::ControlValue::Scalar(0.8))
+        );
+
+        let pack_effects = app
+            .state
+            .handle_command(app.add_current_to_pack_command().expect("pack command"))
+            .expect("Add to Pack schedules");
+        let pack_event = run_fixture_effect(pack_effects, &fixture);
+        assert!(app.state.handle_job_event(pack_event));
+        assert_eq!(app.state.pack.members.len(), 1);
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(app.make_canvas_view_state().pack_drawer_visible);
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(app.make_canvas_view_state().export_drawer_visible);
+
+        let simple_make_copy = [
+            ready.primary_action_label.as_str(),
+            reviewing.primary_action_label.as_str(),
+            ready.adjust_heading_label,
+            LIDDED_BOX_EXPORT_TITLE,
+            LIDDED_BOX_EXPORT_DETAIL,
+            BOX_PRIMITIVE_EXPORT_LIMITATION,
+            ACTION_ADD_TO_PACK,
+            ACTION_EXPORT,
+        ]
+        .join("\n")
+        .to_ascii_lowercase();
+        for forbidden in ["crate", "case", "surface", "material looks", "focus part"] {
+            assert!(
+                !simple_make_copy.contains(forbidden),
+                "Lidded Box baseline copy must not expose {forbidden}: {simple_make_copy}"
+            );
+        }
+        assert!(
+            simple_make_copy.contains("not a textured, rigged, animated, or game-ready package")
+        );
+    }
+
+    #[test]
     fn active_candidate_job_disables_conflicting_actions() {
         let mut app = visible_state_test_app();
         app.state.current_output = Some(Box::new(
@@ -9901,7 +10224,7 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         assert_eq!(
             app.save_state_pill(),
-            ("Choose Box Primitive", StatusTone::Neutral)
+            ("Choose starting point", StatusTone::Neutral)
         );
 
         app.state =
@@ -10216,23 +10539,26 @@ mod tests {
     }
 
     fn visible_state_test_app() -> FoundryDesktopApp {
+        fixture_state_test_app(shape_foundry_catalog::box_primitive::fixture_catalog())
+    }
+
+    fn fixture_state_test_app(fixture: FoundryFixtureCatalog) -> FoundryDesktopApp {
         FoundryDesktopApp {
             tab: FoundryTab::Make,
-            state: FoundryAppState::new(
-                shape_foundry_catalog::box_primitive::fixture_catalog().document,
-            )
-            .expect("fixture state"),
+            state: FoundryAppState::new(fixture.document).expect("fixture state"),
             ..FoundryDesktopApp::default()
         }
     }
 
     fn ready_visible_state_test_app() -> FoundryDesktopApp {
-        let mut app = visible_state_test_app();
-        let output = compile_foundry_document(
-            app.state.document.as_ref().expect("document"),
-            &shape_foundry_catalog::box_primitive::fixture_catalog(),
-        )
-        .expect("fixture compiles");
+        ready_fixture_state_test_app(shape_foundry_catalog::box_primitive::fixture_catalog())
+    }
+
+    fn ready_fixture_state_test_app(fixture: FoundryFixtureCatalog) -> FoundryDesktopApp {
+        let mut app = fixture_state_test_app(fixture.clone());
+        let output =
+            compile_foundry_document(app.state.document.as_ref().expect("document"), &fixture)
+                .expect("fixture compiles");
         let build = output.build_stamp.clone();
         app.state.current_build = Some(build.clone());
         app.state.current_output = Some(Box::new(output));

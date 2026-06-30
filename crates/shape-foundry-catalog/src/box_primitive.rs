@@ -140,6 +140,37 @@ pub fn curation_metadata() -> CatalogCurationMetadata {
     }
 }
 
+/// Quality evidence used to gate novice catalog exposure for Lidded Box.
+#[must_use]
+pub const fn lidded_box_quality_evidence() -> StarterTemplateQualityEvidence {
+    StarterTemplateQualityEvidence {
+        profile_slug: LIDDED_BOX_SLUG,
+        visible_idea_count: 6,
+        distinct_visible_idea_count: 6,
+        primary_control_count: 3,
+        endpoint_reported_primary_control_count: 3,
+        endpoint_readable_primary_control_count: 3,
+        returned_too_subtle_candidate_count: 0,
+        broken_or_floating_part_count: 0,
+        export_conformance_clean: true,
+        advanced_recipe_required: false,
+        raw_technical_summary_count: 0,
+    }
+}
+
+/// Curation metadata for the Lidded Box Make baseline.
+#[must_use]
+pub fn lidded_box_curation_metadata() -> CatalogCurationMetadata {
+    CatalogCurationMetadata {
+        profile_slug: LIDDED_BOX_SLUG,
+        state: starter_template_curation_state_from_quality(lidded_box_quality_evidence()),
+        has_visual_direction_evidence: true,
+        has_readable_control_evidence: true,
+        has_human_showcase_review: false,
+        note: "Lidded Box is Box Primitive plus one visible Lid Seam feature, with pure-clay evidence and no crate claim.",
+    }
+}
+
 /// Build the Box Primitive fixture catalog.
 #[must_use]
 pub fn fixture_catalog() -> FoundryFixtureCatalog {

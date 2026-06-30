@@ -220,6 +220,13 @@ fn box_primitive_exposes_no_focus_part_groups() {
 }
 
 #[test]
+fn lidded_box_exposes_no_focus_part_groups() {
+    let fixture = shape_foundry_catalog::box_primitive::lidded_box_fixture_catalog();
+    let groups = foundry::panels::directions::direction_part_groups_for_document(&fixture.document);
+    assert!(groups.is_empty(), "Lidded Box should not expose part chips");
+}
+
+#[test]
 fn focus_part_mode_targets_active_group_when_selected() {
     let intent = VariationIntent::focus_part_shape("body", "Body");
     let groups = vec![
