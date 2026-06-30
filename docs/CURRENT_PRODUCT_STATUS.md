@@ -1,10 +1,10 @@
 # Current Product Status
 
-Date: 2026-06-29
+Date: 2026-06-30
 
 ## Verdict
 
-`BOX PRIMITIVE BASELINE ACTIVE`
+`BOX PRIMITIVE BASELINE ACTIVE - SCREENSHOT GATE PASSED`
 
 Shape Lab is starting fresh from one honest novice baseline: Box Primitive.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -21,6 +21,7 @@ family.
 - The preview catalog also contains only Box Primitive.
 - The baseline model must read visually as a box.
 - Box ideas must visibly differ by proportions or edge softness.
+- The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
 - No public catalog publishing is approved.
 - No non-box family, surface/material, UV/texturing, rigging, animation,
   runtime LLM, or game-ready UI is approved.
@@ -31,17 +32,18 @@ family.
 - Box Primitive can compile as a valid clay model.
 - Box Primitive can expose Proportions and Edge Softness controls.
 - Box Primitive is the only current built-in product baseline.
+- Box Primitive has release-app screenshot evidence under
+  `target/box-primitive-dogfood-gate/`.
 
 ## Allowed Next Work
 
-- Manual Box Primitive dogfood gate.
 - Box Primitive repair loop for weak variations.
 - Local Personal Kit persistence for Box Primitive.
 - One visible feature module after the baseline passes, such as Lid Seam.
 
 ## Still Blocked
 
-- Calling the current baseline a crate.
+- Calling the current baseline a richer non-box family.
 - Adding multiple visible concepts in one branch.
 - Broad archetype expansion.
 - Surface/material editor work.

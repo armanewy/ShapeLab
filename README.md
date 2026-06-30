@@ -47,10 +47,11 @@ python scripts/dev_gate.py --tier branch --changed --run
 python scripts/clean_targets.py --list --root ..
 ```
 
-Full workspace test, clippy, release build, and human dogfood gates are still
-required before main/release claims. Local branch verification should stay to
-affected crates, adjacent tests, and targeted clippy unless the branch touches
-build/profile/release/export code.
+The Box Primitive screenshot and manual visual gate passed locally on
+2026-06-30. Full workspace test, clippy, release build, and any broader human
+dogfood gates are still required before main/release claims. Local branch
+verification should stay to affected crates, adjacent tests, and targeted
+clippy unless the branch touches build/profile/release/export code.
 
 ## Current Scope
 
@@ -58,13 +59,16 @@ build/profile/release/export code.
 - The built-in catalog and curation metadata are Box Primitive only.
 - Box Primitive has two controls: Proportions and Edge Softness.
 - The app may create, vary, pack, and export a box-like asset.
+- The Box Primitive screenshot/manual visual gate passed with release-app
+  evidence under `target/box-primitive-dogfood-gate/`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- Crate-like features must be added later one visible module at a time, after
-  the Box Primitive baseline passes its own manual gate.
+- Richer box-family features must be added later one visible module at a time,
+  after the Box Primitive baseline gate.
 
 Status details are documented in:
 
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
+- [`docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

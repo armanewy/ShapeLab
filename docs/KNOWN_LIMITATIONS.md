@@ -4,7 +4,7 @@
 
 - The active built-in Visual Foundry catalog contains only Box Primitive.
 - Box Primitive is intentionally a simple closed box-like clay volume.
-- Box Primitive is not a crate and must not be described as one.
+- Box Primitive must not be described as a richer non-box family.
 - The only novice controls are Proportions and Edge Softness.
 
 ## Unsupported Workflows
@@ -15,10 +15,9 @@
 
 ## Evidence
 
-- The app still needs a manual screenshot/video gate for the Box Primitive Make
-  loop before stronger product claims.
-- Crate-like features must be added one visible module at a time after the Box
-  Primitive baseline passes.
+- The Box Primitive screenshot/manual visual gate passed on 2026-06-30.
+- Richer box-family features must be added one visible module at a time after
+  the Box Primitive baseline pass.
 
 ## Product Boundaries
 

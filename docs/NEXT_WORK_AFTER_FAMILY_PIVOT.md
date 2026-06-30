@@ -1,6 +1,6 @@
 # Next Work After Family Pivot
 
-Date: 2026-06-29
+Date: 2026-06-30
 
 The family pivot has been reset to the smallest honest visible baseline:
 Box Primitive.
@@ -13,21 +13,30 @@ Box Primitive.
 - Add local save/pack/export polish for Box Primitive.
 - Add exactly one visible module only after the baseline passes a manual gate.
 
-## Preferred Next Step
+## Gate Result
 
-Run the Box Primitive manual gate:
+The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
+Evidence is recorded in:
 
 ```text
-Choose Box Primitive
--> Make ready
--> Try box ideas
--> Use one box
--> Adjust Proportions or Edge Softness
--> Add to Pack
--> Export
+target/box-primitive-dogfood-gate/
 ```
 
-Pass criteria:
+See [`BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md).
+
+## Preferred Next Step
+
+The next branch should add exactly one user-visible improvement:
+
+- Box Primitive repair loop for weak variations.
+
+An acceptable alternate next branch is:
+
+- Lid Seam module for Box Primitive.
+
+Do not add multiple modules in one branch.
+
+## Continuing Criteria
 
 - The object reads as a box.
 - Every idea visibly differs.
