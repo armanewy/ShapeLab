@@ -64,24 +64,31 @@ docs/HINGED_PANEL_MAKE_BASELINE_GATE.md
 target/hinged-panel-make-baseline-gate/
 ```
 
-## Preferred Next Step
-
-Stop the box ladder. The next gate should integrate the two-kernel proof:
+The second-kernel Flat Panel integration gate passed release-app Computer Use
+regression validation and automated workspace gates on 2026-06-30. Evidence is
+recorded in:
 
 ```text
-Second Kernel Flat Panel integration
+docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md
+target/second-kernel-flat-panel-integration/
 ```
 
-Hinge Edge is now app-visible through Hinged Panel. The next gate should verify
-the whole visible set:
+## Preferred Next Step
+
+Stop the box ladder. The next single visible feature may be:
+
+```text
+Door Handle / Knob
+```
+
+The integration gate verified the whole visible set:
 
 - Box Primitive
 - Lidded Box
 - Flat Panel Primitive
 - Hinged Panel
 
-The next feature after that gate may be Door Handle / Knob, but only as one
-visible concept in one branch:
+Door Handle / Knob must still be only one visible concept in one branch:
 
 - visible handle or knob clay geometry
 - no inset panel
@@ -89,8 +96,8 @@ visible concept in one branch:
 - no Door naming
 
 Do not add Feet / Skids, crate language, material looks, Family Studio public
-UI, open/close motion, or broad archetype work before the second-kernel
-integration gate.
+UI, open/close motion, or broad archetype work before Door Handle / Knob passes
+its own visual gate.
 
 ## Continuing Criteria
 
@@ -107,7 +114,7 @@ integration gate.
 
 - Crate language before a model visually earns the name.
 - Door naming before visible door cues pass a later gate.
-- Feet / Skids before the second-kernel integration gate.
+- Feet / Skids before a deliberate return to the box ladder.
 - Material looks, UV/texturing, rigging, animation, or game-ready UI.
 - Runtime LLM integration.
 - Full Family Studio public flow before two different kernels pass visual gates.

@@ -17,7 +17,7 @@ A door requires recognizable door cues. A simple upright panel does not.
 3. Flat Panel Make baseline. Completed.
 4. Hinge Edge feature module. Completed as internal visual evidence.
 5. Hinged Panel Make baseline. Completed.
-6. Second-kernel Flat Panel integration. Next.
+6. Second-kernel Flat Panel integration. Completed.
 7. Handle/knob feature module.
 8. Door Panel or Door Primitive only after door cues are visible.
 
@@ -48,6 +48,14 @@ and remains a clay panel asset.
 Hinged Panel is not Door, open/close behavior, rigging, animation, or a
 material/textured asset.
 
+## Integration
+
+The second-kernel integration gate passed on 2026-06-30. Box Primitive and
+Lidded Box prove a volumetric closed-object kernel path. Flat Panel Primitive
+and Hinged Panel prove an upright planar-object kernel path. Both paths now use
+the same Choose, Make, Try ideas, Use one, adjust, and Export loop without
+exposing internal kernel/module language.
+
 ## Still blocked
 
 - Door naming before the visual gate passes.
@@ -59,5 +67,5 @@ material/textured asset.
 ## Why this supports arbitrary families
 
 Box Primitive proves a volumetric closed-object kernel. Flat Panel proves an
-upright planar-object kernel. If both work through the same authoring protocol,
+upright planar-object kernel. Both work through the same authoring protocol, so
 Object Orchard is no longer only a box generator.

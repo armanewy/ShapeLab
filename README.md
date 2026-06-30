@@ -87,9 +87,11 @@ clippy unless the branch touches build/profile/release/export code.
   `docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`.
 - The Hinged Panel Make baseline gate passed with release-app evidence under
   `target/hinged-panel-make-baseline-gate/`.
+- The second-kernel Flat Panel integration gate passed with release-app
+  regression evidence under `target/second-kernel-flat-panel-integration/`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- The next gate is the second-kernel integration report; Door naming remains
+- The next allowed visible feature is Door Handle / Knob; Door naming remains
   blocked until visible door cues pass a later gate.
 
 Status details are documented in:
@@ -102,5 +104,6 @@ Status details are documented in:
 - [`docs/TRIM_BAND_FEATURE_MODULE_V0.md`](docs/TRIM_BAND_FEATURE_MODULE_V0.md)
 - [`docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`](docs/FLAT_PANEL_PRIMITIVE_BASELINE.md)
 - [`docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`](docs/HINGED_PANEL_MAKE_BASELINE_GATE.md)
+- [`docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`](docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

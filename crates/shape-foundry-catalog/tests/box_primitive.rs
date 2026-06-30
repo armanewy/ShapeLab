@@ -17,7 +17,7 @@ use shape_foundry::{
 use shape_foundry_catalog::{
     CatalogCurationState, FoundryFixtureCatalog, box_primitive, built_in_catalog_curation_metadata,
     built_in_fixture_catalogs_with_labels, catalog_curation_metadata_for_slug,
-    curated_fixture_catalogs_with_labels,
+    curated_fixture_catalogs_with_labels, flat_panel,
 };
 use shape_search::foundry::generate_foundry_control_endpoint_visibility_report;
 
@@ -735,7 +735,7 @@ fn box_primitive_baseline_ideas_compile_to_distinct_boxes() {
 }
 
 #[test]
-fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
+fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
     let box_metadata = catalog_curation_metadata_for_slug(box_primitive::BOX_PRIMITIVE_SLUG)
         .expect("box metadata");
     assert_eq!(box_metadata.state, CatalogCurationState::Usable);
@@ -751,6 +751,18 @@ fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
             .contains("Box Primitive plus one visible Lid Seam")
     );
 
+    let flat_panel_metadata =
+        catalog_curation_metadata_for_slug(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
+            .expect("flat panel metadata");
+    assert_eq!(flat_panel_metadata.state, CatalogCurationState::Usable);
+    assert!(flat_panel_metadata.default_novice_visible());
+
+    let hinged_panel_metadata = catalog_curation_metadata_for_slug(flat_panel::HINGED_PANEL_SLUG)
+        .expect("hinged panel metadata");
+    assert_eq!(hinged_panel_metadata.state, CatalogCurationState::Usable);
+    assert!(hinged_panel_metadata.default_novice_visible());
+    assert!(hinged_panel_metadata.note.contains("Hinge Edge"));
+
     let all_slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
@@ -760,6 +772,8 @@ fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
         vec![
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
+            flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            flat_panel::HINGED_PANEL_SLUG,
         ]
     );
 
@@ -772,6 +786,8 @@ fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
         vec![
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
+            flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            flat_panel::HINGED_PANEL_SLUG,
         ]
     );
 
@@ -784,6 +800,8 @@ fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
         vec![
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
+            flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            flat_panel::HINGED_PANEL_SLUG,
         ]
     );
 
@@ -796,6 +814,8 @@ fn box_and_lidded_box_are_the_builtin_catalog_profiles() {
         vec![
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
+            flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            flat_panel::HINGED_PANEL_SLUG,
         ]
     );
 }

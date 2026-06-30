@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Verdict
 
-`HINGED PANEL MAKE BASELINE PROVEN`
+`SECOND_KERNEL_FLAT_PANEL_INTEGRATION_PROVEN`
 
 Shape Lab has one honest box-like ladder and a second primitive kernel proof.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -55,6 +55,8 @@ does not open or close, and does not claim rigging or animation.
   2026-06-30.
 - The Hinged Panel Make baseline gate passed release-app Computer Use
   validation on 2026-06-30.
+- The second-kernel Flat Panel integration gate passed release-app Computer Use
+  regression validation and automated workspace gates on 2026-06-30.
 - No public catalog publishing is approved.
 - No Door naming, surface/material, UV/texturing, rigging, animation, runtime
   LLM, or game-ready UI is approved.
@@ -102,15 +104,17 @@ does not open or close, and does not claim rigging or animation.
 - Hinged Panel has Make baseline evidence under
   `target/hinged-panel-make-baseline-gate/` and in
   `docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`.
+- The two-kernel integration has evidence under
+  `target/second-kernel-flat-panel-integration/` and in
+  `docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`.
 
 ## Allowed Next Work
 
-- Second-kernel Flat Panel integration as the next gate.
 - Repair-loop polish for weak box or panel variations.
 - Local Personal Kit persistence for Box Primitive, Lidded Box, Flat Panel
   Primitive, and Hinged Panel.
-- Door Handle / Knob feature only after the second-kernel integration gate
-  passes.
+- Door Handle / Knob as the next single visible feature.
+- Family Studio draft flow using Box and Flat Panel as two proven kernels.
 
 ## Still Blocked
 
@@ -121,6 +125,7 @@ does not open or close, and does not claim rigging or animation.
 - Calling Hinged Panel a Door.
 - Adding multiple visible concepts in one branch.
 - Door naming before visible door cues pass a later gate.
+- Open/close motion before a dedicated mechanical rig/motion gate.
 - Broad archetype expansion.
 - Surface/material editor work.
 - UV/texturing UI.
