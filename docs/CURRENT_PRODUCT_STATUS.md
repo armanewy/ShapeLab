@@ -4,160 +4,71 @@ Date: 2026-06-30
 
 ## Verdict
 
-`OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_PAUSED`
+`PRIMITIVE_DIRECT_MAKE_RESET`
 
-Shape Lab has one honest box-like ladder and a second primitive kernel proof.
-The built-in Visual Foundry catalog and catalog curation metadata expose only
-Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
-Panel.
-
-Box Primitive is a pure-clay closed box-like volume. It has two novice controls:
-Proportions and Edge Softness. It does not claim to be any richer non-box model
-family. Lidded Box is Box Primitive plus one visible Lid Seam feature, not a
-crate.
-
-Trimmed Box has internal feature-module evidence as Lidded Box plus one visible
-Trim Band. It is not exposed in the app Make loop yet and is not a crate.
-
-Flat Panel Primitive is one upright clay panel with readable width, height, and
-thickness. It is not Door or an open/close motion asset.
-
-Hinged Panel is Flat Panel Primitive plus one visible Hinge Edge feature. It is
-now exposed in the Make loop after the Hinge Edge visual gate. It is not Door,
-does not open or close, and does not claim rigging or animation.
-
-Handled Panel is Hinged Panel plus one visible Handle / Knob feature. It is now
-exposed in the Make loop after the Handle / Knob visual gate. It is still not
-Door, does not open or close, and does not claim rigging or animation.
+Shape Lab is resetting the active product direction away from generated
+variation workflows and toward direct primitive property editing.
 
 ## Current Truth
 
-- Box Primitive remains the active novice baseline.
-- Lidded Box is the first incremental Make baseline after Box Primitive.
-- Flat Panel Primitive is the second visible primitive baseline.
-- The default catalog contains only Box Primitive, Lidded Box, Flat Panel
-  Primitive, Hinged Panel, and Handled Panel.
-- The preview catalog contains only Box Primitive, Lidded Box, Flat Panel
-  Primitive, Hinged Panel, and Handled Panel.
-- The Choose screen shows five simple starter profiles, not a broad template
-  browser.
-- The Make screen hides part/focus controls, Material Looks, surface-only UI,
-  and Family Studio entry points for Box Primitive, Lidded Box, Flat Panel
-  Primitive, Hinged Panel, and Handled Panel.
-- The baseline model must read visually as a box.
-- Box ideas must visibly differ by proportions or edge softness.
-- The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
-- The Box Primitive UI truth-pass screenshot/manual gate passed locally on
-  2026-06-30.
-- The Box Primitive visual-readability gate passed locally on 2026-06-30.
-- The Box Primitive baseline cleanup integration gate passed locally on
-  2026-06-30.
-- The Lidded Box Make baseline gate passed locally on 2026-06-30.
-- The Trim Band feature-module gate passed locally on 2026-06-30.
-- The Flat Panel Primitive baseline gate passed automated app/catalog tests on
-  2026-06-30.
-- The Hinge Edge feature-module gate passed catalog/visual evidence tests on
-  2026-06-30.
-- The Hinged Panel Make baseline gate passed release-app Computer Use
-  validation on 2026-06-30.
-- The second-kernel Flat Panel integration gate passed release-app Computer Use
-  regression validation and automated workspace gates on 2026-06-30.
-- The Door Handle / Knob feature-module gate passed catalog/visual evidence
-  tests on 2026-06-30.
-- The Handled Panel Make baseline gate passed release-app Computer Use
-  validation on 2026-06-30.
-- The Object Intent + Handled Panel integration checkpoint recorded release-app
-  Computer Use regression validation on 2026-06-30. Full workspace gates were
-  paused before merge at user request.
-- Box Primitive and Lidded Box current previews use the direct clay readability
-  render path so box edges and the lid seam remain legible in the Make stage.
-- No public catalog publishing is approved.
-- No Door naming, surface/material, UV/texturing, rigging, animation, runtime
-  LLM, or game-ready UI is approved.
+- Box Primitive is the direct box primitive baseline.
+- Flat Panel Primitive is the direct panel primitive baseline.
+- Lidded Box and Hinged Panel are feature proofs, not the future shape of the
+  active primitive workflow.
+- Handled Panel evidence is treated as paused historical proof, not the current
+  active direction.
+- Generated idea workflows are being retired from active primitives.
+- The active Make workflow should expose direct property controls before it
+  offers presets or suggestions.
+- Primitive editing is property-schema based and bounded.
+- Users may edit Width, Height, Depth, Radius, Thickness, Edge Softness, and
+  Flattening when a primitive schema exposes those properties.
+- Users do not edit vertices, faces, loops, cages, booleans, raw mesh
+  transforms, or Blender-like modeling controls.
+- Future suggestions may return only as deterministic property presets.
+- Internal candidate-like machinery may remain for legacy tests and quality
+  evidence until a deliberate cleanup branch removes or repurposes it.
+- Composition will happen through safe anchors and constrained attachment
+  zones, not arbitrary free transforms.
+- Family Studio Lite is paused until direct primitive and composition flows are
+  stable.
+- Material/surface work, UV/texturing, rigging, animation, runtime LLM
+  integration, and game-ready UI remain blocked.
 
 ## Allowed Product Claims
 
 - Shape Lab can start from a Box Primitive profile.
-- Shape Lab can start from a Lidded Box profile after the Lid Seam gate.
 - Shape Lab can start from a Flat Panel Primitive profile.
-- Shape Lab can start from a Hinged Panel profile after the Hinge Edge gate.
-- Shape Lab can start from a Handled Panel profile after the Handle / Knob
-  gate.
-- Box Primitive can compile as a valid clay model.
-- Box Primitive can expose Proportions and Edge Softness controls.
-- Lidded Box can compile as a valid clay model with one visible lid seam.
-- Lidded Box can expose Proportions, Edge Softness, and Lid Seam controls.
-- Flat Panel Primitive can compile as a valid upright clay panel.
-- Flat Panel Primitive can expose Proportions and Edge Softness controls.
-- Hinged Panel can compile as a valid upright clay panel with one visible
-  hinge-side edge.
-- Hinged Panel can expose Proportions, Edge Softness, and Hinge Edge controls.
-- Handled Panel can compile as a valid upright clay panel with one visible
-  hinge-side edge and one visible handle.
-- Handled Panel can expose Proportions, Edge Softness, Hinge Edge, and
-  Handle / Knob Style controls.
-- Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
-  Panel are the only current built-in product baselines.
-- Box Primitive has release-app screenshot evidence under
-  `target/box-primitive-dogfood-gate/`.
-- Box Primitive has UI truth-pass screenshot evidence under
-  `target/box-primitive-ui-truth-pass/screenshots/`.
-- Box Primitive has visual-readability evidence under
-  `target/box-primitive-visual-readability/`.
-- Box Primitive has baseline cleanup integration evidence in
-  `docs/BOX_PRIMITIVE_BASELINE_CLEANUP_INTEGRATION_REPORT.md`.
-- Lidded Box has Make baseline evidence under
-  `target/lidded-box-make-baseline-gate/` and in
-  `docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`.
-- Box Primitive previews may use a display-only clay edge outline as a viewport
-  aid. This is not material, texture, panel, trim, seam, or export geometry.
-- Box Primitive export may say that the current clay box asset is not a
-  textured, rigged, animated, or game-ready package.
-- Lidded Box export may say that the current clay lidded box asset is not a
-  textured, rigged, animated, or game-ready package.
-- Flat Panel export may say that the current clay flat panel asset is not a
-  textured, rigged, animated, or game-ready package.
-- Hinged Panel export may say that the current clay hinged panel asset is not a
-  textured, rigged, animated, or game-ready package.
-- Handled Panel export may say that the current clay handled panel asset is not
-  a textured, rigged, animated, or game-ready package.
-- Trimmed Box may be referenced in internal docs as Lidded Box plus one visible
-  Trim Band feature with evidence under `target/trim-band-feature-module-v0/`.
-- Hinged Panel has Make baseline evidence under
-  `target/hinged-panel-make-baseline-gate/` and in
-  `docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`.
-- Handled Panel has Make baseline evidence under
-  `target/handled-panel-make-baseline-gate/` and in
-  `docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md`.
-- The two-kernel integration has evidence under
-  `target/second-kernel-flat-panel-integration/` and in
-  `docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`.
-- The Object Intent + Handled Panel integration checkpoint has evidence under
-  `target/object-intent-handled-panel-integration/` and in
-  `docs/OBJECT_INTENT_HANDLED_PANEL_INTEGRATION_REPORT.md`.
+- Shape Lab can compile clay primitive previews and exports.
+- Shape Lab can expose bounded primitive properties through direct controls.
+- Lidded Box may be referenced as Box Primitive plus one visible Lid Seam proof.
+- Hinged Panel may be referenced as Flat Panel Primitive plus one visible Hinge
+  Edge proof.
+- Direct primitive editing is the current product baseline.
+- Deterministic presets are the only approved future suggestion form for active
+  primitives.
 
-## Allowed Next Work
+## Current Milestone Sequence
 
-- Repair-loop polish for weak box or panel variations.
-- Local Personal Kit persistence for Box Primitive, Lidded Box, Flat Panel
-  Primitive, Hinged Panel, and Handled Panel.
-- Door naming review after another visible Door cue earns it.
-- Family Studio draft flow using Box and Flat Panel as two proven kernels.
+Use one visible operation per milestone:
+
+1. direct-edit Box
+2. direct-edit Flat Panel
+3. direct-edit Sphere
+4. make knob-like form from Sphere
+5. attach knob-like form to panel through safe anchor
 
 ## Still Blocked
 
-- Calling the current baseline a richer non-box family.
-- Calling Lidded Box a crate.
-- Calling Trimmed Box a crate.
-- Calling Flat Panel Primitive a Door.
-- Calling Hinged Panel a Door.
-- Calling Handled Panel a Door.
-- Adding multiple visible concepts in one branch.
-- Door naming before visible door cues pass a later gate.
-- Open/close motion before a dedicated mechanical rig/motion gate.
-- Broad archetype expansion.
-- Surface/material editor work.
+- Generated variation trays in the active primitive workflow.
+- Random candidate generation as a product-visible primitive Make action.
+- Vertex, face, loop, cage, boolean, sculpt, or raw transform editing.
+- Arbitrary Blender-like scene modeling.
+- Door naming before a later gate explicitly approves it.
+- Open/close motion.
+- Material/surface editor work.
 - UV/texturing UI.
 - Rigging, skinning, or animation UI.
 - Runtime LLM integration.
 - Full game-ready or marketplace-ready claims.
+- Family Studio Lite until direct primitive and composition flows are stable.

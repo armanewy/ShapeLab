@@ -7,6 +7,9 @@ mod foundry;
 use foundry::{
     FoundryAppCommand, FoundryAppState, FoundryJobEvent, FoundryJobRequest, FoundryPackView,
 };
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryCommand, FoundryDocumentId,
     GenerateCandidatesRequest, VariationIntent,
@@ -119,6 +122,59 @@ fn foundry_candidate_job_mode_comes_from_request() {
     assert_eq!(job.candidate_mode(), Some(FoundryCandidateMode::Explore));
 }
 
+#[test]
+fn foundry_direct_make_status_docs_agree() {
+    let readme = doc_text("README.md");
+    let status = doc_text("docs/CURRENT_PRODUCT_STATUS.md");
+    let vision = doc_text("docs/PRIMITIVE_DIRECT_MAKE_VISION.md");
+    let limitations = doc_text("docs/KNOWN_LIMITATIONS.md");
+
+    for text in [&readme, &status] {
+        assert!(
+            text.contains("Box Primitive is the direct box"),
+            "README and status should agree on Box Primitive as direct baseline"
+        );
+        assert!(
+            text.contains("Flat Panel Primitive is the direct"),
+            "README and status should agree on Flat Panel Primitive as direct baseline"
+        );
+        assert!(
+            text.contains("Generated idea workflows are being retired from active primitives"),
+            "README and status should retire generated idea workflows"
+        );
+        assert!(
+            text.contains("Family Studio Lite is paused"),
+            "README and status should keep Family Studio Lite paused"
+        );
+    }
+
+    for text in [&readme, &status, &vision, &limitations] {
+        assert!(
+            text.contains("property-schema")
+                || text.contains("immutable property schemas")
+                || text.contains("primitive property schemas")
+                || text.contains("Primitive editing is property-schema based"),
+            "docs should describe primitive editing as schema based"
+        );
+        assert!(
+            text.contains("deterministic property presets"),
+            "docs should limit future suggestions to deterministic presets"
+        );
+        assert!(
+            text.contains("vertices") && text.contains("faces"),
+            "docs should reject Blender-like vertex and face editing"
+        );
+        assert!(
+            text.contains("runtime LLM"),
+            "docs should keep runtime LLM blocked"
+        );
+        assert!(
+            text.contains("UV/texturing") && text.contains("rigging") && text.contains("animation"),
+            "docs should keep material, UV, rigging, and animation blocked"
+        );
+    }
+}
+
 fn minimal_foundry_document() -> FoundryAssetDocument {
     FoundryAssetDocument::new(
         FoundryDocumentId("doc".to_string()),
@@ -128,6 +184,19 @@ fn minimal_foundry_document() -> FoundryAssetDocument {
         content_ref("style_impl", 4),
         content_ref("profile", 5),
     )
+}
+
+fn doc_text(relative_path: &str) -> String {
+    fs::read_to_string(repo_root().join(relative_path))
+        .unwrap_or_else(|error| panic!("failed to read {relative_path}: {error}"))
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("shape-app manifest has workspace root ancestor")
+        .to_path_buf()
 }
 
 fn content_ref(stable_id: &str, byte: u8) -> CatalogContentRef {
