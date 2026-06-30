@@ -210,43 +210,13 @@ fn unavailable_surface_capability_does_not_enable_visual_surface_mode() {
 }
 
 #[test]
-fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
+fn box_primitive_exposes_no_focus_part_groups() {
     let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let groups = foundry::panels::directions::direction_part_groups_for_document(&fixture.document);
-    let body = groups
-        .iter()
-        .find(|group| group.group_id == "body")
-        .expect("box exposes body focus group");
-
-    assert_eq!(body.label, "Body");
-    assert!(body.focusable);
-    assert_eq!(
-        foundry::panels::directions::focus_part_chip_label(body),
-        "Body"
+    assert!(
+        groups.is_empty(),
+        "Box Primitive should not expose part chips"
     );
-    assert_eq!(
-        foundry::panels::directions::focus_part_status_label(body),
-        "Body is focused"
-    );
-    assert_eq!(
-        foundry::panels::directions::generate_focused_part_label(body),
-        "Try body ideas"
-    );
-    assert_eq!(
-        foundry::panels::directions::lock_focused_part_label(body),
-        "Lock body"
-    );
-
-    let command = foundry::panels::directions::set_focus_part_group_command(body);
-    assert!(matches!(
-        command.single_foundry_command(),
-        Some(FoundryCommand::SetFocusPartGroup { group_id }) if group_id == "body"
-    ));
-    let clear = foundry::panels::directions::clear_focus_part_group_command();
-    assert!(matches!(
-        clear.single_foundry_command(),
-        Some(FoundryCommand::ClearFocusPartGroup)
-    ));
 }
 
 #[test]

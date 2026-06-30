@@ -90,16 +90,12 @@ enum FoundryDrawer {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ScreenshotScenario {
     MakeInitialBox,
-    GeneratingWholeAssetIdeas,
-    GeneratedWholeAssetIdeas,
+    GeneratingBoxIdeas,
+    GeneratedBoxIdeas,
     SelectedComparison,
-    FocusBody,
-    GeneratingBodyIdeas,
-    BodyIdeas,
-    NoClearFocusedIdeas,
+    AdjustedBoxControl,
     PackDrawer,
     ExportDrawer,
-    MaterialLooksDogfood,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,8 +305,8 @@ enum HomeTemplateFilter {
 
 const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 0] = [];
 
-const HOME_SUBTITLE: &str =
-    "Start with the Box Primitive baseline, then make clear whole-box ideas.";
+const HOME_SUBTITLE: &str = "A simple clay box for testing the Make loop.";
+const HOME_CONTROL_COPY: &str = "You can vary proportions and edge softness.";
 const NEED_PROJECT_REASON: &str = "Choose Box Primitive or open a project first.";
 const NEED_SAVE_LOCATION_REASON: &str =
     "Use Save Project first to choose where this project is saved.";
@@ -355,7 +351,7 @@ const SURFACE_PACKAGE_COMMAND: &str =
 const BOX_PRIMITIVE_EXPORT_TITLE: &str = "Export Box Primitive";
 const BOX_PRIMITIVE_EXPORT_DETAIL: &str = "Exports the current clay box asset.";
 const BOX_PRIMITIVE_EXPORT_LIMITATION: &str =
-    "This export includes no textures, rigs, animation, or game-ready package metadata.";
+    "This is not a textured, rigged, animated, or game-ready package.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
     "Clean Lab White",
     "Worn Hazard Yellow",
@@ -397,9 +393,9 @@ const ACTION_OPEN_EXPORT: &str = "Open Export";
 const ACTION_EXPORT_CURRENT_ASSET: &str = "Export Current Asset";
 const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
+const ACTION_CLOSE_DRAWER: &str = "Close drawer";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
-const ACTION_USE_THIS_BOX: &str = "Use this box";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
@@ -412,7 +408,7 @@ const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
 const ACTION_ADJUST_BOX: &str = "Adjust box";
-const RENDERED_ACTION_LABELS: [&str; 45] = [
+const RENDERED_ACTION_LABELS: [&str; 39] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -427,11 +423,8 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_SWITCH_TO_REVISION,
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
-    ACTION_TRY_WHOLE_ASSET_IDEAS,
     ACTION_TRY_BOX_IDEAS,
     ACTION_GENERATING_IDEAS,
-    ACTION_TRY_WHOLE_ASSET_RECOVERY,
-    ACTION_TRY_MORE_IDEAS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
     ACTION_CHOOSE_ANOTHER_TEMPLATE,
@@ -445,16 +438,13 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EXPORT_CURRENT_ASSET,
     ACTION_ADD_CURRENT_ASSET,
     ACTION_EXPORT_PACK,
+    ACTION_CLOSE_DRAWER,
     ACTION_SELECT,
     ACTION_CHOOSE_DIRECTION,
-    ACTION_USE_THIS_BOX,
     ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
     ACTION_UNLOCK_CONTROLS,
-    ACTION_LOCK,
-    ACTION_FOCUS,
-    ACTION_APPLY,
     ACTION_RETRY_PREPARATION,
     ACTION_UPDATE_PREVIEW,
     ACTION_ADJUST_BOX,
@@ -556,7 +546,10 @@ impl FoundryDesktopApp {
                                     |ui| {
                                         if action_button(
                                             ui,
-                                            &ActionSpec::enabled("Close", ButtonTone::Quiet),
+                                            &ActionSpec::enabled(
+                                                ACTION_CLOSE_DRAWER,
+                                                ButtonTone::Secondary,
+                                            ),
                                         )
                                         .clicked()
                                         {
@@ -808,7 +801,7 @@ impl FoundryDesktopApp {
             .document
             .as_ref()
             .map(|document| asset_title_from_id(&document.document_id.0).to_owned())
-            .unwrap_or_else(|| "Choose what to make".to_owned())
+            .unwrap_or_else(|| "Start with Box Primitive".to_owned())
     }
 
     fn active_make_part_group(&self) -> Option<directions::DirectionPartGroup> {
@@ -843,11 +836,7 @@ impl FoundryDesktopApp {
         } else {
             ACTION_TRY_WHOLE_ASSET_IDEAS
         };
-        let use_candidate_action_label = if box_primitive_baseline {
-            ACTION_USE_THIS_BOX
-        } else {
-            ACTION_CHOOSE_DIRECTION
-        };
+        let use_candidate_action_label = ACTION_CHOOSE_DIRECTION;
         let adjust_heading_label = if box_primitive_baseline {
             ACTION_ADJUST_BOX
         } else {
@@ -1365,6 +1354,9 @@ impl FoundryDesktopApp {
     }
 
     fn material_look_export_copy(&self) -> Option<(&'static str, &'static str)> {
+        if self.active_profile_is_box_primitive() {
+            return None;
+        }
         self.selected_material_look().map(|_| {
             (
                 MATERIAL_LOOK_PREVIEW_ONLY_COPY,
@@ -1998,6 +1990,7 @@ impl FoundryDesktopApp {
                                 control,
                                 actions_enabled,
                                 disabled_reason,
+                                !view_state.box_primitive_baseline,
                             ));
                             ui.add_space(8.0);
                         }
@@ -2013,6 +2006,7 @@ impl FoundryDesktopApp {
                                             control,
                                             actions_enabled,
                                             disabled_reason,
+                                            !view_state.box_primitive_baseline,
                                         ));
                                         ui.add_space(8.0);
                                     }
@@ -2877,6 +2871,7 @@ impl FoundryDesktopApp {
                 control,
                 true,
                 ACTIVE_IDEA_JOB_REASON,
+                true,
             ));
             ui.add_space(8.0);
         }
@@ -3394,10 +3389,7 @@ impl FoundryDesktopApp {
             && !self.state.active_jobs.is_empty()
             && matches!(
                 self.screenshot_scenario,
-                Some(
-                    ScreenshotScenario::GeneratingWholeAssetIdeas
-                        | ScreenshotScenario::GeneratingBodyIdeas
-                )
+                Some(ScreenshotScenario::GeneratingBoxIdeas)
             )
     }
 
@@ -3428,15 +3420,8 @@ impl FoundryDesktopApp {
         if !self.state.active_jobs.is_empty() {
             let view_state = self.make_canvas_view_state();
             match scenario {
-                ScreenshotScenario::GeneratingWholeAssetIdeas
+                ScreenshotScenario::GeneratingBoxIdeas
                     if view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas =>
-                {
-                    self.complete_screenshot_scenario(scenario);
-                    return commands;
-                }
-                ScreenshotScenario::GeneratingBodyIdeas
-                    if view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas
-                        && view_state.focused_part_label.as_deref() == Some("Body") =>
                 {
                     self.complete_screenshot_scenario(scenario);
                     return commands;
@@ -3454,7 +3439,7 @@ impl FoundryDesktopApp {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
-            ScreenshotScenario::GeneratingWholeAssetIdeas => {
+            ScreenshotScenario::GeneratingBoxIdeas => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
                     commands.push(make_whole_asset_candidate_request(
                         &self.state,
@@ -3464,8 +3449,7 @@ impl FoundryDesktopApp {
                     self.screenshot_scenario_step = 2;
                 }
             }
-            ScreenshotScenario::GeneratedWholeAssetIdeas
-            | ScreenshotScenario::SelectedComparison => {
+            ScreenshotScenario::GeneratedBoxIdeas | ScreenshotScenario::SelectedComparison => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
                     commands.push(make_whole_asset_candidate_request(
                         &self.state,
@@ -3498,69 +3482,14 @@ impl FoundryDesktopApp {
                     }
                 }
             }
-            ScreenshotScenario::FocusBody => {
-                commands.extend(self.ensure_screenshot_focus("body"));
-                if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Body") {
-                    self.complete_screenshot_scenario(scenario);
-                }
-            }
-            ScreenshotScenario::GeneratingBodyIdeas => {
-                commands.extend(self.ensure_screenshot_focus("body"));
-                if self.screenshot_scenario_step >= 2
-                    && self.state.candidates.is_empty()
-                    && !self.directions_are_generating()
-                    && let Some(group) = screenshot_part_group(&self.state, "body")
-                {
-                    commands.push(make_focused_candidate_request(&self.state, &group));
-                    self.screenshot_scenario_step = 3;
-                }
-            }
-            ScreenshotScenario::BodyIdeas => {
-                commands.extend(self.ensure_screenshot_focus("body"));
-                if self.screenshot_scenario_step >= 2
-                    && self.state.candidates.is_empty()
-                    && !self.directions_are_generating()
-                    && let Some(group) = screenshot_part_group(&self.state, "body")
-                {
-                    commands.push(make_focused_candidate_request(&self.state, &group));
-                    self.screenshot_scenario_step = 3;
-                } else if !self.state.candidates.is_empty() && self.state.active_jobs.is_empty() {
-                    if self
-                        .state
-                        .selected_candidate
-                        .as_ref()
-                        .is_none_or(|selected| {
-                            !self
-                                .state
-                                .candidates
-                                .iter()
-                                .any(|card| &card.id == selected)
-                        })
-                        && let Some(candidate) = self.state.candidates.first()
-                    {
-                        commands.push(FoundryAppCommand::SelectCandidate(Some(
-                            candidate.id.clone(),
-                        )));
-                    } else if self.make_canvas_view_state().focused_part_label.as_deref()
-                        == Some("Body")
-                    {
-                        self.complete_screenshot_scenario(scenario);
-                    }
-                }
-            }
-            ScreenshotScenario::NoClearFocusedIdeas => {
-                commands.extend(self.ensure_screenshot_focus("body"));
-                if self.screenshot_scenario_step >= 2
-                    && self.state.candidates.is_empty()
-                    && !self.directions_are_generating()
-                    && self.state.candidate_output.is_none()
-                    && let Some(group) = screenshot_part_group(&self.state, "body")
-                {
-                    commands.push(make_focused_candidate_request(&self.state, &group));
-                    self.screenshot_scenario_step = 3;
-                } else if self.make_canvas_view_state().candidate_tray_state
-                    == MakeCandidateTrayState::NoCandidatesWithRecovery
-                {
+            ScreenshotScenario::AdjustedBoxControl => {
+                if self.screenshot_scenario_step < 2 {
+                    commands.push(FoundryAppCommand::run(FoundryCommand::SetControl {
+                        control_id: "edge_softness".to_owned(),
+                        value: shape_foundry::ControlValue::Scalar(0.55),
+                    }));
+                    self.screenshot_scenario_step = 2;
+                } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
@@ -3581,38 +3510,6 @@ impl FoundryDesktopApp {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
-            ScreenshotScenario::MaterialLooksDogfood => {
-                let view_state = self.make_canvas_view_state();
-                if !view_state.model_ready || !view_state.preview_ready {
-                    ctx.request_repaint_after(Duration::from_millis(33));
-                    return commands;
-                }
-                if self.material_looks.evidence.is_none()
-                    && self.material_looks.load_error.is_none()
-                {
-                    self.open_material_looks_panel();
-                    self.drawer = None;
-                    self.screenshot_scenario_step = 2;
-                    ctx.request_repaint_after(Duration::from_millis(900));
-                    return commands;
-                }
-                if let Some(evidence) = self.material_looks.evidence.as_ref()
-                    && self.screenshot_scenario_step < 5
-                {
-                    let index = (self.screenshot_scenario_step.saturating_sub(2) as usize)
-                        .min(evidence.candidates.len().saturating_sub(1));
-                    self.material_looks.selected_candidate_id = evidence
-                        .candidates
-                        .get(index)
-                        .map(|candidate| candidate.candidate_id.clone());
-                    self.drawer = None;
-                    self.screenshot_scenario_step += 1;
-                    ctx.request_repaint_after(Duration::from_millis(900));
-                    return commands;
-                }
-                self.drawer = Some(FoundryDrawer::Export);
-                self.complete_screenshot_scenario(scenario);
-            }
         }
         if self.screenshot_scenario_step != u8::MAX {
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -3620,6 +3517,7 @@ impl FoundryDesktopApp {
         commands
     }
 
+    #[cfg(test)]
     fn ensure_screenshot_focus(&mut self, group_id: &str) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         if !self.state.active_jobs.is_empty() {
@@ -4458,16 +4356,16 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
     let value = fs::read_to_string(path).ok()?;
     match value.trim() {
         "make_initial_box" => Some(ScreenshotScenario::MakeInitialBox),
-        "generating_whole_asset_ideas" => Some(ScreenshotScenario::GeneratingWholeAssetIdeas),
-        "generated_whole_asset_ideas" => Some(ScreenshotScenario::GeneratedWholeAssetIdeas),
+        "generating_box_ideas" | "generating_whole_asset_ideas" => {
+            Some(ScreenshotScenario::GeneratingBoxIdeas)
+        }
+        "generated_box_ideas" | "generated_whole_asset_ideas" => {
+            Some(ScreenshotScenario::GeneratedBoxIdeas)
+        }
         "selected_comparison" => Some(ScreenshotScenario::SelectedComparison),
-        "focus_body" => Some(ScreenshotScenario::FocusBody),
-        "generating_body_ideas" => Some(ScreenshotScenario::GeneratingBodyIdeas),
-        "body_ideas" => Some(ScreenshotScenario::BodyIdeas),
-        "no_clear_focused_ideas" => Some(ScreenshotScenario::NoClearFocusedIdeas),
+        "adjusted_box_control" => Some(ScreenshotScenario::AdjustedBoxControl),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
-        "material_looks_dogfood" => Some(ScreenshotScenario::MaterialLooksDogfood),
         _ => None,
     }
 }
@@ -4486,13 +4384,13 @@ fn screenshot_scenario_assertion(
             require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
             require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")
         }
-        ScreenshotScenario::GeneratingWholeAssetIdeas => require_screenshot_state(
+        ScreenshotScenario::GeneratingBoxIdeas => require_screenshot_state(
             view_state.local_busy_visible
                 && view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas,
             scenario,
             "local_busy_visible whole-asset generation",
         ),
-        ScreenshotScenario::GeneratedWholeAssetIdeas => require_screenshot_state(
+        ScreenshotScenario::GeneratedBoxIdeas => require_screenshot_state(
             view_state.candidate_tray_visible && view_state.selected_comparison_visible,
             scenario,
             "candidate_tray_visible with rendered selected comparison",
@@ -4502,29 +4400,12 @@ fn screenshot_scenario_assertion(
             scenario,
             "selected_comparison_visible",
         ),
-        ScreenshotScenario::FocusBody => require_screenshot_state(
-            view_state.focused_part_label.as_deref() == Some("Body"),
+        ScreenshotScenario::AdjustedBoxControl => require_screenshot_state(
+            view_state.mode == MakeCanvasMode::Ready
+                && view_state.model_ready
+                && view_state.preview_ready,
             scenario,
-            "focused_part_label Body",
-        ),
-        ScreenshotScenario::GeneratingBodyIdeas => require_screenshot_state(
-            view_state.local_busy_visible
-                && view_state.focused_part_label.as_deref() == Some("Body")
-                && view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas,
-            scenario,
-            "local_busy_visible Body generation",
-        ),
-        ScreenshotScenario::BodyIdeas => require_screenshot_state(
-            view_state.candidate_tray_visible
-                && view_state.focused_part_label.as_deref() == Some("Body"),
-            scenario,
-            "candidate_tray_visible with Body focus",
-        ),
-        ScreenshotScenario::NoClearFocusedIdeas => require_screenshot_state(
-            view_state.candidate_tray_state == MakeCandidateTrayState::NoCandidatesWithRecovery
-                && view_state.focused_no_candidates_recovery_visible,
-            scenario,
-            "focused_no_candidates_recovery_visible",
+            "ready adjusted box control",
         ),
         ScreenshotScenario::PackDrawer => require_screenshot_state(
             view_state.pack_drawer_visible,
@@ -4535,14 +4416,6 @@ fn screenshot_scenario_assertion(
             view_state.export_drawer_visible,
             scenario,
             "export_drawer_visible",
-        ),
-        ScreenshotScenario::MaterialLooksDogfood => require_screenshot_state(
-            view_state.export_drawer_visible
-                && view_state.model_ready
-                && view_state.preview_ready
-                && !view_state.material_look_tray_visible,
-            scenario,
-            "export drawer visible without material look tray",
         ),
     }
 }
@@ -4583,6 +4456,7 @@ fn record_screenshot_state_assertion(
     );
 }
 
+#[cfg(test)]
 fn screenshot_part_group(
     state: &FoundryAppState,
     group_id: &str,
@@ -4613,22 +4487,6 @@ fn make_whole_asset_candidate_request(
         } else {
             VariationIntent::complete_look()
         },
-    })
-}
-
-fn make_focused_candidate_request(
-    state: &FoundryAppState,
-    group: &directions::DirectionPartGroup,
-) -> FoundryAppCommand {
-    let seed = state.document.as_ref().map_or(0, |document| document.seed);
-    FoundryAppCommand::RequestCandidates(FoundryCandidateRequest {
-        seed,
-        proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
-        result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
-        mode: FoundryCandidateMode::Refine,
-        strategy_id: None,
-        preference_profile: None,
-        variation_intent: VariationIntent::focus_part_shape(&group.group_id, &group.label),
     })
 }
 
@@ -4708,7 +4566,7 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 
 fn profile_description(slug: &str) -> &'static str {
     match slug {
-        "box-primitive" => "A closed clay box with proportions and edge softness controls.",
+        "box-primitive" => HOME_SUBTITLE,
         _ => "A Box Primitive starting point ready for box idea generation.",
     }
 }
@@ -4816,7 +4674,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Choose",
         "Make",
         "Export",
-        "Choose what to make",
+        "Start with Box Primitive",
         "Project",
         "Open Project",
         "Save Project",
@@ -4825,11 +4683,10 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "History",
         "Recent Projects",
         "Start",
-        "Try ideas",
         ACTION_TRY_BOX_IDEAS,
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
-        ACTION_USE_THIS_BOX,
+        ACTION_CHOOSE_DIRECTION,
         "Add to Pack",
         "Open Pack",
         "Open Export",
@@ -4850,7 +4707,6 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No clear ideas survived",
         "The search found changes that were hidden or too subtle.",
         "No ideas yet",
-        "Try whole-asset ideas to compare readable candidates.",
         "Ideas",
         "Save",
         "Undo",
@@ -4874,8 +4730,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Current asset ready",
         "Needs a model first",
         HOME_SUBTITLE,
-        "Choose the Box Primitive starting point below.",
-        "Search starting point...",
+        HOME_CONTROL_COPY,
+        "Start with Box Primitive.",
         "Preview building",
         "No matching starting point",
         "Make asset",
@@ -4885,7 +4741,6 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Ideas",
         "Trying ideas",
         "Current asset",
-        "Try ideas, then use controls below to tune the current asset.",
         "Choose Box Primitive or open a project before making changes.",
         "Preview could not be rendered for this idea.",
         "Preview this idea before using it.",
@@ -4935,13 +4790,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         NEED_PACK_MEMBER_REASON,
         "This model has no quick controls yet.",
         "Prepare the current asset before exporting.",
-        "No family pack workspace is open.",
+        "No pack workspace is open.",
         "Preview is being prepared.",
-        "Whole-asset ideas",
         "Primary control",
         "Box Primitive is not available",
         "Open a saved project, or enable the Box Primitive baseline.",
-        "Choose the Box Primitive starting point below.",
         "Choose Box Primitive or open a project before exporting.",
         "Choose Box Primitive or open a project before starting a pack.",
     ];
@@ -4959,19 +4812,13 @@ pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static s
 
 pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'static>> {
     vec![
-        ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_BOX_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_RECOVERY, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_MORE_IDEAS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_USE_THIS_BOX, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_UNLOCK_CONTROLS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
@@ -4979,6 +4826,7 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_OPEN_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_EXPORT, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_OPEN_EXPORT, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_CLOSE_DRAWER, ButtonTone::Secondary),
     ]
 }
 
@@ -5119,7 +4967,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
                 "Ideas ready".to_owned()
             },
             if box_primitive_baseline {
-                "Use this box, or reject it.".to_owned()
+                "Use this idea, or reject it.".to_owned()
             } else {
                 "Compare the selected idea, then use it or reject it.".to_owned()
             },
@@ -5210,7 +5058,7 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::GeneratingWholeAssetIdeas => "Trying ideas from the current asset.",
         MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas for the focused part.",
         MakeCanvasMode::ReviewingIdeas if view_state.box_primitive_baseline => {
-            "Use this box, or try another idea."
+            "Use this idea, or try another idea."
         }
         MakeCanvasMode::ReviewingIdeas => "Compare the selected idea against the current asset.",
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
@@ -5248,7 +5096,7 @@ fn make_canvas_next_action_hint(
             "Watch this area for new ideas.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) if box_primitive_baseline => {
-            "Use this box, or reject it.".to_owned()
+            "Use this idea, or reject it.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) => {
             "Compare the selected idea, then use it or reject it.".to_owned()
@@ -5584,75 +5432,115 @@ fn show_home_browser_panel(
     selected_slug: &mut Option<String>,
 ) {
     let colors = VisualFoundryTokens::dark().colors;
+    let single_profile_mode = profiles.len() == 1 && HOME_TEMPLATE_FILTERS.is_empty();
     product_card(ui, false, |ui| {
         ui.set_min_height(ui.available_height().max(420.0));
-        section_header(
-            ui,
-            SectionHeaderSpec {
-                eyebrow: "Choose",
-                title: "Choose what to make",
-                subtitle: Some(HOME_SUBTITLE),
-            },
-        );
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new("Choose the Box Primitive starting point below.")
-                .color(colors.text_muted)
-                .small(),
-        );
-        ui.add_space(12.0);
-        let response = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::TextEdit::singleline(search_query)
-                .hint_text("Search starting point...")
-                .desired_width(f32::INFINITY),
-        );
-        if response.changed() {
-            *selected_slug = default_filtered_home_profile_slug(profiles, search_query, *filter);
-        }
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            for option in HOME_TEMPLATE_FILTERS {
-                if home_filter_button(ui, option, *filter).clicked() {
-                    *filter = option;
-                    *selected_slug =
-                        default_filtered_home_profile_slug(profiles, search_query, *filter);
-                }
+        if single_profile_mode {
+            normalize_home_selection(profiles, "", HomeTemplateFilter::All, selected_slug);
+            section_header(
+                ui,
+                SectionHeaderSpec {
+                    eyebrow: "Choose",
+                    title: "Start with Box Primitive.",
+                    subtitle: Some(HOME_SUBTITLE),
+                },
+            );
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(HOME_CONTROL_COPY)
+                        .color(colors.text_muted)
+                        .small(),
+                )
+                .wrap(),
+            );
+            if let Some(profile) = profiles.first() {
+                ui.add_space(18.0);
+                ui.label(
+                    RichText::new(profile.label.as_str())
+                        .color(colors.text)
+                        .size(18.0)
+                        .strong(),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(profile_description(&profile.fixture.slug))
+                            .color(colors.text_muted),
+                    )
+                    .wrap(),
+                );
             }
-        });
-        normalize_home_selection(profiles, search_query, *filter, selected_slug);
-        ui.add_space(12.0);
-
-        let filtered_indices = filtered_home_profile_indices(profiles, search_query, *filter);
-        let count_label = home_profile_count_label(filtered_indices.len());
-        ui.label(
-            RichText::new(count_label)
-                .color(colors.text_subtle)
-                .small()
-                .strong(),
-        );
-        ui.add_space(6.0);
-        egui::ScrollArea::vertical()
-            .id_salt("foundry_home_template_list")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                if filtered_indices.is_empty() {
-                    ui.label(
-                        RichText::new("No matching starting point")
-                            .color(colors.text_muted)
-                            .small(),
-                    );
-                }
-                for index in filtered_indices {
-                    let profile = &profiles[index];
-                    let selected = selected_slug.as_deref() == Some(profile.fixture.slug.as_str());
-                    if show_home_template_row(ui, profile, selected).clicked() {
-                        *selected_slug = Some(profile.fixture.slug.clone());
+        } else {
+            section_header(
+                ui,
+                SectionHeaderSpec {
+                    eyebrow: "Choose",
+                    title: "Choose what to make",
+                    subtitle: Some(HOME_SUBTITLE),
+                },
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Choose the Box Primitive starting point below.")
+                    .color(colors.text_muted)
+                    .small(),
+            );
+            ui.add_space(12.0);
+            let response = ui.add_sized(
+                [ui.available_width(), 32.0],
+                egui::TextEdit::singleline(search_query)
+                    .hint_text("Search starting point...")
+                    .desired_width(f32::INFINITY),
+            );
+            if response.changed() {
+                *selected_slug =
+                    default_filtered_home_profile_slug(profiles, search_query, *filter);
+            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                for option in HOME_TEMPLATE_FILTERS {
+                    if home_filter_button(ui, option, *filter).clicked() {
+                        *filter = option;
+                        *selected_slug =
+                            default_filtered_home_profile_slug(profiles, search_query, *filter);
                     }
-                    ui.add_space(6.0);
                 }
             });
+            normalize_home_selection(profiles, search_query, *filter, selected_slug);
+            ui.add_space(12.0);
+
+            let filtered_indices = filtered_home_profile_indices(profiles, search_query, *filter);
+            let count_label = home_profile_count_label(filtered_indices.len());
+            ui.label(
+                RichText::new(count_label)
+                    .color(colors.text_subtle)
+                    .small()
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical()
+                .id_salt("foundry_home_template_list")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    if filtered_indices.is_empty() {
+                        ui.label(
+                            RichText::new("No matching starting point")
+                                .color(colors.text_muted)
+                                .small(),
+                        );
+                    }
+                    for index in filtered_indices {
+                        let profile = &profiles[index];
+                        let selected =
+                            selected_slug.as_deref() == Some(profile.fixture.slug.as_str());
+                        if show_home_template_row(ui, profile, selected).clicked() {
+                            *selected_slug = Some(profile.fixture.slug.clone());
+                        }
+                        ui.add_space(6.0);
+                    }
+                });
+        }
     });
 }
 
@@ -5718,13 +5606,9 @@ fn show_home_template_row(
             ui.add_space(2.0);
             ui.add(
                 egui::Label::new(
-                    RichText::new(format!(
-                        "{}. {}",
-                        profile.style_name,
-                        profile_description(&profile.fixture.slug)
-                    ))
-                    .color(colors.text_muted)
-                    .small(),
+                    RichText::new(profile_description(&profile.fixture.slug))
+                        .color(colors.text_muted)
+                        .small(),
                 )
                 .wrap(),
             );
@@ -5755,9 +5639,9 @@ fn show_home_selected_template_stage(
         ui.add(
             egui::Label::new(
                 RichText::new(format!(
-                    "{}. {}",
-                    profile.style_name,
-                    profile_description(&profile.fixture.slug)
+                    "{} {}",
+                    profile_description(&profile.fixture.slug),
+                    HOME_CONTROL_COPY
                 ))
                 .color(colors.text_muted),
             )
@@ -7155,6 +7039,7 @@ fn show_customize_control_card(
     control: &crate::foundry::view_model::FoundryControlView,
     actions_enabled: bool,
     disabled_reason: &str,
+    show_focus_action: bool,
 ) -> Vec<FoundryAppCommand> {
     let mut commands = Vec::new();
     product_card(ui, control.locked, |ui| {
@@ -7178,6 +7063,7 @@ fn show_customize_control_card(
                         control,
                         actions_enabled,
                         disabled_reason,
+                        show_focus_action,
                         &mut commands,
                     );
                 });
@@ -7211,6 +7097,7 @@ fn show_customize_control_card(
                             control,
                             actions_enabled,
                             disabled_reason,
+                            show_focus_action,
                             &mut commands,
                         );
                     },
@@ -7274,6 +7161,7 @@ fn show_customize_control_header_actions(
     control: &crate::foundry::view_model::FoundryControlView,
     actions_enabled: bool,
     disabled_reason: &str,
+    show_focus_action: bool,
     commands: &mut Vec<FoundryAppCommand>,
 ) {
     if action_button(
@@ -7312,16 +7200,17 @@ fn show_customize_control_header_actions(
     {
         commands.push(command);
     }
-    if action_button(
-        ui,
-        &action_spec(
-            actions_enabled,
-            ACTION_FOCUS,
-            ButtonTone::Secondary,
-            disabled_reason,
-        ),
-    )
-    .clicked()
+    if show_focus_action
+        && action_button(
+            ui,
+            &action_spec(
+                actions_enabled,
+                ACTION_FOCUS,
+                ButtonTone::Secondary,
+                disabled_reason,
+            ),
+        )
+        .clicked()
     {
         commands.push(customize::select_control_command(Some(control.id.clone())));
     }
@@ -8156,6 +8045,37 @@ mod tests {
     }
 
     #[test]
+    fn choose_screen_single_profile_mode_has_no_category_filters_or_catalog_count() {
+        let profiles = product_home_profiles(false);
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n");
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
+        assert!(HOME_TEMPLATE_FILTERS.is_empty());
+        assert!(strings.contains(&"Start with Box Primitive."));
+        assert!(strings.contains(&HOME_SUBTITLE));
+        assert!(strings.contains(&HOME_CONTROL_COPY));
+
+        for hidden in [
+            "Props",
+            "Architecture",
+            "Gear",
+            "Furniture",
+            "Environment",
+            "18 templates",
+            "1 starting point",
+            "Search starting point...",
+            "Choose what to make",
+        ] {
+            assert!(
+                !joined.contains(hidden),
+                "single-profile Choose copy should not expose {hidden}: {joined}"
+            );
+        }
+    }
+
+    #[test]
     fn product_home_profiles_group_by_asset_family() {
         let profiles = product_home_profiles(true);
         let groups = product_home_profile_groups(profiles.clone());
@@ -8573,7 +8493,11 @@ mod tests {
             MATERIAL_LOOK_SURFACE_ONLY_COPY,
             MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
             MATERIAL_LOOK_PREVIEW_ONLY_COPY,
+            MATERIAL_LOOK_EXPORT_INCLUDED_COPY,
             MATERIAL_LOOK_FULL_READY_BLOCKED_COPY,
+            SURFACE_PACKAGE_COMMAND_COPY,
+            SURFACE_PACKAGE_COMMAND,
+            "static surface package",
         ] {
             assert!(
                 !strings.contains(&hidden),
@@ -8593,8 +8517,6 @@ mod tests {
             "skeleton template",
             "joint id",
             "skinning",
-            "rigged",
-            "animated",
             "retarget",
         ] {
             assert!(
@@ -8738,13 +8660,7 @@ mod tests {
 
         assert_eq!(app.state.current_build, before_build);
         assert_eq!(app.state.controls, before_controls);
-        assert_eq!(
-            app.material_look_export_copy(),
-            Some((
-                MATERIAL_LOOK_PREVIEW_ONLY_COPY,
-                MATERIAL_LOOK_FULL_READY_BLOCKED_COPY
-            ))
-        );
+        assert_eq!(app.material_look_export_copy(), None);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -8787,11 +8703,52 @@ mod tests {
     }
 
     #[test]
+    fn box_primitive_default_copy_has_no_crate_case_or_part_focus_language() {
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n").to_ascii_lowercase();
+
+        for forbidden in [
+            "crate",
+            "case",
+            "cargo",
+            "sci-fi",
+            "body",
+            "focused part",
+            "focus part",
+            "part chip",
+            "family studio",
+        ] {
+            assert!(
+                !joined.contains(forbidden),
+                "Box Primitive default UI copy should not expose {forbidden}: {joined}"
+            );
+        }
+    }
+
+    #[test]
+    fn box_primitive_default_copy_has_no_unsupported_pipeline_overclaim() {
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n").to_ascii_lowercase();
+
+        for forbidden in ["uv", "texturing", "rigging", "animation"] {
+            assert!(
+                !joined.contains(forbidden),
+                "Box Primitive UI copy should not expose unsupported pipeline term {forbidden}: {joined}"
+            );
+        }
+        assert!(strings.contains(&BOX_PRIMITIVE_EXPORT_LIMITATION));
+        assert!(
+            joined.contains("not a textured, rigged, animated, or game-ready package"),
+            "export copy must explicitly block game-ready overclaim: {joined}"
+        );
+    }
+
+    #[test]
     fn product_shell_steps_are_novice_facing() {
         let strings = product_visible_strings_for_default_shell();
 
         for required in [
-            "Choose what to make",
+            "Start with Box Primitive",
             "Choose",
             "Make",
             "Export",
@@ -8802,7 +8759,6 @@ mod tests {
             "Save Project As",
             "Start Another Asset",
             "History",
-            "Try ideas",
             ACTION_CHOOSE_TEMPLATE,
             "Start",
         ] {
@@ -8833,6 +8789,7 @@ mod tests {
             "Candidate tray",
             "Model workspace",
             "Focus Part",
+            ACTION_FOCUS,
             "Generate 6 Directions",
             "Try body ideas",
             "Material looks are not previewable yet.",
@@ -8844,12 +8801,9 @@ mod tests {
         }
 
         for required in [
-            "Try ideas",
-            "Try more ideas",
-            "Try whole-asset ideas",
             "Use this idea",
             ACTION_TRY_BOX_IDEAS,
-            ACTION_USE_THIS_BOX,
+            ACTION_CHOOSE_DIRECTION,
             "Ideas",
         ] {
             assert!(
@@ -8881,8 +8835,8 @@ mod tests {
         assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
         assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_USE_THIS_BOX);
-        assert_eq!(visible.next_action_hint, "Use this box, or reject it.");
+        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
+        assert_eq!(visible.next_action_hint, "Use this idea, or reject it.");
     }
 
     #[test]
@@ -8905,8 +8859,8 @@ mod tests {
         assert!(visible.candidate_tray_visible);
         assert!(!visible.selected_candidate_present);
         assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_USE_THIS_BOX);
-        assert_eq!(visible.next_action_hint, "Use this box, or reject it.");
+        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
+        assert_eq!(visible.next_action_hint, "Use this idea, or reject it.");
     }
 
     #[test]
@@ -8992,7 +8946,7 @@ mod tests {
         reviewing.state.candidates = vec![test_candidate_card("candidate-a", false, None)];
         let reviewing = reviewing.make_canvas_view_state();
         assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(reviewing.primary_action_label, ACTION_CHOOSE_DIRECTION);
         assert!(reviewing.primary_action_enabled);
     }
 
@@ -9142,7 +9096,7 @@ mod tests {
             .expect("candidate job schedules");
         assert!(
             screenshot_scenario_assertion(
-                ScreenshotScenario::GeneratingWholeAssetIdeas,
+                ScreenshotScenario::GeneratingBoxIdeas,
                 &app.make_canvas_view_state(),
             )
             .is_ok()
@@ -9154,11 +9108,15 @@ mod tests {
         app.state.candidates = vec![test_candidate_card(&selected.0, true, None)];
         let view = app.make_canvas_view_state();
         assert!(
-            screenshot_scenario_assertion(ScreenshotScenario::GeneratedWholeAssetIdeas, &view)
-                .is_ok()
+            screenshot_scenario_assertion(ScreenshotScenario::GeneratedBoxIdeas, &view).is_ok()
         );
         assert!(
             screenshot_scenario_assertion(ScreenshotScenario::SelectedComparison, &view).is_ok()
+        );
+        let adjusted = ready_visible_state_test_app().make_canvas_view_state();
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::AdjustedBoxControl, &adjusted)
+                .is_ok()
         );
 
         app.drawer = Some(FoundryDrawer::Pack);
@@ -9173,13 +9131,6 @@ mod tests {
         assert!(
             screenshot_scenario_assertion(
                 ScreenshotScenario::ExportDrawer,
-                &app.make_canvas_view_state(),
-            )
-            .is_ok()
-        );
-        assert!(
-            screenshot_scenario_assertion(
-                ScreenshotScenario::MaterialLooksDogfood,
                 &app.make_canvas_view_state(),
             )
             .is_ok()
@@ -9721,8 +9672,11 @@ mod tests {
 
         let reviewing = app.make_canvas_view_state();
         assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(reviewing.primary_action_label, ACTION_CHOOSE_DIRECTION);
+        assert_eq!(
+            reviewing.use_candidate_action_label,
+            ACTION_CHOOSE_DIRECTION
+        );
         assert!(reviewing.selected_comparison_visible);
         assert!(
             app.state
@@ -9738,7 +9692,7 @@ mod tests {
                 app.accept_visible_candidate_command()
                     .expect("selectable box idea"),
             )
-            .expect("Use this box schedules");
+            .expect("Use this idea schedules");
         let accept_event = run_fixture_effect(accept_effects, &fixture);
         assert!(app.state.handle_job_event(accept_event));
         assert_ne!(app.state.current_build, build_before_accept);
@@ -9887,12 +9841,13 @@ mod tests {
         }
 
         let joined = strings.join("\n").to_ascii_lowercase();
-        for forbidden_phrase in ["fingerprint", "gltf primitive", "rigged", "animated"] {
+        for forbidden_phrase in ["fingerprint", "gltf primitive"] {
             assert!(
                 !joined.contains(forbidden_phrase),
                 "default product strings contain forbidden phrase {forbidden_phrase}: {joined}"
             );
         }
+        assert!(joined.contains("not a textured, rigged, animated, or game-ready package"));
     }
 
     #[test]
