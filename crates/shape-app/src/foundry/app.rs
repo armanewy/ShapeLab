@@ -90,11 +90,10 @@ enum FoundryDrawer {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ScreenshotScenario {
-    MakeInitialBox,
-    GeneratingBoxIdeas,
-    GeneratedBoxIdeas,
-    SelectedComparison,
-    AdjustedBoxControl,
+    BoxDirectMakeReady,
+    BoxPropertyEdit,
+    FlatPanelDirectMakeReady,
+    FlatPanelPropertyEdit,
     PackDrawer,
     ExportDrawer,
 }
@@ -193,6 +192,9 @@ struct MakeCanvasViewState {
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
+    direct_primitive_workflow: bool,
+    property_panel_title: &'static str,
+    property_labels: Vec<&'static str>,
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
@@ -319,6 +321,17 @@ enum MakeProfileKind {
 }
 
 impl MakeProfileKind {
+    const fn direct_primitive_workflow(self) -> bool {
+        matches!(
+            self,
+            Self::BoxPrimitive
+                | Self::LiddedBox
+                | Self::FlatPanelPrimitive
+                | Self::HingedPanel
+                | Self::HandledPanel
+        )
+    }
+
     const fn simple_clay_make_baseline(self) -> bool {
         matches!(
             self,
@@ -459,6 +472,7 @@ const ACTION_ADD_TO_PACK: &str = "Add to Pack";
 const ACTION_OPEN_PACK: &str = "Open Pack";
 const ACTION_OPEN_EXPORT: &str = "Open Export";
 const ACTION_EXPORT_CURRENT_ASSET: &str = "Export Current Asset";
+const ACTION_EXPORT_CURRENT_PRIMITIVE: &str = "Export current primitive";
 const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_CLOSE_DRAWER: &str = "Close drawer";
@@ -482,7 +496,16 @@ const ACTION_ADJUST_LID_SEAM: &str = "Adjust lid seam";
 const ACTION_ADJUST_PANEL: &str = "Adjust panel";
 const ACTION_ADJUST_HINGE_EDGE: &str = "Adjust hinge edge";
 const ACTION_ADJUST_HANDLE_KNOB: &str = "Adjust handle";
-const RENDERED_ACTION_LABELS: [&str; 49] = [
+const ACTION_ADJUST_DIMENSIONS: &str = "Adjust dimensions";
+const ACTION_EDIT_BOX_PRIMITIVE: &str = "Edit Box Primitive";
+const ACTION_EDIT_FLAT_PANEL: &str = "Edit Flat Panel";
+const ACTION_EDIT_LIDDED_BOX: &str = "Edit Lidded Box";
+const ACTION_EDIT_HINGED_PANEL: &str = "Edit Hinged Panel";
+const ACTION_EDIT_HANDLED_PANEL: &str = "Edit Handled Panel";
+const VIEW_ORBIT_LABEL: &str = "Orbit view";
+const VIEW_RESET_LABEL: &str = "Reset view";
+const VIEW_AXIS_LABEL: &str = "Axis view";
+const RENDERED_ACTION_LABELS: [&str; 43] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -497,12 +520,6 @@ const RENDERED_ACTION_LABELS: [&str; 49] = [
     ACTION_SWITCH_TO_REVISION,
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
-    ACTION_TRY_BOX_IDEAS,
-    ACTION_TRY_LIDDED_BOX_IDEAS,
-    ACTION_TRY_PANEL_IDEAS,
-    ACTION_TRY_HINGED_PANEL_IDEAS,
-    ACTION_TRY_HANDLED_PANEL_IDEAS,
-    ACTION_GENERATING_IDEAS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
     ACTION_CHOOSE_ANOTHER_TEMPLATE,
@@ -514,24 +531,24 @@ const RENDERED_ACTION_LABELS: [&str; 49] = [
     ACTION_OPEN_PACK,
     ACTION_OPEN_EXPORT,
     ACTION_EXPORT_CURRENT_ASSET,
+    ACTION_EXPORT_CURRENT_PRIMITIVE,
     ACTION_ADD_CURRENT_ASSET,
     ACTION_EXPORT_PACK,
     ACTION_CLOSE_DRAWER,
-    ACTION_SELECT,
-    ACTION_CHOOSE_DIRECTION,
-    ACTION_USE_THIS_BOX,
-    ACTION_USE_THIS_PANEL,
-    ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
     ACTION_UNLOCK_CONTROLS,
     ACTION_RETRY_PREPARATION,
     ACTION_UPDATE_PREVIEW,
-    ACTION_ADJUST_BOX,
-    ACTION_ADJUST_LID_SEAM,
-    ACTION_ADJUST_PANEL,
-    ACTION_ADJUST_HINGE_EDGE,
-    ACTION_ADJUST_HANDLE_KNOB,
+    ACTION_ADJUST_DIMENSIONS,
+    ACTION_EDIT_BOX_PRIMITIVE,
+    ACTION_EDIT_FLAT_PANEL,
+    ACTION_EDIT_LIDDED_BOX,
+    ACTION_EDIT_HINGED_PANEL,
+    ACTION_EDIT_HANDLED_PANEL,
+    VIEW_ORBIT_LABEL,
+    VIEW_RESET_LABEL,
+    VIEW_AXIS_LABEL,
 ];
 
 impl Default for FoundryDesktopApp {
@@ -915,6 +932,7 @@ impl FoundryDesktopApp {
             .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
         let active_profile_kind = self.active_make_profile_kind();
+        let direct_primitive_workflow = active_profile_kind.direct_primitive_workflow();
         let simple_box_make_baseline = active_profile_kind.simple_clay_make_baseline();
         let lidded_box_baseline = active_profile_kind.is_lidded_box();
         let flat_panel_baseline = active_profile_kind.is_flat_panel_primitive();
@@ -936,11 +954,11 @@ impl FoundryDesktopApp {
             ACTION_CHOOSE_DIRECTION
         };
         let adjust_heading_label = match active_profile_kind {
-            MakeProfileKind::BoxPrimitive => ACTION_ADJUST_BOX,
-            MakeProfileKind::LiddedBox => ACTION_ADJUST_LID_SEAM,
-            MakeProfileKind::FlatPanelPrimitive => ACTION_ADJUST_PANEL,
-            MakeProfileKind::HingedPanel => ACTION_ADJUST_HINGE_EDGE,
-            MakeProfileKind::HandledPanel => ACTION_ADJUST_HANDLE_KNOB,
+            MakeProfileKind::BoxPrimitive => ACTION_EDIT_BOX_PRIMITIVE,
+            MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
+            MakeProfileKind::FlatPanelPrimitive => ACTION_EDIT_FLAT_PANEL,
+            MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
+            MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
             MakeProfileKind::Other => "Adjust",
         };
         let active_candidate_job = self.state.active_jobs.values().any(|request| {
@@ -951,7 +969,8 @@ impl FoundryDesktopApp {
             )
         });
         let candidate_previews_pending = candidate_previews_are_pending(&self.state.candidates);
-        let generating = active_candidate_job || candidate_previews_pending;
+        let generating =
+            !direct_primitive_workflow && (active_candidate_job || candidate_previews_pending);
         let compiling_or_editing = self.state.active_jobs.values().any(|request| {
             matches!(
                 request.slot(),
@@ -1001,14 +1020,18 @@ impl FoundryDesktopApp {
                 .make_preparation_started_at
                 .is_some_and(|started| started.elapsed() >= PREPARATION_TIMEOUT);
         let preparation_fallback_visible = preparation_timed_out;
-        let idea_generation_timed_out = generating
+        let idea_generation_timed_out = !direct_primitive_workflow
+            && generating
             && self
                 .make_generation_started_at
                 .is_some_and(|started| started.elapsed() >= IDEA_GENERATION_TIMEOUT);
         let idea_generation_fallback_visible = idea_generation_timed_out;
-        let local_warning_message = self.make_canvas_local_warning();
+        let local_warning_message = self.make_canvas_local_warning().filter(|message| {
+            !direct_primitive_workflow || message.as_str() != CANCELED_IDEA_SEARCH_WARNING
+        });
         let local_error_message = self.make_canvas_local_error();
-        let candidate_search_finished_empty = self.state.candidate_output.is_some()
+        let candidate_search_finished_empty = !direct_primitive_workflow
+            && self.state.candidate_output.is_some()
             && self.state.candidates.is_empty()
             && !generating;
         let mode = if self.drawer == Some(FoundryDrawer::Pack) {
@@ -1021,7 +1044,7 @@ impl FoundryDesktopApp {
             MakeCanvasMode::NoAsset
         } else if preparing {
             MakeCanvasMode::PreparingAsset
-        } else if !self.state.candidates.is_empty() {
+        } else if !direct_primitive_workflow && !self.state.candidates.is_empty() {
             MakeCanvasMode::ReviewingIdeas
         } else if generating && focused_part_label.is_some() {
             MakeCanvasMode::GeneratingFocusedPartIdeas
@@ -1051,7 +1074,9 @@ impl FoundryDesktopApp {
             _ => None,
         };
         let local_busy_visible = local_busy_label.is_some();
-        let candidate_tray_state = if local_error_message.is_some() {
+        let candidate_tray_state = if direct_primitive_workflow {
+            MakeCandidateTrayState::EmptyReady
+        } else if local_error_message.is_some() {
             MakeCandidateTrayState::ErrorWithRecovery
         } else if !self.state.candidates.is_empty() {
             MakeCandidateTrayState::HasCandidates
@@ -1079,6 +1104,7 @@ impl FoundryDesktopApp {
                 candidate_output: self.state.candidate_output.as_deref(),
                 local_warning_message: local_warning_message.as_deref(),
                 local_error_message: local_error_message.as_deref(),
+                direct_primitive_workflow,
                 simple_box_make_baseline,
                 lidded_box_baseline,
                 flat_panel_baseline,
@@ -1105,12 +1131,13 @@ impl FoundryDesktopApp {
                 "Try {} ideas",
                 singular_part_copy(label).to_ascii_lowercase()
             ),
+            _ if direct_primitive_workflow => ACTION_ADJUST_DIMENSIONS.to_owned(),
             _ => try_ideas_action_label.to_owned(),
         };
         let primary_action_enabled = match mode {
             MakeCanvasMode::NoAsset => true,
             MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
-                model_ready && preview_ready && !generating
+                direct_primitive_workflow || (model_ready && preview_ready && !generating)
             }
             MakeCanvasMode::ReviewingIdeas => {
                 model_ready
@@ -1137,18 +1164,21 @@ impl FoundryDesktopApp {
                 NEED_PROJECT_REASON.to_owned()
             }
         });
-        let candidate_tray_visible = self.state.document.is_some();
+        let candidate_tray_visible = self.state.document.is_some() && !direct_primitive_workflow;
         let material_look_tray_visible = self.material_looks.tray_open && !simple_box_make_baseline;
-        let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
-        let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
-            preview_ready
-                && !candidate.rgba8.is_empty()
-                && self
-                    .state
-                    .current_preview
-                    .as_ref()
-                    .is_some_and(|preview| !preview.rgba8.is_empty())
-        });
+        let rejected_candidate_summary = (!direct_primitive_workflow)
+            .then(|| self.make_canvas_rejected_candidate_summary())
+            .flatten();
+        let selected_comparison_visible = !direct_primitive_workflow
+            && selected_candidate.is_some_and(|candidate| {
+                preview_ready
+                    && !candidate.rgba8.is_empty()
+                    && self
+                        .state
+                        .current_preview
+                        .as_ref()
+                        .is_some_and(|preview| !preview.rgba8.is_empty())
+            });
         let mut next_action_hint = make_canvas_next_action_hint(
             &mode,
             focused_part_label.as_deref(),
@@ -1191,17 +1221,25 @@ impl FoundryDesktopApp {
             candidate_tray_visible,
             material_look_tray_visible,
             candidate_tray_state,
-            candidate_count: self.state.candidates.len(),
+            candidate_count: if direct_primitive_workflow {
+                0
+            } else {
+                self.state.candidates.len()
+            },
             candidate_search_finished_empty,
             focused_no_candidates_recovery_visible,
             rejected_candidate_summary,
-            selected_candidate_present: self.state.selected_candidate.is_some(),
+            selected_candidate_present: !direct_primitive_workflow
+                && self.state.selected_candidate.is_some(),
             selected_comparison_visible,
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
             local_warning_message,
             local_error_message,
             next_action_hint,
+            direct_primitive_workflow,
+            property_panel_title: direct_property_panel_title(active_profile_kind),
+            property_labels: direct_property_labels(active_profile_kind).to_vec(),
             simple_box_make_baseline,
             lidded_box_baseline,
             flat_panel_baseline,
@@ -1757,6 +1795,8 @@ impl FoundryDesktopApp {
             ui.add_space(10.0);
             if let Some(group) = active_group {
                 commands.extend(self.show_make_focus_action_tray(ui, view_state, group));
+            } else if view_state.direct_primitive_workflow {
+                show_make_view_controls(ui);
             } else if view_state.mode != MakeCanvasMode::ReviewingIdeas {
                 commands.extend(self.show_make_primary_stage_action(ui, view_state));
             }
@@ -1986,7 +2026,11 @@ impl FoundryDesktopApp {
                         ui,
                         &action_spec(
                             build_actions_enabled,
-                            ACTION_OPEN_EXPORT,
+                            if view_state.direct_primitive_workflow {
+                                ACTION_EXPORT_CURRENT_PRIMITIVE
+                            } else {
+                                ACTION_OPEN_EXPORT
+                            },
                             ButtonTone::Secondary,
                             build_actions_reason,
                         ),
@@ -2090,10 +2134,18 @@ impl FoundryDesktopApp {
             });
             ui.add_space(12.0);
             ui.label(
-                RichText::new(view_state.adjust_heading_label)
+                RichText::new(view_state.property_panel_title)
                     .color(colors.text)
                     .strong(),
             );
+            if view_state.direct_primitive_workflow {
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    for label in &view_state.property_labels {
+                        let _ = status_pill(ui, StatusPillSpec::new(label, StatusTone::Neutral));
+                    }
+                });
+            }
             ui.add_space(6.0);
             let active_group = self.active_make_part_group();
             let control_sections =
@@ -2468,6 +2520,9 @@ impl FoundryDesktopApp {
     }
 
     fn make_primary_candidate_command(&self) -> Option<FoundryAppCommand> {
+        if self.active_make_profile_kind().direct_primitive_workflow() {
+            return None;
+        }
         let document = self.state.document.as_ref()?;
         let active_group = self.active_make_part_group();
         let variation_intent = active_group
@@ -2525,6 +2580,9 @@ impl FoundryDesktopApp {
     }
 
     fn accept_visible_candidate_command(&self) -> Option<FoundryAppCommand> {
+        if self.active_make_profile_kind().direct_primitive_workflow() {
+            return None;
+        }
         let candidate = self.visible_review_candidate()?;
         candidate
             .selectable
@@ -3511,12 +3569,7 @@ impl FoundryDesktopApp {
     }
 
     fn screenshot_scenario_holds_active_job_capture(&self) -> bool {
-        self.screenshot_scenario_step == u8::MAX
-            && !self.state.active_jobs.is_empty()
-            && matches!(
-                self.screenshot_scenario,
-                Some(ScreenshotScenario::GeneratingBoxIdeas)
-            )
+        false
     }
 
     fn poll_home_thumbnail_jobs(&mut self, ctx: &egui::Context) {
@@ -3535,7 +3588,7 @@ impl FoundryDesktopApp {
 
         let mut commands = Vec::new();
         if self.screenshot_scenario_step == 0 {
-            self.load_fixture(read_screenshot_fixture_catalog(), ctx);
+            self.load_fixture(read_screenshot_fixture_catalog(scenario), ctx);
             self.tab = FoundryTab::Make;
             self.screenshot_scenario_step = 1;
             return commands;
@@ -3544,75 +3597,33 @@ impl FoundryDesktopApp {
             return commands;
         }
         if !self.state.active_jobs.is_empty() {
-            let view_state = self.make_canvas_view_state();
-            match scenario {
-                ScreenshotScenario::GeneratingBoxIdeas
-                    if view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas =>
-                {
-                    self.complete_screenshot_scenario(scenario);
-                    return commands;
-                }
-                _ => {
-                    ctx.request_repaint_after(Duration::from_millis(33));
-                    return commands;
-                }
-            }
+            ctx.request_repaint_after(Duration::from_millis(33));
+            return commands;
         }
 
         match scenario {
-            ScreenshotScenario::MakeInitialBox => {
+            ScreenshotScenario::BoxDirectMakeReady
+            | ScreenshotScenario::FlatPanelDirectMakeReady => {
                 if self.state.active_jobs.is_empty() {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
-            ScreenshotScenario::GeneratingBoxIdeas => {
-                if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(
-                        &self.state,
-                        false,
-                        FoundryCandidateMode::Explore,
-                    ));
-                    self.screenshot_scenario_step = 2;
-                }
-            }
-            ScreenshotScenario::GeneratedBoxIdeas | ScreenshotScenario::SelectedComparison => {
-                if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(
-                        &self.state,
-                        false,
-                        FoundryCandidateMode::Explore,
-                    ));
-                    self.screenshot_scenario_step = 2;
-                } else if !self.state.candidates.is_empty() && self.state.active_jobs.is_empty() {
-                    let target_candidate = match scenario {
-                        ScreenshotScenario::SelectedComparison => self
-                            .state
-                            .candidates
-                            .get(1)
-                            .or_else(|| self.state.candidates.first()),
-                        _ => self.state.candidates.first(),
-                    };
-                    if let Some(candidate) = target_candidate
-                        && self.state.selected_candidate.as_ref() != Some(&candidate.id)
-                    {
-                        commands.push(FoundryAppCommand::SelectCandidate(Some(
-                            candidate.id.clone(),
-                        )));
-                    } else {
-                        let view_state = self.make_canvas_view_state();
-                        if candidate_review_is_ready(&view_state, &self.state.candidates) {
-                            self.complete_screenshot_scenario(scenario);
-                        } else {
-                            ctx.request_repaint_after(Duration::from_millis(33));
-                        }
-                    }
-                }
-            }
-            ScreenshotScenario::AdjustedBoxControl => {
+            ScreenshotScenario::BoxPropertyEdit => {
                 if self.screenshot_scenario_step < 2 {
                     commands.push(FoundryAppCommand::run(FoundryCommand::SetControl {
                         control_id: "edge_softness".to_owned(),
                         value: shape_foundry::ControlValue::Scalar(0.55),
+                    }));
+                    self.screenshot_scenario_step = 2;
+                } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::FlatPanelPropertyEdit => {
+                if self.screenshot_scenario_step < 2 {
+                    commands.push(FoundryAppCommand::run(FoundryCommand::SetControl {
+                        control_id: "edge_softness".to_owned(),
+                        value: shape_foundry::ControlValue::Scalar(0.45),
                     }));
                     self.screenshot_scenario_step = 2;
                 } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
@@ -4288,7 +4299,8 @@ fn make_canvas_controls_enabled(view_state: &MakeCanvasViewState) -> bool {
 }
 
 fn make_canvas_candidate_actions_enabled(view_state: &MakeCanvasViewState) -> bool {
-    view_state.model_ready
+    !view_state.direct_primitive_workflow
+        && view_state.model_ready
         && view_state.preview_ready
         && !matches!(
             view_state.mode,
@@ -4450,21 +4462,6 @@ fn candidate_previews_are_pending(
         })
 }
 
-fn candidate_review_is_ready(
-    view_state: &MakeCanvasViewState,
-    candidates: &[crate::foundry::view_model::FoundryCandidateCard],
-) -> bool {
-    view_state.mode == MakeCanvasMode::ReviewingIdeas
-        && view_state.preview_ready
-        && view_state.selected_comparison_visible
-        && candidates.iter().any(|candidate| {
-            candidate.selected
-                && candidate.selectable
-                && candidate.preview_failure.is_none()
-                && !candidate.rgba8.is_empty()
-        })
-}
-
 fn tab_for_workflow_step(index: usize) -> FoundryTab {
     match index {
         1 => FoundryTab::Home,
@@ -4477,23 +4474,33 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
     let path = env::temp_dir().join("shape-lab-screenshot-scenario.txt");
     let value = fs::read_to_string(path).ok()?;
     match value.trim() {
-        "make_initial_box" => Some(ScreenshotScenario::MakeInitialBox),
-        "generating_box_ideas" | "generating_whole_asset_ideas" => {
-            Some(ScreenshotScenario::GeneratingBoxIdeas)
+        "box_direct_make_ready" | "make_initial_box" => {
+            Some(ScreenshotScenario::BoxDirectMakeReady)
         }
-        "generated_box_ideas" | "generated_whole_asset_ideas" => {
-            Some(ScreenshotScenario::GeneratedBoxIdeas)
-        }
-        "selected_comparison" => Some(ScreenshotScenario::SelectedComparison),
-        "adjusted_box_control" => Some(ScreenshotScenario::AdjustedBoxControl),
+        "box_property_edit" | "adjusted_box_control" => Some(ScreenshotScenario::BoxPropertyEdit),
+        "flat_panel_direct_make_ready" => Some(ScreenshotScenario::FlatPanelDirectMakeReady),
+        "flat_panel_property_edit" => Some(ScreenshotScenario::FlatPanelPropertyEdit),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
         _ => None,
     }
 }
 
-fn read_screenshot_fixture_catalog() -> shape_foundry_catalog::FoundryFixtureCatalog {
-    shape_foundry_catalog::box_primitive::fixture_catalog()
+fn read_screenshot_fixture_catalog(
+    scenario: ScreenshotScenario,
+) -> shape_foundry_catalog::FoundryFixtureCatalog {
+    match scenario {
+        ScreenshotScenario::FlatPanelDirectMakeReady
+        | ScreenshotScenario::FlatPanelPropertyEdit => {
+            shape_foundry_catalog::flat_panel::fixture_catalog()
+        }
+        ScreenshotScenario::BoxDirectMakeReady
+        | ScreenshotScenario::BoxPropertyEdit
+        | ScreenshotScenario::PackDrawer
+        | ScreenshotScenario::ExportDrawer => {
+            shape_foundry_catalog::box_primitive::fixture_catalog()
+        }
+    }
 }
 
 fn screenshot_scenario_assertion(
@@ -4501,34 +4508,24 @@ fn screenshot_scenario_assertion(
     view_state: &MakeCanvasViewState,
 ) -> Result<(), String> {
     match scenario {
-        ScreenshotScenario::MakeInitialBox => {
+        ScreenshotScenario::BoxDirectMakeReady
+        | ScreenshotScenario::BoxPropertyEdit
+        | ScreenshotScenario::FlatPanelDirectMakeReady
+        | ScreenshotScenario::FlatPanelPropertyEdit => {
             require_screenshot_state(view_state.mode == MakeCanvasMode::Ready, scenario, "Ready")?;
             require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
-            require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")
+            require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")?;
+            require_screenshot_state(
+                view_state.direct_primitive_workflow,
+                scenario,
+                "direct primitive workflow",
+            )?;
+            require_screenshot_state(
+                !view_state.candidate_tray_visible && !view_state.selected_comparison_visible,
+                scenario,
+                "no active variation UI",
+            )
         }
-        ScreenshotScenario::GeneratingBoxIdeas => require_screenshot_state(
-            view_state.local_busy_visible
-                && view_state.mode == MakeCanvasMode::GeneratingWholeAssetIdeas,
-            scenario,
-            "local_busy_visible whole-asset generation",
-        ),
-        ScreenshotScenario::GeneratedBoxIdeas => require_screenshot_state(
-            view_state.candidate_tray_visible && view_state.selected_comparison_visible,
-            scenario,
-            "candidate_tray_visible with rendered selected comparison",
-        ),
-        ScreenshotScenario::SelectedComparison => require_screenshot_state(
-            view_state.selected_comparison_visible,
-            scenario,
-            "selected_comparison_visible",
-        ),
-        ScreenshotScenario::AdjustedBoxControl => require_screenshot_state(
-            view_state.mode == MakeCanvasMode::Ready
-                && view_state.model_ready
-                && view_state.preview_ready,
-            scenario,
-            "ready adjusted box control",
-        ),
         ScreenshotScenario::PackDrawer => require_screenshot_state(
             view_state.pack_drawer_visible,
             scenario,
@@ -4839,37 +4836,26 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "History",
         "Recent Projects",
         "Start",
-        ACTION_TRY_BOX_IDEAS,
-        ACTION_TRY_LIDDED_BOX_IDEAS,
-        ACTION_TRY_PANEL_IDEAS,
-        ACTION_TRY_HINGED_PANEL_IDEAS,
-        ACTION_TRY_HANDLED_PANEL_IDEAS,
-        "Found 4 clear ideas",
-        "Rejected 2 that looked too similar",
-        ACTION_CHOOSE_DIRECTION,
-        ACTION_USE_THIS_BOX,
-        ACTION_USE_THIS_PANEL,
+        ACTION_ADJUST_DIMENSIONS,
+        ACTION_EDIT_BOX_PRIMITIVE,
+        ACTION_EDIT_FLAT_PANEL,
+        ACTION_EDIT_LIDDED_BOX,
+        ACTION_EDIT_HINGED_PANEL,
+        ACTION_EDIT_HANDLED_PANEL,
         "Add to Pack",
         "Open Pack",
         "Open Export",
-        "Trying ideas...",
+        ACTION_EXPORT_CURRENT_PRIMITIVE,
         ACTION_CHOOSE_TEMPLATE,
         "Preparing model",
         "Rendering preview",
-        "Ready to try ideas",
+        "Ready for adjustments",
         PREVIEW_UPDATING_REASON,
         PREPARATION_TIMEOUT_MESSAGE,
         ASSET_PREPARING_REASON,
         STALE_RESULT_WARNING,
         "Try again when you are ready.",
         "Current Asset",
-        "Compare",
-        "What changed",
-        "No clear ideas yet",
-        "No clear ideas survived",
-        "The search found changes that were hidden or too subtle.",
-        "No ideas yet",
-        "Ideas",
         "Save",
         "Undo",
         "Choose starting point",
@@ -4908,25 +4894,21 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Preview building",
         "No matching starting point",
         "Make asset",
-        "Use the model as the workspace: try box ideas, tune controls, and compare.",
-        "Try box ideas, adjust box, Add to Pack, or Export.",
-        "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export.",
-        "Try panel ideas, adjust Proportions or Edge Softness, Add to Pack, or Export.",
-        "Try hinged panel ideas, adjust hinge edge or proportions, Add to Pack, or Export.",
-        "Try handled panel ideas, adjust handle or proportions, Add to Pack, or Export.",
-        "Lidded box ideas ready",
-        "Panel ideas ready",
-        "Hinged panel ideas ready",
-        "Handled panel ideas ready",
-        "Use this box, or reject it.",
-        "Use this panel, or reject it.",
+        "Adjust dimensions, Add to Pack, or Export current primitive.",
+        "Direct properties ready",
+        "Width",
+        "Depth",
+        "Height",
+        "Thickness",
+        "Edge Softness",
+        "Lid Seam",
+        "Hinge Edge",
+        VIEW_ORBIT_LABEL,
+        VIEW_RESET_LABEL,
+        VIEW_AXIS_LABEL,
         "Current Asset",
-        "Ideas",
-        "Trying ideas",
         "Current asset",
         "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
-        "Preview could not be rendered for this idea.",
-        "Preview this idea before using it.",
         "Project history",
         "Review previous project steps and branch from a saved point.",
         "saved step(s)",
@@ -5004,25 +4986,21 @@ pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static s
 pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'static>> {
     vec![
         ActionSpec::enabled(ACTION_START, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_BOX_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_LIDDED_BOX_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_PANEL_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_HINGED_PANEL_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_HANDLED_PANEL_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_ADJUST_DIMENSIONS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_EDIT_BOX_PRIMITIVE, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_EDIT_FLAT_PANEL, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_EDIT_LIDDED_BOX, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_EDIT_HINGED_PANEL, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_USE_THIS_BOX, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_USE_THIS_PANEL, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UNLOCK_CONTROLS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_ADD_TO_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_OPEN_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_EXPORT, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_OPEN_EXPORT, ButtonTone::Secondary),
+        ActionSpec::enabled(ACTION_EXPORT_CURRENT_PRIMITIVE, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_CLOSE_DRAWER, ButtonTone::Secondary),
     ]
 }
@@ -5086,6 +5064,7 @@ struct MakeCanvasBannerContext<'a> {
     candidate_output: Option<&'a FoundryCandidateOutput>,
     local_warning_message: Option<&'a str>,
     local_error_message: Option<&'a str>,
+    direct_primitive_workflow: bool,
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
@@ -5107,6 +5086,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         candidate_output,
         local_warning_message,
         local_error_message,
+        direct_primitive_workflow,
         simple_box_make_baseline,
         lidded_box_baseline,
         flat_panel_baseline,
@@ -5127,7 +5107,8 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Error,
         );
     }
-    if matches!(mode, MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart)
+    if !direct_primitive_workflow
+        && matches!(mode, MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart)
         && candidate_output.is_some_and(|output| output.candidates.is_empty())
     {
         let (title, message) = no_candidates_recovery_copy(active_group, candidate_output);
@@ -5206,7 +5187,13 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Error,
         ),
         MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
-            if lidded_box_baseline && matches!(mode, MakeCanvasMode::Ready) {
+            if direct_primitive_workflow {
+                (
+                    "Ready".to_owned(),
+                    "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned(),
+                    BannerTone::Success,
+                )
+            } else if lidded_box_baseline && matches!(mode, MakeCanvasMode::Ready) {
                 (
                     "Ready".to_owned(),
                     "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
@@ -5252,6 +5239,12 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
 }
 
 fn empty_candidate_tray_copy(view_state: &MakeCanvasViewState) -> (&'static str, &'static str) {
+    if view_state.direct_primitive_workflow {
+        return (
+            "Direct properties ready",
+            "Adjust dimensions, Add to Pack, or Export current primitive.",
+        );
+    }
     if view_state.mode == MakeCanvasMode::PreparingAsset {
         (
             "Ideas unlock when ready",
@@ -5293,6 +5286,41 @@ fn no_candidates_recovery_copy(
         "No clear ideas survived".to_owned(),
         format!("{reason} Try again or adjust the current asset."),
     )
+}
+
+fn direct_property_panel_title(profile_kind: MakeProfileKind) -> &'static str {
+    match profile_kind {
+        MakeProfileKind::BoxPrimitive => ACTION_EDIT_BOX_PRIMITIVE,
+        MakeProfileKind::FlatPanelPrimitive => ACTION_EDIT_FLAT_PANEL,
+        MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
+        MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
+        MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
+        MakeProfileKind::Other => "Adjust controls",
+    }
+}
+
+fn direct_property_labels(profile_kind: MakeProfileKind) -> &'static [&'static str] {
+    match profile_kind {
+        MakeProfileKind::BoxPrimitive => &["Width", "Depth", "Height", "Edge Softness"],
+        MakeProfileKind::FlatPanelPrimitive => &["Width", "Height", "Thickness", "Edge Softness"],
+        MakeProfileKind::LiddedBox => &["Width", "Depth", "Height", "Edge Softness", "Lid Seam"],
+        MakeProfileKind::HingedPanel => &[
+            "Width",
+            "Height",
+            "Thickness",
+            "Edge Softness",
+            "Hinge Edge",
+        ],
+        MakeProfileKind::HandledPanel => &[
+            "Width",
+            "Height",
+            "Thickness",
+            "Edge Softness",
+            "Hinge Edge",
+            "Handle",
+        ],
+        MakeProfileKind::Other => &[],
+    }
 }
 
 fn make_canvas_warning_title(message: &str) -> &'static str {
@@ -5344,9 +5372,15 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
             "Use this idea, or try another idea."
         }
         MakeCanvasMode::ReviewingIdeas => "Compare the selected idea against the current asset.",
+        MakeCanvasMode::FocusedPart if view_state.direct_primitive_workflow => {
+            "Adjust bounded properties for this primitive."
+        }
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
+        MakeCanvasMode::Ready if view_state.direct_primitive_workflow => {
+            "Adjust dimensions directly."
+        }
         MakeCanvasMode::Ready if view_state.lidded_box_baseline => {
             "Try lidded box ideas or adjust lid seam."
         }
@@ -5414,6 +5448,9 @@ fn make_canvas_next_action_hint(
         (MakeCanvasMode::ReviewingIdeas, _, false) => {
             "Select an idea to compare it against the current asset.".to_owned()
         }
+        (MakeCanvasMode::FocusedPart, _, _) if profile_kind.direct_primitive_workflow() => {
+            "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+        }
         (MakeCanvasMode::FocusedPart, Some(part), _) => {
             format!(
                 "Try {} ideas, lock this part, or clear focus.",
@@ -5430,6 +5467,9 @@ fn make_canvas_next_action_hint(
             "Choose an export option when readiness is clear.".to_owned()
         }
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
+        (MakeCanvasMode::Ready, _, _) if profile_kind.direct_primitive_workflow() => {
+            "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+        }
         (MakeCanvasMode::Ready, _, _) if profile_kind.is_lidded_box() => {
             "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
                 .to_owned()
@@ -5476,6 +5516,22 @@ fn draw_busy_overlay(ui: &egui::Ui, rect: egui::Rect, label: &str) {
         egui::FontId::proportional(18.0),
         colors.text,
     );
+}
+
+fn show_make_view_controls(ui: &mut egui::Ui) {
+    product_card(ui, false, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(VIEW_ORBIT_LABEL, StatusTone::Neutral),
+            );
+            let _ = status_pill(
+                ui,
+                StatusPillSpec::new(VIEW_RESET_LABEL, StatusTone::Neutral),
+            );
+            let _ = status_pill(ui, StatusPillSpec::new(VIEW_AXIS_LABEL, StatusTone::Ready));
+        });
+    });
 }
 
 fn draw_focus_callout(ui: &egui::Ui, rect: egui::Rect, label: &str) {
@@ -9232,24 +9288,37 @@ mod tests {
             "Variation mode",
             "Complete Looks",
             "Candidate tray",
+            "candidate",
+            "generated ideas",
+            "survivor",
             "Model workspace",
             "Focus Part",
             ACTION_FOCUS,
             "Generate 6 Directions",
+            "Use this idea",
             "Try body ideas",
+            ACTION_TRY_BOX_IDEAS,
+            ACTION_CHOOSE_DIRECTION,
             "Material looks are not previewable yet.",
         ] {
             assert!(
-                !strings.contains(&forbidden),
+                !strings.iter().any(|string| string
+                    .to_ascii_lowercase()
+                    .contains(&forbidden.to_ascii_lowercase())),
                 "Make canvas product copy should not expose {forbidden}"
             );
         }
 
         for required in [
-            "Use this idea",
-            ACTION_TRY_BOX_IDEAS,
-            ACTION_CHOOSE_DIRECTION,
-            "Ideas",
+            ACTION_ADJUST_DIMENSIONS,
+            ACTION_EDIT_BOX_PRIMITIVE,
+            ACTION_EDIT_FLAT_PANEL,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
+            "Width",
+            "Depth",
+            "Height",
+            "Thickness",
+            "Edge Softness",
         ] {
             assert!(
                 strings.contains(&required),
@@ -9259,7 +9328,7 @@ mod tests {
     }
 
     #[test]
-    fn make_canvas_view_state_tracks_generated_candidates_and_comparison() {
+    fn direct_make_ignores_generated_candidates_and_comparison() {
         let mut app = visible_state_test_app();
         app.state.current_preview = Some(test_preview_image("current"));
         app.state.current_output = Some(Box::new(
@@ -9275,17 +9344,20 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(visible.candidate_count, 1);
-        assert!(visible.candidate_tray_visible);
-        assert!(visible.selected_candidate_present);
-        assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
-        assert_eq!(visible.next_action_hint, "Use this idea, or reject it.");
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.candidate_count, 0);
+        assert!(!visible.candidate_tray_visible);
+        assert!(!visible.selected_candidate_present);
+        assert!(!visible.selected_comparison_visible);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(
+            visible.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
     }
 
     #[test]
-    fn make_canvas_view_state_requires_selected_candidate_for_comparison() {
+    fn direct_make_has_no_selected_candidate_comparison() {
         let mut app = visible_state_test_app();
         app.state.current_preview = Some(test_preview_image("current"));
         app.state.current_output = Some(Box::new(
@@ -9299,13 +9371,16 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(visible.candidate_count, 1);
-        assert!(visible.candidate_tray_visible);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.candidate_count, 0);
+        assert!(!visible.candidate_tray_visible);
         assert!(!visible.selected_candidate_present);
-        assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
-        assert_eq!(visible.next_action_hint, "Use this idea, or reject it.");
+        assert!(!visible.selected_comparison_visible);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(
+            visible.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
     }
 
     #[test]
@@ -9328,10 +9403,11 @@ mod tests {
         assert!(visible.focused_part_label.is_none());
         assert!(!visible.focused_part_visible);
         assert!(!visible.focused_part_actions_visible);
-        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(visible.property_panel_title, ACTION_EDIT_BOX_PRIMITIVE);
         assert_eq!(
             visible.next_action_hint,
-            "Try box ideas, adjust box, Add to Pack, or Export."
+            "Adjust dimensions, Add to Pack, or Export current primitive."
         );
     }
 
@@ -9354,21 +9430,22 @@ mod tests {
         assert_eq!(visible.primary_title, "Box Primitive");
         assert!(visible.focused_part_label.is_none());
         assert!(!visible.focused_part_visible);
-        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(visible.property_panel_title, ACTION_EDIT_BOX_PRIMITIVE);
     }
 
     #[test]
     fn make_canvas_primary_action_changes_by_state() {
         let ready = ready_visible_state_test_app().make_canvas_view_state();
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
         assert!(ready.primary_action_enabled);
 
         let mut focused = ready_visible_state_test_app();
         set_test_focus_scope(&mut focused, "body", "Body");
         let focused = focused.make_canvas_view_state();
         assert_eq!(focused.mode, MakeCanvasMode::Ready);
-        assert_eq!(focused.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(focused.primary_action_label, ACTION_ADJUST_DIMENSIONS);
 
         let mut generating = ready_visible_state_test_app();
         generating
@@ -9384,15 +9461,18 @@ mod tests {
             })
             .expect("candidate job schedules");
         let generating = generating.make_canvas_view_state();
-        assert_eq!(generating.primary_action_label, ACTION_GENERATING_IDEAS);
-        assert!(!generating.primary_action_enabled);
+        assert_eq!(generating.mode, MakeCanvasMode::Ready);
+        assert_eq!(generating.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert!(generating.primary_action_enabled);
+        assert!(!generating.candidate_tray_visible);
 
         let mut reviewing = ready_visible_state_test_app();
         reviewing.state.candidates = vec![test_candidate_card("candidate-a", false, None)];
         let reviewing = reviewing.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_CHOOSE_DIRECTION);
+        assert_eq!(reviewing.mode, MakeCanvasMode::Ready);
+        assert_eq!(reviewing.primary_action_label, ACTION_ADJUST_DIMENSIONS);
         assert!(reviewing.primary_action_enabled);
+        assert!(!reviewing.selected_comparison_visible);
     }
 
     #[test]
@@ -9472,10 +9552,10 @@ mod tests {
         let visible = app.make_canvas_view_state();
 
         assert_eq!(visible.primary_title, "Box Primitive");
-        assert_eq!(visible.candidate_count, 1);
-        assert!(visible.candidate_tray_visible);
-        assert!(visible.selected_candidate_present);
-        assert!(visible.selected_comparison_visible);
+        assert_eq!(visible.candidate_count, 0);
+        assert!(!visible.candidate_tray_visible);
+        assert!(!visible.selected_candidate_present);
+        assert!(!visible.selected_comparison_visible);
         assert_ne!(visible.primary_title, "Whole asset");
     }
 
@@ -9522,45 +9602,30 @@ mod tests {
         let mut app = ready_visible_state_test_app();
         assert!(
             screenshot_scenario_assertion(
-                ScreenshotScenario::MakeInitialBox,
+                ScreenshotScenario::BoxDirectMakeReady,
                 &app.make_canvas_view_state(),
             )
             .is_ok()
         );
 
-        app.state
-            .request_candidates(FoundryCandidateRequest {
-                seed: 1,
-                proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
-                result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
-                mode: FoundryCandidateMode::Explore,
-                strategy_id: None,
-                preference_profile: None,
-                variation_intent: VariationIntent::complete_look(),
-            })
-            .expect("candidate job schedules");
+        let box_edited = ready_visible_state_test_app().make_canvas_view_state();
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::BoxPropertyEdit, &box_edited,)
+                .is_ok()
+        );
+
+        let flat_panel =
+            ready_fixture_state_test_app(shape_foundry_catalog::flat_panel::fixture_catalog())
+                .make_canvas_view_state();
         assert!(
             screenshot_scenario_assertion(
-                ScreenshotScenario::GeneratingBoxIdeas,
-                &app.make_canvas_view_state(),
+                ScreenshotScenario::FlatPanelDirectMakeReady,
+                &flat_panel,
             )
             .is_ok()
         );
-
-        app.state.active_jobs.clear();
-        let selected = shape_foundry::FoundryCandidateId("candidate-a".to_owned());
-        app.state.selected_candidate = Some(selected.clone());
-        app.state.candidates = vec![test_candidate_card(&selected.0, true, None)];
-        let view = app.make_canvas_view_state();
         assert!(
-            screenshot_scenario_assertion(ScreenshotScenario::GeneratedBoxIdeas, &view).is_ok()
-        );
-        assert!(
-            screenshot_scenario_assertion(ScreenshotScenario::SelectedComparison, &view).is_ok()
-        );
-        let adjusted = ready_visible_state_test_app().make_canvas_view_state();
-        assert!(
-            screenshot_scenario_assertion(ScreenshotScenario::AdjustedBoxControl, &adjusted)
+            screenshot_scenario_assertion(ScreenshotScenario::FlatPanelPropertyEdit, &flat_panel)
                 .is_ok()
         );
 
@@ -9715,11 +9780,11 @@ mod tests {
 
         let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
 
-        assert!(!layout.compact_ideas);
-        assert!(layout.inline_ideas);
+        assert!(layout.compact_ideas);
+        assert!(!layout.inline_ideas);
         assert_eq!(layout.tray_height, 0.0);
         assert_eq!(layout.top_height, 860.0);
-        assert!(layout.ideas_width >= 650.0);
+        assert_eq!(layout.ideas_width, 0.0);
         assert!(make_canvas_inspector_build_actions_visible(&visible));
     }
 
@@ -9733,7 +9798,8 @@ mod tests {
         let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
 
         assert!(!visible.material_look_tray_visible);
-        assert!(layout.inline_ideas);
+        assert!(!visible.candidate_tray_visible);
+        assert!(!layout.inline_ideas);
         assert_eq!(layout.tray_height, 0.0);
         assert_eq!(layout.top_height, 860.0);
     }
@@ -9768,8 +9834,9 @@ mod tests {
             .expect("candidate job schedules");
         assert_eq!(
             app.make_canvas_view_state().candidate_tray_state,
-            MakeCandidateTrayState::GeneratingSkeletons
+            MakeCandidateTrayState::EmptyReady
         );
+        assert!(!app.make_canvas_view_state().candidate_tray_visible);
 
         app.state.active_jobs.clear();
         let mut pending_card = test_candidate_card("candidate-pending", false, None);
@@ -9782,30 +9849,30 @@ mod tests {
         pending_card.selectable = false;
         app.state.candidates = vec![pending_card];
         let visible = app.make_canvas_view_state();
-        assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
         assert_eq!(
             visible.candidate_tray_state,
-            MakeCandidateTrayState::HasCandidates
+            MakeCandidateTrayState::EmptyReady
         );
-        assert_eq!(visible.local_banner_title, "Rendering previews");
+        assert!(!visible.candidate_tray_visible);
 
         app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
         assert_eq!(
             app.make_canvas_view_state().candidate_tray_state,
-            MakeCandidateTrayState::HasCandidates
+            MakeCandidateTrayState::EmptyReady
         );
 
         app.state.candidates.clear();
         app.state.candidate_output = Some(Box::new(empty_test_candidate_output(3, 1, 0)));
         assert_eq!(
             app.make_canvas_view_state().candidate_tray_state,
-            MakeCandidateTrayState::NoCandidatesWithRecovery
+            MakeCandidateTrayState::EmptyReady
         );
 
         app.state.status = Some("Candidate search failed locally.".to_owned());
         assert_eq!(
             app.make_canvas_view_state().candidate_tray_state,
-            MakeCandidateTrayState::ErrorWithRecovery
+            MakeCandidateTrayState::EmptyReady
         );
     }
 
@@ -9820,18 +9887,16 @@ mod tests {
 
         assert_eq!(
             visible.candidate_tray_state,
-            MakeCandidateTrayState::NoCandidatesWithRecovery
+            MakeCandidateTrayState::EmptyReady
         );
-        assert!(visible.candidate_search_finished_empty);
-        assert_eq!(visible.local_banner_title, "No clear ideas survived");
-        assert!(!visible.local_banner_message.contains("body"));
-        assert!(
-            visible
-                .local_banner_message
-                .contains("hidden or too subtle")
+        assert!(!visible.candidate_search_finished_empty);
+        assert_eq!(visible.local_banner_title, "Ready");
+        assert_eq!(
+            visible.local_banner_message,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
         );
         assert!(!visible.focused_no_candidates_recovery_visible);
-        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
     }
 
     #[test]
@@ -9850,18 +9915,15 @@ mod tests {
 
         let pending_visible = app.make_canvas_view_state();
 
-        assert_eq!(pending_visible.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(pending_visible.mode, MakeCanvasMode::Ready);
         assert_eq!(
             pending_visible.candidate_tray_state,
-            MakeCandidateTrayState::HasCandidates
+            MakeCandidateTrayState::EmptyReady
         );
-        assert_eq!(pending_visible.local_banner_title, "Rendering previews");
-        assert_eq!(
-            pending_visible.local_banner_message,
-            "Candidate shells are ready. Use an idea after its preview renders."
-        );
+        assert_eq!(pending_visible.local_banner_title, "Ready");
+        assert!(!pending_visible.candidate_tray_visible);
         assert!(!pending_visible.selected_comparison_visible);
-        assert!(!pending_visible.primary_action_enabled);
+        assert!(pending_visible.primary_action_enabled);
         assert!(app.accept_visible_candidate_command().is_none());
 
         let mut pending_card = test_candidate_card("candidate-pending", false, None);
@@ -9878,12 +9940,12 @@ mod tests {
 
         let mixed_visible = app.make_canvas_view_state();
 
-        assert_eq!(mixed_visible.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(mixed_visible.local_banner_title, "Rendering previews");
-        assert!(mixed_visible.selected_comparison_visible);
-        assert!(!mixed_visible.primary_action_enabled);
-        assert!(make_canvas_candidate_actions_enabled(&mixed_visible));
-        assert!(app.accept_visible_candidate_command().is_some());
+        assert_eq!(mixed_visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(mixed_visible.local_banner_title, "Ready");
+        assert!(!mixed_visible.selected_comparison_visible);
+        assert!(mixed_visible.primary_action_enabled);
+        assert!(!make_canvas_candidate_actions_enabled(&mixed_visible));
+        assert!(app.accept_visible_candidate_command().is_none());
     }
 
     #[test]
@@ -9935,7 +9997,10 @@ mod tests {
                 .count(),
             1
         );
-        assert!(!app.make_canvas_view_state().primary_action_enabled);
+        let visible = app.make_canvas_view_state();
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert!(visible.primary_action_enabled);
+        assert!(!visible.candidate_tray_visible);
     }
 
     #[test]
@@ -9957,13 +10022,16 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert!(visible.idea_generation_timed_out);
-        assert!(visible.idea_generation_fallback_visible);
+        assert!(!visible.idea_generation_timed_out);
+        assert!(!visible.idea_generation_fallback_visible);
         assert_eq!(
             visible.local_banner_message,
-            IDEA_GENERATION_TIMEOUT_MESSAGE
+            "Adjust dimensions, Add to Pack, or Export current primitive."
         );
-        assert_eq!(visible.next_action_hint, IDEA_GENERATION_TIMEOUT_MESSAGE);
+        assert_eq!(
+            visible.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
         let labels = rendered_action_labels_for_default_shell();
         assert!(labels.contains(&ACTION_CANCEL));
         assert!(labels.contains(&ACTION_KEEP_WAITING));
@@ -10003,12 +10071,12 @@ mod tests {
         assert!(!app.state.active_jobs.contains_key(&job_id));
         assert!(app.state.stale_jobs.contains(&job_id));
         assert_eq!(app.state.make_job_trace.summary().total_jobs_canceled, 1);
+        assert_eq!(visible.local_warning_message.as_deref(), None);
+        assert_eq!(visible.local_banner_title, "Ready");
         assert_eq!(
-            visible.local_warning_message.as_deref(),
-            Some(CANCELED_IDEA_SEARCH_WARNING)
+            visible.local_banner_message,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
         );
-        assert_eq!(visible.local_banner_title, "Idea search canceled");
-        assert!(visible.local_banner_message.contains(ACTION_TRY_AGAIN));
     }
 
     #[test]
@@ -10048,9 +10116,19 @@ mod tests {
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_BOX_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_BOX);
-        assert!(ready.next_action_hint.contains("adjust box"));
+        assert!(ready.direct_primitive_workflow);
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_BOX_PRIMITIVE);
+        assert_eq!(
+            ready.property_labels,
+            vec!["Width", "Depth", "Height", "Edge Softness"]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
         assert!(!app.material_look_action_visible(&ready));
         assert!(!ready.material_look_tray_visible);
         let groups = app
@@ -10063,85 +10141,7 @@ mod tests {
             groups.is_empty(),
             "Box Primitive should not expose part focus chips"
         );
-
-        let request_command = app
-            .make_primary_candidate_command()
-            .expect("request command");
-        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
-            panic!("expected candidate request command");
-        };
-        assert_eq!(
-            request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::CompleteLook]
-        );
-        for forbidden_channel in [
-            shape_foundry::VariationChannel::Surface,
-            shape_foundry::VariationChannel::Rig,
-            shape_foundry::VariationChannel::Motion,
-        ] {
-            assert!(
-                !request
-                    .variation_intent
-                    .channels
-                    .contains(&forbidden_channel)
-            );
-        }
-
-        let candidate_effects = app
-            .state
-            .handle_command(request_command)
-            .expect("Try box ideas schedules");
-        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
-        let (preview_request, candidate_output) = match &candidate_event {
-            FoundryJobEvent::CandidatesGenerated {
-                request, output, ..
-            } => {
-                assert!(
-                    !output.candidates.is_empty(),
-                    "Try box ideas should yield candidates: {:?} {:?}",
-                    output.diagnostics,
-                    output.reliability_report
-                );
-                (request.clone(), output.as_ref().clone())
-            }
-            other => panic!("expected generated candidates, got {other:?}"),
-        };
-        assert!(app.state.handle_job_event(candidate_event));
-
-        let preview_effects = app
-            .state
-            .request_candidate_previews(preview_request, candidate_output)
-            .expect("candidate previews schedule");
-        let preview_event = run_fixture_effect(preview_effects, &fixture);
-        assert!(app.state.handle_job_event(preview_event));
-
-        let reviewing = app.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_CHOOSE_DIRECTION);
-        assert_eq!(
-            reviewing.use_candidate_action_label,
-            ACTION_CHOOSE_DIRECTION
-        );
-        assert!(reviewing.selected_comparison_visible);
-        assert!(
-            app.state
-                .candidates
-                .iter()
-                .any(|candidate| !candidate.rgba8.is_empty())
-        );
-
-        let build_before_accept = app.state.current_build.clone();
-        let accept_effects = app
-            .state
-            .handle_command(
-                app.accept_visible_candidate_command()
-                    .expect("selectable box idea"),
-            )
-            .expect("Use this idea schedules");
-        let accept_event = run_fixture_effect(accept_effects, &fixture);
-        assert!(app.state.handle_job_event(accept_event));
-        assert_ne!(app.state.current_build, build_before_accept);
-        assert!(app.state.candidates.is_empty());
+        assert!(app.make_primary_candidate_command().is_none());
 
         let adjust_effects = app
             .state
@@ -10175,14 +10175,21 @@ mod tests {
 
         let simple_make_copy = [
             ready.primary_action_label.as_str(),
-            reviewing.primary_action_label.as_str(),
-            ready.adjust_heading_label,
+            ready.property_panel_title,
             ACTION_ADD_TO_PACK,
-            ACTION_EXPORT,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
         ]
         .join("\n")
         .to_ascii_lowercase();
-        for forbidden in ["surface", "material", "rig", "motion", "focus part"] {
+        for forbidden in [
+            "surface",
+            "material",
+            "rig",
+            "motion",
+            "focus part",
+            "try ideas",
+            "candidate",
+        ] {
             assert!(
                 !simple_make_copy.contains(forbidden),
                 "Box Primitive baseline copy must not expose {forbidden}: {simple_make_copy}"
@@ -10197,12 +10204,21 @@ mod tests {
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
         assert!(ready.simple_box_make_baseline);
         assert!(ready.lidded_box_baseline);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_LIDDED_BOX_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_LID_SEAM);
-        assert!(ready.next_action_hint.contains("adjust lid seam"));
-        assert!(ready.next_action_hint.contains("proportions"));
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_LIDDED_BOX);
+        assert_eq!(
+            ready.property_labels,
+            vec!["Width", "Depth", "Height", "Edge Softness", "Lid Seam"]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
         assert!(!app.material_look_action_visible(&ready));
         assert!(!ready.material_look_tray_visible);
         assert_eq!(app.material_look_export_copy(), None);
@@ -10232,78 +10248,7 @@ mod tests {
             groups.is_empty(),
             "Lidded Box should not expose part focus chips"
         );
-
-        let request_command = app
-            .make_primary_candidate_command()
-            .expect("request command");
-        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
-            panic!("expected candidate request command");
-        };
-        assert_eq!(
-            request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::CompleteLook]
-        );
-
-        let candidate_effects = app
-            .state
-            .handle_command(request_command)
-            .expect("Try lidded box ideas schedules");
-        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
-        let (preview_request, candidate_output) = match &candidate_event {
-            FoundryJobEvent::CandidatesGenerated {
-                request, output, ..
-            } => {
-                assert!(
-                    !output.candidates.is_empty(),
-                    "Try lidded box ideas should yield candidates: {:?} {:?}",
-                    output.diagnostics,
-                    output.reliability_report
-                );
-                assert!(
-                    output
-                        .candidates
-                        .iter()
-                        .any(|candidate| !candidate.changed_controls.is_empty()),
-                    "Try lidded box ideas should yield at least one changed candidate"
-                );
-                (request.clone(), output.as_ref().clone())
-            }
-            other => panic!("expected generated candidates, got {other:?}"),
-        };
-        assert!(app.state.handle_job_event(candidate_event));
-
-        let preview_effects = app
-            .state
-            .request_candidate_previews(preview_request, candidate_output)
-            .expect("candidate previews schedule");
-        let preview_event = run_fixture_effect(preview_effects, &fixture);
-        assert!(app.state.handle_job_event(preview_event));
-
-        let reviewing = app.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_BOX);
-        assert_eq!(reviewing.next_action_hint, "Use this box, or reject it.");
-        assert!(reviewing.selected_comparison_visible);
-        assert!(
-            app.state
-                .candidates
-                .iter()
-                .any(|candidate| !candidate.rgba8.is_empty())
-        );
-
-        let build_before_accept = app.state.current_build.clone();
-        let accept_effects = app
-            .state
-            .handle_command(
-                app.accept_visible_candidate_command()
-                    .expect("selectable lidded box idea"),
-            )
-            .expect("Use this box schedules");
-        let accept_event = run_fixture_effect(accept_effects, &fixture);
-        assert!(app.state.handle_job_event(accept_event));
-        assert_ne!(app.state.current_build, build_before_accept);
-        assert!(app.state.candidates.is_empty());
+        assert!(app.make_primary_candidate_command().is_none());
 
         let adjust_effects = app
             .state
@@ -10337,17 +10282,24 @@ mod tests {
 
         let simple_make_copy = [
             ready.primary_action_label.as_str(),
-            reviewing.primary_action_label.as_str(),
-            ready.adjust_heading_label,
+            ready.property_panel_title,
             LIDDED_BOX_EXPORT_TITLE,
             LIDDED_BOX_EXPORT_DETAIL,
             BOX_PRIMITIVE_EXPORT_LIMITATION,
             ACTION_ADD_TO_PACK,
-            ACTION_EXPORT,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
         ]
         .join("\n")
         .to_ascii_lowercase();
-        for forbidden in ["crate", "case", "surface", "material looks", "focus part"] {
+        for forbidden in [
+            "crate",
+            "case",
+            "surface",
+            "material looks",
+            "focus part",
+            "try ideas",
+            "candidate",
+        ] {
             assert!(
                 !simple_make_copy.contains(forbidden),
                 "Lidded Box baseline copy must not expose {forbidden}: {simple_make_copy}"
@@ -10365,14 +10317,22 @@ mod tests {
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
         assert!(ready.simple_box_make_baseline);
         assert!(ready.flat_panel_baseline);
         assert!(!ready.lidded_box_baseline);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_PANEL_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_PANEL);
-        assert!(ready.next_action_hint.contains("Try panel ideas"));
-        assert!(ready.next_action_hint.contains("Proportions"));
-        assert!(ready.next_action_hint.contains("Edge Softness"));
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_FLAT_PANEL);
+        assert_eq!(
+            ready.property_labels,
+            vec!["Width", "Height", "Thickness", "Edge Softness"]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
         assert!(!app.material_look_action_visible(&ready));
         assert!(!ready.material_look_tray_visible);
         assert_eq!(app.material_look_export_copy(), None);
@@ -10403,78 +10363,7 @@ mod tests {
             groups.is_empty(),
             "Flat Panel should not expose part focus chips"
         );
-
-        let request_command = app
-            .make_primary_candidate_command()
-            .expect("request command");
-        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
-            panic!("expected candidate request command");
-        };
-        assert_eq!(
-            request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::CompleteLook]
-        );
-
-        let candidate_effects = app
-            .state
-            .handle_command(request_command)
-            .expect("Try panel ideas schedules");
-        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
-        let (preview_request, candidate_output) = match &candidate_event {
-            FoundryJobEvent::CandidatesGenerated {
-                request, output, ..
-            } => {
-                assert!(
-                    !output.candidates.is_empty(),
-                    "Try panel ideas should yield candidates: {:?} {:?}",
-                    output.diagnostics,
-                    output.reliability_report
-                );
-                assert!(
-                    output
-                        .candidates
-                        .iter()
-                        .any(|candidate| !candidate.changed_controls.is_empty()),
-                    "Try panel ideas should yield at least one changed candidate"
-                );
-                (request.clone(), output.as_ref().clone())
-            }
-            other => panic!("expected generated candidates, got {other:?}"),
-        };
-        assert!(app.state.handle_job_event(candidate_event));
-
-        let preview_effects = app
-            .state
-            .request_candidate_previews(preview_request, candidate_output)
-            .expect("candidate previews schedule");
-        let preview_event = run_fixture_effect(preview_effects, &fixture);
-        assert!(app.state.handle_job_event(preview_event));
-
-        let reviewing = app.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.next_action_hint, "Use this panel, or reject it.");
-        assert!(reviewing.selected_comparison_visible);
-        assert!(
-            app.state
-                .candidates
-                .iter()
-                .any(|candidate| !candidate.rgba8.is_empty())
-        );
-
-        let build_before_accept = app.state.current_build.clone();
-        let accept_effects = app
-            .state
-            .handle_command(
-                app.accept_visible_candidate_command()
-                    .expect("selectable panel idea"),
-            )
-            .expect("Use this panel schedules");
-        let accept_event = run_fixture_effect(accept_effects, &fixture);
-        assert!(app.state.handle_job_event(accept_event));
-        assert_ne!(app.state.current_build, build_before_accept);
-        assert!(app.state.candidates.is_empty());
+        assert!(app.make_primary_candidate_command().is_none());
 
         let adjust_effects = app
             .state
@@ -10508,13 +10397,12 @@ mod tests {
 
         let simple_make_copy = [
             ready.primary_action_label.as_str(),
-            reviewing.primary_action_label.as_str(),
-            ready.adjust_heading_label,
+            ready.property_panel_title,
             FLAT_PANEL_EXPORT_TITLE,
             FLAT_PANEL_EXPORT_DETAIL,
             BOX_PRIMITIVE_EXPORT_LIMITATION,
             ACTION_ADD_TO_PACK,
-            ACTION_EXPORT,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
         ]
         .join("\n")
         .to_ascii_lowercase();
@@ -10527,6 +10415,8 @@ mod tests {
             "focus part",
             "open",
             "close",
+            "try ideas",
+            "candidate",
         ] {
             assert!(
                 !simple_make_copy.contains(forbidden),
@@ -10545,15 +10435,29 @@ mod tests {
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
         assert!(ready.simple_box_make_baseline);
         assert!(ready.hinged_panel_baseline);
         assert!(!ready.flat_panel_baseline);
         assert!(!ready.lidded_box_baseline);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_HINGED_PANEL_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_HINGE_EDGE);
-        assert!(ready.next_action_hint.contains("Try hinged panel ideas"));
-        assert!(ready.next_action_hint.contains("hinge edge"));
-        assert!(ready.next_action_hint.contains("proportions"));
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_HINGED_PANEL);
+        assert_eq!(
+            ready.property_labels,
+            vec![
+                "Width",
+                "Height",
+                "Thickness",
+                "Edge Softness",
+                "Hinge Edge"
+            ]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
         assert!(!app.material_look_action_visible(&ready));
         assert!(!ready.material_look_tray_visible);
         assert_eq!(app.material_look_export_copy(), None);
@@ -10584,87 +10488,7 @@ mod tests {
             groups.is_empty(),
             "Hinged Panel should not expose part focus chips"
         );
-
-        let request_command = app
-            .make_primary_candidate_command()
-            .expect("request command");
-        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
-            panic!("expected candidate request command");
-        };
-        assert_eq!(
-            request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::CompleteLook]
-        );
-
-        let candidate_effects = app
-            .state
-            .handle_command(request_command)
-            .expect("Try hinged panel ideas schedules");
-        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
-        let (preview_request, candidate_output) = match &candidate_event {
-            FoundryJobEvent::CandidatesGenerated {
-                request, output, ..
-            } => {
-                assert!(
-                    !output.candidates.is_empty(),
-                    "Try hinged panel ideas should yield candidates: {:?} {:?}",
-                    output.diagnostics,
-                    output.reliability_report
-                );
-                assert!(
-                    output
-                        .candidates
-                        .iter()
-                        .any(|candidate| !candidate.changed_controls.is_empty()),
-                    "Try hinged panel ideas should yield at least one changed candidate"
-                );
-                for candidate in &output.candidates {
-                    for forbidden in ["Box", "Door", "Open", "Close", "Animation"] {
-                        assert!(
-                            !candidate.label.contains(forbidden),
-                            "Hinged Panel candidate must not use {forbidden}: {}",
-                            candidate.label
-                        );
-                    }
-                }
-                (request.clone(), output.as_ref().clone())
-            }
-            other => panic!("expected generated candidates, got {other:?}"),
-        };
-        assert!(app.state.handle_job_event(candidate_event));
-
-        let preview_effects = app
-            .state
-            .request_candidate_previews(preview_request, candidate_output)
-            .expect("candidate previews schedule");
-        let preview_event = run_fixture_effect(preview_effects, &fixture);
-        assert!(app.state.handle_job_event(preview_event));
-
-        let reviewing = app.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.next_action_hint, "Use this panel, or reject it.");
-        assert!(reviewing.selected_comparison_visible);
-        assert!(
-            app.state
-                .candidates
-                .iter()
-                .any(|candidate| !candidate.rgba8.is_empty())
-        );
-
-        let build_before_accept = app.state.current_build.clone();
-        let accept_effects = app
-            .state
-            .handle_command(
-                app.accept_visible_candidate_command()
-                    .expect("selectable hinged panel idea"),
-            )
-            .expect("Use this panel schedules");
-        let accept_event = run_fixture_effect(accept_effects, &fixture);
-        assert!(app.state.handle_job_event(accept_event));
-        assert_ne!(app.state.current_build, build_before_accept);
-        assert!(app.state.candidates.is_empty());
+        assert!(app.make_primary_candidate_command().is_none());
 
         let adjust_effects = app
             .state
@@ -10698,13 +10522,12 @@ mod tests {
 
         let simple_make_copy = [
             ready.primary_action_label.as_str(),
-            reviewing.primary_action_label.as_str(),
-            ready.adjust_heading_label,
+            ready.property_panel_title,
             HINGED_PANEL_EXPORT_TITLE,
             HINGED_PANEL_EXPORT_DETAIL,
             BOX_PRIMITIVE_EXPORT_LIMITATION,
             ACTION_ADD_TO_PACK,
-            ACTION_EXPORT,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
         ]
         .join("\n")
         .to_ascii_lowercase();
@@ -10716,6 +10539,8 @@ mod tests {
             "focus part",
             "open",
             "close",
+            "try ideas",
+            "candidate",
         ] {
             assert!(
                 !simple_make_copy.contains(forbidden),
@@ -10734,21 +10559,36 @@ mod tests {
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
         assert!(ready.simple_box_make_baseline);
         assert!(ready.handled_panel_baseline);
         assert!(!ready.hinged_panel_baseline);
         assert!(!ready.flat_panel_baseline);
         assert!(!ready.lidded_box_baseline);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_HANDLED_PANEL_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_HANDLE_KNOB);
-        assert!(ready.next_action_hint.contains("Try handled panel ideas"));
-        assert!(ready.next_action_hint.contains("handle"));
-        assert!(ready.next_action_hint.contains("proportions"));
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_HANDLED_PANEL);
+        assert_eq!(
+            ready.property_labels,
+            vec![
+                "Width",
+                "Height",
+                "Thickness",
+                "Edge Softness",
+                "Hinge Edge",
+                "Handle"
+            ]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
         let (empty_tray_title, empty_tray_message) = empty_candidate_tray_copy(&ready);
-        assert_eq!(empty_tray_title, "Ready to try ideas");
+        assert_eq!(empty_tray_title, "Direct properties ready");
         assert_eq!(
             empty_tray_message,
-            "Try handled panel ideas when the panel is ready."
+            "Adjust dimensions, Add to Pack, or Export current primitive."
         );
         assert!(
             !empty_tray_message.contains("box"),
@@ -10792,87 +10632,7 @@ mod tests {
             groups.is_empty(),
             "Handled Panel should not expose part focus chips"
         );
-
-        let request_command = app
-            .make_primary_candidate_command()
-            .expect("request command");
-        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
-            panic!("expected candidate request command");
-        };
-        assert_eq!(
-            request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::CompleteLook]
-        );
-
-        let candidate_effects = app
-            .state
-            .handle_command(request_command)
-            .expect("Try handled panel ideas schedules");
-        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
-        let (preview_request, candidate_output) = match &candidate_event {
-            FoundryJobEvent::CandidatesGenerated {
-                request, output, ..
-            } => {
-                assert!(
-                    !output.candidates.is_empty(),
-                    "Try handled panel ideas should yield candidates: {:?} {:?}",
-                    output.diagnostics,
-                    output.reliability_report
-                );
-                assert!(
-                    output
-                        .candidates
-                        .iter()
-                        .any(|candidate| !candidate.changed_controls.is_empty()),
-                    "Try handled panel ideas should yield at least one changed candidate"
-                );
-                for candidate in &output.candidates {
-                    for forbidden in ["Box", "Door", "Open", "Close", "Animation"] {
-                        assert!(
-                            !candidate.label.contains(forbidden),
-                            "Handled Panel candidate must not use {forbidden}: {}",
-                            candidate.label
-                        );
-                    }
-                }
-                (request.clone(), output.as_ref().clone())
-            }
-            other => panic!("expected generated candidates, got {other:?}"),
-        };
-        assert!(app.state.handle_job_event(candidate_event));
-
-        let preview_effects = app
-            .state
-            .request_candidate_previews(preview_request, candidate_output)
-            .expect("candidate previews schedule");
-        let preview_event = run_fixture_effect(preview_effects, &fixture);
-        assert!(app.state.handle_job_event(preview_event));
-
-        let reviewing = app.make_canvas_view_state();
-        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_PANEL);
-        assert_eq!(reviewing.next_action_hint, "Use this panel, or reject it.");
-        assert!(reviewing.selected_comparison_visible);
-        assert!(
-            app.state
-                .candidates
-                .iter()
-                .any(|candidate| !candidate.rgba8.is_empty())
-        );
-
-        let build_before_accept = app.state.current_build.clone();
-        let accept_effects = app
-            .state
-            .handle_command(
-                app.accept_visible_candidate_command()
-                    .expect("selectable handled panel idea"),
-            )
-            .expect("Use this panel schedules");
-        let accept_event = run_fixture_effect(accept_effects, &fixture);
-        assert!(app.state.handle_job_event(accept_event));
-        assert_ne!(app.state.current_build, build_before_accept);
-        assert!(app.state.candidates.is_empty());
+        assert!(app.make_primary_candidate_command().is_none());
 
         let adjust_effects = app
             .state
@@ -10906,17 +10666,24 @@ mod tests {
 
         let simple_make_copy = [
             ready.primary_action_label.as_str(),
-            reviewing.primary_action_label.as_str(),
-            ready.adjust_heading_label,
+            ready.property_panel_title,
             HANDLED_PANEL_EXPORT_TITLE,
             HANDLED_PANEL_EXPORT_DETAIL,
             BOX_PRIMITIVE_EXPORT_LIMITATION,
             ACTION_ADD_TO_PACK,
-            ACTION_EXPORT,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
         ]
         .join("\n")
         .to_ascii_lowercase();
-        for forbidden in ["door", "material looks", "focus part", "open", "close"] {
+        for forbidden in [
+            "door",
+            "material looks",
+            "focus part",
+            "open",
+            "close",
+            "try ideas",
+            "candidate",
+        ] {
             assert!(
                 !simple_make_copy.contains(forbidden),
                 "Handled Panel baseline copy must not expose {forbidden}: {simple_make_copy}"
@@ -10952,14 +10719,17 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::GeneratingWholeAssetIdeas);
-        assert_eq!(visible.primary_action_label, ACTION_GENERATING_IDEAS);
-        assert!(!visible.primary_action_enabled);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert!(visible.primary_action_enabled);
         assert!(!make_canvas_candidate_actions_enabled(&visible));
-        assert!(visible.local_busy_label.is_some());
-        assert!(visible.local_busy_visible);
-        assert!(visible.candidate_tray_visible);
-        assert_eq!(visible.next_action_hint, "Watch this area for new ideas.");
+        assert!(visible.local_busy_label.is_none());
+        assert!(!visible.local_busy_visible);
+        assert!(!visible.candidate_tray_visible);
+        assert_eq!(
+            visible.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
     }
 
     #[test]
@@ -10970,10 +10740,8 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(
-            visible.rejected_candidate_summary.as_deref(),
-            Some("Found 4 clear ideas. Rejected 2 that looked too similar.")
-        );
+        assert_eq!(visible.rejected_candidate_summary.as_deref(), None);
+        assert!(!visible.candidate_tray_visible);
     }
 
     #[test]

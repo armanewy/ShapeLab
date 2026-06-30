@@ -22,7 +22,8 @@ Choose Primitive
 - Flat Panel Primitive is the direct panel baseline.
 - Lidded Box and Hinged Panel are feature proofs that remain useful evidence,
   but future active primitive work favors direct property editing.
-- Generated idea workflows are being retired from active primitives.
+- Generated idea workflows are retired from active primitive UI.
+- Candidate generation is inactive in the current primitive product flow.
 - Future suggestions may return only as deterministic property presets, not
   opaque random candidate generation.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -83,5 +84,6 @@ python scripts/clean_targets.py --list --root ..
 
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
 - [`docs/PRIMITIVE_DIRECT_MAKE_VISION.md`](docs/PRIMITIVE_DIRECT_MAKE_VISION.md)
+- [`docs/ACTIVE_VARIATION_UI_RETIREMENT.md`](docs/ACTIVE_VARIATION_UI_RETIREMENT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

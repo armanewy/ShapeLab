@@ -12,12 +12,10 @@ min_width="${2:-1000}"
 min_height="${3:-700}"
 
 required=(
-  "choose_box_primitive.png"
-  "make_ready_box_primitive.png"
-  "generating_box_ideas.png"
-  "generated_box_ideas.png"
-  "selected_box_idea.png"
-  "adjusted_box_control.png"
+  "box_direct_make_ready.png"
+  "box_property_edit.png"
+  "flat_panel_direct_make_ready.png"
+  "flat_panel_property_edit.png"
   "pack_drawer.png"
   "export_drawer.png"
 )
@@ -73,11 +71,10 @@ hash_for() {
 }
 
 pairs=(
-  "generating_box_ideas.png make_ready_box_primitive.png"
-  "generated_box_ideas.png generating_box_ideas.png"
-  "selected_box_idea.png generated_box_ideas.png"
-  "adjusted_box_control.png make_ready_box_primitive.png"
-  "pack_drawer.png adjusted_box_control.png"
+  "box_property_edit.png box_direct_make_ready.png"
+  "flat_panel_direct_make_ready.png box_direct_make_ready.png"
+  "flat_panel_property_edit.png flat_panel_direct_make_ready.png"
+  "pack_drawer.png box_property_edit.png"
   "export_drawer.png pack_drawer.png"
 )
 

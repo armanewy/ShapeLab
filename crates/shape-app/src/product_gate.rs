@@ -10,9 +10,6 @@ use crate::foundry::{
         developer_preview_product_home_profile_count, installed_product_kit_count,
         product_visible_strings_for_default_shell,
     },
-    panels::directions::{
-        DIRECTION_BOARD_MODES, VISIBLE_DIRECTION_CANDIDATE_CARDS, direction_mode_actions,
-    },
     ui::copy::first_forbidden_product_term,
 };
 
@@ -35,8 +32,10 @@ pub struct ProductUiGateReport {
     pub default_advanced_recipe_visible: bool,
     /// Whether default product copy exposes raw technical terms.
     pub default_raw_technical_terms_visible: bool,
-    /// Whether the directions board reserves six whole-model candidate slots and five modes.
-    pub directions_board_gate: bool,
+    /// Whether active primitive Make copy has retired product-visible variation UI.
+    pub active_variation_ui_retired: bool,
+    /// Whether default product copy exposes direct primitive property controls.
+    pub direct_property_gate: bool,
     /// Whether core profiles compile and expose novice controls.
     pub customize_deck_gate: bool,
     /// Whether pack actions and readiness reasons are represented in product copy.
@@ -57,10 +56,8 @@ pub struct ProductUiGateReport {
     pub forbidden_terms_found: Vec<ProductUiForbiddenTermFinding>,
     /// Core profile compile/start evidence.
     pub core_profiles: Vec<ProductUiProfileGate>,
-    /// Direction action labels exposed by the default board.
-    pub direction_modes: Vec<&'static str>,
-    /// Reserved whole-model candidate card slots.
-    pub direction_candidate_slots: usize,
+    /// Direct primitive property labels exposed by the default product shell.
+    pub direct_property_labels: Vec<&'static str>,
 }
 
 impl ProductUiGateReport {
@@ -75,7 +72,8 @@ impl ProductUiGateReport {
             && self.product_home_profiles == self.installed_kit_count
             && self.installed_kit_count == self.core_profiles.len()
             && self.developer_preview_kit_count == self.installed_kit_count
-            && self.directions_board_gate
+            && self.active_variation_ui_retired
+            && self.direct_property_gate
             && self.customize_deck_gate
             && self.pack_gate
             && self.export_gate
@@ -151,18 +149,27 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
     .into_iter()
     .any(|term| joined_lower.contains(term));
     let default_advanced_recipe_visible = joined_lower.contains("advanced recipe");
-    let direction_mode_actions = direction_mode_actions(None, 0, None);
-    let direction_modes = direction_mode_actions
+    let retired_terms = [
+        "try ideas",
+        "try box ideas",
+        "try lidded box ideas",
+        "try panel ideas",
+        "try hinged panel ideas",
+        "generated ideas",
+        "variation mode",
+        "candidate",
+        "survivor",
+        "use this idea",
+    ];
+    let active_variation_ui_retired = retired_terms
         .iter()
-        .map(|action| action.label)
-        .collect::<Vec<_>>();
-    let directions_board_gate = VISIBLE_DIRECTION_CANDIDATE_CARDS == 6
-        && DIRECTION_BOARD_MODES.len() == 5
-        && direction_mode_actions.len() == 5
-        && direction_mode_actions.iter().all(|action| {
-            action.request.result_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
-                && action.request.proposal_count >= 8
-        });
+        .all(|term| !joined_lower.contains(term));
+    let direct_property_labels = vec!["Width", "Depth", "Height", "Thickness", "Edge Softness"];
+    let direct_property_gate = direct_property_labels
+        .iter()
+        .all(|label| visible_strings.contains(label))
+        && visible_strings.contains(&"Adjust dimensions")
+        && visible_strings.contains(&"Export current primitive");
     let product_home_profiles = default_product_home_profile_count();
     let installed_kit_count = installed_product_kit_count();
     let developer_preview_kit_count = developer_preview_product_home_profile_count();
@@ -195,7 +202,8 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         startup_blank: !default_app_launches_on_home(),
         default_advanced_recipe_visible,
         default_raw_technical_terms_visible: !forbidden_terms_found.is_empty(),
-        directions_board_gate,
+        active_variation_ui_retired,
+        direct_property_gate,
         customize_deck_gate,
         pack_gate,
         export_gate,
@@ -206,8 +214,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         rendered_action_labels_audited,
         forbidden_terms_found,
         core_profiles,
-        direction_modes,
-        direction_candidate_slots: VISIBLE_DIRECTION_CANDIDATE_CARDS,
+        direct_property_labels,
     })
 }
 
@@ -268,10 +275,11 @@ mod tests {
         assert_eq!(report.product_home_profiles, report.installed_kit_count);
         assert_eq!(report.installed_kit_count, 5);
         assert_eq!(report.developer_preview_kit_count, 5);
-        assert_eq!(report.direction_candidate_slots, 6);
+        assert!(report.active_variation_ui_retired);
+        assert!(report.direct_property_gate);
         assert_eq!(
-            report.direction_modes,
-            vec!["Refine", "Explore", "Silhouette", "Structure", "Detail"]
+            report.direct_property_labels,
+            vec!["Width", "Depth", "Height", "Thickness", "Edge Softness"]
         );
         assert!(report.manual_gate_required);
     }

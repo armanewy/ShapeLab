@@ -17,9 +17,11 @@ Choose Primitive
 -> Export
 ```
 
-Generated variations are removed from the active primitive workflow. Candidate
-and variation code may remain as internal, legacy, or test-only machinery until
-a later branch deliberately repurposes it.
+Generated variations are removed from the active primitive workflow.
+Candidate generation is inactive in the current primitive product flow.
+Candidate-like machinery may remain as internal, legacy, quality-evidence,
+contact-sheet, or test-only code until a later branch deliberately repurposes
+it.
 
 ## Primitive Schemas
 

@@ -127,6 +127,7 @@ fn foundry_direct_make_status_docs_agree() {
     let readme = doc_text("README.md");
     let status = doc_text("docs/CURRENT_PRODUCT_STATUS.md");
     let vision = doc_text("docs/PRIMITIVE_DIRECT_MAKE_VISION.md");
+    let retirement = doc_text("docs/ACTIVE_VARIATION_UI_RETIREMENT.md");
     let limitations = doc_text("docs/KNOWN_LIMITATIONS.md");
 
     for text in [&readme, &status] {
@@ -139,8 +140,12 @@ fn foundry_direct_make_status_docs_agree() {
             "README and status should agree on Flat Panel Primitive as direct baseline"
         );
         assert!(
-            text.contains("Generated idea workflows are being retired from active primitives"),
-            "README and status should retire generated idea workflows"
+            text.contains("Generated idea workflows are retired from active primitive UI"),
+            "README and status should agree that generated idea workflows are retired"
+        );
+        assert!(
+            text.contains("Candidate generation is inactive in the current primitive product flow"),
+            "README and status should mark candidate generation inactive in active primitives"
         );
         assert!(
             text.contains("Family Studio Lite is paused"),
@@ -148,7 +153,7 @@ fn foundry_direct_make_status_docs_agree() {
         );
     }
 
-    for text in [&readme, &status, &vision, &limitations] {
+    for text in [&readme, &status, &vision, &retirement, &limitations] {
         assert!(
             text.contains("property-schema")
                 || text.contains("immutable property schemas")
@@ -171,6 +176,17 @@ fn foundry_direct_make_status_docs_agree() {
         assert!(
             text.contains("UV/texturing") && text.contains("rigging") && text.contains("animation"),
             "docs should keep material, UV, rigging, and animation blocked"
+        );
+    }
+
+    for text in [&status, &vision, &retirement] {
+        assert!(
+            text.contains("contact sheet") || text.contains("contact-sheet"),
+            "active variation retirement docs should allow internal contact-sheet machinery"
+        );
+        assert!(
+            text.contains("Candidate generation is inactive in the current primitive product flow"),
+            "active variation retirement docs should mark candidate generation inactive"
         );
     }
 }

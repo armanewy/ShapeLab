@@ -4,10 +4,10 @@ Date: 2026-06-30
 
 ## Verdict
 
-`PRIMITIVE_DIRECT_MAKE_RESET`
+`ACTIVE_VARIATION_UI_RETIRED`
 
-Shape Lab is resetting the active product direction away from generated
-variation workflows and toward direct primitive property editing.
+Shape Lab has retired active variation UI for current primitives and is moving
+the active product surface toward direct primitive property editing.
 
 ## Current Truth
 
@@ -17,7 +17,8 @@ variation workflows and toward direct primitive property editing.
   active primitive workflow.
 - Handled Panel evidence is treated as paused historical proof, not the current
   active direction.
-- Generated idea workflows are being retired from active primitives.
+- Generated idea workflows are retired from active primitive UI.
+- Candidate generation is inactive in the current primitive product flow.
 - The active Make workflow should expose direct property controls before it
   offers presets or suggestions.
 - Primitive editing is property-schema based and bounded.
@@ -26,8 +27,9 @@ variation workflows and toward direct primitive property editing.
 - Users do not edit vertices, faces, loops, cages, booleans, raw mesh
   transforms, or Blender-like modeling controls.
 - Future suggestions may return only as deterministic property presets.
-- Internal candidate-like machinery may remain for legacy tests and quality
-  evidence until a deliberate cleanup branch removes or repurposes it.
+- Internal candidate-like machinery may remain for legacy tests, quality
+  evidence, and contact sheets until a deliberate cleanup branch removes or
+  repurposes it.
 - Composition will happen through safe anchors and constrained attachment
   zones, not arbitrary free transforms.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -47,6 +49,8 @@ variation workflows and toward direct primitive property editing.
 - Direct primitive editing is the current product baseline.
 - Deterministic presets are the only approved future suggestion form for active
   primitives.
+- Current primitive Make shows direct property controls, view controls, Add to
+  Pack, and Export rather than Try ideas or selected-candidate comparison.
 
 ## Current Milestone Sequence
 
