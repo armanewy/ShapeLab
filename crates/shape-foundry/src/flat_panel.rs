@@ -289,18 +289,28 @@ pub fn hinge_edge_module() -> FlatPanelFeatureModule {
     }
 }
 
-/// Future handle-area module. This is a contract only, not product geometry yet.
+/// Handle / Knob feature module. This is visible clay detail, not door motion.
 #[must_use]
 pub fn panel_handle_module() -> FlatPanelFeatureModule {
     FlatPanelFeatureModule {
-        module_id: "panel-handle".to_owned(),
-        display_name: "Panel Handle".to_owned(),
-        product_safe_summary: "Adds a simple visible handle or knob area later.".to_owned(),
-        required_zone_kinds: vec![FlatPanelZoneKind::HandleCandidateZone],
-        provides_roles: vec!["panel_handle".to_owned()],
-        provides_controls: vec!["handle_style".to_owned()],
-        candidate_hooks: vec!["handle-panel-ideas".to_owned()],
-        quality_gates: vec!["handle-visible".to_owned(), "handle-attached".to_owned()],
+        module_id: "handle-knob".to_owned(),
+        display_name: "Handle / Knob".to_owned(),
+        product_safe_summary: "Adds one visible handle or knob to an upright panel.".to_owned(),
+        required_zone_kinds: vec![
+            FlatPanelZoneKind::Face,
+            FlatPanelZoneKind::HandleCandidateZone,
+        ],
+        provides_roles: vec!["handle_knob".to_owned()],
+        provides_controls: vec!["handle_knob_style".to_owned()],
+        candidate_hooks: vec!["handled-panel-ideas".to_owned()],
+        quality_gates: vec![
+            "upright-panel-body-required".to_owned(),
+            "handle-knob-visible-in-pure-clay".to_owned(),
+            "handle-knob-attached-cleanly".to_owned(),
+            "handle-knob-not-floating".to_owned(),
+            "handle-knob-endpoint-visible".to_owned(),
+            "handle-knob-not-motion".to_owned(),
+        ],
     }
 }
 
@@ -605,6 +615,56 @@ mod tests {
             module
                 .quality_gates
                 .contains(&"hinge-edge-endpoint-visible".to_owned())
+        );
+    }
+
+    #[test]
+    fn handle_knob_module_validates_with_one_owned_visible_control() {
+        let report = validate_flat_panel_feature_module(
+            &flat_panel_primitive_kernel(),
+            &panel_handle_module(),
+        );
+        assert!(report.is_valid(), "{report:?}");
+        let module = panel_handle_module();
+        assert_eq!(
+            module.required_zone_kinds,
+            vec![
+                FlatPanelZoneKind::Face,
+                FlatPanelZoneKind::HandleCandidateZone
+            ]
+        );
+        assert_eq!(module.provides_roles, vec!["handle_knob"]);
+        assert_eq!(module.provides_controls, vec!["handle_knob_style"]);
+        assert_eq!(module.candidate_hooks, vec!["handled-panel-ideas"]);
+        assert!(
+            module
+                .quality_gates
+                .contains(&"upright-panel-body-required".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"handle-knob-visible-in-pure-clay".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"handle-knob-attached-cleanly".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"handle-knob-not-floating".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"handle-knob-endpoint-visible".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"handle-knob-not-motion".to_owned())
         );
     }
 
