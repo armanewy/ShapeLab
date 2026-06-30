@@ -9,9 +9,9 @@ box ladder is:
 Box Primitive -> Lidded Box -> Trimmed Box
 ```
 
-Only Box Primitive, Lidded Box, and Flat Panel Primitive are app-visible
-product baselines today. Trimmed Box is internal feature-module evidence until a
-later Make gate chooses to expose it.
+Only Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel are
+app-visible product baselines today. Trimmed Box is internal feature-module
+evidence until a later Make gate chooses to expose it.
 
 ## Gate Results
 
@@ -56,25 +56,41 @@ docs/HINGE_EDGE_FEATURE_MODULE_V0.md
 target/hinge-edge-feature-module-v0/
 ```
 
-## Preferred Next Step
-
-Stop the box ladder. The next visible family proof should be:
+The Hinged Panel Make baseline gate passed release-app Computer Use validation
+on 2026-06-30. Evidence is recorded in:
 
 ```text
-Hinged Panel Make baseline
+docs/HINGED_PANEL_MAKE_BASELINE_GATE.md
+target/hinged-panel-make-baseline-gate/
 ```
 
-Hinge Edge is now internal feature-module evidence. The next gate should expose
-that single feature in Make as Hinged Panel:
+## Preferred Next Step
 
-- visible hinge-side edge geometry
-- no handle/knob
+Stop the box ladder. The next gate should integrate the two-kernel proof:
+
+```text
+Second Kernel Flat Panel integration
+```
+
+Hinge Edge is now app-visible through Hinged Panel. The next gate should verify
+the whole visible set:
+
+- Box Primitive
+- Lidded Box
+- Flat Panel Primitive
+- Hinged Panel
+
+The next feature after that gate may be Door Handle / Knob, but only as one
+visible concept in one branch:
+
+- visible handle or knob clay geometry
+- no inset panel
 - no open/close motion
 - no Door naming
 
-Do not add Feet / Skids, panels, handles, crate language, material looks,
-Family Studio public UI, or broad archetype work before the Hinged Panel Make
-baseline gate.
+Do not add Feet / Skids, crate language, material looks, Family Studio public
+UI, open/close motion, or broad archetype work before the second-kernel
+integration gate.
 
 ## Continuing Criteria
 
@@ -91,7 +107,7 @@ baseline gate.
 
 - Crate language before a model visually earns the name.
 - Door naming before visible door cues pass a later gate.
-- Feet / Skids before the Hinged Panel Make baseline gate.
+- Feet / Skids before the second-kernel integration gate.
 - Material looks, UV/texturing, rigging, animation, or game-ready UI.
 - Runtime LLM integration.
 - Full Family Studio public flow before two different kernels pass visual gates.

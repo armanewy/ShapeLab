@@ -612,6 +612,7 @@ pub(crate) fn direction_part_groups_for_document(
     if normalized.contains("box-primitive")
         || normalized.contains("lidded-box")
         || normalized.contains("flat-panel-primitive")
+        || normalized.contains("hinged-panel")
     {
         return Vec::new();
     }

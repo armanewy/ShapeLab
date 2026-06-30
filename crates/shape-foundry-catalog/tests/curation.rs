@@ -27,9 +27,10 @@ fn curation_metadata_covers_visible_starter_profiles_once() {
             box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
             box_primitive::LIDDED_BOX_SLUG.to_owned(),
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
+            flat_panel::HINGED_PANEL_SLUG.to_owned(),
         ])
     );
-    assert_eq!(curation.len(), 3);
+    assert_eq!(curation.len(), 4);
     assert_eq!(curation_slugs, fixture_slugs);
     assert!(
         curation
@@ -52,6 +53,7 @@ fn default_and_preview_catalogs_show_supported_starter_profiles() {
                 box_primitive::BOX_PRIMITIVE_SLUG,
                 box_primitive::LIDDED_BOX_SLUG,
                 flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+                flat_panel::HINGED_PANEL_SLUG,
             ]
         );
     }
@@ -80,6 +82,20 @@ fn lidded_box_is_usable_after_lid_seam_gate_but_not_showcase() {
     assert!(metadata.has_readable_control_evidence);
     assert!(!metadata.has_human_showcase_review);
     assert!(metadata.note.contains("no crate claim"));
+}
+
+#[test]
+fn hinged_panel_is_usable_after_hinge_edge_gate_but_not_door() {
+    let metadata = catalog_curation_metadata_for_slug(flat_panel::HINGED_PANEL_SLUG)
+        .expect("hinged panel curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(metadata.has_visual_direction_evidence);
+    assert!(metadata.has_readable_control_evidence);
+    assert!(!metadata.has_human_showcase_review);
+    assert!(metadata.note.contains("Hinge Edge"));
+    assert!(metadata.note.contains("does not claim Door"));
 }
 
 #[test]

@@ -196,6 +196,7 @@ struct MakeCanvasViewState {
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
+    hinged_panel_baseline: bool,
     try_ideas_action_label: &'static str,
     use_candidate_action_label: &'static str,
     adjust_heading_label: &'static str,
@@ -311,6 +312,7 @@ enum MakeProfileKind {
     BoxPrimitive,
     LiddedBox,
     FlatPanelPrimitive,
+    HingedPanel,
     Other,
 }
 
@@ -318,7 +320,7 @@ impl MakeProfileKind {
     const fn simple_clay_make_baseline(self) -> bool {
         matches!(
             self,
-            Self::BoxPrimitive | Self::LiddedBox | Self::FlatPanelPrimitive
+            Self::BoxPrimitive | Self::LiddedBox | Self::FlatPanelPrimitive | Self::HingedPanel
         )
     }
 
@@ -328,6 +330,14 @@ impl MakeProfileKind {
 
     const fn is_flat_panel_primitive(self) -> bool {
         matches!(self, Self::FlatPanelPrimitive)
+    }
+
+    const fn is_hinged_panel(self) -> bool {
+        matches!(self, Self::HingedPanel)
+    }
+
+    const fn is_panel_like(self) -> bool {
+        matches!(self, Self::FlatPanelPrimitive | Self::HingedPanel)
     }
 }
 
@@ -364,6 +374,7 @@ const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
 const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
+const HINGED_PANEL_PROFILE_ID: &str = "hinged-panel";
 const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/box-primitive/surface/variants/surface-candidate-report.json";
 const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
 const MATERIAL_LOOK_MISSING_MESSAGE: &str = "Material looks are not generated yet.";
@@ -385,6 +396,8 @@ const LIDDED_BOX_EXPORT_TITLE: &str = "Export Lidded Box";
 const LIDDED_BOX_EXPORT_DETAIL: &str = "Exports the current clay lidded box asset.";
 const FLAT_PANEL_EXPORT_TITLE: &str = "Export Flat Panel";
 const FLAT_PANEL_EXPORT_DETAIL: &str = "Exports the current clay flat panel asset.";
+const HINGED_PANEL_EXPORT_TITLE: &str = "Export Hinged Panel";
+const HINGED_PANEL_EXPORT_DETAIL: &str = "Exports the current clay hinged panel asset.";
 const BOX_PRIMITIVE_EXPORT_LIMITATION: &str =
     "This is not a textured, rigged, animated, or game-ready package.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
@@ -413,6 +426,7 @@ const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
 const ACTION_TRY_BOX_IDEAS: &str = "Try box ideas";
 const ACTION_TRY_LIDDED_BOX_IDEAS: &str = "Try lidded box ideas";
 const ACTION_TRY_PANEL_IDEAS: &str = "Try panel ideas";
+const ACTION_TRY_HINGED_PANEL_IDEAS: &str = "Try hinged panel ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
@@ -449,7 +463,8 @@ const ACTION_UPDATE_PREVIEW: &str = "Update preview";
 const ACTION_ADJUST_BOX: &str = "Adjust box";
 const ACTION_ADJUST_LID_SEAM: &str = "Adjust lid seam";
 const ACTION_ADJUST_PANEL: &str = "Adjust panel";
-const RENDERED_ACTION_LABELS: [&str; 45] = [
+const ACTION_ADJUST_HINGE_EDGE: &str = "Adjust hinge edge";
+const RENDERED_ACTION_LABELS: [&str; 47] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -467,6 +482,7 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_TRY_BOX_IDEAS,
     ACTION_TRY_LIDDED_BOX_IDEAS,
     ACTION_TRY_PANEL_IDEAS,
+    ACTION_TRY_HINGED_PANEL_IDEAS,
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
@@ -495,6 +511,7 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_ADJUST_BOX,
     ACTION_ADJUST_LID_SEAM,
     ACTION_ADJUST_PANEL,
+    ACTION_ADJUST_HINGE_EDGE,
 ];
 
 impl Default for FoundryDesktopApp {
@@ -881,15 +898,17 @@ impl FoundryDesktopApp {
         let simple_box_make_baseline = active_profile_kind.simple_clay_make_baseline();
         let lidded_box_baseline = active_profile_kind.is_lidded_box();
         let flat_panel_baseline = active_profile_kind.is_flat_panel_primitive();
+        let hinged_panel_baseline = active_profile_kind.is_hinged_panel();
         let try_ideas_action_label = match active_profile_kind {
             MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
             MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
             MakeProfileKind::FlatPanelPrimitive => ACTION_TRY_PANEL_IDEAS,
+            MakeProfileKind::HingedPanel => ACTION_TRY_HINGED_PANEL_IDEAS,
             MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
         };
         let use_candidate_action_label = if lidded_box_baseline {
             ACTION_USE_THIS_BOX
-        } else if flat_panel_baseline {
+        } else if active_profile_kind.is_panel_like() {
             ACTION_USE_THIS_PANEL
         } else {
             ACTION_CHOOSE_DIRECTION
@@ -898,6 +917,7 @@ impl FoundryDesktopApp {
             MakeProfileKind::BoxPrimitive => ACTION_ADJUST_BOX,
             MakeProfileKind::LiddedBox => ACTION_ADJUST_LID_SEAM,
             MakeProfileKind::FlatPanelPrimitive => ACTION_ADJUST_PANEL,
+            MakeProfileKind::HingedPanel => ACTION_ADJUST_HINGE_EDGE,
             MakeProfileKind::Other => "Adjust",
         };
         let active_candidate_job = self.state.active_jobs.values().any(|request| {
@@ -1039,6 +1059,7 @@ impl FoundryDesktopApp {
                 simple_box_make_baseline,
                 lidded_box_baseline,
                 flat_panel_baseline,
+                hinged_panel_baseline,
             });
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
@@ -1111,6 +1132,7 @@ impl FoundryDesktopApp {
             simple_box_make_baseline,
             lidded_box_baseline,
             flat_panel_baseline,
+            hinged_panel_baseline,
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
@@ -1162,6 +1184,7 @@ impl FoundryDesktopApp {
             simple_box_make_baseline,
             lidded_box_baseline,
             flat_panel_baseline,
+            hinged_panel_baseline,
             try_ideas_action_label,
             use_candidate_action_label,
             adjust_heading_label,
@@ -1347,6 +1370,8 @@ impl FoundryDesktopApp {
             MakeProfileKind::LiddedBox
         } else if self.active_profile_matches(FLAT_PANEL_PRIMITIVE_PROFILE_ID) {
             MakeProfileKind::FlatPanelPrimitive
+        } else if self.active_profile_matches(HINGED_PANEL_PROFILE_ID) {
+            MakeProfileKind::HingedPanel
         } else {
             MakeProfileKind::Other
         }
@@ -1442,6 +1467,8 @@ impl FoundryDesktopApp {
             (LIDDED_BOX_EXPORT_TITLE, LIDDED_BOX_EXPORT_DETAIL)
         } else if self.active_make_profile_kind().is_flat_panel_primitive() {
             (FLAT_PANEL_EXPORT_TITLE, FLAT_PANEL_EXPORT_DETAIL)
+        } else if self.active_make_profile_kind().is_hinged_panel() {
+            (HINGED_PANEL_EXPORT_TITLE, HINGED_PANEL_EXPORT_DETAIL)
         } else {
             (BOX_PRIMITIVE_EXPORT_TITLE, BOX_PRIMITIVE_EXPORT_DETAIL)
         }
@@ -1515,7 +1542,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before making changes.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before making changes.",
             ));
             return commands;
         }
@@ -2536,6 +2563,7 @@ impl FoundryDesktopApp {
                 view_state.simple_box_make_baseline,
                 view_state.lidded_box_baseline,
                 view_state.flat_panel_baseline,
+                view_state.hinged_panel_baseline,
             )
         };
         if make_canvas_uses_compact_ideas(view_state) {
@@ -2625,6 +2653,8 @@ impl FoundryDesktopApp {
                         "Ready to try ideas",
                         if view_state.lidded_box_baseline {
                             "Try lidded box ideas when the box is ready."
+                        } else if view_state.hinged_panel_baseline {
+                            "Try hinged panel ideas when the panel is ready."
                         } else if view_state.flat_panel_baseline {
                             "Try panel ideas when the panel is ready."
                         } else if view_state.simple_box_make_baseline {
@@ -2876,7 +2906,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before adjusting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before adjusting.",
             ));
                 } else {
                     ui.add_space(10.0);
@@ -3056,7 +3086,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before exporting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before exporting.",
             ));
             return commands;
         }
@@ -3173,7 +3203,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before starting a pack.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -4590,6 +4620,8 @@ fn asset_title_from_id(document_id: &str) -> &'static str {
     match document_id {
         id if id.contains("box-primitive") => "Box Primitive",
         id if id.contains("lidded-box") => "Lidded Box",
+        id if id.contains("hinged-panel") => "Hinged Panel",
+        id if id.contains("flat-panel-primitive") => "Flat Panel Primitive",
         _ => "Shape Lab Project",
     }
 }
@@ -4657,6 +4689,7 @@ fn profile_description(slug: &str) -> &'static str {
         "flat-panel-primitive" => {
             "One upright clay panel with readable width, height, and thickness."
         }
+        "hinged-panel" => "One upright clay panel with a visible hinge edge.",
         _ => "A simple clay starting point ready for idea generation.",
     }
 }
@@ -4664,6 +4697,7 @@ fn profile_description(slug: &str) -> &'static str {
 fn profile_control_copy(slug: &str) -> &'static str {
     match slug {
         "lidded-box" => "You can vary proportions, edge softness, and lid seam.",
+        "hinged-panel" => "You can vary proportions, edge softness, and hinge edge.",
         _ => HOME_CONTROL_COPY,
     }
 }
@@ -4671,7 +4705,10 @@ fn profile_control_copy(slug: &str) -> &'static str {
 fn is_visible_starter_profile(slug: &str) -> bool {
     matches!(
         slug,
-        BOX_PRIMITIVE_PROFILE_ID | LIDDED_BOX_PROFILE_ID | FLAT_PANEL_PRIMITIVE_PROFILE_ID
+        BOX_PRIMITIVE_PROFILE_ID
+            | LIDDED_BOX_PROFILE_ID
+            | FLAT_PANEL_PRIMITIVE_PROFILE_ID
+            | HINGED_PANEL_PROFILE_ID
     )
 }
 
@@ -4781,6 +4818,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Start with Box Primitive",
         "Lidded Box",
         "Flat Panel Primitive",
+        "Hinged Panel",
         "Project",
         "Open Project",
         "Save Project",
@@ -4792,6 +4830,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         ACTION_TRY_BOX_IDEAS,
         ACTION_TRY_LIDDED_BOX_IDEAS,
         ACTION_TRY_PANEL_IDEAS,
+        ACTION_TRY_HINGED_PANEL_IDEAS,
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
         ACTION_CHOOSE_DIRECTION,
@@ -4845,9 +4884,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "A simple box with a visible lid seam.",
         "You can vary proportions, edge softness, and lid seam.",
         "One upright clay panel with readable width, height, and thickness.",
+        "One upright clay panel with a visible hinge edge.",
+        "You can vary proportions, edge softness, and hinge edge.",
         "Start with Box Primitive.",
         "Choose a starting point.",
-        "Start with Box Primitive, Lidded Box, or Flat Panel Primitive.",
+        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, or Hinged Panel.",
         "Each starting point is a simple clay asset with only visible controls.",
         "Preview building",
         "No matching starting point",
@@ -4856,15 +4897,17 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Try box ideas, adjust box, Add to Pack, or Export.",
         "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export.",
         "Try panel ideas, adjust Proportions or Edge Softness, Add to Pack, or Export.",
+        "Try hinged panel ideas, adjust hinge edge or proportions, Add to Pack, or Export.",
         "Lidded box ideas ready",
         "Panel ideas ready",
+        "Hinged panel ideas ready",
         "Use this box, or reject it.",
         "Use this panel, or reject it.",
         "Current Asset",
         "Ideas",
         "Trying ideas",
         "Current asset",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before making changes.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before making changes.",
         "Preview could not be rendered for this idea.",
         "Preview this idea before using it.",
         "Project history",
@@ -4873,7 +4916,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Project step",
         "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before adjusting.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -4888,6 +4931,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         LIDDED_BOX_EXPORT_DETAIL,
         FLAT_PANEL_EXPORT_TITLE,
         FLAT_PANEL_EXPORT_DETAIL,
+        HINGED_PANEL_EXPORT_TITLE,
+        HINGED_PANEL_EXPORT_DETAIL,
         BOX_PRIMITIVE_EXPORT_LIMITATION,
         "Current Asset",
         "Export options",
@@ -4922,8 +4967,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Primary control",
         "Starting point is not available",
         "Open a saved project, or enable the clay starting points.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before exporting.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before starting a pack.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before exporting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -5023,6 +5068,7 @@ struct MakeCanvasBannerContext<'a> {
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
+    hinged_panel_baseline: bool,
 }
 
 fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, String, BannerTone) {
@@ -5042,6 +5088,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         simple_box_make_baseline,
         lidded_box_baseline,
         flat_panel_baseline,
+        hinged_panel_baseline,
     } = context;
     if let Some(message) = local_warning_message {
         return (
@@ -5067,7 +5114,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     match mode {
         MakeCanvasMode::NoAsset => (
             "Choose an asset".to_owned(),
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or open a project before making changes.".to_owned(),
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or open a project before making changes.".to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::PreparingAsset => {
@@ -5098,6 +5145,8 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         MakeCanvasMode::ReviewingIdeas => (
             if lidded_box_baseline {
                 "Lidded box ideas ready".to_owned()
+            } else if hinged_panel_baseline {
+                "Hinged panel ideas ready".to_owned()
             } else if flat_panel_baseline {
                 "Panel ideas ready".to_owned()
             } else if simple_box_make_baseline {
@@ -5107,7 +5156,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             },
             if lidded_box_baseline {
                 "Use this box, or reject it.".to_owned()
-            } else if flat_panel_baseline {
+            } else if hinged_panel_baseline || flat_panel_baseline {
                 "Use this panel, or reject it.".to_owned()
             } else if simple_box_make_baseline {
                 "Use this idea, or reject it.".to_owned()
@@ -5136,6 +5185,13 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
                 (
                     "Ready".to_owned(),
                     "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
+                        .to_owned(),
+                    BannerTone::Success,
+                )
+            } else if hinged_panel_baseline && matches!(mode, MakeCanvasMode::Ready) {
+                (
+                    "Ready".to_owned(),
+                    "Try hinged panel ideas, adjust hinge edge or proportions, Add to Pack, or Export."
                         .to_owned(),
                     BannerTone::Success,
                 )
@@ -5217,6 +5273,9 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::ReviewingIdeas if view_state.lidded_box_baseline => {
             "Use this box, or try another idea."
         }
+        MakeCanvasMode::ReviewingIdeas if view_state.hinged_panel_baseline => {
+            "Use this panel, or try another idea."
+        }
         MakeCanvasMode::ReviewingIdeas if view_state.flat_panel_baseline => {
             "Use this panel, or try another idea."
         }
@@ -5229,6 +5288,9 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
         MakeCanvasMode::Ready if view_state.lidded_box_baseline => {
             "Try lidded box ideas or adjust lid seam."
+        }
+        MakeCanvasMode::Ready if view_state.hinged_panel_baseline => {
+            "Try hinged panel ideas or adjust hinge edge."
         }
         MakeCanvasMode::Ready if view_state.flat_panel_baseline => {
             "Try panel ideas or adjust Proportions."
@@ -5248,10 +5310,12 @@ fn make_canvas_next_action_hint(
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
+    hinged_panel_baseline: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => {
-            "Choose Box Primitive, Lidded Box, or Flat Panel Primitive first.".to_owned()
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, or Hinged Panel first."
+                .to_owned()
         }
         (MakeCanvasMode::PreparingAsset, _, _) => {
             "Wait for the model and preview to finish preparing.".to_owned()
@@ -5270,6 +5334,9 @@ fn make_canvas_next_action_hint(
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) if lidded_box_baseline => {
             "Use this box, or reject it.".to_owned()
+        }
+        (MakeCanvasMode::ReviewingIdeas, _, true) if hinged_panel_baseline => {
+            "Use this panel, or reject it.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) if flat_panel_baseline => {
             "Use this panel, or reject it.".to_owned()
@@ -5301,6 +5368,10 @@ fn make_canvas_next_action_hint(
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
         (MakeCanvasMode::Ready, _, _) if lidded_box_baseline => {
             "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
+                .to_owned()
+        }
+        (MakeCanvasMode::Ready, _, _) if hinged_panel_baseline => {
+            "Try hinged panel ideas, adjust hinge edge or proportions, Add to Pack, or Export."
                 .to_owned()
         }
         (MakeCanvasMode::Ready, _, _) if flat_panel_baseline => {
@@ -5547,10 +5618,13 @@ fn direction_board_count_label(
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
+    hinged_panel_baseline: bool,
 ) -> String {
     if count == 0 {
         if lidded_box_baseline {
             "Try lidded box ideas.".to_owned()
+        } else if hinged_panel_baseline {
+            "Try hinged panel ideas.".to_owned()
         } else if flat_panel_baseline {
             "Try panel ideas.".to_owned()
         } else if simple_box_make_baseline {
@@ -5684,7 +5758,7 @@ fn show_home_browser_panel(
                         "Choose what to make"
                     },
                     subtitle: Some(if starter_profile_mode {
-                        "Start with Box Primitive, Lidded Box, or Flat Panel Primitive."
+                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, or Hinged Panel."
                     } else {
                         HOME_SUBTITLE
                     }),
@@ -8251,8 +8325,8 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 3);
-        assert_eq!(default_product_home_profile_count(), 3);
+        assert_eq!(installed_product_kit_count(), 4);
+        assert_eq!(default_product_home_profile_count(), 4);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -8262,9 +8336,15 @@ mod tests {
         assert_eq!(default_profiles[0].fixture.slug, "box-primitive");
         assert_eq!(default_profiles[1].fixture.slug, "lidded-box");
         assert_eq!(default_profiles[2].fixture.slug, "flat-panel-primitive");
+        assert_eq!(default_profiles[3].fixture.slug, "hinged-panel");
         assert_eq!(
             default_labels,
-            vec!["Box Primitive", "Lidded Box", "Flat Panel Primitive"]
+            vec![
+                "Box Primitive",
+                "Lidded Box",
+                "Flat Panel Primitive",
+                "Hinged Panel"
+            ]
         );
 
         let profiles = product_home_profiles(true);
@@ -8273,10 +8353,15 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 3);
+        assert_eq!(profiles.len(), 4);
         assert_eq!(
             labels,
-            vec!["Box Primitive", "Lidded Box", "Flat Panel Primitive"]
+            vec![
+                "Box Primitive",
+                "Lidded Box",
+                "Flat Panel Primitive",
+                "Hinged Panel"
+            ]
         );
         assert!(!labels.iter().any(|label| label.contains("MVP")));
     }
@@ -8287,10 +8372,11 @@ mod tests {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
 
-        assert_eq!(profiles.len(), 3);
+        assert_eq!(profiles.len(), 4);
         assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[1].fixture.slug, LIDDED_BOX_PROFILE_ID);
         assert_eq!(profiles[2].fixture.slug, FLAT_PANEL_PRIMITIVE_PROFILE_ID);
+        assert_eq!(profiles[3].fixture.slug, HINGED_PANEL_PROFILE_ID);
         assert!(HOME_TEMPLATE_FILTERS.is_empty());
         assert!(strings.contains(&"Choose a starting point."));
         assert!(strings.contains(&HOME_SUBTITLE));
@@ -8300,6 +8386,8 @@ mod tests {
         assert!(
             strings.contains(&"One upright clay panel with readable width, height, and thickness.")
         );
+        assert!(strings.contains(&"One upright clay panel with a visible hinge edge."));
+        assert!(strings.contains(&"You can vary proportions, edge softness, and hinge edge."));
 
         for hidden in [
             "Props",
@@ -8311,6 +8399,7 @@ mod tests {
             "1 starting point",
             "2 starting points",
             "3 starting points",
+            "4 starting points",
             "Search starting point...",
             "Choose what to make",
         ] {
@@ -8335,7 +8424,12 @@ mod tests {
         assert_eq!(family_names, sorted_family_names);
         assert_eq!(
             family_names,
-            vec!["Box Primitive", "Flat Panel Primitive", "Lidded Box"]
+            vec![
+                "Box Primitive",
+                "Flat Panel Primitive",
+                "Hinged Panel",
+                "Lidded Box"
+            ]
         );
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
         assert!(
@@ -8384,7 +8478,12 @@ mod tests {
                 .iter()
                 .map(|index| profiles[*index].fixture.slug.as_str())
                 .collect::<Vec<_>>(),
-            vec!["box-primitive", "lidded-box", "flat-panel-primitive"]
+            vec![
+                "box-primitive",
+                "lidded-box",
+                "flat-panel-primitive",
+                "hinged-panel"
+            ]
         );
     }
 
@@ -8392,13 +8491,15 @@ mod tests {
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
         let groups = product_home_profile_groups(profiles);
-        assert_eq!(groups.len(), 3);
+        assert_eq!(groups.len(), 4);
         assert_eq!(groups[0].family_id, "box_primitive");
         assert_eq!(groups[1].family_id, "flat_panel_primitive");
-        assert_eq!(groups[2].family_id, "lidded_box");
+        assert_eq!(groups[2].family_id, "hinged_panel");
+        assert_eq!(groups[3].family_id, "lidded_box");
         assert_eq!(groups[0].profiles.len(), 1);
         assert_eq!(groups[1].profiles.len(), 1);
         assert_eq!(groups[2].profiles.len(), 1);
+        assert_eq!(groups[3].profiles.len(), 1);
     }
 
     #[test]
@@ -10346,6 +10447,195 @@ mod tests {
             assert!(
                 !simple_make_copy.contains(forbidden),
                 "Flat Panel baseline copy must not expose {forbidden}: {simple_make_copy}"
+            );
+        }
+        assert!(
+            simple_make_copy.contains("not a textured, rigged, animated, or game-ready package")
+        );
+    }
+
+    #[test]
+    fn hinged_panel_make_baseline_flow_is_plain_and_complete() {
+        let fixture = shape_foundry_catalog::flat_panel::hinged_panel_fixture_catalog();
+        let mut app = ready_fixture_state_test_app(fixture.clone());
+        let ready = app.make_canvas_view_state();
+
+        assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.simple_box_make_baseline);
+        assert!(ready.hinged_panel_baseline);
+        assert!(!ready.flat_panel_baseline);
+        assert!(!ready.lidded_box_baseline);
+        assert_eq!(ready.primary_action_label, ACTION_TRY_HINGED_PANEL_IDEAS);
+        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_HINGE_EDGE);
+        assert!(ready.next_action_hint.contains("Try hinged panel ideas"));
+        assert!(ready.next_action_hint.contains("hinge edge"));
+        assert!(ready.next_action_hint.contains("proportions"));
+        assert!(!app.material_look_action_visible(&ready));
+        assert!(!ready.material_look_tray_visible);
+        assert_eq!(app.material_look_export_copy(), None);
+        assert_eq!(
+            app.current_export_copy(),
+            (HINGED_PANEL_EXPORT_TITLE, HINGED_PANEL_EXPORT_DETAIL)
+        );
+        let controls = app
+            .state
+            .current_output
+            .as_ref()
+            .expect("compiled hinged panel output")
+            .catalog
+            .customizer_profile
+            .controls
+            .iter()
+            .filter(|control| control.primary && control.visible)
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(controls, vec!["Proportions", "Edge Softness", "Hinge Edge"]);
+        let groups = app
+            .state
+            .document
+            .as_ref()
+            .map(directions::direction_part_groups_for_document)
+            .expect("hinged panel document has direction groups");
+        assert!(
+            groups.is_empty(),
+            "Hinged Panel should not expose part focus chips"
+        );
+
+        let request_command = app
+            .make_primary_candidate_command()
+            .expect("request command");
+        let FoundryAppCommand::RequestCandidates(request) = request_command.clone() else {
+            panic!("expected candidate request command");
+        };
+        assert_eq!(
+            request.variation_intent.channels,
+            vec![shape_foundry::VariationChannel::CompleteLook]
+        );
+
+        let candidate_effects = app
+            .state
+            .handle_command(request_command)
+            .expect("Try hinged panel ideas schedules");
+        let candidate_event = run_fixture_effect(candidate_effects, &fixture);
+        let (preview_request, candidate_output) = match &candidate_event {
+            FoundryJobEvent::CandidatesGenerated {
+                request, output, ..
+            } => {
+                assert!(
+                    !output.candidates.is_empty(),
+                    "Try hinged panel ideas should yield candidates: {:?} {:?}",
+                    output.diagnostics,
+                    output.reliability_report
+                );
+                assert!(
+                    output
+                        .candidates
+                        .iter()
+                        .any(|candidate| !candidate.changed_controls.is_empty()),
+                    "Try hinged panel ideas should yield at least one changed candidate"
+                );
+                for candidate in &output.candidates {
+                    for forbidden in ["Box", "Door", "Open", "Close", "Animation"] {
+                        assert!(
+                            !candidate.label.contains(forbidden),
+                            "Hinged Panel candidate must not use {forbidden}: {}",
+                            candidate.label
+                        );
+                    }
+                }
+                (request.clone(), output.as_ref().clone())
+            }
+            other => panic!("expected generated candidates, got {other:?}"),
+        };
+        assert!(app.state.handle_job_event(candidate_event));
+
+        let preview_effects = app
+            .state
+            .request_candidate_previews(preview_request, candidate_output)
+            .expect("candidate previews schedule");
+        let preview_event = run_fixture_effect(preview_effects, &fixture);
+        assert!(app.state.handle_job_event(preview_event));
+
+        let reviewing = app.make_canvas_view_state();
+        assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
+        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_PANEL);
+        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_PANEL);
+        assert_eq!(reviewing.next_action_hint, "Use this panel, or reject it.");
+        assert!(reviewing.selected_comparison_visible);
+        assert!(
+            app.state
+                .candidates
+                .iter()
+                .any(|candidate| !candidate.rgba8.is_empty())
+        );
+
+        let build_before_accept = app.state.current_build.clone();
+        let accept_effects = app
+            .state
+            .handle_command(
+                app.accept_visible_candidate_command()
+                    .expect("selectable hinged panel idea"),
+            )
+            .expect("Use this panel schedules");
+        let accept_event = run_fixture_effect(accept_effects, &fixture);
+        assert!(app.state.handle_job_event(accept_event));
+        assert_ne!(app.state.current_build, build_before_accept);
+        assert!(app.state.candidates.is_empty());
+
+        let adjust_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "hinge_edge_style".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(0.75),
+            }))
+            .expect("adjust hinge edge schedules");
+        let adjust_event = run_fixture_effect(adjust_effects, &fixture);
+        assert!(app.state.handle_job_event(adjust_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("hinge_edge_style")),
+            Some(&shape_foundry::ControlValue::Scalar(0.75))
+        );
+
+        let pack_effects = app
+            .state
+            .handle_command(app.add_current_to_pack_command().expect("pack command"))
+            .expect("Add to Pack schedules");
+        let pack_event = run_fixture_effect(pack_effects, &fixture);
+        assert!(app.state.handle_job_event(pack_event));
+        assert_eq!(app.state.pack.members.len(), 1);
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(app.make_canvas_view_state().pack_drawer_visible);
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(app.make_canvas_view_state().export_drawer_visible);
+
+        let simple_make_copy = [
+            ready.primary_action_label.as_str(),
+            reviewing.primary_action_label.as_str(),
+            ready.adjust_heading_label,
+            HINGED_PANEL_EXPORT_TITLE,
+            HINGED_PANEL_EXPORT_DETAIL,
+            BOX_PRIMITIVE_EXPORT_LIMITATION,
+            ACTION_ADD_TO_PACK,
+            ACTION_EXPORT,
+        ]
+        .join("\n")
+        .to_ascii_lowercase();
+        for forbidden in [
+            "door",
+            "handle",
+            "knob",
+            "material looks",
+            "focus part",
+            "open",
+            "close",
+        ] {
+            assert!(
+                !simple_make_copy.contains(forbidden),
+                "Hinged Panel baseline copy must not expose {forbidden}: {simple_make_copy}"
             );
         }
         assert!(

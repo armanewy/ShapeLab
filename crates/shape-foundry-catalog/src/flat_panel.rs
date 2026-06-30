@@ -167,7 +167,7 @@ pub fn hinged_panel_curation_metadata() -> CatalogCurationMetadata {
         has_visual_direction_evidence: true,
         has_readable_control_evidence: true,
         has_human_showcase_review: false,
-        note: "Hinged Panel is Flat Panel plus one visible clay hinge-side edge. It does not claim Door naming, open/close motion, materials, rigging, or animation.",
+        note: "Hinged Panel is Flat Panel plus one visible Hinge Edge feature. It does not claim Door naming, open/close motion, materials, rigging, or animation.",
     }
 }
 

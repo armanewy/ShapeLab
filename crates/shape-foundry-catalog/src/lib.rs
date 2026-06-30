@@ -320,6 +320,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
         ("Box Primitive", box_primitive::fixture_catalog()),
         ("Lidded Box", box_primitive::lidded_box_fixture_catalog()),
         ("Flat Panel Primitive", flat_panel::fixture_catalog()),
+        ("Hinged Panel", flat_panel::hinged_panel_fixture_catalog()),
     ]
 }
 
@@ -330,6 +331,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
         box_primitive::curation_metadata(),
         box_primitive::lidded_box_curation_metadata(),
         flat_panel::curation_metadata(),
+        flat_panel::hinged_panel_curation_metadata(),
     ]
 }
 

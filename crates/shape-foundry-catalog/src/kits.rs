@@ -536,7 +536,8 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
         box_primitive::BOX_PRIMITIVE_SLUG
         | box_primitive::LIDDED_BOX_SLUG
-        | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => FoundryKitQualityTier::Usable,
+        | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG
+        | flat_panel::HINGED_PANEL_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -546,6 +547,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         box_primitive::BOX_PRIMITIVE_SLUG => vec!["Primitive", "Box"],
         box_primitive::LIDDED_BOX_SLUG => vec!["Box", "Lidded"],
         flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => vec!["Primitive", "Panel"],
+        flat_panel::HINGED_PANEL_SLUG => vec!["Panel", "Hinged"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -558,6 +560,7 @@ fn normalize_kit_slug(slug: &str) -> String {
         "box" | "box_primitive" => box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
         "lidded_box" => box_primitive::LIDDED_BOX_SLUG.to_owned(),
         "flat_panel" | "panel" => flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
+        "hinged_panel" => flat_panel::HINGED_PANEL_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -571,7 +574,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 3);
+        assert_eq!(packages.len(), 4);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -627,6 +630,18 @@ mod tests {
             Some(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
         );
         assert_eq!(panel_package.kit.category_chips, vec!["Primitive", "Panel"]);
+
+        let hinged_package =
+            built_in_foundry_kit_package(flat_panel::HINGED_PANEL_SLUG).expect("hinged kit");
+        assert_eq!(
+            hinged_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            hinged_package.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::HINGED_PANEL_SLUG)
+        );
+        assert_eq!(hinged_package.kit.category_chips, vec!["Panel", "Hinged"]);
     }
 
     #[test]
@@ -641,6 +656,12 @@ mod tests {
         assert_eq!(
             panel_kit.kit.source_profile_slug.as_deref(),
             Some(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
+        );
+
+        let hinged_kit = built_in_foundry_kit_package("hinged_panel").expect("hinged alias");
+        assert_eq!(
+            hinged_kit.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::HINGED_PANEL_SLUG)
         );
     }
 }

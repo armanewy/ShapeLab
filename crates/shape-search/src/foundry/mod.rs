@@ -3510,6 +3510,30 @@ fn candidate_intent_label(
         "Square Edge Panel",
         "Plain Edge Panel",
     ];
+    const HINGED_PANEL_COMPLETE_LOOK_LABELS: [&str; 6] = [
+        "Clean Hinged Panel",
+        "Wide Hinged Panel",
+        "Tall Hinged Panel",
+        "Heavy Edge Panel",
+        "Minimal Hinged Panel",
+        "Soft-Edged Hinged Panel",
+    ];
+    const HINGED_PANEL_SHAPE_LABELS: [&str; 6] = [
+        "Wide Hinged Panel",
+        "Tall Hinged Panel",
+        "Short Hinged Panel",
+        "Narrow Hinged Panel",
+        "Balanced Hinged Panel",
+        "Clean Hinged Panel",
+    ];
+    const HINGED_PANEL_DETAIL_LABELS: [&str; 6] = [
+        "Heavy Edge Panel",
+        "Minimal Hinged Panel",
+        "Sharper Hinged Panel",
+        "Softer Hinged Panel",
+        "Plain Hinge Edge",
+        "Clean Hinge Edge",
+    ];
     const COMPLETE_LOOK_LABELS: [&str; 6] = [
         "Compact Box",
         "Wide Box",
@@ -3545,14 +3569,33 @@ fn candidate_intent_label(
 
     let flat_panel_profile =
         profile.family_id.contains("flat_panel") || profile.family_id.contains("flat-panel");
+    let hinged_panel_profile =
+        profile.family_id.contains("hinged_panel") || profile.family_id.contains("hinged-panel");
 
-    let labels = if flat_panel_profile
+    let labels = if hinged_panel_profile
         && !intent.scope.is_focus_part()
         && (intent.includes_channel(&VariationChannel::Shape)
             || matches!(
                 mode,
                 FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
             )) {
+        &HINGED_PANEL_SHAPE_LABELS
+    } else if hinged_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Detail)
+            || mode == FoundryCandidateMode::Detail)
+    {
+        &HINGED_PANEL_DETAIL_LABELS
+    } else if hinged_panel_profile && !intent.scope.is_focus_part() {
+        &HINGED_PANEL_COMPLETE_LOOK_LABELS
+    } else if flat_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Shape)
+            || matches!(
+                mode,
+                FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
+            ))
+    {
         &FLAT_PANEL_SHAPE_LABELS
     } else if flat_panel_profile
         && !intent.scope.is_focus_part()
@@ -4273,6 +4316,44 @@ mod tests {
                 "Flat Panel idea must not use box language: {}",
                 candidate.label
             );
+        }
+    }
+
+    #[test]
+    fn hinged_panel_candidate_labels_do_not_fall_back_to_box_or_door_names() {
+        let fixture = shape_foundry_catalog::flat_panel::hinged_panel_fixture_catalog();
+        let output = generate_foundry_candidate_draft_plans(
+            &fixture.document,
+            &fixture,
+            &FoundryCandidateRequest {
+                seed: 42,
+                proposal_count: 12,
+                result_count: 6,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            },
+        )
+        .expect("hinged panel candidates generate");
+
+        assert!(
+            !output.candidates.is_empty(),
+            "Hinged Panel should generate candidate ideas"
+        );
+        for candidate in output.candidates {
+            assert!(
+                candidate.label.contains("Panel") || candidate.label.contains("Edge"),
+                "Hinged Panel idea should use panel/edge language: {}",
+                candidate.label
+            );
+            for forbidden in ["Box", "Door", "Open", "Close", "Animation"] {
+                assert!(
+                    !candidate.label.contains(forbidden),
+                    "Hinged Panel idea must not use {forbidden} language: {}",
+                    candidate.label
+                );
+            }
         }
     }
 }

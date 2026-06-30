@@ -4,11 +4,11 @@ Date: 2026-06-30
 
 ## Verdict
 
-`HINGE EDGE INTERNAL FEATURE EVIDENCE PROVEN`
+`HINGED PANEL MAKE BASELINE PROVEN`
 
 Shape Lab has one honest box-like ladder and a second primitive kernel proof.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
-Box Primitive, Lidded Box, and Flat Panel Primitive.
+Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel.
 
 Box Primitive is a pure-clay closed box-like volume. It has two novice controls:
 Proportions and Edge Softness. It does not claim to be any richer non-box model
@@ -19,26 +19,26 @@ Trimmed Box has internal feature-module evidence as Lidded Box plus one visible
 Trim Band. It is not exposed in the app Make loop yet and is not a crate.
 
 Flat Panel Primitive is one upright clay panel with readable width, height, and
-thickness. It is not Door, Hinged Panel, or an open/close motion asset.
+thickness. It is not Door or an open/close motion asset.
 
-Hinge Edge has internal feature-module evidence as Flat Panel Primitive plus one
-visible hinge-side clay edge. It is not exposed in the app Make loop yet and is
-not Door or an open/close motion asset.
+Hinged Panel is Flat Panel Primitive plus one visible Hinge Edge feature. It is
+now exposed in the Make loop after the Hinge Edge visual gate. It is not Door,
+does not open or close, and does not claim rigging or animation.
 
 ## Current Truth
 
 - Box Primitive remains the active novice baseline.
 - Lidded Box is the first incremental Make baseline after Box Primitive.
 - Flat Panel Primitive is the second visible primitive baseline.
-- The default catalog contains only Box Primitive, Lidded Box, and Flat Panel
-  Primitive.
-- The preview catalog contains only Box Primitive, Lidded Box, and Flat Panel
-  Primitive.
-- The Choose screen shows three simple starter profiles, not a broad template
+- The default catalog contains only Box Primitive, Lidded Box, Flat Panel
+  Primitive, and Hinged Panel.
+- The preview catalog contains only Box Primitive, Lidded Box, Flat Panel
+  Primitive, and Hinged Panel.
+- The Choose screen shows four simple starter profiles, not a broad template
   browser.
 - The Make screen hides part/focus controls, Material Looks, surface-only UI,
-  and Family Studio entry points for Box Primitive, Lidded Box, and Flat Panel
-  Primitive.
+  and Family Studio entry points for Box Primitive, Lidded Box, Flat Panel
+  Primitive, and Hinged Panel.
 - The baseline model must read visually as a box.
 - Box ideas must visibly differ by proportions or edge softness.
 - The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
@@ -53,6 +53,8 @@ not Door or an open/close motion asset.
   2026-06-30.
 - The Hinge Edge feature-module gate passed catalog/visual evidence tests on
   2026-06-30.
+- The Hinged Panel Make baseline gate passed release-app Computer Use
+  validation on 2026-06-30.
 - No public catalog publishing is approved.
 - No Door naming, surface/material, UV/texturing, rigging, animation, runtime
   LLM, or game-ready UI is approved.
@@ -62,17 +64,18 @@ not Door or an open/close motion asset.
 - Shape Lab can start from a Box Primitive profile.
 - Shape Lab can start from a Lidded Box profile after the Lid Seam gate.
 - Shape Lab can start from a Flat Panel Primitive profile.
+- Shape Lab can start from a Hinged Panel profile after the Hinge Edge gate.
 - Box Primitive can compile as a valid clay model.
 - Box Primitive can expose Proportions and Edge Softness controls.
 - Lidded Box can compile as a valid clay model with one visible lid seam.
 - Lidded Box can expose Proportions, Edge Softness, and Lid Seam controls.
 - Flat Panel Primitive can compile as a valid upright clay panel.
 - Flat Panel Primitive can expose Proportions and Edge Softness controls.
-- Hinged Panel may be referenced in internal docs as Flat Panel plus one
-  visible Hinge Edge feature with evidence under
-  `target/hinge-edge-feature-module-v0/`.
-- Box Primitive, Lidded Box, and Flat Panel Primitive are the only current
-  built-in product baselines.
+- Hinged Panel can compile as a valid upright clay panel with one visible
+  hinge-side edge.
+- Hinged Panel can expose Proportions, Edge Softness, and Hinge Edge controls.
+- Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel are the only
+  current built-in product baselines.
 - Box Primitive has release-app screenshot evidence under
   `target/box-primitive-dogfood-gate/`.
 - Box Primitive has UI truth-pass screenshot evidence under
@@ -92,15 +95,22 @@ not Door or an open/close motion asset.
   textured, rigged, animated, or game-ready package.
 - Flat Panel export may say that the current clay flat panel asset is not a
   textured, rigged, animated, or game-ready package.
+- Hinged Panel export may say that the current clay hinged panel asset is not a
+  textured, rigged, animated, or game-ready package.
 - Trimmed Box may be referenced in internal docs as Lidded Box plus one visible
   Trim Band feature with evidence under `target/trim-band-feature-module-v0/`.
+- Hinged Panel has Make baseline evidence under
+  `target/hinged-panel-make-baseline-gate/` and in
+  `docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`.
 
 ## Allowed Next Work
 
-- Hinged Panel Make baseline as the next app-visible gate after Hinge Edge.
+- Second-kernel Flat Panel integration as the next gate.
 - Repair-loop polish for weak box or panel variations.
-- Local Personal Kit persistence for Box Primitive, Lidded Box, and Flat Panel
-  Primitive.
+- Local Personal Kit persistence for Box Primitive, Lidded Box, Flat Panel
+  Primitive, and Hinged Panel.
+- Door Handle / Knob feature only after the second-kernel integration gate
+  passes.
 
 ## Still Blocked
 
@@ -108,8 +118,8 @@ not Door or an open/close motion asset.
 - Calling Lidded Box a crate.
 - Calling Trimmed Box a crate.
 - Calling Flat Panel Primitive a Door.
+- Calling Hinged Panel a Door.
 - Adding multiple visible concepts in one branch.
-- Feet / Skids before the Hinged Panel Make baseline gate.
 - Door naming before visible door cues pass a later gate.
 - Broad archetype expansion.
 - Surface/material editor work.
