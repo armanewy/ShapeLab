@@ -11,7 +11,7 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     WorkflowStepCopy {
         index: 1,
         label: "Choose",
-        detail: "Template",
+        detail: "Starting point",
     },
     WorkflowStepCopy {
         index: 2,
@@ -20,10 +20,9 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     },
 ];
 
-pub(crate) const PRIMARY_ACTION_LABELS: [&str; 14] = [
+pub(crate) const PRIMARY_ACTION_LABELS: [&str; 13] = [
     "Try ideas",
     "Try box ideas",
-    "Try body ideas",
     "Use this idea",
     "Use this box",
     "Add to Pack",

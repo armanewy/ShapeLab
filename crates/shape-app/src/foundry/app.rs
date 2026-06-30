@@ -16,14 +16,11 @@ use serde::de::DeserializeOwned;
 use shape_core::Aabb;
 use shape_foundry::{
     CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
-    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput,
-    STATIC_PROP_FULL_READY_BLOCKED_NOTE, STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL,
-    STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION, VariationIntent,
+    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput, VariationIntent,
     built_in_surface_capability_for_profile, compile_foundry_document,
 };
 use shape_foundry_catalog::{
-    FoundryFixtureCatalog, catalog_curation_metadata_for_slug,
-    curated_fixture_catalogs_with_labels, headless_fixture_catalogs,
+    FoundryFixtureCatalog, curated_fixture_catalogs_with_labels, headless_fixture_catalogs,
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{
@@ -308,24 +305,13 @@ struct SurfaceCandidateDeltaFile {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum HomeTemplateFilter {
     All,
-    Props,
-    Architecture,
-    Gear,
-    Furniture,
-    Environment,
 }
 
-const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 6] = [
-    HomeTemplateFilter::All,
-    HomeTemplateFilter::Props,
-    HomeTemplateFilter::Architecture,
-    HomeTemplateFilter::Gear,
-    HomeTemplateFilter::Furniture,
-    HomeTemplateFilter::Environment,
-];
+const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 0] = [];
 
-const HOME_SUBTITLE: &str = "Start with an asset template, then make clear whole-asset ideas.";
-const NEED_PROJECT_REASON: &str = "Choose a template or open a project first.";
+const HOME_SUBTITLE: &str =
+    "Start with the Box Primitive baseline, then make clear whole-box ideas.";
+const NEED_PROJECT_REASON: &str = "Choose Box Primitive or open a project first.";
 const NEED_SAVE_LOCATION_REASON: &str =
     "Use Save Project first to choose where this project is saved.";
 const NEED_MODEL_REASON: &str = "Prepare the current model first.";
@@ -366,6 +352,10 @@ const MATERIAL_LOOK_FULL_READY_BLOCKED_COPY: &str =
 const SURFACE_PACKAGE_COMMAND_COPY: &str = "Run static surface package command";
 const SURFACE_PACKAGE_COMMAND: &str =
     "Surface packages are not part of the Box Primitive baseline.";
+const BOX_PRIMITIVE_EXPORT_TITLE: &str = "Export Box Primitive";
+const BOX_PRIMITIVE_EXPORT_DETAIL: &str = "Exports the current clay box asset.";
+const BOX_PRIMITIVE_EXPORT_LIMITATION: &str =
+    "This export includes no textures, rigs, animation, or game-ready package metadata.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
     "Clean Lab White",
     "Worn Hazard Yellow",
@@ -395,8 +385,8 @@ const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
 const ACTION_TRY_MATERIAL_LOOKS: &str = "Try material looks";
 const ACTION_TRY_AGAIN: &str = "Try again";
-const ACTION_CHOOSE_TEMPLATE: &str = "Choose Template";
-const ACTION_CHOOSE_ANOTHER_TEMPLATE: &str = "Choose another template";
+const ACTION_CHOOSE_TEMPLATE: &str = "Choose Box Primitive";
+const ACTION_CHOOSE_ANOTHER_TEMPLATE: &str = "Choose another starting point";
 const ACTION_CANCEL: &str = "Cancel";
 const ACTION_KEEP_WAITING: &str = "Keep waiting";
 const ACTION_SWITCH: &str = "Switch";
@@ -422,7 +412,7 @@ const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
 const ACTION_ADJUST_BOX: &str = "Adjust box";
-const RENDERED_ACTION_LABELS: [&str; 48] = [
+const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -442,7 +432,6 @@ const RENDERED_ACTION_LABELS: [&str; 48] = [
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_WHOLE_ASSET_RECOVERY,
     ACTION_TRY_MORE_IDEAS,
-    ACTION_TRY_MATERIAL_LOOKS,
     ACTION_TRY_AGAIN,
     ACTION_CHOOSE_TEMPLATE,
     ACTION_CHOOSE_ANOTHER_TEMPLATE,
@@ -466,8 +455,6 @@ const RENDERED_ACTION_LABELS: [&str; 48] = [
     ACTION_LOCK,
     ACTION_FOCUS,
     ACTION_APPLY,
-    ACTION_CLEAR_FOCUS,
-    ACTION_CHOOSE_ANOTHER_PART,
     ACTION_RETRY_PREPARATION,
     ACTION_UPDATE_PREVIEW,
     ACTION_ADJUST_BOX,
@@ -1057,7 +1044,7 @@ impl FoundryDesktopApp {
             }
         });
         let candidate_tray_visible = self.state.document.is_some();
-        let material_look_tray_visible = self.material_looks.tray_open;
+        let material_look_tray_visible = self.material_looks.tray_open && !box_primitive_baseline;
         let rejected_candidate_summary = self.make_canvas_rejected_candidate_summary();
         let selected_comparison_visible = selected_candidate.is_some_and(|candidate| {
             preview_ready
@@ -1232,7 +1219,7 @@ impl FoundryDesktopApp {
 
     fn save_state_pill(&self) -> (&'static str, StatusTone) {
         if self.state.document.is_none() {
-            ("Choose a template to start", StatusTone::Neutral)
+            ("Choose Box Primitive", StatusTone::Neutral)
         } else if self.state.project_path.is_none() {
             ("Not saved", StatusTone::Warning)
         } else if self.state.dirty {
@@ -1258,7 +1245,7 @@ impl FoundryDesktopApp {
         } else if self.state.document.is_some() {
             "Preparing model"
         } else {
-            "Choose a template"
+            "Choose Box Primitive"
         }
     }
 
@@ -1391,8 +1378,8 @@ impl FoundryDesktopApp {
         if profiles.is_empty() {
             product_empty_state(
                 ui,
-                "No reviewed templates yet",
-                "Open a saved project, or enable the preview catalog for internal kit testing.",
+                "Box Primitive is not available",
+                "Open a saved project, or enable the Box Primitive baseline.",
             );
             return;
         }
@@ -1434,8 +1421,8 @@ impl FoundryDesktopApp {
                     } else {
                         product_empty_state(
                             ui,
-                            "No matching template",
-                            "Change the search or filter to choose a template.",
+                            "No matching starting point",
+                            "Change the search to choose Box Primitive.",
                         );
                     }
                 },
@@ -1454,7 +1441,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Pick a template or open a project before making changes.",
+                "Choose Box Primitive or open a project before making changes.",
             ));
             return commands;
         }
@@ -1884,7 +1871,7 @@ impl FoundryDesktopApp {
                 });
                 ui.add_space(10.0);
             }
-            if self.material_looks.tray_open {
+            if view_state.material_look_tray_visible {
                 self.show_material_look_inspector_summary(ui);
                 ui.add_space(10.0);
             }
@@ -2446,7 +2433,7 @@ impl FoundryDesktopApp {
         view_state: &MakeCanvasViewState,
     ) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
-        if self.material_looks.tray_open {
+        if view_state.material_look_tray_visible {
             self.show_material_looks_panel(ui);
             ui.add_space(12.0);
         }
@@ -2799,7 +2786,7 @@ impl FoundryDesktopApp {
                         eyebrow: "Customize",
                         title: "Adjust controls",
                         subtitle: Some(
-                            "Tune the main asset controls and lock the parts you want to keep.",
+                            "Tune the main box controls and lock the settings you want to keep.",
                         ),
                     },
                 );
@@ -2807,7 +2794,7 @@ impl FoundryDesktopApp {
                     commands.extend(self.show_choose_asset_empty_state(
                         ui,
                         "Choose an asset first",
-                        "Pick a template or open a project before customizing.",
+                        "Choose Box Primitive or open a project before adjusting.",
                     ));
                 } else {
                     ui.add_space(10.0);
@@ -2976,8 +2963,8 @@ impl FoundryDesktopApp {
             ui,
             SectionHeaderSpec {
                 eyebrow: "Export",
-                title: "Export ready",
-                subtitle: Some("Send the current asset or prepared pack to disk."),
+                title: BOX_PRIMITIVE_EXPORT_TITLE,
+                subtitle: Some(BOX_PRIMITIVE_EXPORT_DETAIL),
             },
         );
         ui.add_space(10.0);
@@ -2985,7 +2972,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Pick a template or open a project before exporting.",
+                "Choose Box Primitive or open a project before exporting.",
             ));
             return commands;
         }
@@ -3102,7 +3089,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Pick a template or open a project before starting a pack.",
+                "Choose Box Primitive or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -3638,6 +3625,9 @@ impl FoundryDesktopApp {
         if !self.state.active_jobs.is_empty() {
             return commands;
         }
+        let Some(group) = screenshot_part_group(&self.state, group_id) else {
+            return commands;
+        };
         let active_group_id = self.state.document.as_ref().and_then(|document| {
             document
                 .variation_state
@@ -3649,10 +3639,8 @@ impl FoundryDesktopApp {
             self.screenshot_scenario_step = self.screenshot_scenario_step.max(2);
             return commands;
         }
-        if let Some(group) = screenshot_part_group(&self.state, group_id) {
-            commands.push(directions::set_focus_part_group_command(&group));
-            self.screenshot_scenario_step = 1;
-        }
+        commands.push(directions::set_focus_part_group_command(&group));
+        self.screenshot_scenario_step = 1;
         commands
     }
 
@@ -4549,9 +4537,12 @@ fn screenshot_scenario_assertion(
             "export_drawer_visible",
         ),
         ScreenshotScenario::MaterialLooksDogfood => require_screenshot_state(
-            view_state.export_drawer_visible && view_state.model_ready && view_state.preview_ready,
+            view_state.export_drawer_visible
+                && view_state.model_ready
+                && view_state.preview_ready
+                && !view_state.material_look_tray_visible,
             scenario,
-            "material look export drawer visible",
+            "export drawer visible without material look tray",
         ),
     }
 }
@@ -4718,7 +4709,7 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 fn profile_description(slug: &str) -> &'static str {
     match slug {
         "box-primitive" => "A closed clay box with proportions and edge softness controls.",
-        _ => "A Box Primitive template ready for visual direction generation.",
+        _ => "A Box Primitive starting point ready for box idea generation.",
     }
 }
 
@@ -4728,7 +4719,6 @@ struct ProductHomeProfile {
     fixture: FoundryFixtureCatalog,
     family_id: String,
     family_name: String,
-    quality_badge: String,
     style_name: String,
     category_chips: Vec<String>,
 }
@@ -4748,13 +4738,11 @@ fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProf
             let card = cards
                 .iter()
                 .find(|card| card.source_profile_slug.as_deref() == Some(fixture.slug.as_str()))?;
-            let curation = catalog_curation_metadata_for_slug(&fixture.slug)?;
             Some(ProductHomeProfile {
                 label: card.display_name.clone(),
                 fixture,
                 family_id: card.family_id.clone(),
                 family_name: card.family_name.clone(),
-                quality_badge: curation.state.label().to_owned(),
                 style_name: card.style_name.clone(),
                 category_chips: card.category_chips.clone(),
             })
@@ -4842,18 +4830,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
         ACTION_USE_THIS_BOX,
-        "Body",
-        "Focused: Body",
-        "Try body ideas",
-        "Lock body",
-        "Clear focus",
         "Add to Pack",
         "Open Pack",
         "Open Export",
-        "Material looks are not previewable yet.",
-        "This part has no focused ideas yet.",
         "Trying ideas...",
-        "Choose Template",
+        ACTION_CHOOSE_TEMPLATE,
         "Preparing model",
         "Rendering preview",
         "Ready to try ideas",
@@ -4865,20 +4846,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Current Asset",
         "Compare",
         "What changed",
-        "Affected parts",
-        "Focused: Body",
-        "Body ideas",
         "No clear ideas yet",
-        "No clear focused ideas survived",
         "No clear ideas survived",
         "The search found changes that were hidden or too subtle.",
-        "No clear body ideas survived. Try unlocking more controls.",
         "No ideas yet",
         "Try whole-asset ideas to compare readable candidates.",
         "Ideas",
         "Save",
         "Undo",
-        "Choose a template to start",
+        "Choose Box Primitive",
         "Not saved",
         "Saved",
         "Unsaved",
@@ -4887,7 +4863,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Working",
         "Model ready",
         "Preparing model",
-        "Choose a template",
+        "Choose Box Primitive",
         "Ready",
         "Preview available",
         "Preparing",
@@ -4898,44 +4874,28 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Current asset ready",
         "Needs a model first",
         HOME_SUBTITLE,
-        "Choose a template below to start a new project.",
-        "Search assets...",
-        "All",
-        "Props",
-        "Architecture",
-        "Gear",
-        "Furniture",
-        "Environment",
+        "Choose the Box Primitive starting point below.",
+        "Search starting point...",
         "Preview building",
-        "No matching templates",
+        "No matching starting point",
         "Make asset",
-        "Use the model as the workspace: try ideas, focus parts, tune controls, and compare.",
+        "Use the model as the workspace: try box ideas, tune controls, and compare.",
         "Try box ideas, adjust box, Add to Pack, or Export.",
         "Current Asset",
         "Ideas",
         "Trying ideas",
         "Current asset",
         "Try ideas, then use controls below to tune the current asset.",
-        MATERIAL_LOOK_SECTION_TITLE,
-        MATERIAL_LOOK_SURFACE_ONLY_COPY,
-        MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
-        "Current Material",
-        "Candidate Material",
-        MATERIAL_LOOK_PREVIEW_ONLY_COPY,
-        MATERIAL_LOOK_EXPORT_INCLUDED_COPY,
-        MATERIAL_LOOK_FULL_READY_BLOCKED_COPY,
-        MATERIAL_LOOK_MISSING_MESSAGE,
-        SURFACE_PACKAGE_COMMAND_COPY,
-        "Pick a template or open a project before making changes.",
+        "Choose Box Primitive or open a project before making changes.",
         "Preview could not be rendered for this idea.",
         "Preview this idea before using it.",
         "Project history",
         "Review previous project steps and branch from a saved point.",
         "saved step(s)",
         "Project step",
-        "Tune the main asset controls and lock the parts you want to keep.",
+        "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Pick a template or open a project before customizing.",
+        "Choose Box Primitive or open a project before adjusting.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -4944,13 +4904,12 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "This option is not available right now.",
         "This control is locked.",
         "Export ready",
-        "Send the current asset or prepared pack to disk.",
+        BOX_PRIMITIVE_EXPORT_TITLE,
+        BOX_PRIMITIVE_EXPORT_DETAIL,
+        BOX_PRIMITIVE_EXPORT_LIMITATION,
         "Current Asset",
         "Export options",
         "Pack members",
-        STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL,
-        STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION,
-        STATIC_PROP_FULL_READY_BLOCKED_NOTE,
         "Export this asset here, or export the prepared pack from the Pack drawer.",
         "Export the current asset as an individual result.",
         "Pack preview",
@@ -4980,11 +4939,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Preview is being prepared.",
         "Whole-asset ideas",
         "Primary control",
-        "No reviewed templates yet",
-        "Open a saved project, or enable the preview catalog for internal kit testing.",
-        "Choose a template below to start a new project.",
-        "Pick a template or open a project before exporting.",
-        "Pick a template or open a project before starting a pack.",
+        "Box Primitive is not available",
+        "Open a saved project, or enable the Box Primitive baseline.",
+        "Choose the Box Primitive starting point below.",
+        "Choose Box Primitive or open a project before exporting.",
+        "Choose Box Primitive or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -5005,11 +4964,9 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_RECOVERY, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_MORE_IDEAS, ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_TRY_MATERIAL_LOOKS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
-        ActionSpec::enabled("Try body ideas", ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_USE_THIS_BOX, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
@@ -5017,8 +4974,6 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_UNLOCK_CONTROLS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_RESET, ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_CLEAR_FOCUS, ButtonTone::Secondary),
-        ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_PART, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_ADD_TO_PACK, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_OPEN_PACK, ButtonTone::Secondary),
@@ -5129,7 +5084,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     match mode {
         MakeCanvasMode::NoAsset => (
             "Choose an asset".to_owned(),
-            "Pick a template or open a project before making changes.".to_owned(),
+            "Choose Box Primitive or open a project before making changes.".to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::PreparingAsset => {
@@ -5246,7 +5201,7 @@ fn no_candidates_reason_copy(candidate_output: Option<&FoundryCandidateOutput>) 
 
 fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
     match view_state.mode {
-        MakeCanvasMode::NoAsset => "Choose a template first.",
+        MakeCanvasMode::NoAsset => "Choose Box Primitive first.",
         MakeCanvasMode::PreparingAsset if view_state.preparation_timed_out => {
             PREPARATION_TIMEOUT_MESSAGE
         }
@@ -5276,7 +5231,7 @@ fn make_canvas_next_action_hint(
     box_primitive_baseline: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
-        (MakeCanvasMode::NoAsset, _, _) => "Start with a template from Choose.".to_owned(),
+        (MakeCanvasMode::NoAsset, _, _) => "Start with Box Primitive from Choose.".to_owned(),
         (MakeCanvasMode::PreparingAsset, _, _) => {
             "Wait for the model and preview to finish preparing.".to_owned()
         }
@@ -5641,7 +5596,7 @@ fn show_home_browser_panel(
         );
         ui.add_space(8.0);
         ui.label(
-            RichText::new("Choose a template below to start a new project.")
+            RichText::new("Choose the Box Primitive starting point below.")
                 .color(colors.text_muted)
                 .small(),
         );
@@ -5649,7 +5604,7 @@ fn show_home_browser_panel(
         let response = ui.add_sized(
             [ui.available_width(), 32.0],
             egui::TextEdit::singleline(search_query)
-                .hint_text("Search assets...")
+                .hint_text("Search starting point...")
                 .desired_width(f32::INFINITY),
         );
         if response.changed() {
@@ -5684,7 +5639,7 @@ fn show_home_browser_panel(
                 ui.set_width(ui.available_width());
                 if filtered_indices.is_empty() {
                     ui.label(
-                        RichText::new("No matching templates")
+                        RichText::new("No matching starting point")
                             .color(colors.text_muted)
                             .small(),
                     );
@@ -5773,16 +5728,6 @@ fn show_home_template_row(
                 )
                 .wrap(),
             );
-            ui.add_space(5.0);
-            ui.horizontal_wrapped(|ui| {
-                let _ = status_pill(
-                    ui,
-                    StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
-                );
-                for chip in &profile.category_chips {
-                    let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
-                }
-            });
         })
         .response
         .interact(egui::Sense::click())
@@ -5805,14 +5750,6 @@ fn show_home_selected_template_stage(
                     .size(18.0)
                     .strong(),
             );
-            ui.add_space(6.0);
-            let _ = status_pill(
-                ui,
-                StatusPillSpec::new(&profile.quality_badge, StatusTone::Working),
-            );
-            for chip in &profile.category_chips {
-                let _ = status_pill(ui, StatusPillSpec::new(chip, StatusTone::Neutral));
-            }
         });
         ui.add_space(8.0);
         ui.add(
@@ -5904,8 +5841,8 @@ fn show_home_selected_model_preview(
 
 fn home_profile_count_label(count: usize) -> String {
     match count {
-        1 => "1 template".to_owned(),
-        count => format!("{count} templates"),
+        1 => "1 starting point".to_owned(),
+        count => format!("{count} starting points"),
     }
 }
 
@@ -6002,29 +5939,12 @@ impl HomeTemplateFilter {
     fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Props => "Props",
-            Self::Architecture => "Architecture",
-            Self::Gear => "Gear",
-            Self::Furniture => "Furniture",
-            Self::Environment => "Environment",
         }
     }
 
-    fn matches(self, profile: &ProductHomeProfile) -> bool {
-        if self == Self::All {
-            return true;
-        }
-        let chips = profile
-            .category_chips
-            .iter()
-            .map(|chip| chip.to_ascii_lowercase())
-            .collect::<Vec<_>>();
+    fn matches(self, _profile: &ProductHomeProfile) -> bool {
         match self {
             Self::All => true,
-            Self::Props => chips
-                .iter()
-                .any(|chip| chip == "primitive" || chip == "box"),
-            Self::Architecture | Self::Gear | Self::Furniture | Self::Environment => false,
         }
     }
 }
@@ -7756,6 +7676,11 @@ fn show_export_readiness_panel(
             .color(colors.text_muted)
             .small(),
         );
+        ui.label(
+            RichText::new(BOX_PRIMITIVE_EXPORT_LIMITATION)
+                .color(colors.text_muted)
+                .small(),
+        );
         ui.add_space(10.0);
         export_checklist_row(ui, "Model prepared", can_export_current, NEED_MODEL_REASON);
         export_checklist_row(
@@ -7823,31 +7748,6 @@ fn show_export_readiness_panel(
             };
             ui.label(RichText::new(reason).color(colors.warning).small());
         }
-        ui.add_space(12.0);
-        ui.separator();
-        ui.add_space(10.0);
-        ui.label(
-            RichText::new("Material looks are not previewable yet.")
-                .color(colors.text_muted)
-                .small(),
-        );
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL)
-                .color(colors.text)
-                .strong(),
-        );
-        ui.label(
-            RichText::new(STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION)
-                .color(colors.text_muted)
-                .small(),
-        );
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(STATIC_PROP_FULL_READY_BLOCKED_NOTE)
-                .color(colors.text_muted)
-                .small(),
-        );
     });
     commands
 }
@@ -8307,11 +8207,11 @@ mod tests {
         let profiles = product_home_profiles(false);
         let mut selected_slug = Some("box-primitive".to_owned());
 
-        normalize_home_selection(&profiles, "", HomeTemplateFilter::Props, &mut selected_slug);
+        normalize_home_selection(&profiles, "", HomeTemplateFilter::All, &mut selected_slug);
 
         assert_eq!(selected_slug.as_deref(), Some("box-primitive"));
         assert!(
-            filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::Props)
+            filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::All)
                 .iter()
                 .all(|index| profiles[*index].fixture.slug == "box-primitive")
         );
@@ -8644,8 +8544,7 @@ mod tests {
             ACTION_UPDATE_PREVIEW,
             "Ready to try ideas",
             "Trying ideas",
-            "No clear focused ideas survived",
-            "No clear body ideas survived",
+            "No clear ideas survived",
             "EmptyReady",
             "GeneratingSkeletons",
             "HasCandidates",
@@ -8662,20 +8561,25 @@ mod tests {
     }
 
     #[test]
-    fn export_surface_copy_states_package_without_full_game_ready_claim() {
+    fn box_primitive_default_shell_hides_surface_export_copy() {
         let strings = product_visible_strings_for_default_shell();
-
-        assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL));
-        assert!(strings.contains(&STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION));
-        assert!(strings.contains(&STATIC_PROP_FULL_READY_BLOCKED_NOTE));
-        assert!(strings.contains(&ACTION_TRY_MATERIAL_LOOKS));
-        assert!(strings.contains(&MATERIAL_LOOK_SECTION_TITLE));
-        assert!(strings.contains(&MATERIAL_LOOK_SURFACE_ONLY_COPY));
-        assert!(strings.contains(&MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY));
-        assert!(strings.contains(&MATERIAL_LOOK_PREVIEW_ONLY_COPY));
-        assert!(strings.contains(&MATERIAL_LOOK_FULL_READY_BLOCKED_COPY));
-
         let joined = strings.join("\n").to_ascii_lowercase();
+        for hidden in [
+            shape_foundry::STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL,
+            shape_foundry::STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION,
+            shape_foundry::STATIC_PROP_FULL_READY_BLOCKED_NOTE,
+            ACTION_TRY_MATERIAL_LOOKS,
+            MATERIAL_LOOK_SECTION_TITLE,
+            MATERIAL_LOOK_SURFACE_ONLY_COPY,
+            MATERIAL_LOOK_GEOMETRY_UNCHANGED_COPY,
+            MATERIAL_LOOK_PREVIEW_ONLY_COPY,
+            MATERIAL_LOOK_FULL_READY_BLOCKED_COPY,
+        ] {
+            assert!(
+                !strings.contains(&hidden),
+                "Box Primitive default shell should not expose {hidden}"
+            );
+        }
         for overclaim in [
             "game-ready textured asset",
             "visual foundry previews are textured",
@@ -8794,6 +8698,7 @@ mod tests {
             Some(missing_root.join("surface/variants/surface-candidate-report.json"));
         box_app.open_material_looks_panel();
         assert!(box_app.material_looks.tray_open);
+        assert!(!box_app.make_canvas_view_state().material_look_tray_visible);
         assert_eq!(
             box_app.material_looks.load_error.as_deref(),
             Some(MATERIAL_LOOK_MISSING_MESSAGE)
@@ -8845,11 +8750,11 @@ mod tests {
     }
 
     #[test]
-    fn material_look_copy_avoids_internal_surface_terms_and_overclaims() {
+    fn box_primitive_default_copy_hides_material_look_terms() {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n").to_ascii_lowercase();
 
-        for required in [
+        for hidden in [
             ACTION_TRY_MATERIAL_LOOKS,
             MATERIAL_LOOK_SECTION_TITLE,
             MATERIAL_LOOK_SURFACE_ONLY_COPY,
@@ -8859,8 +8764,8 @@ mod tests {
             MATERIAL_LOOK_MISSING_MESSAGE,
         ] {
             assert!(
-                strings.contains(&required),
-                "missing material look copy {required}"
+                !strings.contains(&hidden),
+                "Box Primitive default copy should not expose {hidden}"
             );
         }
 
@@ -8871,7 +8776,6 @@ mod tests {
             "texture file path",
             "gltf primitive",
             "rigging",
-            "animation",
             "game-ready surface",
         ] {
             assert!(
@@ -8879,6 +8783,7 @@ mod tests {
                 "material look copy leaked {forbidden}: {joined}"
             );
         }
+        assert!(strings.contains(&BOX_PRIMITIVE_EXPORT_LIMITATION));
     }
 
     #[test]
@@ -8898,7 +8803,7 @@ mod tests {
             "Start Another Asset",
             "History",
             "Try ideas",
-            "Choose Template",
+            ACTION_CHOOSE_TEMPLATE,
             "Start",
         ] {
             assert!(
@@ -8929,6 +8834,8 @@ mod tests {
             "Model workspace",
             "Focus Part",
             "Generate 6 Directions",
+            "Try body ideas",
+            "Material looks are not previewable yet.",
         ] {
             assert!(
                 !strings.contains(&forbidden),
@@ -8938,12 +8845,12 @@ mod tests {
 
         for required in [
             "Try ideas",
-            "Try body ideas",
             "Try more ideas",
             "Try whole-asset ideas",
             "Use this idea",
+            ACTION_TRY_BOX_IDEAS,
+            ACTION_USE_THIS_BOX,
             "Ideas",
-            "Material looks are not previewable yet.",
         ] {
             assert!(
                 strings.contains(&required),
@@ -9003,7 +8910,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_part_changes_visible_scope_and_local_tray() {
+    fn box_primitive_ignores_stale_focus_part_scope() {
         let mut app = visible_state_test_app();
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
@@ -9017,20 +8924,20 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(visible.primary_title, "Body");
-        assert_eq!(visible.focused_part_label.as_deref(), Some("Body"));
-        assert!(visible.focused_part_visible);
-        assert!(visible.focused_part_actions_visible);
-        assert_eq!(visible.primary_action_label, "Try body ideas");
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.primary_title, "Box Primitive");
+        assert!(visible.focused_part_label.is_none());
+        assert!(!visible.focused_part_visible);
+        assert!(!visible.focused_part_actions_visible);
+        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
         assert_eq!(
             visible.next_action_hint,
-            "Try body ideas, lock this part, or clear focus."
+            "Try box ideas, adjust box, Add to Pack, or Export."
         );
     }
 
     #[test]
-    fn focus_body_changes_visible_scope_and_action() {
+    fn box_primitive_focus_body_does_not_change_visible_scope_or_action() {
         let mut app = visible_state_test_app();
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
@@ -9044,11 +8951,11 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(visible.primary_title, "Body");
-        assert_eq!(visible.focused_part_label.as_deref(), Some("Body"));
-        assert!(visible.focused_part_visible);
-        assert_eq!(visible.primary_action_label, "Try body ideas");
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.primary_title, "Box Primitive");
+        assert!(visible.focused_part_label.is_none());
+        assert!(!visible.focused_part_visible);
+        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
     }
 
     #[test]
@@ -9061,8 +8968,8 @@ mod tests {
         let mut focused = ready_visible_state_test_app();
         set_test_focus_scope(&mut focused, "body", "Body");
         let focused = focused.make_canvas_view_state();
-        assert_eq!(focused.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(focused.primary_action_label, "Try body ideas");
+        assert_eq!(focused.mode, MakeCanvasMode::Ready);
+        assert_eq!(focused.primary_action_label, ACTION_TRY_BOX_IDEAS);
 
         let mut generating = ready_visible_state_test_app();
         generating
@@ -9165,7 +9072,7 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.primary_title, "Body");
+        assert_eq!(visible.primary_title, "Box Primitive");
         assert_eq!(visible.candidate_count, 1);
         assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
@@ -9190,12 +9097,12 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_focus_scenario_helper_waits_for_visible_focus() {
+    fn screenshot_focus_scenario_helper_does_not_focus_box_body() {
         let mut app = visible_state_test_app();
 
         let commands = app.ensure_screenshot_focus("body");
-        assert_eq!(app.screenshot_scenario_step, 1);
-        assert_eq!(commands.len(), 1);
+        assert_eq!(app.screenshot_scenario_step, 0);
+        assert!(commands.is_empty());
         assert_eq!(
             app.make_canvas_view_state().focused_part_label.as_deref(),
             None
@@ -9204,10 +9111,10 @@ mod tests {
         set_test_focus_scope(&mut app, "body", "Body");
         let commands = app.ensure_screenshot_focus("body");
         assert!(commands.is_empty());
-        assert_eq!(app.screenshot_scenario_step, 2);
+        assert_eq!(app.screenshot_scenario_step, 0);
         assert_eq!(
             app.make_canvas_view_state().focused_part_label.as_deref(),
-            Some("Body")
+            None
         );
     }
 
@@ -9252,27 +9159,6 @@ mod tests {
         );
         assert!(
             screenshot_scenario_assertion(ScreenshotScenario::SelectedComparison, &view).is_ok()
-        );
-
-        set_test_focus_scope(&mut app, "body", "Body");
-        app.state.candidates = vec![test_candidate_card(
-            &selected.0,
-            true,
-            Some("Body".to_owned()),
-        )];
-        let view = app.make_canvas_view_state();
-        assert!(screenshot_scenario_assertion(ScreenshotScenario::FocusBody, &view).is_ok());
-        assert!(screenshot_scenario_assertion(ScreenshotScenario::BodyIdeas, &view).is_ok());
-
-        set_test_focus_scope(&mut app, "body", "Body");
-        app.state.candidates.clear();
-        app.state.candidate_output = Some(Box::new(empty_test_candidate_output(4, 0, 0)));
-        assert!(
-            screenshot_scenario_assertion(
-                ScreenshotScenario::NoClearFocusedIdeas,
-                &app.make_canvas_view_state(),
-            )
-            .is_ok()
         );
 
         app.drawer = Some(FoundryDrawer::Pack);
@@ -9442,7 +9328,7 @@ mod tests {
     }
 
     #[test]
-    fn make_canvas_responsive_layout_expands_material_looks_tray() {
+    fn make_canvas_responsive_layout_hides_material_looks_tray_for_box() {
         let mut app = ready_visible_state_test_app();
         app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
         app.material_looks.tray_open = true;
@@ -9450,10 +9336,10 @@ mod tests {
 
         let layout = make_canvas_layout(egui::vec2(1900.0, 860.0), &visible);
 
-        assert!(visible.material_look_tray_visible);
-        assert!(!layout.inline_ideas);
-        assert!(layout.tray_height >= 330.0);
-        assert!(layout.top_height >= 320.0);
+        assert!(!visible.material_look_tray_visible);
+        assert!(layout.inline_ideas);
+        assert_eq!(layout.tray_height, 0.0);
+        assert_eq!(layout.top_height, 860.0);
     }
 
     #[test]
@@ -9528,7 +9414,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_zero_candidates_show_why_and_body_recovery_copy() {
+    fn box_primitive_zero_candidates_show_whole_box_recovery_copy() {
         let mut app = ready_visible_state_test_app();
         set_test_focus_scope(&mut app, "body", "Body");
         app.state.candidates.clear();
@@ -9541,25 +9427,15 @@ mod tests {
             MakeCandidateTrayState::NoCandidatesWithRecovery
         );
         assert!(visible.candidate_search_finished_empty);
-        assert_eq!(
-            visible.local_banner_title,
-            "No clear focused ideas survived"
-        );
-        assert!(
-            visible
-                .local_banner_message
-                .contains("No clear body ideas survived")
-        );
+        assert_eq!(visible.local_banner_title, "No clear ideas survived");
+        assert!(!visible.local_banner_message.contains("body"));
         assert!(
             visible
                 .local_banner_message
                 .contains("hidden or too subtle")
         );
-        assert!(visible.focused_no_candidates_recovery_visible);
-        assert_eq!(
-            visible.primary_action_label,
-            ACTION_TRY_WHOLE_ASSET_RECOVERY
-        );
+        assert!(!visible.focused_no_candidates_recovery_visible);
+        assert_eq!(visible.primary_action_label, ACTION_TRY_BOX_IDEAS);
     }
 
     #[test]
@@ -9780,14 +9656,17 @@ mod tests {
         assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_BOX);
         assert!(ready.next_action_hint.contains("adjust box"));
         assert!(!app.material_look_action_visible(&ready));
+        assert!(!ready.material_look_tray_visible);
         let groups = app
             .state
             .document
             .as_ref()
             .map(directions::direction_part_groups_for_document)
             .expect("box document has direction groups");
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].group_id, "body");
+        assert!(
+            groups.is_empty(),
+            "Box Primitive should not expose part focus chips"
+        );
 
         let request_command = app
             .make_primary_candidate_command()
@@ -10065,7 +9944,7 @@ mod tests {
         let mut app = FoundryDesktopApp::default();
         assert_eq!(
             app.save_state_pill(),
-            ("Choose a template to start", StatusTone::Neutral)
+            ("Choose Box Primitive", StatusTone::Neutral)
         );
 
         app.state =

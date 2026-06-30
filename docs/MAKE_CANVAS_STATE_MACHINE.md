@@ -90,13 +90,13 @@ workflow.
 
 ## Interaction Rules
 
-Starting a template switches to Make and queues model preparation automatically.
+Starting Box Primitive switches to Make and queues model preparation automatically.
 After compile completion, the host requests the current preview automatically.
 The visible preparation phase is `Preparing model`, then `Rendering preview`,
 then `Ready`.
 
-Before the first full build finishes, Make may show a deterministic quick
-template preview so the stage is not blank.
+Before the first full build finishes, Make may show a deterministic quick Box
+Primitive preview so the stage is not blank.
 
 Make does not expose novice-facing `Build Asset` or `Refresh Preview` actions.
 When the current preview is stale, missing, or rendering, the visible copy is
@@ -109,7 +109,7 @@ copy is:
 Still preparing. You can keep waiting or retry.
 ```
 
-The fallback actions are `Retry preparation`, `Choose another template`, and
+The fallback actions are `Retry preparation`, `Choose another starting point`, and
 `Open Project`.
 
 Idea generation is disabled until both `model_ready` and `preview_ready` are
@@ -175,11 +175,10 @@ When candidates exist:
 - `next_action_hint` tells the user whether to select, compare, use, reject, or
   continue waiting.
 
-When a focused search returns zero clear candidates, the local banner title is
-`No clear focused ideas survived`. The recovery card explains whether candidates
-were hidden, too subtle, duplicate-looking, or outside the focused part. Vents
-use limited-variation copy when applicable. Recovery actions include `Try again`,
-`Choose another part`, and `Unlock controls`.
+When a whole-box search returns zero clear candidates, the local banner title is
+`No clear ideas survived`. The recovery card explains whether candidates were
+hidden, too subtle, or duplicate-looking. Recovery actions include `Try again`
+and `Unlock controls`.
 
 When stale background work is ignored, the local banner title is `Older result
 ignored`, the copy is product-safe, and the local region offers `Try again`.
