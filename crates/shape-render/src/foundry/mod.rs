@@ -15,8 +15,8 @@ use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
 use crate::{
-    OrbitCamera, RenderError, RenderSettings, RenderedImage, fit_camera_to_bounds_with_aspect,
-    render_mesh,
+    OrbitCamera, RenderError, RenderSettings, RenderedImage, clay_readability_render_settings,
+    fit_camera_to_bounds_with_aspect, render_mesh,
 };
 
 const OVERLAY_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
@@ -169,6 +169,8 @@ pub struct FoundryPreviewRenderSettingsKey {
     pub light_direction: [u32; 3],
     /// Whether wireframe overlay is enabled.
     pub wireframe: bool,
+    /// Whether the display-only edge outline is enabled.
+    pub edge_outline: bool,
 }
 
 impl FoundryPreviewRenderSettingsKey {
@@ -182,6 +184,7 @@ impl FoundryPreviewRenderSettingsKey {
             ambient: canonical_f32_bits(settings.ambient.clamp(0.0, 1.0)),
             light_direction: vec3_key(normalized_light_direction(settings.light_direction)),
             wireframe: settings.wireframe,
+            edge_outline: settings.edge_outline,
         }
     }
 }
@@ -655,7 +658,10 @@ impl FoundryPreviewBatchRequest {
             comparison_set_id: comparison_set_id.into(),
             items,
             camera: None,
-            render_settings: RenderSettings::default(),
+            render_settings: clay_readability_render_settings(
+                resolution.pixels(),
+                resolution.pixels(),
+            ),
             resolution,
             max_parallel_jobs: 1,
         }

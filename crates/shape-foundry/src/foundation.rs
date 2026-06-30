@@ -1221,11 +1221,7 @@ fn box_primitive_draft_strategies() -> Vec<DraftCandidateStrategy> {
         ("tall_box", "Tall Box", &["proportions"][..]),
         ("flat_box", "Flat Box", &["proportions"][..]),
         ("soft_edged_box", "Soft-Edged Box", &["edge_softness"][..]),
-        (
-            "sharp_utility_box",
-            "Sharp Utility Box",
-            &["edge_softness"][..],
-        ),
+        ("sharp_utility_box", "Sharp Box", &["edge_softness"][..]),
     ]
     .into_iter()
     .map(|(id, name, controls)| DraftCandidateStrategy {

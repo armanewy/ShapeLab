@@ -23,7 +23,10 @@ use shape_render::foundry::{
     FoundryPreviewResolution, FoundryPreviewVariationMetadata,
     compare_foundry_rendered_visible_delta,
 };
-use shape_render::{OrbitCamera, RenderSettings, RenderedImage, fit_camera_to_bounds, render_mesh};
+use shape_render::{
+    OrbitCamera, RenderSettings, RenderedImage, clay_readability_render_settings,
+    fit_camera_to_bounds, render_mesh,
+};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRejectionReason,
     FoundryCandidateRequest, generate_foundry_candidate_draft_plans,
@@ -497,11 +500,7 @@ fn render_preview(
 
     let mesh = preview_mesh_from_output(output);
     let camera = fit_camera_to_bounds(mesh.bounds);
-    let settings = RenderSettings {
-        width,
-        height,
-        ..RenderSettings::default()
-    };
+    let settings = clay_readability_render_settings(width, height);
     let image = render_mesh(&mesh, &camera, &settings).map_err(|error| error.to_string())?;
     Ok(FoundryJobEvent::PreviewRendered {
         job_id,

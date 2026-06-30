@@ -168,6 +168,7 @@ pub fn default_surface_preview_request(
             ambient: 0.38,
             light_direction: Vec3::new(-0.45, -0.8, -0.28).normalize(),
             wireframe: false,
+            edge_outline: false,
         },
         sampling: TextureSampling::Bilinear,
     }
@@ -800,6 +801,7 @@ mod tests {
                 ambient: 1.0,
                 light_direction: Vec3::new(0.0, -1.0, -1.0).normalize(),
                 wireframe: false,
+                edge_outline: false,
             },
             sampling: TextureSampling::Bilinear,
         }

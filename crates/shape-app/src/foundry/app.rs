@@ -27,7 +27,8 @@ use shape_project::foundry::{
     FOUNDRY_PROJECT_FILE_SUFFIX, FoundryProject, FoundryProjectFile, ensure_foundry_project_path,
 };
 use shape_render::{
-    OrbitCamera, RenderSettings, fit_camera_to_bounds, foundry::FoundryPreviewCache, render_mesh,
+    OrbitCamera, clay_readability_render_settings, fit_camera_to_bounds,
+    foundry::FoundryPreviewCache, render_mesh,
 };
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
@@ -4046,11 +4047,7 @@ fn render_home_thumbnail(
     frame_index: i32,
     include_mesh: Option<Arc<TriangleMesh>>,
 ) -> Option<HomeThumbnailJobOutput> {
-    let settings = RenderSettings {
-        width: HOME_THUMBNAIL_PIXELS,
-        height: HOME_THUMBNAIL_PIXELS,
-        ..RenderSettings::default()
-    };
+    let settings = clay_readability_render_settings(HOME_THUMBNAIL_PIXELS, HOME_THUMBNAIL_PIXELS);
     let image = render_mesh(mesh.as_ref(), &camera, &settings).ok()?;
     Some(HomeThumbnailJobOutput {
         mesh: include_mesh,

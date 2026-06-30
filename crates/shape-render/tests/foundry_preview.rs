@@ -75,6 +75,25 @@ fn foundry_pure_clay_preview_produces_one_display_class() {
 }
 
 #[test]
+fn foundry_default_preview_uses_clay_readability_settings() {
+    let request = FoundryPreviewBatchRequest::new(
+        "default-readability",
+        vec![candidate_request("default", "geom-default", 1.0)],
+        FoundryPreviewResolution::Px64,
+    );
+
+    assert_eq!(request.render_settings.width, 64);
+    assert_eq!(request.render_settings.height, 64);
+    assert!(request.render_settings.edge_outline);
+    assert!(!request.render_settings.wireframe);
+    assert!(request.render_settings.ambient < RenderSettings::default().ambient);
+    assert_ne!(
+        request.render_settings.light_direction,
+        RenderSettings::default().light_direction
+    );
+}
+
+#[test]
 fn foundry_semantic_clay_preview_maps_neutral_gray_assignments() {
     let mut request = candidate_request("semantic", "geom-semantic", 1.0);
     request.semantic_clay_assignments = semantic_assignments();
@@ -660,6 +679,20 @@ fn cache_key_covers_all_foundry_preview_inputs() {
         FoundryPreviewCacheStatus::Miss
     );
 
+    let mut changed_outline = render_settings();
+    changed_outline.edge_outline = true;
+    let changed_outline = render_single_variant(
+        &mut cache,
+        base_item.clone(),
+        Some(base.camera.clone()),
+        Some(changed_outline),
+    );
+    assert_ne!(base_key, changed_outline.previews[0].key);
+    assert_eq!(
+        changed_outline.previews[0].cache_status,
+        FoundryPreviewCacheStatus::Miss
+    );
+
     let mut changed_resolution = batch(
         "key-coverage",
         vec![base_item],
@@ -922,6 +955,7 @@ fn render_settings() -> RenderSettings {
         ambient: 0.65,
         light_direction: Vec3::new(0.0, -1.0, -1.0).normalize(),
         wireframe: false,
+        edge_outline: false,
     }
 }
 
