@@ -371,7 +371,7 @@ const HOME_TEMPLATE_FILTERS: [HomeTemplateFilter; 0] = [];
 
 const HOME_SUBTITLE: &str = "Choose a simple clay starting point for the Make loop.";
 const BOX_PRIMITIVE_HOME_SUBTITLE: &str = "A simple clay box for testing the Make loop.";
-const HOME_CONTROL_COPY: &str = "You can vary proportions and edge softness.";
+const HOME_CONTROL_COPY: &str = "You can edit bounded properties.";
 const NEED_PROJECT_REASON: &str = "Choose a starting point or open a project first.";
 const NEED_SAVE_LOCATION_REASON: &str =
     "Use Save Project first to choose where this project is saved.";
@@ -983,7 +983,7 @@ impl FoundryDesktopApp {
             .values()
             .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
         let current_asset_job_active = compiling_or_editing || preview_rendering;
-        let model_ready = self.state.current_output.is_some() && !compiling_or_editing;
+        let model_ready = self.state.current_output.is_some();
         let quick_template_preview_visible =
             self.state.document.is_some() && self.state.current_output.is_none();
         let preview_image_ready = self
@@ -999,10 +999,12 @@ impl FoundryDesktopApp {
         let stale_preview = preview_image_ready && !preview_matches_current_build;
         let preview_ready = model_ready
             && preview_image_ready
-            && preview_matches_current_build
+            && (preview_matches_current_build || compiling_or_editing)
             && !preview_rendering;
-        let preview_updating = model_ready && (preview_rendering || stale_preview);
-        let preview_update_required = model_ready && !preview_ready && !preview_rendering;
+        let preview_updating =
+            model_ready && (preview_rendering || stale_preview || compiling_or_editing);
+        let preview_update_required =
+            model_ready && !preview_ready && !preview_rendering && !compiling_or_editing;
         let preparation_phase = if !model_ready {
             MakePreparationPhase::PreparingModel
         } else if !preview_ready {
@@ -1310,10 +1312,11 @@ impl FoundryDesktopApp {
             .active_jobs
             .values()
             .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
-        let model_ready = self.state.current_output.is_some() && !compiling_or_editing;
+        let model_ready = self.state.current_output.is_some();
         let preview_ready = model_ready
             && self.state.current_preview.as_ref().is_some_and(|preview| {
-                !preview.rgba8.is_empty() && preview.build == self.state.current_build
+                !preview.rgba8.is_empty()
+                    && (preview.build == self.state.current_build || compiling_or_editing)
             })
             && !preview_rendering;
 
@@ -3611,8 +3614,8 @@ impl FoundryDesktopApp {
             ScreenshotScenario::BoxPropertyEdit => {
                 if self.screenshot_scenario_step < 2 {
                     commands.push(FoundryAppCommand::run(FoundryCommand::SetControl {
-                        control_id: "edge_softness".to_owned(),
-                        value: shape_foundry::ControlValue::Scalar(0.55),
+                        control_id: "width".to_owned(),
+                        value: shape_foundry::ControlValue::Scalar(2.4),
                     }));
                     self.screenshot_scenario_step = 2;
                 } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
@@ -3622,8 +3625,8 @@ impl FoundryDesktopApp {
             ScreenshotScenario::FlatPanelPropertyEdit => {
                 if self.screenshot_scenario_step < 2 {
                     commands.push(FoundryAppCommand::run(FoundryCommand::SetControl {
-                        control_id: "edge_softness".to_owned(),
-                        value: shape_foundry::ControlValue::Scalar(0.45),
+                        control_id: "thickness".to_owned(),
+                        value: shape_foundry::ControlValue::Scalar(0.28),
                     }));
                     self.screenshot_scenario_step = 2;
                 } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
@@ -4920,6 +4923,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No quick controls yet",
         "This asset has no quick controls yet.",
         "Preview",
+        "Bounded property",
         "More options",
         "This option is not available right now.",
         "This control is locked.",
@@ -5008,7 +5012,9 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
 fn product_control_summary(
     control: &crate::foundry::view_model::FoundryControlView,
 ) -> &'static str {
-    if control.options.len() > 1 {
+    if control.numeric_range.is_some() {
+        "Bounded property"
+    } else if control.options.len() > 1 {
         "Whole-model options"
     } else {
         "Primary control"
@@ -7542,48 +7548,135 @@ fn show_customize_control_card(
             );
         }
         ui.add_space(8.0);
-        let visible_options = control
-            .options
-            .iter()
-            .take(CONTROL_FILMSTRIP_LIMIT)
-            .collect::<Vec<_>>();
         let action_state = CustomizeActionState {
             enabled: actions_enabled,
             disabled_reason,
         };
-        commands.extend(show_customize_option_grid(
-            ui,
-            texture_cache,
-            current_build,
-            control,
-            &visible_options,
-            true,
-            action_state,
-        ));
-        let remaining_options = control
-            .options
-            .iter()
-            .skip(CONTROL_FILMSTRIP_LIMIT)
-            .collect::<Vec<_>>();
-        if !remaining_options.is_empty() {
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new("More options")
-                    .color(colors.text_muted)
-                    .small(),
-            );
+        if let Some(range) = control.numeric_range {
+            commands.extend(show_direct_numeric_control(
+                ui,
+                control,
+                range,
+                action_state,
+            ));
+        } else {
+            let visible_options = control
+                .options
+                .iter()
+                .take(CONTROL_FILMSTRIP_LIMIT)
+                .collect::<Vec<_>>();
             commands.extend(show_customize_option_grid(
                 ui,
                 texture_cache,
                 current_build,
                 control,
-                &remaining_options,
-                false,
+                &visible_options,
+                true,
                 action_state,
             ));
+            let remaining_options = control
+                .options
+                .iter()
+                .skip(CONTROL_FILMSTRIP_LIMIT)
+                .collect::<Vec<_>>();
+            if !remaining_options.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("More options")
+                        .color(colors.text_muted)
+                        .small(),
+                );
+                commands.extend(show_customize_option_grid(
+                    ui,
+                    texture_cache,
+                    current_build,
+                    control,
+                    &remaining_options,
+                    false,
+                    action_state,
+                ));
+            }
         }
     });
     commands
+}
+
+fn show_direct_numeric_control(
+    ui: &mut egui::Ui,
+    control: &crate::foundry::view_model::FoundryControlView,
+    range: crate::foundry::view_model::FoundryNumericRange,
+    action_state: CustomizeActionState<'_>,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let colors = VisualFoundryTokens::dark().colors;
+    let current = direct_numeric_value(control, range);
+    let step = range.step.max(0.01);
+    ui.label(
+        RichText::new(format!(
+            "Domain {:.2} to {:.2}",
+            range.minimum, range.maximum
+        ))
+        .color(colors.text_muted)
+        .small(),
+    );
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        let decrease = (current - step).max(range.minimum);
+        let increase = (current + step).min(range.maximum);
+        let decrease_enabled = action_state.enabled && decrease < current;
+        let increase_enabled = action_state.enabled && increase > current;
+        if ui
+            .add_enabled(decrease_enabled, egui::Button::new("-"))
+            .on_disabled_hover_text(if action_state.enabled {
+                "Minimum reached."
+            } else {
+                action_state.disabled_reason
+            })
+            .clicked()
+        {
+            commands.extend(customize::release_control_value_intents(
+                control,
+                shape_foundry::ControlValue::Scalar(decrease),
+            ));
+        }
+        ui.monospace(format!("{current:.2}"));
+        if ui
+            .add_enabled(increase_enabled, egui::Button::new("+"))
+            .on_disabled_hover_text(if action_state.enabled {
+                "Maximum reached."
+            } else {
+                action_state.disabled_reason
+            })
+            .clicked()
+        {
+            commands.extend(customize::release_control_value_intents(
+                control,
+                shape_foundry::ControlValue::Scalar(increase),
+            ));
+        }
+    });
+    if !action_state.enabled {
+        ui.label(
+            RichText::new(product_panel_message(
+                action_state.disabled_reason,
+                PREVIEW_UPDATING_REASON,
+            ))
+            .color(colors.text_muted)
+            .small(),
+        );
+    }
+    commands
+}
+
+fn direct_numeric_value(
+    control: &crate::foundry::view_model::FoundryControlView,
+    range: crate::foundry::view_model::FoundryNumericRange,
+) -> f32 {
+    let value = match control.value.as_ref().or(control.default_value.as_ref()) {
+        Some(shape_foundry::ControlValue::Scalar(value)) if value.is_finite() => *value,
+        _ => range.minimum,
+    };
+    value.clamp(range.minimum, range.maximum)
 }
 
 fn show_customize_control_header_actions(
@@ -10142,12 +10235,25 @@ mod tests {
             "Box Primitive should not expose part focus chips"
         );
         assert!(app.make_primary_candidate_command().is_none());
+        let controls = app
+            .state
+            .current_output
+            .as_ref()
+            .expect("compiled box output")
+            .catalog
+            .customizer_profile
+            .controls
+            .iter()
+            .filter(|control| control.primary && control.visible)
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(controls, vec!["Width", "Depth", "Height", "Edge Softness"]);
 
         let adjust_effects = app
             .state
             .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
-                control_id: "edge_softness".to_owned(),
-                value: shape_foundry::ControlValue::Scalar(0.55),
+                control_id: "width".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(2.2),
             }))
             .expect("adjust box schedules");
         let adjust_event = run_fixture_effect(adjust_effects, &fixture);
@@ -10156,8 +10262,8 @@ mod tests {
             app.state
                 .document
                 .as_ref()
-                .and_then(|document| document.control_state.get("edge_softness")),
-            Some(&shape_foundry::ControlValue::Scalar(0.55))
+                .and_then(|document| document.control_state.get("width")),
+            Some(&shape_foundry::ControlValue::Scalar(2.2))
         );
 
         let pack_effects = app
@@ -10352,7 +10458,10 @@ mod tests {
             .filter(|control| control.primary && control.visible)
             .map(|control| control.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(controls, vec!["Proportions", "Edge Softness"]);
+        assert_eq!(
+            controls,
+            vec!["Width", "Height", "Thickness", "Edge Softness"]
+        );
         let groups = app
             .state
             .document
@@ -10369,7 +10478,7 @@ mod tests {
             .state
             .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
                 control_id: "edge_softness".to_owned(),
-                value: shape_foundry::ControlValue::Scalar(0.55),
+                value: shape_foundry::ControlValue::Scalar(0.08),
             }))
             .expect("adjust panel schedules");
         let adjust_event = run_fixture_effect(adjust_effects, &fixture);
@@ -10379,7 +10488,7 @@ mod tests {
                 .document
                 .as_ref()
                 .and_then(|document| document.control_state.get("edge_softness")),
-            Some(&shape_foundry::ControlValue::Scalar(0.55))
+            Some(&shape_foundry::ControlValue::Scalar(0.08))
         );
 
         let pack_effects = app
@@ -10426,6 +10535,106 @@ mod tests {
         assert!(
             simple_make_copy.contains("not a textured, rigged, animated, or game-ready package")
         );
+    }
+
+    #[test]
+    fn direct_property_controls_validate_reset_and_keep_view_copy_safe() {
+        let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
+        let mut app = ready_fixture_state_test_app(fixture.clone());
+        let profile = &app
+            .state
+            .current_output
+            .as_ref()
+            .expect("compiled box output")
+            .catalog
+            .customizer_profile;
+        let width = profile
+            .controls
+            .iter()
+            .find(|control| control.id == "width")
+            .expect("width control");
+        assert!(
+            width
+                .domain
+                .contains_available_value(&shape_foundry::ControlValue::Scalar(2.0))
+        );
+        assert!(
+            !width
+                .domain
+                .contains_available_value(&shape_foundry::ControlValue::Scalar(9.0))
+        );
+
+        let invalid_report = shape_foundry::validate_foundry_command(
+            &FoundryCommand::SetControl {
+                control_id: "width".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(9.0),
+            },
+            app.state.document.as_ref(),
+            Some(profile),
+        );
+        assert!(!invalid_report.is_valid());
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("width")),
+            Some(&shape_foundry::ControlValue::Scalar(2.0))
+        );
+
+        let set_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "width".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(2.2),
+            }))
+            .expect("valid width edit schedules");
+        let set_event = run_fixture_effect(set_effects, &fixture);
+        assert!(app.state.handle_job_event(set_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("width")),
+            Some(&shape_foundry::ControlValue::Scalar(2.2))
+        );
+
+        let reset_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::ResetControl {
+                control_id: "width".to_owned(),
+            }))
+            .expect("reset schedules");
+        let reset_event = run_fixture_effect(reset_effects, &fixture);
+        assert!(app.state.handle_job_event(reset_event));
+        assert!(
+            !app.state
+                .document
+                .as_ref()
+                .expect("document")
+                .control_state
+                .contains_key("width")
+        );
+
+        let strings = product_visible_strings_for_default_shell()
+            .into_iter()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for required in [VIEW_ORBIT_LABEL, VIEW_RESET_LABEL, VIEW_AXIS_LABEL] {
+            assert!(strings.contains(&required.to_ascii_lowercase()));
+        }
+        for forbidden in [
+            "mesh edit",
+            "gizmo",
+            "vertex",
+            "face selection",
+            "edit face",
+        ] {
+            assert!(
+                !strings.contains(forbidden),
+                "direct property UI must not expose {forbidden}: {strings}"
+            );
+        }
     }
 
     #[test]
@@ -10750,16 +10959,17 @@ mod tests {
 
         app.state
             .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
-                control_id: "edge_softness".to_owned(),
-                value: shape_foundry::ControlValue::Scalar(0.4),
+                control_id: "width".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(2.2),
             }))
             .expect("edit schedules rebuild");
 
         let visible = app.make_canvas_view_state();
 
         assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
-        assert!(!visible.model_ready);
-        assert!(!visible.preview_ready);
+        assert!(visible.model_ready);
+        assert!(visible.preview_ready);
+        assert!(visible.preview_updating);
         assert!(visible.local_busy_visible);
         assert!(!make_canvas_build_dependent_actions_enabled(&visible));
     }
@@ -10902,8 +11112,17 @@ mod tests {
         let controls = display_customize_controls(&app.state.controls);
         assert!(controls.len() <= CUSTOMIZE_PRIMARY_CONTROL_LIMIT);
         assert!(!controls.is_empty());
-        assert!(controls.iter().any(|control| control.id == "proportions"));
+        assert!(controls.iter().any(|control| control.id == "width"));
+        assert!(controls.iter().any(|control| control.id == "depth"));
+        assert!(controls.iter().any(|control| control.id == "height"));
         assert!(controls.iter().any(|control| control.id == "edge_softness"));
+        assert!(
+            controls
+                .iter()
+                .filter(|control| control.numeric_range.is_some())
+                .count()
+                >= 4
+        );
         let visible = controls
             .iter()
             .map(|control| product_control_summary(control))
@@ -11144,8 +11363,7 @@ mod tests {
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
-            if default_customize_controls(&app.state.controls)
-                .any(|control| control.id == "proportions")
+            if default_customize_controls(&app.state.controls).any(|control| control.id == "width")
             {
                 break;
             }
@@ -11155,7 +11373,9 @@ mod tests {
         let default_ids = default_customize_controls(&app.state.controls)
             .map(|control| control.id.as_str())
             .collect::<Vec<_>>();
-        assert!(default_ids.contains(&"proportions"));
+        assert!(default_ids.contains(&"width"));
+        assert!(default_ids.contains(&"depth"));
+        assert!(default_ids.contains(&"height"));
         assert!(default_ids.contains(&"edge_softness"));
         assert!(
             default_customize_controls(&app.state.controls)
@@ -11348,6 +11568,7 @@ mod tests {
             topology_behavior: shape_foundry::ControlTopologyBehavior::TopologyPreserving,
             divergence: shape_foundry::ControlDivergence::Synced,
             options: Vec::new(),
+            numeric_range: None,
             advanced_path: None,
             help: None,
         }

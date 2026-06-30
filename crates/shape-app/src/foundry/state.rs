@@ -8,15 +8,16 @@ use std::path::{Path, PathBuf};
 use shape_asset::RevisionId;
 use shape_core::Aabb;
 use shape_foundry::{
-    CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, FoundryAssetDocument,
-    FoundryBuildStamp, FoundryCandidateId, FoundryCatalogError, FoundryCatalogLock,
-    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput, FoundryConformanceSummary,
-    FoundryDocumentId, FoundryEdit, FoundryLock, FoundryLockMode, FoundryLockTarget,
-    FoundryPackDocument, FoundryPackExportProfile, FoundryPreferenceEvent, FoundryPreferenceLog,
-    FoundryPreferenceProfile, FoundryPreferenceScope, FoundryProjectRevisionProgram,
-    FoundryValidationReport, GenerateCandidatesRequest, GeneratedRecipeSnapshot, ProviderOverride,
-    SharedProviderPolicy, apply_foundry_command, compile_foundry_document, control_divergence,
-    default_control_value, effective_control_domain, validate_foundry_document,
+    CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, FeasibleControlDomain,
+    FoundryAssetDocument, FoundryBuildStamp, FoundryCandidateId, FoundryCatalogError,
+    FoundryCatalogLock, FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput,
+    FoundryConformanceSummary, FoundryDocumentId, FoundryEdit, FoundryLock, FoundryLockMode,
+    FoundryLockTarget, FoundryPackDocument, FoundryPackExportProfile, FoundryPreferenceEvent,
+    FoundryPreferenceLog, FoundryPreferenceProfile, FoundryPreferenceScope,
+    FoundryProjectRevisionProgram, FoundryValidationReport, GenerateCandidatesRequest,
+    GeneratedRecipeSnapshot, ProviderOverride, SharedProviderPolicy, apply_foundry_command,
+    compile_foundry_document, control_divergence, default_control_value, effective_control_domain,
+    validate_foundry_document,
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{FoundryProjectFile, FoundryProjectLoadReport};
@@ -36,8 +37,8 @@ use super::trace::{
     trigger_action_for_request,
 };
 use super::view_model::{
-    FoundryCandidateCard, FoundryControlPresentation, FoundryControlView, FoundryOptionCard,
-    FoundryPackView,
+    FoundryCandidateCard, FoundryControlPresentation, FoundryControlView, FoundryNumericRange,
+    FoundryOptionCard, FoundryPackView,
 };
 
 const FIRST_JOB_ID: u64 = 1;
@@ -1893,11 +1894,23 @@ fn control_views_from_output(
                     value.as_ref(),
                     &option_previews,
                 ),
+                numeric_range: numeric_range_for_domain(&domain),
                 advanced_path: Some(format!("controls.{}", control.id)),
                 help: None,
             }
         })
         .collect()
+}
+
+fn numeric_range_for_domain(domain: &FeasibleControlDomain) -> Option<FoundryNumericRange> {
+    domain
+        .continuous_intervals
+        .first()
+        .map(|interval| FoundryNumericRange {
+            minimum: interval.minimum,
+            maximum: interval.maximum,
+            step: 0.01_f32.max((interval.maximum - interval.minimum) / 100.0),
+        })
 }
 
 fn control_presentation(kind: &ControlKind) -> FoundryControlPresentation {

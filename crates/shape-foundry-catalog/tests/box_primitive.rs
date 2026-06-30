@@ -119,7 +119,7 @@ fn box_primitive_without_lid_seam_remains_unchanged() {
             .iter()
             .map(|control| control.label.as_str())
             .collect::<Vec<_>>(),
-        vec!["Proportions", "Edge Softness"]
+        vec!["Width", "Depth", "Height", "Edge Softness"]
     );
 }
 
@@ -151,16 +151,22 @@ fn box_primitive_controls_and_labels_are_honest() {
         .iter()
         .filter(|control| control.primary && control.visible)
         .collect::<Vec<_>>();
-    assert_eq!(primary.len(), 2);
+    assert_eq!(primary.len(), 4);
     assert_eq!(
         primary
             .iter()
             .map(|control| control.label.as_str())
             .collect::<Vec<_>>(),
-        vec!["Proportions", "Edge Softness"]
+        vec!["Width", "Depth", "Height", "Edge Softness"]
     );
     assert!(primary.iter().any(|control| {
-        control.id == "proportions" && matches!(control.kind, ControlKind::ChoiceGallery { .. })
+        control.id == "width" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
+    }));
+    assert!(primary.iter().any(|control| {
+        control.id == "depth" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
+    }));
+    assert!(primary.iter().any(|control| {
+        control.id == "height" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
     }));
     assert!(primary.iter().any(|control| {
         control.id == "edge_softness" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
@@ -172,6 +178,7 @@ fn box_primitive_controls_and_labels_are_honest() {
         .map(|strategy| strategy.label.as_str())
         .collect::<Vec<_>>()
         .join(" ");
+    assert!(profile.candidate_strategies.is_empty());
     let visible_copy = [
         family.display_name.as_str(),
         family.summary.as_str(),
@@ -202,26 +209,9 @@ fn box_primitive_controls_and_labels_are_honest() {
 fn box_primitive_candidate_strategies_match_baseline_ideas() {
     let fixture = box_primitive::fixture_catalog();
     let profile = profile(&fixture);
-    assert_eq!(
-        profile
-            .candidate_strategies
-            .iter()
-            .map(|strategy| strategy.label.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "Compact Box",
-            "Wide Box",
-            "Tall Box",
-            "Flat Box",
-            "Soft-Edged Box",
-            "Sharp Box",
-        ]
-    );
     assert!(
-        profile
-            .candidate_strategies
-            .iter()
-            .all(|strategy| { strategy.label.contains("Box") && !strategy.control_ids.is_empty() })
+        profile.candidate_strategies.is_empty(),
+        "Box Primitive active profile should not expose product candidate strategies"
     );
 }
 
@@ -676,7 +666,7 @@ fn box_primitive_every_control_endpoint_is_visible() {
     let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
         .expect("endpoint report should generate");
 
-    assert_eq!(report.controls.len(), 2);
+    assert_eq!(report.controls.len(), 4);
     for row in &report.controls {
         assert!(
             matches!(
@@ -694,28 +684,12 @@ fn box_primitive_every_control_endpoint_is_visible() {
 #[test]
 fn box_primitive_baseline_ideas_compile_to_distinct_boxes() {
     let variants = [
-        (
-            "Compact Box",
-            vec![(
-                "proportions",
-                ControlValue::Choice("compact_box".to_owned()),
-            )],
-        ),
-        (
-            "Wide Box",
-            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
-        ),
-        (
-            "Tall Box",
-            vec![("proportions", ControlValue::Choice("tall_box".to_owned()))],
-        ),
-        (
-            "Flat Box",
-            vec![("proportions", ControlValue::Choice("flat_box".to_owned()))],
-        ),
+        ("Wide Box", vec![("width", ControlValue::Scalar(2.8))]),
+        ("Deep Box", vec![("depth", ControlValue::Scalar(2.2))]),
+        ("Tall Box", vec![("height", ControlValue::Scalar(1.8))]),
         (
             "Soft-Edged Box",
-            vec![("edge_softness", ControlValue::Scalar(1.0))],
+            vec![("edge_softness", ControlValue::Scalar(0.2))],
         ),
         (
             "Sharp Box",

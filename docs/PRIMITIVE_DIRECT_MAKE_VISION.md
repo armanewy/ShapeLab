@@ -39,6 +39,23 @@ manipulate bounded properties such as:
 Users do not manipulate vertices, faces, loops, cages, booleans, raw mesh
 transforms, or arbitrary topology.
 
+## Direct Property UI
+
+Box Primitive and Flat Panel Primitive are the active direct-edit baselines.
+Their Make panels expose bounded numeric property controls with visible domains
+and reset actions:
+
+- Box Primitive: Width, Depth, Height, Edge Softness
+- Flat Panel Primitive: Width, Height, Thickness, Edge Softness
+
+Invalid values cannot become current primitive state. During direct edits, the
+previous valid preview remains visible while the exact updated build compiles,
+and the UI labels the preview as updating instead of blanking the model stage.
+
+View controls remain inspection-only: orbit around the asset, reset view, and
+axis orientation. They are not mesh transform gizmos, vertex tools, face tools,
+or object-level free transform handles.
+
 ## Future Presets
 
 Future suggestions may return only as deterministic property presets. A preset

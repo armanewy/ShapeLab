@@ -316,16 +316,22 @@ fn flat_panel_controls_and_copy_are_honest() {
         .iter()
         .filter(|control| control.primary && control.visible)
         .collect::<Vec<_>>();
-    assert_eq!(primary.len(), 2);
+    assert_eq!(primary.len(), 4);
     assert_eq!(
         primary
             .iter()
             .map(|control| control.label.as_str())
             .collect::<Vec<_>>(),
-        vec!["Proportions", "Edge Softness"]
+        vec!["Width", "Height", "Thickness", "Edge Softness"]
     );
     assert!(primary.iter().any(|control| {
-        control.id == "proportions" && matches!(control.kind, ControlKind::ChoiceGallery { .. })
+        control.id == "width" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
+    }));
+    assert!(primary.iter().any(|control| {
+        control.id == "height" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
+    }));
+    assert!(primary.iter().any(|control| {
+        control.id == "thickness" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
     }));
     assert!(primary.iter().any(|control| {
         control.id == "edge_softness" && matches!(control.kind, ControlKind::ContinuousAxis { .. })
@@ -337,20 +343,9 @@ fn flat_panel_controls_and_copy_are_honest() {
         .map(|strategy| strategy.label.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    assert_eq!(
-        profile
-            .candidate_strategies
-            .iter()
-            .map(|strategy| strategy.label.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "Narrow Panel",
-            "Wide Panel",
-            "Tall Panel",
-            "Short Panel",
-            "Soft-Edged Panel",
-            "Sharp Panel",
-        ]
+    assert!(
+        profile.candidate_strategies.is_empty(),
+        "Flat Panel active profile should not expose product candidate strategies"
     );
     let visible_copy = [
         family.display_name.as_str(),
@@ -591,7 +586,7 @@ fn flat_panel_control_endpoints_are_visible() {
     let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
         .expect("endpoint report should generate");
 
-    assert_eq!(report.controls.len(), 2);
+    assert_eq!(report.controls.len(), 4);
     for row in &report.controls {
         assert!(
             matches!(
@@ -672,31 +667,15 @@ fn handled_panel_handle_knob_endpoint_is_visible_in_pure_clay() {
 #[test]
 fn flat_panel_candidate_ideas_compile_to_distinct_shapes() {
     let variants = [
+        ("Wide Panel", vec![("width", ControlValue::Scalar(2.6))]),
+        ("Tall Panel", vec![("height", ControlValue::Scalar(3.2))]),
         (
-            "Narrow Panel",
-            vec![(
-                "proportions",
-                ControlValue::Choice("narrow_panel".to_owned()),
-            )],
-        ),
-        (
-            "Wide Panel",
-            vec![("proportions", ControlValue::Choice("wide_panel".to_owned()))],
-        ),
-        (
-            "Tall Panel",
-            vec![("proportions", ControlValue::Choice("tall_panel".to_owned()))],
-        ),
-        (
-            "Short Panel",
-            vec![(
-                "proportions",
-                ControlValue::Choice("short_panel".to_owned()),
-            )],
+            "Thick Panel",
+            vec![("thickness", ControlValue::Scalar(0.32))],
         ),
         (
             "Soft-Edged Panel",
-            vec![("edge_softness", ControlValue::Scalar(1.0))],
+            vec![("edge_softness", ControlValue::Scalar(0.12))],
         ),
         (
             "Sharp Panel",

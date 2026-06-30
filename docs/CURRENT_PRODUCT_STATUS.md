@@ -13,6 +13,10 @@ the active product surface toward direct primitive property editing.
 
 - Box Primitive is the direct box primitive baseline.
 - Flat Panel Primitive is the direct panel primitive baseline.
+- Box Primitive exposes bounded Width, Depth, Height, and Edge Softness
+  controls in Make.
+- Flat Panel Primitive exposes bounded Width, Height, Thickness, and Edge
+  Softness controls in Make.
 - Lidded Box and Hinged Panel are feature proofs, not the future shape of the
   active primitive workflow.
 - Handled Panel evidence is treated as paused historical proof, not the current
@@ -22,6 +26,11 @@ the active product surface toward direct primitive property editing.
 - The active Make workflow should expose direct property controls before it
   offers presets or suggestions.
 - Primitive editing is property-schema based and bounded.
+- Direct property controls show visible domains, use bounded numeric steppers,
+  and support reset to authored defaults.
+- Invalid property values must be rejected or clamped before they become
+  current primitive state.
+- Prior valid previews remain visible while a direct property edit rebuilds.
 - Users may edit Width, Height, Depth, Radius, Thickness, Edge Softness, and
   Flattening when a primitive schema exposes those properties.
 - Users do not edit vertices, faces, loops, cages, booleans, raw mesh
@@ -51,6 +60,9 @@ the active product surface toward direct primitive property editing.
   primitives.
 - Current primitive Make shows direct property controls, view controls, Add to
   Pack, and Export rather than Try ideas or selected-candidate comparison.
+- Current Box and Flat Panel Make screens allow direct dimension edits through
+  bounded controls with visible domains.
+- View controls are inspection-only: orbit, reset view, and axis orientation.
 
 ## Current Milestone Sequence
 
@@ -67,6 +79,7 @@ Use one visible operation per milestone:
 - Generated variation trays in the active primitive workflow.
 - Random candidate generation as a product-visible primitive Make action.
 - Vertex, face, loop, cage, boolean, sculpt, or raw transform editing.
+- Mesh transform gizmos, object handles, vertex selection, and face selection.
 - Arbitrary Blender-like scene modeling.
 - Door naming before a later gate explicitly approves it.
 - Open/close motion.
