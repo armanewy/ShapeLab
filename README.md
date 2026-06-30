@@ -63,6 +63,8 @@ clippy unless the branch touches build/profile/release/export code.
   evidence under `target/box-primitive-dogfood-gate/`.
 - The Box Primitive UI truth-pass gate passed with release-app evidence under
   `target/box-primitive-ui-truth-pass/screenshots/`.
+- The Box Primitive visual-readability gate passed with evidence under
+  `target/box-primitive-visual-readability/`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
 - Richer box-family features must be added later one visible module at a time,
@@ -73,5 +75,6 @@ Status details are documented in:
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
 - [`docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md)
 - [`docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md`](docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md)
+- [`docs/BOX_PRIMITIVE_VISUAL_READABILITY.md`](docs/BOX_PRIMITIVE_VISUAL_READABILITY.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

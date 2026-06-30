@@ -178,7 +178,7 @@ fn box_primitive_candidate_strategies_match_baseline_ideas() {
             "Tall Box",
             "Flat Box",
             "Soft-Edged Box",
-            "Sharp Utility Box",
+            "Sharp Box",
         ]
     );
     assert!(
@@ -237,7 +237,7 @@ fn box_primitive_baseline_ideas_compile_to_distinct_boxes() {
             vec![("edge_softness", ControlValue::Scalar(1.0))],
         ),
         (
-            "Sharp Utility Box",
+            "Sharp Box",
             vec![("edge_softness", ControlValue::Scalar(0.0))],
         ),
     ];

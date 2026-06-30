@@ -371,7 +371,7 @@ fn box_primitive_candidate_strategies() -> Vec<ArchetypeCandidateStrategyTemplat
         ),
         strategy(
             "sharp_utility_box",
-            "Sharp Utility Box",
+            "Sharp Box",
             &["edge_softness"],
             &["body"],
         ),

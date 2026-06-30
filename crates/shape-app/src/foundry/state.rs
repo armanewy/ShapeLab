@@ -20,7 +20,7 @@ use shape_foundry::{
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{FoundryProjectFile, FoundryProjectLoadReport};
-use shape_render::{RenderSettings, fit_camera_to_bounds, render_mesh};
+use shape_render::{clay_readability_render_settings, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
 };
@@ -2119,11 +2119,7 @@ fn render_option_preview_from_output(
         },
     };
     let camera = fit_camera_to_bounds(mesh.bounds);
-    let settings = RenderSettings {
-        width: 64,
-        height: 64,
-        ..RenderSettings::default()
-    };
+    let settings = clay_readability_render_settings(64, 64);
     let image = render_mesh(&mesh, &camera, &settings).ok()?;
     Some(OptionPreviewImage {
         rgba8: image.rgba8,

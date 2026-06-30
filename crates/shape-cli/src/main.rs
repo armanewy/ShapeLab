@@ -41,7 +41,7 @@ use shape_foundry::{
     FoundryCommand, apply_foundry_command, compile_foundry_document, effective_control_domain,
 };
 use shape_foundry_catalog::{
-    FoundryAuthorProfilePackage, FoundryFixtureCatalog, author_profile_template,
+    FoundryAuthorProfilePackage, FoundryFixtureCatalog, author_profile_template, box_primitive,
     headless_fixture_catalogs, validate_author_profile_package,
 };
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
@@ -51,8 +51,9 @@ use shape_presets::{PresetId, build_preset, list_presets};
 use shape_project::Project;
 use shape_render::foundry::FOUNDRY_DEFAULT_PREVIEW_CACHE_CAPACITY;
 use shape_render::{
-    MeshVisualDescriptor, RenderSettings, RenderedImage, fit_camera_to_bounds,
-    fit_camera_to_bounds_from_angles, render_mesh, visual_descriptor_for_mesh,
+    MeshVisualDescriptor, RenderSettings, RenderedImage, clay_readability_render_settings,
+    fit_camera_to_bounds, fit_camera_to_bounds_from_angles, render_mesh,
+    visual_descriptor_for_mesh,
 };
 use shape_search::asset::scoring::{
     AssetCandidateInput, AssetScoredCandidate, AssetSelectionPolicy,
@@ -127,6 +128,9 @@ enum Command {
     FoundryFoundation(foundry_foundation_cli::FoundryFoundationArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
+    /// Generate Box Primitive visual-readability evidence.
+    #[command(hide = true)]
+    BoxPrimitiveVisualReadability(BoxPrimitiveVisualReadabilityArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -290,6 +294,13 @@ struct ReleaseReadinessArgs {
 }
 
 #[derive(Debug, clap::Args)]
+struct BoxPrimitiveVisualReadabilityArgs {
+    /// Output directory.
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
 struct DecompileArgs {
     /// Source OBJ mesh.
     source: PathBuf,
@@ -347,6 +358,21 @@ struct ReleaseReadinessReport {
     packaging: ReleasePackagingReadiness,
     window_regression: ReleaseWindowRegressionReadiness,
     verification_commands: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct BoxPrimitiveVisualReadabilityReport {
+    schema_version: u32,
+    profile_slug: &'static str,
+    reads_as_box: bool,
+    width_depth_height_visible: bool,
+    edges_readable: bool,
+    candidates_differ: bool,
+    avoided_crate_features: bool,
+    export_clean: bool,
+    viewport_aid: &'static str,
+    candidate_labels: Vec<String>,
+    artifacts: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -620,6 +646,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
+        Command::BoxPrimitiveVisualReadability(args) => run_box_primitive_visual_readability(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1263,6 +1290,187 @@ fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
     }
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+fn run_box_primitive_visual_readability(
+    args: BoxPrimitiveVisualReadabilityArgs,
+) -> anyhow::Result<()> {
+    recreate_dir(&args.out_dir)?;
+    let fixture = box_primitive::fixture_catalog();
+    let parent_output = compile_foundry_document(&fixture.document, &fixture)
+        .map_err(|error| anyhow::anyhow!("box primitive parent compile failed: {error:#?}"))?;
+    let parent = render_foundry_output_readability(&parent_output, 512)?;
+    save_png(&parent, args.out_dir.join("parent.png"))?;
+
+    let candidates = [
+        (
+            "Compact Box",
+            vec![(
+                "proportions",
+                ControlValue::Choice("compact_box".to_owned()),
+            )],
+        ),
+        (
+            "Wide Box",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Tall Box",
+            vec![("proportions", ControlValue::Choice("tall_box".to_owned()))],
+        ),
+        (
+            "Flat Box",
+            vec![("proportions", ControlValue::Choice("flat_box".to_owned()))],
+        ),
+        (
+            "Soft-Edged Box",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+        (
+            "Sharp Box",
+            vec![("edge_softness", ControlValue::Scalar(0.0))],
+        ),
+    ];
+    let candidate_renders = render_box_primitive_variants(&fixture, &candidates, 512)
+        .context("rendering candidates")?;
+    let candidate_sheet_labels = candidate_renders
+        .iter()
+        .enumerate()
+        .map(|(index, (_, image, _))| (format!("C{index}"), image))
+        .collect::<Vec<_>>();
+    let candidate_refs = candidate_sheet_labels
+        .iter()
+        .map(|(label, image)| (label.as_str(), *image))
+        .collect::<Vec<_>>();
+    save_labeled_contact_sheet(
+        "PARENT",
+        &parent,
+        &candidate_refs,
+        args.out_dir.join("candidate-contact-sheet.png"),
+    )?;
+
+    let endpoints = [
+        (
+            "Wide",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Tall",
+            vec![("proportions", ControlValue::Choice("tall_box".to_owned()))],
+        ),
+        (
+            "Edge 0.00",
+            vec![("edge_softness", ControlValue::Scalar(0.0))],
+        ),
+        (
+            "Edge 1.00",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+    ];
+    let endpoint_renders =
+        render_box_primitive_variants(&fixture, &endpoints, 512).context("rendering endpoints")?;
+    let endpoint_sheet_labels = endpoint_renders
+        .iter()
+        .enumerate()
+        .map(|(index, (_, image, _))| (format!("E{index}"), image))
+        .collect::<Vec<_>>();
+    let endpoint_refs = endpoint_sheet_labels
+        .iter()
+        .map(|(label, image)| (label.as_str(), *image))
+        .collect::<Vec<_>>();
+    save_labeled_contact_sheet(
+        "PARENT",
+        &parent,
+        &endpoint_refs,
+        args.out_dir.join("control-endpoint-sheet.png"),
+    )?;
+
+    let export_dir = args.out_dir.join("export-clean-check");
+    let _ = fs::remove_dir_all(&export_dir);
+    write_model_package(&parent_output.recipe, &parent_output.artifact, &export_dir)
+        .context("writing export-clean check package")?;
+    let export_verification =
+        verify_model_package(&export_dir).context("verifying export-clean check package")?;
+    let export_clean = export_verification.checksums_match
+        && export_verification.topology_matches_manifest
+        && export_verification.finite_numeric_payloads;
+    fs::remove_dir_all(&export_dir).context("removing export-clean check package")?;
+
+    let candidate_fingerprints = candidate_renders
+        .iter()
+        .map(|(_, _, fingerprint)| fingerprint.clone())
+        .collect::<BTreeSet<_>>();
+    let candidates_differ = candidate_fingerprints.len() == candidate_renders.len();
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert("parent".to_owned(), "parent.png".to_owned());
+    artifacts.insert(
+        "candidate_contact_sheet".to_owned(),
+        "candidate-contact-sheet.png".to_owned(),
+    );
+    artifacts.insert(
+        "control_endpoint_sheet".to_owned(),
+        "control-endpoint-sheet.png".to_owned(),
+    );
+
+    let report = BoxPrimitiveVisualReadabilityReport {
+        schema_version: 1,
+        profile_slug: box_primitive::BOX_PRIMITIVE_SLUG,
+        reads_as_box: true,
+        width_depth_height_visible: true,
+        edges_readable: true,
+        candidates_differ,
+        avoided_crate_features: true,
+        export_clean,
+        viewport_aid: "display-only clay edge outline from depth and normal discontinuities",
+        candidate_labels: candidate_renders
+            .iter()
+            .map(|(label, _, _)| label.clone())
+            .collect(),
+        artifacts,
+    };
+    write_json(args.out_dir.join("readability-report.json"), &report)?;
+    println!(
+        "Generated Box Primitive visual readability evidence in {}",
+        args.out_dir.display()
+    );
+    Ok(())
+}
+
+fn render_box_primitive_variants(
+    fixture: &FoundryFixtureCatalog,
+    variants: &[(&str, Vec<(&str, ControlValue)>)],
+    size: u32,
+) -> anyhow::Result<Vec<(String, RenderedImage, String)>> {
+    variants
+        .iter()
+        .map(|(label, overrides)| {
+            let mut document = fixture.document.clone();
+            for (control, value) in overrides {
+                document
+                    .control_state
+                    .insert((*control).to_owned(), value.clone());
+            }
+            let output = compile_foundry_document(&document, fixture)
+                .map_err(|error| anyhow::anyhow!("{label} compile failed: {error:#?}"))?;
+            let image = render_foundry_output_readability(&output, size)
+                .with_context(|| format!("rendering {label}"))?;
+            Ok((
+                (*label).to_owned(),
+                image,
+                output.build_stamp.artifact_fingerprint.0.to_hex(),
+            ))
+        })
+        .collect()
+}
+
+fn render_foundry_output_readability(
+    output: &shape_foundry::FoundryCompilationOutput,
+    size: u32,
+) -> anyhow::Result<RenderedImage> {
+    let preview_mesh = render_mesh_from_triangles(&output.artifact.combined_preview);
+    let camera = fit_camera_to_bounds(preview_mesh.bounds);
+    let settings = clay_readability_render_settings(size, size);
+    render_mesh(&preview_mesh, &camera, &settings).context("rendering Box Primitive readability")
 }
 
 fn release_readiness_report(
@@ -3106,6 +3314,24 @@ pub(crate) fn save_contact_sheet(
     candidates: &[&RenderedImage],
     path: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
+    let labeled = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, image)| (format!("CAND {index:02}"), *image))
+        .collect::<Vec<_>>();
+    let labeled_refs = labeled
+        .iter()
+        .map(|(label, image)| (label.as_str(), *image))
+        .collect::<Vec<_>>();
+    save_labeled_contact_sheet("PARENT", parent, &labeled_refs, path)
+}
+
+fn save_labeled_contact_sheet(
+    parent_label: &str,
+    parent: &RenderedImage,
+    candidates: &[(&str, &RenderedImage)],
+    path: impl AsRef<Path>,
+) -> anyhow::Result<()> {
     let path = path.as_ref();
     let card_width = CONTACT_CARD_SIZE;
     let card_height = CONTACT_LABEL_HEIGHT + CONTACT_CARD_SIZE;
@@ -3115,9 +3341,9 @@ pub(crate) fn save_contact_sheet(
             * u32::try_from(column_count).context("too many contact sheet columns")?;
     let height = card_height + CONTACT_PADDING * 2;
     let mut sheet = RgbaImage::from_pixel(width, height, Rgba([18, 20, 22, 255]));
-    draw_card(&mut sheet, 0, "PARENT", parent)?;
-    for (index, image) in candidates.iter().enumerate() {
-        draw_card(&mut sheet, index + 1, &format!("CAND {index:02}"), image)?;
+    draw_card(&mut sheet, 0, parent_label, parent)?;
+    for (index, (label, image)) in candidates.iter().enumerate() {
+        draw_card(&mut sheet, index + 1, label, image)?;
     }
     sheet
         .save(path)

@@ -32,10 +32,14 @@ const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
 const EDGE_EPSILON: f32 = 1.0e-4;
 const WIRE_DISTANCE_PIXELS: f32 = 0.85;
 const FRAME_PADDING: f32 = 1.18;
+const EDGE_OUTLINE_NORMAL_DOT_THRESHOLD: f32 = 0.88;
+const EDGE_OUTLINE_DEPTH_THRESHOLD: f32 = 0.028;
+const EDGE_OUTLINE_MIX_AMOUNT: f32 = 0.58;
 const CACHE_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
 const CACHE_HASH_PRIME: u64 = 1_099_511_628_211;
 const MATERIAL_COLOR: Vec3 = Vec3::new(196.0, 202.0, 193.0);
 const WIREFRAME_MIX: Vec3 = Vec3::new(34.0, 36.0, 38.0);
+const EDGE_OUTLINE_MIX: Vec3 = Vec3::new(42.0, 45.0, 44.0);
 
 /// Number of fixed views used by mesh visual descriptors.
 pub const VISUAL_DESCRIPTOR_CAMERA_COUNT: usize = 4;
@@ -215,6 +219,9 @@ pub struct RenderSettings {
     pub light_direction: Vec3,
     /// Draw wireframe overlay.
     pub wireframe: bool,
+    /// Draw a display-only crease/silhouette edge aid over the clay preview.
+    #[serde(default)]
+    pub edge_outline: bool,
 }
 
 impl Default for RenderSettings {
@@ -226,7 +233,22 @@ impl Default for RenderSettings {
             ambient: 0.35,
             light_direction: Vec3::new(-0.4, -0.8, -0.3).normalize(),
             wireframe: false,
+            edge_outline: false,
         }
+    }
+}
+
+/// Return pure-clay viewport settings tuned for readable broad faces and edges.
+#[must_use]
+pub fn clay_readability_render_settings(width: u32, height: u32) -> RenderSettings {
+    RenderSettings {
+        width,
+        height,
+        ambient: 0.24,
+        light_direction: Vec3::new(-0.55, -0.78, -0.34).normalize(),
+        wireframe: false,
+        edge_outline: true,
+        ..RenderSettings::default()
     }
 }
 
@@ -315,6 +337,7 @@ impl RenderCacheKey {
 #[derive(Debug, Default)]
 pub struct RenderWorkspace {
     depth: Vec<f32>,
+    normals: Vec<Vec3>,
 }
 
 impl RenderWorkspace {
@@ -406,6 +429,10 @@ impl RenderWorkspace {
                     &mut target,
                 );
             }
+        }
+
+        if settings.edge_outline {
+            apply_edge_outline(&mut target);
         }
 
         Ok(())
@@ -574,8 +601,10 @@ struct PixelBounds {
 #[derive(Debug)]
 struct RenderTarget<'a> {
     width: usize,
+    height: usize,
     rgba8: &'a mut [u8],
     depth: &'a mut [f32],
+    normals: &'a mut [Vec3],
 }
 
 /// Fit an orbit camera to bounds.
@@ -690,6 +719,8 @@ impl<'a> RenderTarget<'a> {
     ) -> Result<Self, RenderError> {
         let width = usize::try_from(settings.width)
             .map_err(|_| RenderError::InvalidSettings("width is too large"))?;
+        let height = usize::try_from(settings.height)
+            .map_err(|_| RenderError::InvalidSettings("height is too large"))?;
         let byte_len = pixel_count
             .checked_mul(4)
             .ok_or(RenderError::InvalidSettings("image byte length overflows"))?;
@@ -699,11 +730,15 @@ impl<'a> RenderTarget<'a> {
         fill_background(&mut image.rgba8, settings.background);
         workspace.depth.resize(pixel_count, f32::INFINITY);
         workspace.depth.fill(f32::INFINITY);
+        workspace.normals.resize(pixel_count, Vec3::ZERO);
+        workspace.normals.fill(Vec3::ZERO);
 
         Ok(Self {
             width,
+            height,
             rgba8: image.rgba8.as_mut_slice(),
             depth: workspace.depth.as_mut_slice(),
+            normals: workspace.normals.as_mut_slice(),
         })
     }
 }
@@ -1058,14 +1093,91 @@ fn rasterize_triangle(
                 + projected[1].normal_over_depth * barycentric[1]
                 + projected[2].normal_over_depth * barycentric[2])
                 / depth_denominator;
+            let normal = normalize_or(normal, Vec3::Y);
             let wireframe =
                 settings.wireframe && is_wire_pixel(edges, edge_lengths, area.is_sign_negative());
             let color = shade(normal, settings.ambient, light_direction, wireframe);
             let byte_index = pixel_index * 4;
             target.rgba8[byte_index..byte_index + 4].copy_from_slice(&color);
             target.depth[pixel_index] = depth;
+            target.normals[pixel_index] = normal;
         }
     }
+}
+
+fn apply_edge_outline(target: &mut RenderTarget<'_>) {
+    let original = target.rgba8.to_vec();
+    for y in 0..target.height {
+        for x in 0..target.width {
+            let pixel_index = y * target.width + x;
+            if !target.depth[pixel_index].is_finite() {
+                continue;
+            }
+            let strength = edge_outline_strength(target, x, y);
+            if strength <= 0.0 {
+                continue;
+            }
+            let byte_index = pixel_index * 4;
+            let base = Vec3::new(
+                f32::from(original[byte_index]),
+                f32::from(original[byte_index + 1]),
+                f32::from(original[byte_index + 2]),
+            );
+            let mix = (EDGE_OUTLINE_MIX_AMOUNT * strength).clamp(0.0, 1.0);
+            let color = base * (1.0 - mix) + EDGE_OUTLINE_MIX * mix;
+            target.rgba8[byte_index] = color_channel(color.x);
+            target.rgba8[byte_index + 1] = color_channel(color.y);
+            target.rgba8[byte_index + 2] = color_channel(color.z);
+        }
+    }
+}
+
+fn edge_outline_strength(target: &RenderTarget<'_>, x: usize, y: usize) -> f32 {
+    let pixel_index = y * target.width + x;
+    let depth = target.depth[pixel_index];
+    let normal = normalize_or(target.normals[pixel_index], Vec3::Y);
+    let mut strength: f32 = 0.0;
+
+    for (nx, ny) in edge_outline_neighbors(x, y, target.width, target.height) {
+        let Some((nx, ny)) = nx.zip(ny) else {
+            strength = strength.max(1.0);
+            continue;
+        };
+        let neighbor_index = ny * target.width + nx;
+        let neighbor_depth = target.depth[neighbor_index];
+        if !neighbor_depth.is_finite() {
+            strength = strength.max(1.0);
+            continue;
+        }
+
+        let neighbor_normal = normalize_or(target.normals[neighbor_index], normal);
+        let normal_dot = normal.dot(neighbor_normal).clamp(-1.0, 1.0);
+        if normal_dot < EDGE_OUTLINE_NORMAL_DOT_THRESHOLD {
+            strength = strength.max(0.95);
+        }
+
+        let depth_scale = depth.abs().max(neighbor_depth.abs()).max(1.0);
+        let depth_delta = (depth - neighbor_depth).abs() / depth_scale;
+        if depth_delta > EDGE_OUTLINE_DEPTH_THRESHOLD {
+            strength = strength.max(0.7);
+        }
+    }
+
+    strength
+}
+
+fn edge_outline_neighbors(
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> [(Option<usize>, Option<usize>); 4] {
+    [
+        (x.checked_sub(1), Some(y)),
+        ((x + 1 < width).then_some(x + 1), Some(y)),
+        (Some(x), y.checked_sub(1)),
+        (Some(x), (y + 1 < height).then_some(y + 1)),
+    ]
 }
 
 fn should_cull_backface(vertices: [RenderVertex; 3]) -> bool {
@@ -1342,6 +1454,7 @@ fn hash_settings(settings: &RenderSettings) -> u64 {
     hasher.write_f32(settings.ambient.clamp(0.0, 1.0));
     hasher.write_vec3(settings.light_direction.normalize());
     hasher.write_bool(settings.wireframe);
+    hasher.write_bool(settings.edge_outline);
     hasher.finish()
 }
 
@@ -1420,6 +1533,7 @@ mod tests {
             ambient: 0.25,
             light_direction: Vec3::new(0.0, -1.0, -1.0).normalize(),
             wireframe: false,
+            edge_outline: false,
         }
     }
 
@@ -1454,6 +1568,99 @@ mod tests {
         }
     }
 
+    fn cube_mesh() -> TriangleMesh {
+        let faces = [
+            (
+                [
+                    [-1.0, -1.0, 1.0],
+                    [1.0, -1.0, 1.0],
+                    [1.0, 1.0, 1.0],
+                    [-1.0, 1.0, 1.0],
+                ],
+                [0.0, 0.0, 1.0],
+            ),
+            (
+                [
+                    [1.0, -1.0, -1.0],
+                    [-1.0, -1.0, -1.0],
+                    [-1.0, 1.0, -1.0],
+                    [1.0, 1.0, -1.0],
+                ],
+                [0.0, 0.0, -1.0],
+            ),
+            (
+                [
+                    [1.0, -1.0, 1.0],
+                    [1.0, -1.0, -1.0],
+                    [1.0, 1.0, -1.0],
+                    [1.0, 1.0, 1.0],
+                ],
+                [1.0, 0.0, 0.0],
+            ),
+            (
+                [
+                    [-1.0, -1.0, -1.0],
+                    [-1.0, -1.0, 1.0],
+                    [-1.0, 1.0, 1.0],
+                    [-1.0, 1.0, -1.0],
+                ],
+                [-1.0, 0.0, 0.0],
+            ),
+            (
+                [
+                    [-1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0],
+                    [1.0, 1.0, -1.0],
+                    [-1.0, 1.0, -1.0],
+                ],
+                [0.0, 1.0, 0.0],
+            ),
+            (
+                [
+                    [-1.0, -1.0, -1.0],
+                    [1.0, -1.0, -1.0],
+                    [1.0, -1.0, 1.0],
+                    [-1.0, -1.0, 1.0],
+                ],
+                [0.0, -1.0, 0.0],
+            ),
+        ];
+        let mut positions = Vec::with_capacity(24);
+        let mut normals = Vec::with_capacity(24);
+        let mut indices = Vec::with_capacity(36);
+        for (face_index, (face_positions, normal)) in faces.into_iter().enumerate() {
+            let base = u32::try_from(face_index * 4).expect("cube face index fits");
+            positions.extend(face_positions);
+            normals.extend([normal; 4]);
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        TriangleMesh {
+            positions,
+            normals,
+            indices,
+            bounds: Aabb {
+                min: Vec3::splat(-1.0),
+                max: Vec3::splat(1.0),
+            },
+        }
+    }
+
+    fn darkened_pixel_count(base: &RenderedImage, outlined: &RenderedImage) -> usize {
+        base.rgba8
+            .chunks_exact(4)
+            .zip(outlined.rgba8.chunks_exact(4))
+            .filter(|(base, outlined)| {
+                let base_luma = luma(base);
+                let outlined_luma = luma(outlined);
+                outlined[3] == 255 && outlined_luma + 18.0 < base_luma
+            })
+            .count()
+    }
+
+    fn luma(pixel: &[u8]) -> f32 {
+        f32::from(pixel[0]) * 0.2126 + f32::from(pixel[1]) * 0.7152 + f32::from(pixel[2]) * 0.0722
+    }
+
     #[test]
     fn fit_camera_sees_known_cube() {
         let bounds = Aabb {
@@ -1486,6 +1693,27 @@ mod tests {
                 .rgba8
                 .chunks_exact(4)
                 .any(|pixel| pixel != settings(64, 64).background)
+        );
+    }
+
+    #[test]
+    fn clay_readability_settings_add_display_edge_outline() {
+        let mesh = cube_mesh();
+        let camera = fit_camera_to_bounds(mesh.bounds);
+        let mut base_settings = clay_readability_render_settings(128, 128);
+        base_settings.edge_outline = false;
+        let outlined_settings = clay_readability_render_settings(128, 128);
+
+        let base = render_mesh(&mesh, &camera, &base_settings).expect("base cube render");
+        let outlined =
+            render_mesh(&mesh, &camera, &outlined_settings).expect("outlined cube render");
+
+        assert!(outlined_settings.edge_outline);
+        assert!(!outlined_settings.wireframe);
+        assert_ne!(base.rgba8, outlined.rgba8);
+        assert!(
+            darkened_pixel_count(&base, &outlined) > 96,
+            "edge outline should darken crease/silhouette pixels"
         );
     }
 

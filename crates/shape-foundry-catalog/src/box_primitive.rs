@@ -171,7 +171,7 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
         strategy("tall-box", "Tall Box", &["proportions"]),
         strategy("flat-box", "Flat Box", &["proportions"]),
         strategy("soft-edged-box", "Soft-Edged Box", &["edge_softness"]),
-        strategy("sharp-utility-box", "Sharp Utility Box", &["edge_softness"]),
+        strategy("sharp-box", "Sharp Box", &["edge_softness"]),
     ];
 
     build_fixture_catalog(FixtureCatalogSpec {
