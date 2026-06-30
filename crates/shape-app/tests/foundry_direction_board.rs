@@ -18,8 +18,7 @@ use foundry::panels::directions::{
 use foundry::{FoundryAppCommand, FoundryCandidateCard};
 use shape_foundry::{
     CandidateLegibilityClass, FoundryCandidateId, FoundryCommand, FoundrySurfaceCapabilityView,
-    SURFACE_PACKAGE_UNAVAILABLE_REASON, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
-    VariationChannel, VariationIntent,
+    SURFACE_PACKAGE_UNAVAILABLE_REASON, VariationChannel, VariationIntent,
 };
 use shape_render::OrbitCamera;
 use shape_search::foundry::{
@@ -89,7 +88,7 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
     let actions = direction_mode_actions(
         Some(FoundryCandidateMode::Structure),
         17,
-        Some("novice_bridge".to_owned()),
+        Some("box_primitive".to_owned()),
     );
 
     assert_eq!(DIRECTION_BOARD_MODES.len(), 5);
@@ -114,7 +113,7 @@ fn direction_modes_cover_refine_explore_silhouette_structure_and_detail() {
     assert!(actions.iter().all(|action| {
         action.request.proposal_count == DEFAULT_DIRECTION_PROPOSALS
             && action.request.result_count == VISIBLE_DIRECTION_CANDIDATE_CARDS
-            && action.request.strategy_id.as_deref() == Some("novice_bridge")
+            && action.request.strategy_id.as_deref() == Some("box_primitive")
     }));
 
     let request = candidate_request_for_mode(FoundryCandidateMode::Detail, 23, None);
@@ -142,7 +141,7 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
     let actions = direction_variation_mode_actions(
         &VariationIntent::default(),
         29,
-        Some("novice_crate".to_owned()),
+        Some("box_primitive".to_owned()),
         None,
         &[],
     );
@@ -188,12 +187,12 @@ fn foundry_variation_modes_expose_product_scope_and_channel_actions() {
 }
 
 #[test]
-fn surface_package_capability_does_not_enable_visual_surface_mode() {
-    let capability = FoundrySurfaceCapabilityView::sci_fi_crate_static_prop();
+fn unavailable_surface_capability_does_not_enable_visual_surface_mode() {
+    let capability = FoundrySurfaceCapabilityView::unavailable("box-primitive", "Surface package");
     let actions = direction_variation_mode_actions(
         &VariationIntent::default(),
         31,
-        Some("novice_crate".to_owned()),
+        Some("box_primitive".to_owned()),
         Some(&capability),
         &[],
     );
@@ -205,43 +204,43 @@ fn surface_package_capability_does_not_enable_visual_surface_mode() {
     assert!(!surface.enabled);
     assert_eq!(
         surface.unavailable_reason,
-        Some(SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON)
+        Some(SURFACE_PACKAGE_UNAVAILABLE_REASON)
     );
     assert!(surface.request.is_none());
 }
 
 #[test]
 fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let groups = foundry::panels::directions::direction_part_groups_for_document(&fixture.document);
-    let handles = groups
+    let body = groups
         .iter()
-        .find(|group| group.group_id == "handles")
-        .expect("crate exposes handles focus group");
+        .find(|group| group.group_id == "body")
+        .expect("box exposes body focus group");
 
-    assert_eq!(handles.label, "Handles");
-    assert!(handles.focusable);
+    assert_eq!(body.label, "Body");
+    assert!(body.focusable);
     assert_eq!(
-        foundry::panels::directions::focus_part_chip_label(handles),
-        "Handles"
+        foundry::panels::directions::focus_part_chip_label(body),
+        "Body"
     );
     assert_eq!(
-        foundry::panels::directions::focus_part_status_label(handles),
-        "Handles is focused"
+        foundry::panels::directions::focus_part_status_label(body),
+        "Body is focused"
     );
     assert_eq!(
-        foundry::panels::directions::generate_focused_part_label(handles),
-        "Try handle ideas"
+        foundry::panels::directions::generate_focused_part_label(body),
+        "Try body ideas"
     );
     assert_eq!(
-        foundry::panels::directions::lock_focused_part_label(handles),
-        "Lock handles"
+        foundry::panels::directions::lock_focused_part_label(body),
+        "Lock body"
     );
 
-    let command = foundry::panels::directions::set_focus_part_group_command(handles);
+    let command = foundry::panels::directions::set_focus_part_group_command(body);
     assert!(matches!(
         command.single_foundry_command(),
-        Some(FoundryCommand::SetFocusPartGroup { group_id }) if group_id == "handles"
+        Some(FoundryCommand::SetFocusPartGroup { group_id }) if group_id == "body"
     ));
     let clear = foundry::panels::directions::clear_focus_part_group_command();
     assert!(matches!(
@@ -252,7 +251,7 @@ fn focus_part_groups_use_product_labels_and_emit_focus_commands() {
 
 #[test]
 fn focus_part_mode_targets_active_group_when_selected() {
-    let intent = VariationIntent::focus_part_shape("handles", "Handles");
+    let intent = VariationIntent::focus_part_shape("body", "Body");
     let groups = vec![
         foundry::panels::directions::DirectionPartGroup {
             group_id: "body".to_owned(),
@@ -261,8 +260,8 @@ fn focus_part_mode_targets_active_group_when_selected() {
             unavailable_reason: None,
         },
         foundry::panels::directions::DirectionPartGroup {
-            group_id: "handles".to_owned(),
-            label: "Handles".to_owned(),
+            group_id: "edge_softness".to_owned(),
+            label: "Edge Softness".to_owned(),
             focusable: true,
             unavailable_reason: None,
         },
@@ -281,7 +280,7 @@ fn focus_part_mode_targets_active_group_when_selected() {
             .request
             .as_ref()
             .and_then(|request| request.variation_intent.scope.semantic_part_group_id()),
-        Some("handles")
+        Some("body")
     );
 }
 
@@ -296,18 +295,18 @@ fn candidate_cards_expose_explanations_role_badges_and_hover_highlight() {
         &camera,
     );
     candidate.changed_roles = vec![
-        "shade".to_owned(),
-        "trim".to_owned(),
-        "shade".to_owned(),
+        "body".to_owned(),
+        "edge_softness".to_owned(),
+        "body".to_owned(),
         " ".to_owned(),
     ];
     candidate.explanations = vec![control_change(
         FoundryCandidateChangeKind::Provider,
-        "shade_provider",
-        "Shade provider",
-        "Paper",
-        "Glass",
-        "Shade provider changed from `Paper` to `Glass`.",
+        "body_provider",
+        "Body provider",
+        "Compact",
+        "Tall",
+        "Body provider changed from `Compact` to `Tall`.",
     )];
 
     let board = direction_board_view(
@@ -328,14 +327,14 @@ fn candidate_cards_expose_explanations_role_badges_and_hover_highlight() {
     assert_eq!(card.mode_label, "Structure");
     assert_eq!(
         card.explanations,
-        vec!["Shade provider changed from `Paper` to `Glass`."]
+        vec!["Body provider changed from `Compact` to `Tall`."]
     );
     assert_eq!(
         card.changed_role_badges
             .iter()
             .map(|badge| badge.label.as_str())
             .collect::<Vec<_>>(),
-        vec!["shade", "trim"]
+        vec!["body", "edge_softness"]
     );
     assert_eq!(card.validation_badge.state, DirectionValidationState::Valid);
 }

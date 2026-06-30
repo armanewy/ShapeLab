@@ -59,7 +59,7 @@ pub enum GrammarProfile {
 /// Versioned base topology reference for strict-from-library programs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseTopologyReference {
-    /// Stable catalog key, for example `humanoid-body`.
+    /// Stable catalog key, for example `box-primitive-body`.
     pub catalog_id: String,
     /// Version inside that catalog.
     pub version: String,

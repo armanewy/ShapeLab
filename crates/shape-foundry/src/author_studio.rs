@@ -304,8 +304,8 @@ pub enum AuthorQualityGateTask {
     RenderPreview,
     /// `shape-cli foundry-kit contact-sheet`.
     RenderContactSheet,
-    /// `shape-cli hq-quality-benchmark`.
-    HqQualityBenchmark,
+    /// `cargo test -p shape-foundry-catalog --test box_primitive --jobs 1`.
+    BoxPrimitiveGate,
     /// `shape-cli foundry-kit review`.
     ProduceReviewManifest,
     /// `shape-cli foundry-kit package`.
@@ -1124,15 +1124,15 @@ pub fn author_quality_gate_launches(
             package.kit.source_profile_slug.as_deref(),
         ) {
             supported(
-                AuthorQualityGateTask::HqQualityBenchmark,
+                AuthorQualityGateTask::BoxPrimitiveGate,
                 format!(
-                    "shape-cli hq-quality-benchmark --profile {slug} --out-dir {out_dir}/hq-quality --verify-export"
+                    "cargo test -p shape-foundry-catalog --test box_primitive --jobs 1 # {slug} -> {out_dir}/box-primitive-gate"
                 ),
             )
         } else {
             unsupported(
-                AuthorQualityGateTask::HqQualityBenchmark,
-                "HQ quality benchmark requires verified canonical built-in backing and an output directory.",
+                AuthorQualityGateTask::BoxPrimitiveGate,
+                "Box Primitive gate requires verified canonical built-in backing and an output directory.",
             )
         },
         match (&artifacts.quality_report_ref, full_package_arg, has_out_dir) {
@@ -1256,9 +1256,9 @@ mod tests {
             provider_id: "provider_a".to_owned(),
             display_name: "Provider A".to_owned(),
             semantic_role: "missing".to_owned(),
-            provider_slot: "blade_slot".to_owned(),
-            tags: vec!["sharp".to_owned()],
-            compatibility_tags: vec!["heroic".to_owned()],
+            provider_slot: "body_slot".to_owned(),
+            tags: vec!["clean".to_owned()],
+            compatibility_tags: vec!["plain".to_owned()],
             approximate_triangle_budget: Some(512),
             preview_available: false,
             descriptor_only: true,
@@ -1266,17 +1266,17 @@ mod tests {
                 SocketPortDescriptor {
                     socket_id: "attach".to_owned(),
                     port_id: String::new(),
-                    target_role: "guard".to_owned(),
+                    target_role: "detail".to_owned(),
                     compatibility_tags: Vec::new(),
                     allowed_attachment_modes: vec!["snap".to_owned()],
                     required: true,
-                    author_notes: "Required guard attachment.".to_owned(),
+                    author_notes: "Required detail attachment.".to_owned(),
                 },
                 SocketPortDescriptor {
                     socket_id: "attach".to_owned(),
                     port_id: "other".to_owned(),
                     target_role: "missing".to_owned(),
-                    compatibility_tags: vec!["heroic".to_owned()],
+                    compatibility_tags: vec!["plain".to_owned()],
                     allowed_attachment_modes: vec!["snap".to_owned()],
                     required: true,
                     author_notes: "Duplicate socket.".to_owned(),
@@ -1297,18 +1297,18 @@ mod tests {
         let provider = ProviderDescriptor {
             provider_id: "provider_a".to_owned(),
             display_name: "Provider A".to_owned(),
-            semantic_role: "blade".to_owned(),
-            provider_slot: "blade_slot".to_owned(),
-            tags: vec!["sharp".to_owned()],
-            compatibility_tags: vec!["heroic".to_owned()],
+            semantic_role: "body".to_owned(),
+            provider_slot: "body_slot".to_owned(),
+            tags: vec!["clean".to_owned()],
+            compatibility_tags: vec!["plain".to_owned()],
             approximate_triangle_budget: Some(512),
             preview_available: false,
             descriptor_only: false,
             socket_requirements: vec![SocketPortDescriptor {
                 socket_id: "attach".to_owned(),
                 port_id: "attach_port".to_owned(),
-                target_role: "guard".to_owned(),
-                compatibility_tags: vec!["heroic".to_owned()],
+                target_role: "detail".to_owned(),
+                compatibility_tags: vec!["plain".to_owned()],
                 allowed_attachment_modes: Vec::new(),
                 required: true,
                 author_notes: String::new(),
@@ -1324,13 +1324,13 @@ mod tests {
     #[test]
     fn style_compatibility_validation_rejects_conflicting_tags() {
         let descriptor = StyleCompatibilityDescriptor {
-            compatible_style_packs: vec!["heroic".to_owned()],
-            incompatible_style_packs: BTreeMap::from([("heroic".to_owned(), String::new())]),
-            allowed_provider_tags: vec!["ornate".to_owned()],
-            forbidden_provider_tags: vec!["ornate".to_owned()],
+            compatible_style_packs: vec!["plain".to_owned()],
+            incompatible_style_packs: BTreeMap::from([("plain".to_owned(), String::new())]),
+            allowed_provider_tags: vec!["decorative".to_owned()],
+            forbidden_provider_tags: vec!["decorative".to_owned()],
             detail_density_policy: "Readable at thumbnail size.".to_owned(),
             bevel_language_notes: "Broad bevels.".to_owned(),
-            proportion_language_notes: "Heroic proportions.".to_owned(),
+            proportion_language_notes: "Plain proportions.".to_owned(),
             symmetry_asymmetry_policy: "Mostly symmetric.".to_owned(),
         };
         let report = validate_style_compatibility(&descriptor);
@@ -1346,23 +1346,23 @@ mod tests {
             control(
                 "shape",
                 "Shape",
-                "blade_slot",
+                "body_slot",
                 ControlProfileControlKind::Continuous,
             ),
             ControlMappingDescriptor {
                 control_id: "shape_alt".to_owned(),
                 label: "Shape Alt".to_owned(),
-                description: "Changes the blade.".to_owned(),
+                description: "Changes the body.".to_owned(),
                 kind: ControlProfileControlKind::Continuous,
                 primary: true,
                 visible: true,
                 owned_family_slots: Vec::new(),
-                owned_provider_slots: vec!["blade_slot".to_owned()],
+                owned_provider_slots: vec!["body_slot".to_owned()],
                 response_curve_descriptor: "linear".to_owned(),
                 discrete_options: Vec::new(),
-                provider_slot_binding: Some("blade_slot".to_owned()),
+                provider_slot_binding: Some("body_slot".to_owned()),
                 topology_behavior: ControlProfileTopologyBehavior::TopologyChanging,
-                disabled_reason_policy: "Requires a blade provider.".to_owned(),
+                disabled_reason_policy: "Requires a body provider.".to_owned(),
             },
         ];
         let report = validate_control_mappings(&controls);
@@ -1374,19 +1374,19 @@ mod tests {
     #[test]
     fn control_mapping_rejects_empty_choice_options_and_unowned_bindings() {
         let controls = vec![ControlMappingDescriptor {
-            control_id: "blade_shape".to_owned(),
-            label: "Blade Shape".to_owned(),
-            description: "Changes the blade.".to_owned(),
+            control_id: "body_shape".to_owned(),
+            label: "Body Shape".to_owned(),
+            description: "Changes the body.".to_owned(),
             kind: ControlProfileControlKind::Choice,
             primary: true,
             visible: true,
             owned_family_slots: Vec::new(),
-            owned_provider_slots: vec!["blade_slot".to_owned()],
+            owned_provider_slots: vec!["body_slot".to_owned()],
             response_curve_descriptor: "discrete".to_owned(),
             discrete_options: Vec::new(),
-            provider_slot_binding: Some("guard_slot".to_owned()),
+            provider_slot_binding: Some("detail_slot".to_owned()),
             topology_behavior: ControlProfileTopologyBehavior::TopologyChanging,
-            disabled_reason_policy: "Requires a blade provider.".to_owned(),
+            disabled_reason_policy: "Requires a body provider.".to_owned(),
         }];
         let report = validate_control_mappings(&controls);
         let codes = issue_codes(&report);
@@ -1557,7 +1557,7 @@ mod tests {
             launch.task == AuthorQualityGateTask::ValidateKit && !launch.supported
         }));
         assert!(launches.iter().any(|launch| {
-            launch.task == AuthorQualityGateTask::HqQualityBenchmark
+            launch.task == AuthorQualityGateTask::BoxPrimitiveGate
                 && !launch.supported
                 && launch.unsupported_reason.is_some()
         }));
@@ -1618,11 +1618,11 @@ mod tests {
         );
         assert!(launches.iter().all(|launch| launch.supported));
         assert!(launches.iter().any(|launch| {
-            launch.task == AuthorQualityGateTask::HqQualityBenchmark
+            launch.task == AuthorQualityGateTask::BoxPrimitiveGate
                 && launch
                     .invocation
                     .as_deref()
-                    .is_some_and(|invocation| invocation.contains("--profile sample"))
+                    .is_some_and(|invocation| invocation.contains("box_primitive"))
         }));
     }
 
@@ -1667,22 +1667,22 @@ mod tests {
     fn sample_roles() -> Vec<AuthorRoleDescriptor> {
         vec![
             AuthorRoleDescriptor {
-                role_id: "blade".to_owned(),
-                display_name: "Blade".to_owned(),
-                description: "Main cutting surface.".to_owned(),
+                role_id: "body".to_owned(),
+                display_name: "Body".to_owned(),
+                description: "Main box body.".to_owned(),
                 required: true,
                 repeated: false,
                 default_visibility: true,
-                export_part_name: "Blade".to_owned(),
+                export_part_name: "Body".to_owned(),
             },
             AuthorRoleDescriptor {
-                role_id: "guard".to_owned(),
-                display_name: "Guard".to_owned(),
-                description: "Protective cross guard.".to_owned(),
+                role_id: "detail".to_owned(),
+                display_name: "Detail".to_owned(),
+                description: "Optional box detail.".to_owned(),
                 required: true,
                 repeated: false,
                 default_visibility: true,
-                export_part_name: "Guard".to_owned(),
+                export_part_name: "Detail".to_owned(),
             },
         ]
     }
@@ -1760,27 +1760,27 @@ mod tests {
                 family_id: "sample-family".to_owned(),
                 display_name: "Sample Family".to_owned(),
                 semantic_roles: vec![FamilyBlueprintRole {
-                    role_id: "blade".to_owned(),
-                    label: "Blade".to_owned(),
+                    role_id: "body".to_owned(),
+                    label: "Body".to_owned(),
                     required: true,
-                    tags: vec!["weapon".to_owned()],
+                    tags: vec!["box".to_owned()],
                 }],
-                required_roles: vec!["blade".to_owned()],
+                required_roles: vec!["body".to_owned()],
                 optional_roles: Vec::new(),
                 provider_slots: vec![ProviderSlotExpectation {
-                    slot_id: "blade_slot".to_owned(),
-                    role_id: "blade".to_owned(),
+                    slot_id: "body_slot".to_owned(),
+                    role_id: "body".to_owned(),
                     required: true,
                     attachment_tags: vec!["center".to_owned()],
                 }],
                 attachment_expectations: Vec::new(),
                 scale_policy: HighLevelScalePolicy {
-                    label: "Handheld".to_owned(),
-                    allowed_range: Some("Authored weapon scale.".to_owned()),
+                    label: "Box scale".to_owned(),
+                    allowed_range: Some("Authored box scale.".to_owned()),
                 },
                 export_part_naming_policy: ExportPartNamingPolicy {
                     strategy: "role labels".to_owned(),
-                    required_part_names: vec!["Blade".to_owned()],
+                    required_part_names: vec!["Body".to_owned()],
                 },
             },
             provider_pack: ProviderPack {
@@ -1788,21 +1788,21 @@ mod tests {
                 pack_id: "sample-provider".to_owned(),
                 family_id: Some("sample-family".to_owned()),
                 compatible_family_ids: vec!["sample-family".to_owned()],
-                provider_slots_supplied: vec!["blade_slot".to_owned()],
+                provider_slots_supplied: vec!["body_slot".to_owned()],
                 provider_options: vec![ProviderPackOption {
-                    option_id: "straight_blade".to_owned(),
-                    slot_id: "blade_slot".to_owned(),
-                    label: "Straight Blade".to_owned(),
-                    semantic_roles: vec!["blade".to_owned()],
-                    compatibility_tags: vec!["heroic".to_owned()],
+                    option_id: "simple_body".to_owned(),
+                    slot_id: "body_slot".to_owned(),
+                    label: "Simple Body".to_owned(),
+                    semantic_roles: vec!["body".to_owned()],
+                    compatibility_tags: vec!["plain".to_owned()],
                     detail_density_tags: vec!["clean".to_owned()],
                     triangle_budget_estimate: Some(512),
                 }],
-                semantic_role_coverage: vec!["blade".to_owned()],
+                semantic_role_coverage: vec!["body".to_owned()],
                 socket_attachment_tags: vec!["center".to_owned()],
                 detail_density_tags: vec!["clean".to_owned()],
-                triangle_budget_estimates: BTreeMap::from([("straight_blade".to_owned(), 512)]),
-                compatibility_tags: vec!["heroic".to_owned()],
+                triangle_budget_estimates: BTreeMap::from([("simple_body".to_owned(), 512)]),
+                compatibility_tags: vec!["plain".to_owned()],
             },
             style_pack: StylePack {
                 schema_version: STYLE_PACK_SCHEMA_VERSION,
@@ -1810,11 +1810,11 @@ mod tests {
                 display_name: "Sample Style".to_owned(),
                 compatible_family_ids: vec!["sample-family".to_owned()],
                 bevel_language: "Readable bevels.".to_owned(),
-                proportion_language: "Heroic proportions.".to_owned(),
+                proportion_language: "Plain proportions.".to_owned(),
                 detail_density_policy: "Moderate details.".to_owned(),
                 silhouette_exaggeration_policy: "Readable outline.".to_owned(),
                 symmetry_asymmetry_policy: "Mostly symmetric.".to_owned(),
-                allowed_provider_tags: vec!["heroic".to_owned()],
+                allowed_provider_tags: vec!["plain".to_owned()],
                 forbidden_provider_tags: Vec::new(),
                 compatible_provider_packs: vec!["sample-provider".to_owned()],
                 incompatible_provider_packs: Vec::new(),
@@ -1830,13 +1830,13 @@ mod tests {
                 style_id: Some("sample-style".to_owned()),
                 maximum_primary_controls: DEFAULT_MAX_PRIMARY_NOVICE_CONTROLS,
                 controls: vec![crate::ControlProfileControl {
-                    control_id: "blade_shape".to_owned(),
-                    label: "Blade Shape".to_owned(),
-                    description: "Choose the blade silhouette.".to_owned(),
+                    control_id: "body_shape".to_owned(),
+                    label: "Body Shape".to_owned(),
+                    description: "Choose the body silhouette.".to_owned(),
                     kind: ControlProfileControlKind::Choice,
                     owned_family_slots: Vec::new(),
-                    owned_provider_slots: vec!["blade_slot".to_owned()],
-                    visible_effect_expectation: "Blade silhouette changes.".to_owned(),
+                    owned_provider_slots: vec!["body_slot".to_owned()],
+                    visible_effect_expectation: "Body silhouette changes.".to_owned(),
                     topology_behavior: ControlProfileTopologyBehavior::TopologyChanging,
                     option_visibility: ControlOptionVisibility {
                         hide_invalid_from_novices: true,
@@ -1851,15 +1851,15 @@ mod tests {
                 schema_version: CANDIDATE_STRATEGY_PACK_SCHEMA_VERSION,
                 pack_id: "sample-strategies".to_owned(),
                 strategies: vec![KitCandidateStrategy {
-                    strategy_id: "heroic".to_owned(),
-                    name: "Heroic".to_owned(),
-                    allowed_controls: vec!["blade_shape".to_owned()],
-                    explanation_templates: vec!["Blade Shape becomes broader.".to_owned()],
+                    strategy_id: "plain".to_owned(),
+                    name: "Plain".to_owned(),
+                    allowed_controls: vec!["body_shape".to_owned()],
+                    explanation_templates: vec!["Body Shape becomes broader.".to_owned()],
                 }],
-                allowed_controls: vec!["blade_shape".to_owned()],
+                allowed_controls: vec!["body_shape".to_owned()],
                 allowed_provider_choices: BTreeMap::from([(
-                    "blade_slot".to_owned(),
-                    vec!["straight_blade".to_owned()],
+                    "body_slot".to_owned(),
+                    vec!["simple_body".to_owned()],
                 )]),
                 diversity_goals: vec!["shape".to_owned()],
                 invalid_state_rejection_policy: "Reject invalid output.".to_owned(),

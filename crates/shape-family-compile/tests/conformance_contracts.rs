@@ -7,8 +7,8 @@ use shape_family_compile::conformance::{
 #[test]
 fn required_failures_reject_but_advisory_failures_do_not() {
     let mut report = FamilyConformanceReport {
-        family_id: "bridge".to_owned(),
-        style_kit_id: "roman".to_owned(),
+        family_id: "box_primitive".to_owned(),
+        style_kit_id: "plain_clay".to_owned(),
         ..FamilyConformanceReport::default()
     };
     report.issues.push(ConformanceIssue {
@@ -33,8 +33,8 @@ fn required_failures_reject_but_advisory_failures_do_not() {
 #[test]
 fn required_row_status_rejects_without_flattened_issue() {
     let mut report = FamilyConformanceReport {
-        family_id: "bridge".to_owned(),
-        style_kit_id: "roman".to_owned(),
+        family_id: "box_primitive".to_owned(),
+        style_kit_id: "plain_clay".to_owned(),
         ..FamilyConformanceReport::default()
     };
     report.roles.push(RoleConformance {
@@ -52,8 +52,8 @@ fn required_row_status_rejects_without_flattened_issue() {
 #[test]
 fn runtime_deferred_rows_are_non_blocking_but_required_deferred_rows_reject() {
     let mut report = FamilyConformanceReport {
-        family_id: "bridge".to_owned(),
-        style_kit_id: "roman".to_owned(),
+        family_id: "box_primitive".to_owned(),
+        style_kit_id: "plain_clay".to_owned(),
         ..FamilyConformanceReport::default()
     };
     report.attachments.push(AttachmentConformance {

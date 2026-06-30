@@ -19,10 +19,7 @@ use shape_foundry::{
     QualityGateProfile, STYLE_PACK_SCHEMA_VERSION, StylePack, StyleProviderCompatibility,
 };
 
-use crate::{
-    FoundryFixtureCatalog, built_in_fixture_catalogs_with_labels, moba_hero::MOBA_HERO_CLAY_SLUG,
-    showcase_gear::is_showcase_gear_slug,
-};
+use crate::{FoundryFixtureCatalog, box_primitive, built_in_fixture_catalogs_with_labels};
 
 /// Return every built-in Visual Foundry profile as a curated kit package.
 #[must_use]
@@ -535,34 +532,14 @@ fn provider_slot_id(role_id: &str) -> String {
 
 fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
-        "sci-fi-crate" | "stylized-lamp" | "sci-fi-door" | "signpost" => {
-            FoundryKitQualityTier::Usable
-        }
-        slug if is_showcase_gear_slug(slug) => FoundryKitQualityTier::Usable,
-        MOBA_HERO_CLAY_SLUG => FoundryKitQualityTier::Prototype,
+        box_primitive::BOX_PRIMITIVE_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
 
 fn product_category_chips(slug: &str) -> Vec<String> {
     match slug {
-        "roman-bridge" => vec!["Bridge", "Structure"],
-        "roman-bridge-hq" => vec!["Bridge", "HQ", "Structure"],
-        "sci-fi-crate" => vec!["Prop", "Sci-Fi"],
-        "stylized-lamp" => vec!["Furniture", "Lighting"],
-        "market-stall" => vec!["Architecture", "Market"],
-        "sci-fi-door" => vec!["Architecture", "Sci-Fi"],
-        "storage-barrel" => vec!["Prop", "Storage"],
-        "signpost" => vec!["Prop", "Wayfinding"],
-        "workshop-chair" => vec!["Furniture", "Workshop"],
-        "handcart" => vec!["Vehicle", "Market"],
-        "stylized-tree" => vec!["Nature", "Stylized"],
-        "fantasy-sword" => vec!["Weapon", "Heroic"],
-        "round-shield" => vec!["Armor", "Shield"],
-        "hero-helmet" => vec!["Armor", "Helmet"],
-        "pauldron-pair" => vec!["Armor", "Shoulder"],
-        "chest-armor" => vec!["Armor", "Chest"],
-        MOBA_HERO_CLAY_SLUG => vec!["Hero", "Clay MVP"],
+        box_primitive::BOX_PRIMITIVE_SLUG => vec!["Primitive", "Box"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -572,29 +549,21 @@ fn product_category_chips(slug: &str) -> Vec<String> {
 
 fn normalize_kit_slug(slug: &str) -> String {
     match slug {
-        "storybook-tree" => "stylized-tree".to_owned(),
-        "roman-hq-bridge" | "roman-bridge-hq-v1" => "roman-bridge-hq".to_owned(),
-        "scifi-crate" => "sci-fi-crate".to_owned(),
-        "fantasy_sword" => "fantasy-sword".to_owned(),
-        "round_shield" => "round-shield".to_owned(),
-        "hero_helmet" => "hero-helmet".to_owned(),
-        "pauldron_pair" => "pauldron-pair".to_owned(),
-        "chest_armor" => "chest-armor".to_owned(),
-        "moba_hero_clay" | "hero-foundry-clay" => MOBA_HERO_CLAY_SLUG.to_owned(),
+        "box" | "box_primitive" => box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use shape_foundry::{foundry_kit_visibility_decision, validate_foundry_kit_package};
+    use shape_foundry::{FoundryKitQualityTier, validate_foundry_kit_package};
 
     use super::*;
 
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 17);
+        assert_eq!(packages.len(), 1);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -617,68 +586,23 @@ mod tests {
     }
 
     #[test]
-    fn showcase_gear_kits_are_usable_without_showcase_approval() {
-        for slug in crate::showcase_gear::SHOWCASE_GEAR_SLUGS {
-            let package = built_in_foundry_kit_package(slug).expect("showcase gear kit");
-            assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Usable);
-            assert_ne!(package.kit.quality_tier, FoundryKitQualityTier::Showcase);
-            assert!(!package.review_manifest.human_approval_marker);
-            assert!(package.review_manifest.benchmark_refs.iter().any(|path| {
-                path == &format!("target/hq-benchmark/{slug}/quality-report.json")
-            }));
-        }
-    }
-
-    #[test]
-    fn built_in_draft_and_prototype_kits_are_hidden_by_default() {
-        let package = built_in_foundry_kit_package("roman-bridge").expect("roman bridge kit");
-        assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Prototype);
-        let decision =
-            foundry_kit_visibility_decision(&package.kit, &package.review_manifest, false);
-        assert!(!decision.visible);
-        assert!(
-            foundry_kit_visibility_decision(&package.kit, &package.review_manifest, true).visible
-        );
-    }
-
-    #[test]
-    fn built_in_usable_kits_remain_hidden_until_manual_review() {
-        let package = built_in_foundry_kit_package("sci-fi-crate").expect("crate kit");
+    fn box_primitive_kit_is_the_only_usable_builtin() {
+        let package =
+            built_in_foundry_kit_package(box_primitive::BOX_PRIMITIVE_SLUG).expect("box kit");
         assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Usable);
-        let decision =
-            foundry_kit_visibility_decision(&package.kit, &package.review_manifest, false);
-        assert!(!decision.visible);
-        assert!(decision.reason.unwrap().contains("Manual review"));
-
-        let hq_bridge = built_in_foundry_kit_package("roman-bridge-hq").expect("hq bridge kit");
-        assert_eq!(hq_bridge.kit.quality_tier, FoundryKitQualityTier::Prototype);
         assert_eq!(
-            hq_bridge.kit.source_profile_slug.as_deref(),
-            Some("roman-bridge-hq")
+            package.kit.source_profile_slug.as_deref(),
+            Some(box_primitive::BOX_PRIMITIVE_SLUG)
         );
-        let decision =
-            foundry_kit_visibility_decision(&hq_bridge.kit, &hq_bridge.review_manifest, false);
-        assert!(!decision.visible);
-        assert!(decision.reason.unwrap().contains("preview catalog"));
+        assert_eq!(package.kit.category_chips, vec!["Primitive", "Box"]);
     }
 
     #[test]
     fn kit_slug_aliases_resolve_to_canonical_built_ins() {
-        let tree = built_in_foundry_kit_package("storybook-tree").expect("storybook alias");
+        let box_kit = built_in_foundry_kit_package("box").expect("box alias");
         assert_eq!(
-            tree.kit.source_profile_slug.as_deref(),
-            Some("stylized-tree")
-        );
-        let crate_kit = built_in_foundry_kit_package("scifi-crate").expect("crate alias");
-        assert_eq!(
-            crate_kit.kit.source_profile_slug.as_deref(),
-            Some("sci-fi-crate")
-        );
-        let hq_bridge =
-            built_in_foundry_kit_package("roman-bridge-hq-v1").expect("hq bridge alias");
-        assert_eq!(
-            hq_bridge.kit.source_profile_slug.as_deref(),
-            Some("roman-bridge-hq")
+            box_kit.kit.source_profile_slug.as_deref(),
+            Some(box_primitive::BOX_PRIMITIVE_SLUG)
         );
     }
 }

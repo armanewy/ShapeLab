@@ -73,52 +73,41 @@ pub(crate) fn built_in_kit_card_views() -> Vec<FoundryKitCardView> {
 }
 
 fn product_kit_display_name(source_profile_slug: Option<&str>, display_name: &str) -> String {
-    match source_profile_slug {
-        Some("moba-hero-clay") => "Hero Character".to_owned(),
-        _ => display_name.to_owned(),
-    }
+    let _ = source_profile_slug;
+    display_name.to_owned()
 }
 
 fn product_family_display_name(family_id: &str, display_name: &str) -> String {
-    match family_id {
-        "moba_hero_clay" => "Hero Character".to_owned(),
-        _ => display_name.to_owned(),
-    }
+    let _ = family_id;
+    display_name.to_owned()
 }
 
 fn product_category_chips(
     source_profile_slug: Option<&str>,
     category_chips: Vec<String>,
 ) -> Vec<String> {
-    match source_profile_slug {
-        Some("moba-hero-clay") => vec!["Hero".to_owned(), "Character".to_owned()],
-        _ => category_chips,
-    }
+    let _ = source_profile_slug;
+    category_chips
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::foundry::ui::copy::first_forbidden_product_term;
-    use shape_foundry::{
-        materialize_foundation_draft_package, weapon_armor_foundation_draft_batch,
-    };
-    use shape_foundry_catalog::showcase_gear::SHOWCASE_GEAR_SLUGS;
 
     #[test]
     fn built_in_kit_cards_expose_product_safe_badges() {
         let cards = built_in_kit_card_views();
-        assert_eq!(cards.len(), 19);
+        assert_eq!(cards.len(), 1);
         assert!(cards.iter().all(|card| !card.display_name.is_empty()));
         assert!(cards.iter().all(|card| !card.style_name.is_empty()));
         assert!(cards.iter().all(|card| !card.category_chips.is_empty()));
         assert!(
             cards
                 .iter()
-                .any(|card| card.display_name == "Hero Character")
+                .all(|card| card.display_name == "Box Primitive")
         );
-        assert!(cards.iter().any(|card| card.quality_badge == "Usable"));
-        assert!(cards.iter().any(|card| card.quality_badge == "Prototype"));
+        assert!(cards.iter().all(|card| card.quality_badge == "Usable"));
         assert!(cards.iter().all(|card| card.hidden_by_default));
         for card in cards {
             let labels = [
@@ -152,46 +141,6 @@ mod tests {
             if let Some(reason) = &card.hidden_reason {
                 assert_eq!(first_forbidden_product_term(reason), None);
             }
-        }
-    }
-
-    #[test]
-    fn wave37_foundation_drafts_do_not_appear_in_novice_kit_cards() {
-        let cards = built_in_kit_card_views();
-        let card_slugs = cards
-            .iter()
-            .filter_map(|card| card.source_profile_slug.as_deref())
-            .collect::<Vec<_>>();
-        for draft in weapon_armor_foundation_draft_batch() {
-            let materialized = materialize_foundation_draft_package(&draft)
-                .expect("foundation batch draft should materialize internally");
-            for display_name in [
-                draft.family_blueprint.display_name.as_str(),
-                materialized.kit.display_name.as_str(),
-            ] {
-                let matching_cards = cards
-                    .iter()
-                    .filter(|card| card.display_name == display_name)
-                    .collect::<Vec<_>>();
-                assert!(
-                    matching_cards.iter().all(|card| {
-                        card.source_profile_slug
-                            .as_deref()
-                            .is_some_and(|slug| SHOWCASE_GEAR_SLUGS.contains(&slug))
-                            && card.quality_badge == "Usable"
-                    }),
-                    "{display_name} may appear only as a promoted Wave 38 gear kit, not as a foundation draft"
-                );
-            }
-            assert!(
-                !card_slugs.contains(&materialized.kit.kit_id.as_str()),
-                "{} kit ID must not be used as a built-in novice card slug",
-                materialized.kit.kit_id
-            );
-            assert!(
-                materialized.kit.source_profile_slug.is_none(),
-                "foundation drafts must not claim a built-in novice profile"
-            );
         }
     }
 }

@@ -122,7 +122,7 @@ mod tests {
         assert!(view.authoring_terms.is_empty());
         assert!(view.descriptor_only_notice.is_none());
         assert!(view.foundation_draft_panel.is_none());
-        assert!(!visible.contains("fantasy_sword_core_draft"));
+        assert!(!visible.contains("box_primitive_core_draft"));
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests {
         assert!(
             panel
                 .internal_draft_ids
-                .contains(&"fantasy_sword_core_draft".to_owned())
+                .contains(&"box_primitive_core_draft".to_owned())
         );
         assert!(panel.actions.contains(&"Materialize Internal Kit Draft"));
         assert!(panel.catalog_visibility_notice.contains("stay internal"));

@@ -20,7 +20,7 @@ fn built_in_fixtures_round_trip_through_author_packages() {
             fixture.slug,
             report.issues
         );
-        assert_eq!(report.primary_control_count, 7);
+        assert_eq!(report.primary_control_count, 2);
         assert!(report.candidate_strategy_count > 0);
         assert_eq!(report.preview_camera_count, 1);
         assert_eq!(report.pack_policy_count, 1);
@@ -49,7 +49,7 @@ fn built_in_fixtures_round_trip_through_author_packages() {
 
 #[test]
 fn author_package_writes_exact_local_catalog() {
-    let mut profile = author_profile_template("roman-bridge").expect("template");
+    let mut profile = author_profile_template("box-primitive").expect("template");
     profile.package_version = 7;
     let catalog = profile.to_fixture_catalog();
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -60,11 +60,11 @@ fn author_package_writes_exact_local_catalog() {
     for name in [
         "foundry-document.json",
         "catalog-manifest.json",
-        "roman-bridge-family.json",
-        "roman-bridge-style.json",
-        "roman-bridge-family-impl.json",
-        "roman-bridge-style-impl.json",
-        "roman-bridge-profile.json",
+        "box-primitive-family.json",
+        "box-primitive-style.json",
+        "box-primitive-family-impl.json",
+        "box-primitive-style-impl.json",
+        "box-primitive-profile.json",
     ] {
         let path = temp_dir.path().join(name);
         assert!(path.exists(), "{name} should exist");
@@ -77,7 +77,7 @@ fn author_package_writes_exact_local_catalog() {
     let document_json = fs::read_to_string(temp_dir.path().join("foundry-document.json")).unwrap();
     let document: shape_foundry::FoundryAssetDocument =
         serde_json::from_str(&document_json).unwrap();
-    assert_eq!(document.document_id.0, "roman-bridge-doc");
+    assert_eq!(document.document_id.0, "box-primitive-doc");
     assert_eq!(
         document.catalog_lock.as_ref().unwrap().catalog_version,
         profile.package_version
@@ -90,7 +90,7 @@ fn author_package_writes_exact_local_catalog() {
 
 #[test]
 fn author_validation_rejects_bad_metadata_before_compile() {
-    let mut profile = author_profile_template("sci-fi-crate").expect("template");
+    let mut profile = author_profile_template("box-primitive").expect("template");
     profile.preview_cameras.push(FoundryAuthorPreviewCamera {
         id: "default".to_owned(),
         label: "Duplicate".to_owned(),
@@ -119,8 +119,8 @@ fn author_validation_rejects_bad_metadata_before_compile() {
 
 #[test]
 fn author_validation_rejects_cross_reference_drift() {
-    let mut profile = author_profile_template("stylized-lamp").expect("template");
-    profile.customizer_profile.family_id = "crate".to_owned();
+    let mut profile = author_profile_template("box-primitive").expect("template");
+    profile.customizer_profile.family_id = "other_box".to_owned();
 
     let report = validate_author_profile_package(&profile);
     assert!(
@@ -133,7 +133,7 @@ fn author_validation_rejects_cross_reference_drift() {
 
 #[test]
 fn author_validation_runs_full_customizer_contract() {
-    let mut profile = author_profile_template("roman-bridge").expect("template");
+    let mut profile = author_profile_template("box-primitive").expect("template");
     profile.customizer_profile.controls[0].section = Some("missing-section".to_owned());
 
     let report = validate_author_profile_package(&profile);

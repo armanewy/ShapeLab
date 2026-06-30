@@ -1651,7 +1651,7 @@ mod tests {
         package
             .style_pack
             .forbidden_provider_tags
-            .push("timber".to_owned());
+            .push("plain".to_owned());
         let report = validate_foundry_kit_package(&package);
         assert!(has_issue(&report, "style_forbidden_provider_tag"));
     }
@@ -1678,7 +1678,7 @@ mod tests {
     #[test]
     fn provider_options_must_cover_their_slot_role() {
         let mut package = valid_package(FoundryKitQualityTier::Prototype);
-        package.provider_pack.provider_options[0].semantic_roles = vec!["brace".to_owned()];
+        package.provider_pack.provider_options[0].semantic_roles = vec!["detail".to_owned()];
         let report = validate_foundry_kit_package(&package);
         assert!(has_issue(&report, "provider_option_missing_slot_role"));
     }
@@ -1765,17 +1765,17 @@ mod tests {
             schema_version: FOUNDRY_KIT_PACKAGE_SCHEMA_VERSION,
             kit: FoundryKit {
                 schema_version: FOUNDRY_KIT_SCHEMA_VERSION,
-                kit_id: "bridge-kit".to_owned(),
-                display_name: "Bridge Kit".to_owned(),
-                family_blueprint_id: "bridge".to_owned(),
-                provider_pack_id: "bridge-providers".to_owned(),
-                style_pack_id: "timber-style".to_owned(),
-                control_profile_id: "bridge-controls".to_owned(),
-                candidate_strategy_pack_id: "bridge-strategies".to_owned(),
+                kit_id: "box-kit".to_owned(),
+                display_name: "Box Kit".to_owned(),
+                family_blueprint_id: "box".to_owned(),
+                provider_pack_id: "box-providers".to_owned(),
+                style_pack_id: "plain-style".to_owned(),
+                control_profile_id: "box-controls".to_owned(),
+                candidate_strategy_pack_id: "box-strategies".to_owned(),
                 quality_gate_profile_id: "usable-gates".to_owned(),
-                compatibility_matrix_id: "bridge-compatibility".to_owned(),
-                review_manifest_id: "bridge-review".to_owned(),
-                catalog_manifest_id: "bridge-catalog".to_owned(),
+                compatibility_matrix_id: "box-compatibility".to_owned(),
+                review_manifest_id: "box-review".to_owned(),
+                catalog_manifest_id: "box-catalog".to_owned(),
                 preview_camera_policy: PreviewCameraPolicy {
                     policy_id: "clay-review".to_owned(),
                     required_views: vec!["front".to_owned(), "three-quarter".to_owned()],
@@ -1784,32 +1784,32 @@ mod tests {
                 },
                 quality_tier: tier,
                 catalog_visibility_policy: visibility,
-                source_profile_slug: Some("roman-bridge".to_owned()),
-                category_chips: vec!["Bridge".to_owned()],
+                source_profile_slug: Some("box-primitive".to_owned()),
+                category_chips: vec!["Box".to_owned()],
             },
             family_blueprint: FamilyBlueprint {
                 schema_version: FAMILY_BLUEPRINT_SCHEMA_VERSION,
-                family_id: "bridge".to_owned(),
-                display_name: "Bridge".to_owned(),
+                family_id: "box".to_owned(),
+                display_name: "Box".to_owned(),
                 semantic_roles: vec![
                     FamilyBlueprintRole {
-                        role_id: "deck".to_owned(),
-                        label: "Deck".to_owned(),
+                        role_id: "body".to_owned(),
+                        label: "Body".to_owned(),
                         required: true,
                         tags: vec!["structure".to_owned()],
                     },
                     FamilyBlueprintRole {
-                        role_id: "brace".to_owned(),
-                        label: "Brace".to_owned(),
+                        role_id: "detail".to_owned(),
+                        label: "Detail".to_owned(),
                         required: false,
                         tags: vec!["detail".to_owned()],
                     },
                 ],
-                required_roles: vec!["deck".to_owned()],
-                optional_roles: vec!["brace".to_owned()],
+                required_roles: vec!["body".to_owned()],
+                optional_roles: vec!["detail".to_owned()],
                 provider_slots: vec![ProviderSlotExpectation {
-                    slot_id: "deck-slot".to_owned(),
-                    role_id: "deck".to_owned(),
+                    slot_id: "body-slot".to_owned(),
+                    role_id: "body".to_owned(),
                     required: true,
                     attachment_tags: vec!["support".to_owned()],
                 }],
@@ -1820,67 +1820,67 @@ mod tests {
                 },
                 export_part_naming_policy: ExportPartNamingPolicy {
                     strategy: "role-labels".to_owned(),
-                    required_part_names: vec!["deck".to_owned()],
+                    required_part_names: vec!["body".to_owned()],
                 },
             },
             provider_pack: ProviderPack {
                 schema_version: PROVIDER_PACK_SCHEMA_VERSION,
-                pack_id: "bridge-providers".to_owned(),
-                family_id: Some("bridge".to_owned()),
-                compatible_family_ids: vec!["bridge".to_owned()],
-                provider_slots_supplied: vec!["deck-slot".to_owned()],
+                pack_id: "box-providers".to_owned(),
+                family_id: Some("box".to_owned()),
+                compatible_family_ids: vec!["box".to_owned()],
+                provider_slots_supplied: vec!["body-slot".to_owned()],
                 provider_options: vec![ProviderPackOption {
-                    option_id: "deck-basic".to_owned(),
-                    slot_id: "deck-slot".to_owned(),
-                    label: "Straight Deck".to_owned(),
-                    semantic_roles: vec!["deck".to_owned()],
-                    compatibility_tags: vec!["timber".to_owned()],
+                    option_id: "body-basic".to_owned(),
+                    slot_id: "body-slot".to_owned(),
+                    label: "Straight Body".to_owned(),
+                    semantic_roles: vec!["body".to_owned()],
+                    compatibility_tags: vec!["plain".to_owned()],
                     detail_density_tags: vec!["medium".to_owned()],
                     triangle_budget_estimate: Some(1200),
                 }],
-                semantic_role_coverage: vec!["deck".to_owned()],
+                semantic_role_coverage: vec!["body".to_owned()],
                 socket_attachment_tags: vec!["support".to_owned()],
                 detail_density_tags: vec!["medium".to_owned()],
-                triangle_budget_estimates: BTreeMap::from([("deck-basic".to_owned(), 1200)]),
-                compatibility_tags: vec!["timber".to_owned()],
+                triangle_budget_estimates: BTreeMap::from([("body-basic".to_owned(), 1200)]),
+                compatibility_tags: vec!["plain".to_owned()],
             },
             style_pack: StylePack {
                 schema_version: STYLE_PACK_SCHEMA_VERSION,
-                style_id: "timber-style".to_owned(),
-                display_name: "Timber".to_owned(),
-                compatible_family_ids: vec!["bridge".to_owned()],
+                style_id: "plain-style".to_owned(),
+                display_name: "Plain".to_owned(),
+                compatible_family_ids: vec!["box".to_owned()],
                 bevel_language: "soft structural edges".to_owned(),
                 proportion_language: "sturdy broad spans".to_owned(),
                 detail_density_policy: "medium detail".to_owned(),
                 silhouette_exaggeration_policy: "readable from three-quarter view".to_owned(),
                 symmetry_asymmetry_policy: "mostly symmetric with optional wear".to_owned(),
-                allowed_provider_tags: vec!["timber".to_owned()],
-                forbidden_provider_tags: vec!["sci-fi".to_owned()],
-                compatible_provider_packs: vec!["bridge-providers".to_owned()],
+                allowed_provider_tags: vec!["plain".to_owned()],
+                forbidden_provider_tags: vec!["other-style".to_owned()],
+                compatible_provider_packs: vec!["box-providers".to_owned()],
                 incompatible_provider_packs: Vec::new(),
                 future_material_vocabulary: Some(FutureMaterialVocabulary {
                     label: "Future material notes".to_owned(),
-                    tags: vec!["wood".to_owned()],
+                    tags: vec!["clay".to_owned()],
                 }),
             },
             control_profile: ControlProfile {
                 schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
-                profile_id: "bridge-controls".to_owned(),
-                family_id: "bridge".to_owned(),
-                style_id: Some("timber-style".to_owned()),
+                profile_id: "box-controls".to_owned(),
+                family_id: "box".to_owned(),
+                style_id: Some("plain-style".to_owned()),
                 maximum_primary_controls: DEFAULT_MAX_PRIMARY_NOVICE_CONTROLS,
-                controls: vec![control("deck-width", "width")],
+                controls: vec![control("body-width", "width")],
             },
             candidate_strategy_pack: CandidateStrategyPack {
                 schema_version: CANDIDATE_STRATEGY_PACK_SCHEMA_VERSION,
-                pack_id: "bridge-strategies".to_owned(),
+                pack_id: "box-strategies".to_owned(),
                 strategies: vec![KitCandidateStrategy {
                     strategy_id: "refine".to_owned(),
                     name: "Refine".to_owned(),
-                    allowed_controls: vec!["deck-width".to_owned()],
+                    allowed_controls: vec!["body-width".to_owned()],
                     explanation_templates: vec!["Adjusted whole-model proportions.".to_owned()],
                 }],
-                allowed_controls: vec!["deck-width".to_owned()],
+                allowed_controls: vec!["body-width".to_owned()],
                 allowed_provider_choices: BTreeMap::new(),
                 diversity_goals: vec!["six coherent options".to_owned()],
                 invalid_state_rejection_policy: "Reject invalid compile states.".to_owned(),
@@ -1898,17 +1898,17 @@ mod tests {
             },
             compatibility_matrix: KitCompatibilityMatrix {
                 schema_version: KIT_COMPATIBILITY_MATRIX_SCHEMA_VERSION,
-                matrix_id: "bridge-compatibility".to_owned(),
+                matrix_id: "box-compatibility".to_owned(),
                 compatible_style_provider_pairs: vec![StyleProviderCompatibility {
-                    style_id: "timber-style".to_owned(),
-                    provider_pack_id: "bridge-providers".to_owned(),
-                    reason: "Coherent timber bridge style.".to_owned(),
+                    style_id: "plain-style".to_owned(),
+                    provider_pack_id: "box-providers".to_owned(),
+                    reason: "Coherent plain box style.".to_owned(),
                 }],
                 incompatible_style_provider_pairs: Vec::new(),
             },
             review_manifest: KitReviewManifest {
                 schema_version: KIT_REVIEW_MANIFEST_SCHEMA_VERSION,
-                manifest_id: "bridge-review".to_owned(),
+                manifest_id: "box-review".to_owned(),
                 tier_requested: tier,
                 tier_achieved: review_tier,
                 reviewer: None,
@@ -1926,16 +1926,16 @@ mod tests {
             },
             catalog_manifest: KitCatalogManifest {
                 schema_version: KIT_CATALOG_MANIFEST_SCHEMA_VERSION,
-                catalog_id: "bridge-catalog".to_owned(),
-                kit_ids: vec!["bridge-kit".to_owned()],
+                catalog_id: "box-catalog".to_owned(),
+                kit_ids: vec!["box-kit".to_owned()],
                 default_visible_kit_ids: Vec::new(),
                 developer_preview_kit_ids: if tier == FoundryKitQualityTier::Draft {
                     Vec::new()
                 } else {
-                    vec!["bridge-kit".to_owned()]
+                    vec!["box-kit".to_owned()]
                 },
                 hidden_kit_reasons: BTreeMap::from([(
-                    "bridge-kit".to_owned(),
+                    "box-kit".to_owned(),
                     "Review pending.".to_owned(),
                 )]),
             },

@@ -154,25 +154,25 @@ fn default_usability_payload_omits_paths_and_geometry() {
 
 #[test]
 fn preference_profile_derives_bounded_control_scores_from_explicit_local_signals() {
-    let scope = FoundryPreferenceScope::new("crate", "crate-profile");
+    let scope = FoundryPreferenceScope::new("box-primitive", "box-primitive-profile");
     let mut log = FoundryPreferenceLog::new();
     log.record(FoundryPreferenceEvent::CandidateComparison {
         scope: scope.clone(),
         mode: Some("explore".to_owned()),
         accepted_candidate_id: FoundryCandidateId("candidate-a".to_owned()),
-        accepted_controls: vec!["body_proportions".to_owned(), "edge_softness".to_owned()],
+        accepted_controls: vec!["proportions".to_owned(), "edge_softness".to_owned()],
         rejected_candidate_ids: vec![FoundryCandidateId("candidate-b".to_owned())],
-        rejected_controls: vec!["handle_style".to_owned()],
+        rejected_controls: vec!["draft_note".to_owned()],
         weight: 1.0,
     });
     log.record(FoundryPreferenceEvent::ControlLocked {
         scope: scope.clone(),
-        control_id: "handle_style".to_owned(),
+        control_id: "draft_note".to_owned(),
         weight: 1.0,
     });
     log.record(FoundryPreferenceEvent::VariantExported {
         scope: scope.clone(),
-        changed_controls: vec!["body_proportions".to_owned()],
+        changed_controls: vec!["proportions".to_owned()],
         weight: 1.0,
     });
     log.record(FoundryPreferenceEvent::PackMemberAdded {
@@ -188,7 +188,7 @@ fn preference_profile_derives_bounded_control_scores_from_explicit_local_signals
     assert!(
         profile
             .control_preferences
-            .get("body_proportions")
+            .get("proportions")
             .expect("body preference")
             .score
             > 0.0
@@ -204,25 +204,25 @@ fn preference_profile_derives_bounded_control_scores_from_explicit_local_signals
     assert!(
         profile
             .control_preferences
-            .get("handle_style")
-            .expect("handle preference")
+            .get("draft_note")
+            .expect("draft preference")
             .score
             < 0.0
     );
-    assert!(profile.score_changed_controls(&["body_proportions".to_owned()]) > 0.0);
-    assert!(profile.score_changed_controls(&["handle_style".to_owned()]) < 0.0);
+    assert!(profile.score_changed_controls(&["proportions".to_owned()]) > 0.0);
+    assert!(profile.score_changed_controls(&["draft_note".to_owned()]) < 0.0);
     assert!(profile.score_changed_controls(&["unknown".to_owned()]) == 0.0);
 }
 
 #[test]
 fn preference_profile_ignores_other_catalog_scopes() {
-    let scope = FoundryPreferenceScope::new("crate", "crate-profile");
-    let other_scope = FoundryPreferenceScope::new("lamp", "lamp-profile");
+    let scope = FoundryPreferenceScope::new("box-primitive", "box-primitive-profile");
+    let other_scope = FoundryPreferenceScope::new("other-box", "other-box-profile");
     let mut log = FoundryPreferenceLog::new();
     log.record(FoundryPreferenceEvent::CandidateRejected {
         scope: other_scope,
         candidate_id: FoundryCandidateId("candidate-b".to_owned()),
-        changed_controls: vec!["body_proportions".to_owned()],
+        changed_controls: vec!["proportions".to_owned()],
         weight: 1.0,
     });
 
@@ -234,7 +234,7 @@ fn preference_profile_ignores_other_catalog_scopes() {
 
 #[test]
 fn non_local_or_unsupported_preference_logs_do_not_derive_usable_profiles() {
-    let scope = FoundryPreferenceScope::new("crate", "crate-profile");
+    let scope = FoundryPreferenceScope::new("box-primitive", "box-primitive-profile");
     let mut non_local = preference_log_with_positive_signal(scope.clone());
     non_local.local_only = false;
 
@@ -256,8 +256,10 @@ fn non_local_or_unsupported_preference_logs_do_not_derive_usable_profiles() {
 
 #[test]
 fn preference_payload_omits_paths_geometry_and_recipes() {
-    let log =
-        preference_log_with_positive_signal(FoundryPreferenceScope::new("crate", "crate-profile"));
+    let log = preference_log_with_positive_signal(FoundryPreferenceScope::new(
+        "box-primitive",
+        "box-primitive-profile",
+    ));
 
     let json = serde_json::to_string(&log).expect("preference log serializes");
 
@@ -277,7 +279,7 @@ fn preference_log_with_positive_signal(scope: FoundryPreferenceScope) -> Foundry
         scope,
         mode: Some("explore".to_owned()),
         accepted_candidate_id: FoundryCandidateId("candidate-a".to_owned()),
-        accepted_controls: vec!["body_proportions".to_owned()],
+        accepted_controls: vec!["proportions".to_owned()],
         rejected_candidate_ids: Vec::new(),
         rejected_controls: Vec::new(),
         weight: 1.0,

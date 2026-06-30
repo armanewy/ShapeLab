@@ -101,7 +101,7 @@ fn focus_part_group_applies_without_background_rebuild() {
 
     let effects = state
         .handle_command(FoundryAppCommand::run(FoundryCommand::SetFocusPartGroup {
-            group_id: "handles".to_owned(),
+            group_id: "body".to_owned(),
         }))
         .expect("focus scope should apply locally");
 
@@ -113,7 +113,7 @@ fn focus_part_group_applies_without_background_rebuild() {
             .intent
             .scope
             .semantic_part_group_id()),
-        Some("handles")
+        Some("body")
     );
 
     let effects = state
@@ -159,8 +159,8 @@ fn candidate_job_mode_comes_from_explicit_candidate_request() {
 }
 
 #[test]
-fn starting_scifi_crate_records_template_build_and_preview_trace() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+fn starting_box_primitive_records_template_build_and_preview_trace() {
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = FoundryAppState::new(fixture.document.clone()).expect("fixture state");
 
     let build_request = start_job(state.request_build().expect("build should schedule"));
@@ -188,7 +188,7 @@ fn starting_scifi_crate_records_template_build_and_preview_trace() {
 
 #[test]
 fn equivalent_preview_job_is_reused_without_queueing_second_job() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
 
     let first = state
@@ -208,7 +208,7 @@ fn equivalent_preview_job_is_reused_without_queueing_second_job() {
 
 #[test]
 fn equivalent_candidate_job_is_reused_without_queueing_second_job() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     let request = FoundryCandidateRequest {
         seed: 77,
@@ -258,7 +258,7 @@ fn stale_result_records_local_trace_event() {
 
 #[test]
 fn candidate_job_records_started_and_finished_events() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     let request = FoundryCandidateRequest {
         seed: 77,
@@ -310,7 +310,7 @@ fn candidate_job_records_started_and_finished_events() {
 
 #[test]
 fn latency_summary_serializes_deterministically() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let state = compiled_fixture_state(&fixture);
     let summary = state.make_job_trace.summary();
 
@@ -329,7 +329,7 @@ fn latency_summary_serializes_deterministically() {
 
 #[test]
 fn trace_contains_no_absolute_paths_or_mesh_payloads() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let state = compiled_fixture_state(&fixture);
     let trace_json =
         serde_json::to_string_pretty(&state.make_job_trace.events).expect("trace should serialize");
@@ -345,7 +345,7 @@ fn trace_contains_no_absolute_paths_or_mesh_payloads() {
 
 #[test]
 fn make_job_trace_dogfood_hook_writes_trace_files() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
 
     state.set_make_trace_elapsed_ms(120);
@@ -381,7 +381,7 @@ fn make_job_trace_dogfood_hook_writes_trace_files() {
     assert!(
         state
             .handle_command(FoundryAppCommand::run(FoundryCommand::SetFocusPartGroup {
-                group_id: "handles".to_owned(),
+                group_id: "body".to_owned(),
             }))
             .expect("focus should apply")
             .is_empty()
@@ -396,7 +396,7 @@ fn make_job_trace_dogfood_hook_writes_trace_files() {
             mode: FoundryCandidateMode::Refine,
             strategy_id: None,
             preference_profile: None,
-            variation_intent: VariationIntent::focus_part_shape("handles", "Handles"),
+            variation_intent: VariationIntent::focus_part_shape("body", "Body"),
         },
         CandidateCycleTimes {
             queued_ms: 1_100,
@@ -410,7 +410,7 @@ fn make_job_trace_dogfood_hook_writes_trace_files() {
     let pack_effects = state
         .handle_command(FoundryAppCommand::run(FoundryCommand::AddCurrentToPack {
             pack_id: "dogfood-pack".to_owned(),
-            member_id: "sci-fi-crate-baseline".to_owned(),
+            member_id: "box-primitive-baseline".to_owned(),
         }))
         .expect("add to pack should schedule");
     let pack_event = run_fixture_job(start_job(pack_effects), &fixture);
@@ -494,7 +494,7 @@ fn focused_candidate_command_sets_part_intent() {
     let effects = state
         .handle_command(FoundryAppCommand::run(
             FoundryCommand::GenerateFocusedPartCandidates {
-                group_id: "handles".to_owned(),
+                group_id: "body".to_owned(),
                 channels: vec![VariationChannel::Shape],
                 mode: "refine".to_owned(),
             },
@@ -506,7 +506,7 @@ fn focused_candidate_command_sets_part_intent() {
     };
     assert_eq!(
         request.variation_intent.scope.semantic_part_group_id(),
-        Some("handles")
+        Some("body")
     );
     assert_eq!(
         request.variation_intent.channels,
@@ -516,7 +516,7 @@ fn focused_candidate_command_sets_part_intent() {
 
 #[test]
 fn make_job_trace_dogfood_hook_candidate_compile_only_path_remains_supported() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     let request = FoundryCandidateRequest {
         seed: 77,
@@ -639,7 +639,7 @@ fn accepting_candidate_schedules_its_replayable_foundry_edit() {
 
 #[test]
 fn local_preferences_record_visible_lock_and_reset_actions() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
 
     apply_fixture_command(
@@ -655,7 +655,7 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
         &fixture,
         FoundryCommand::SetLock {
             lock: FoundryLock {
-                target: FoundryLockTarget::Control("body_proportions".to_owned()),
+                target: FoundryLockTarget::Control("proportions".to_owned()),
                 mode: FoundryLockMode::SearchProtected,
                 reason: Some("test".to_owned()),
             },
@@ -673,7 +673,7 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
         matches!(
             event,
             FoundryPreferenceEvent::ControlLocked { control_id, .. }
-                if control_id == "body_proportions"
+                if control_id == "proportions"
         )
     }));
     assert!(state.local_preferences.events.iter().any(|event| {
@@ -818,10 +818,10 @@ fn set_style_apply_edit_prunes_incompatible_provider_override() {
         job_id: 1,
         document: Box::new(fixture.document.clone()),
         edit: Box::new(FoundryEdit {
-            label: "Modern style".to_owned(),
+            label: "Soft style".to_owned(),
             commands: vec![FoundryCommand::SetStyle {
-                style_content_ref: fixture.modern_style_ref.clone(),
-                style_implementation_ref: fixture.modern_style_impl_ref.clone(),
+                style_content_ref: fixture.soft_style_ref.clone(),
+                style_implementation_ref: fixture.soft_style_impl_ref.clone(),
             }],
         }),
     };
@@ -835,10 +835,10 @@ fn set_style_apply_edit_prunes_incompatible_provider_override() {
         panic!("style edit should compile after pruning, got {event:?}");
     };
 
-    assert_eq!(output.document.style_content_ref, fixture.modern_style_ref);
+    assert_eq!(output.document.style_content_ref, fixture.soft_style_ref);
     assert_eq!(
         output.document.style_implementation_ref,
-        fixture.modern_style_impl_ref
+        fixture.soft_style_impl_ref
     );
     assert!(output.document.provider_overrides.is_empty());
 }
@@ -885,7 +885,7 @@ fn candidate_generation_job_returns_pending_cards_before_preview_rendering() {
 
 #[test]
 fn candidate_preview_job_renders_preview_images_for_cards() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let request = FoundryCandidateRequest {
         seed: 33,
         proposal_count: 12,
@@ -934,7 +934,7 @@ fn candidate_preview_job_renders_preview_images_for_cards() {
 
 #[test]
 fn candidate_preview_failures_are_isolated_to_their_cards() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let request = FoundryCandidateRequest {
         seed: 51,
         proposal_count: 12,
@@ -981,16 +981,16 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
 
 #[test]
 fn option_cards_render_distinct_whole_model_thumbnails() {
-    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let state = compiled_fixture_state(&fixture);
-    let support = state
+    let proportions = state
         .controls
         .iter()
-        .find(|control| control.id == "support_rhythm")
-        .expect("support rhythm control");
+        .find(|control| control.id == "proportions")
+        .expect("proportions control");
 
-    assert!(support.options.len() >= 3);
-    assert!(support.options.iter().all(|option| {
+    assert!(proportions.options.len() >= 3);
+    assert!(proportions.options.iter().all(|option| {
         option.preview_id.is_some()
             && option.width == 64
             && option.height == 64
@@ -998,7 +998,7 @@ fn option_cards_render_distinct_whole_model_thumbnails() {
             && option.camera.is_some()
     }));
     assert!(
-        support
+        proportions
             .options
             .windows(2)
             .any(|pair| pair[0].rgba8 != pair[1].rgba8),
@@ -1092,8 +1092,8 @@ fn release_gate_all_builtin_profiles_render_real_option_thumbnails() {
 }
 
 #[test]
-fn novice_can_create_reinforced_bridge_without_advanced_recipe() {
-    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+fn novice_can_create_reinforced_box_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
@@ -1101,34 +1101,30 @@ fn novice_can_create_reinforced_bridge_without_advanced_recipe() {
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "structural_heft".to_owned(),
+            control_id: "proportions".to_owned(),
+            value: ControlValue::Choice("wide_box".to_owned()),
+        },
+    );
+    apply_fixture_command(
+        &mut state,
+        &fixture,
+        FoundryCommand::SetControl {
+            control_id: "edge_softness".to_owned(),
             value: ControlValue::Scalar(0.92),
         },
     );
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "support_rhythm".to_owned(),
-            value: ControlValue::Provider("marching_pile_bents".to_owned()),
-        },
-    );
 
-    let document = state.document.as_ref().expect("current bridge document");
+    let document = state.document.as_ref().expect("current box document");
     assert_eq!(
-        document.control_state.get("structural_heft"),
+        document.control_state.get("edge_softness"),
         Some(&ControlValue::Scalar(0.92))
     );
-    assert_eq!(
-        document.control_state.get("support_rhythm"),
-        Some(&ControlValue::Provider("marching_pile_bents".to_owned()))
-    );
     assert_current_mesh_valid(&state);
 }
 
 #[test]
-fn novice_can_create_compact_vented_crate_without_advanced_recipe() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+fn novice_can_create_compact_box_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
@@ -1136,34 +1132,34 @@ fn novice_can_create_compact_vented_crate_without_advanced_recipe() {
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "body_proportions".to_owned(),
-            value: ControlValue::Scalar(0.12),
+            control_id: "proportions".to_owned(),
+            value: ControlValue::Choice("compact_box".to_owned()),
         },
     );
     apply_fixture_command(
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "vent_density".to_owned(),
-            value: ControlValue::Choice("dense".to_owned()),
+            control_id: "edge_softness".to_owned(),
+            value: ControlValue::Scalar(0.18),
         },
     );
 
-    let document = state.document.as_ref().expect("current crate document");
+    let document = state.document.as_ref().expect("current box document");
     assert_eq!(
-        document.control_state.get("body_proportions"),
-        Some(&ControlValue::Scalar(0.12))
+        document.control_state.get("proportions"),
+        Some(&ControlValue::Choice("compact_box".to_owned()))
     );
     assert_eq!(
-        document.control_state.get("vent_density"),
-        Some(&ControlValue::Choice("dense".to_owned()))
+        document.control_state.get("edge_softness"),
+        Some(&ControlValue::Scalar(0.18))
     );
     assert_current_mesh_valid(&state);
 }
 
 #[test]
-fn novice_can_create_tall_lamp_with_new_shade_without_advanced_recipe() {
-    let fixture = shape_foundry_catalog::stylized_lamp::fixture_catalog();
+fn novice_can_create_tall_box_with_soft_edges_without_advanced_recipe() {
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
@@ -1171,34 +1167,34 @@ fn novice_can_create_tall_lamp_with_new_shade_without_advanced_recipe() {
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "overall_height".to_owned(),
-            value: ControlValue::Scalar(2.05),
+            control_id: "proportions".to_owned(),
+            value: ControlValue::Choice("tall_box".to_owned()),
         },
     );
     apply_fixture_command(
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "shade_style".to_owned(),
-            value: ControlValue::Choice("drum".to_owned()),
+            control_id: "edge_softness".to_owned(),
+            value: ControlValue::Scalar(0.72),
         },
     );
 
-    let document = state.document.as_ref().expect("current lamp document");
+    let document = state.document.as_ref().expect("current box document");
     assert_eq!(
-        document.control_state.get("overall_height"),
-        Some(&ControlValue::Scalar(2.05))
+        document.control_state.get("proportions"),
+        Some(&ControlValue::Choice("tall_box".to_owned()))
     );
     assert_eq!(
-        document.control_state.get("shade_style"),
-        Some(&ControlValue::Choice("drum".to_owned()))
+        document.control_state.get("edge_softness"),
+        Some(&ControlValue::Scalar(0.72))
     );
     assert_current_mesh_valid(&state);
 }
 
 #[test]
 fn novice_can_export_three_member_pack_without_advanced_recipe() {
-    let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     add_current_to_fixture_pack(&mut state, &fixture, "balanced");
 
@@ -1206,8 +1202,8 @@ fn novice_can_export_three_member_pack_without_advanced_recipe() {
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "structural_heft".to_owned(),
-            value: ControlValue::Scalar(0.25),
+            control_id: "proportions".to_owned(),
+            value: ControlValue::Choice("flat_box".to_owned()),
         },
     );
     add_current_to_fixture_pack(&mut state, &fixture, "light");
@@ -1216,8 +1212,8 @@ fn novice_can_export_three_member_pack_without_advanced_recipe() {
         &mut state,
         &fixture,
         FoundryCommand::SetControl {
-            control_id: "support_rhythm".to_owned(),
-            value: ControlValue::Provider("marching_pile_bents".to_owned()),
+            control_id: "proportions".to_owned(),
+            value: ControlValue::Choice("tall_box".to_owned()),
         },
     );
     add_current_to_fixture_pack(&mut state, &fixture, "reinforced");
@@ -1259,7 +1255,7 @@ fn novice_can_export_three_member_pack_without_advanced_recipe() {
 
 #[test]
 fn novice_can_reject_bad_candidate_and_branch_to_another_direction() {
-    let fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let mut state = compiled_fixture_state(&fixture);
     let effects = state
         .request_candidates(FoundryCandidateRequest {
@@ -1354,12 +1350,12 @@ fn pack_compile_preserves_selected_member_when_it_still_exists() {
             require_all_members: true,
         },
     );
-    let mut crate_document = minimal_foundry_document();
-    crate_document.document_id = FoundryDocumentId("crate".to_owned());
+    let mut box_document = minimal_foundry_document();
+    box_document.document_id = FoundryDocumentId("box".to_owned());
     let mut barrel_document = minimal_foundry_document();
     barrel_document.document_id = FoundryDocumentId("barrel".to_owned());
     pack.members.insert("barrel".to_owned(), barrel_document);
-    pack.members.insert("crate".to_owned(), crate_document);
+    pack.members.insert("box".to_owned(), box_document);
     state.pack = FoundryPackView {
         pack_id: Some("props".to_owned()),
         members: pack
@@ -1367,11 +1363,11 @@ fn pack_compile_preserves_selected_member_when_it_still_exists() {
             .iter()
             .map(|(member_id, document)| (member_id.clone(), document.document_id.clone()))
             .collect(),
-        selected_member: Some("crate".to_owned()),
+        selected_member: Some("box".to_owned()),
         pack: Some(pack.clone()),
         ..FoundryPackView::default()
     };
-    state.selected_pack_member = Some("crate".to_owned());
+    state.selected_pack_member = Some("box".to_owned());
     state.active_jobs.insert(
         1,
         FoundryJobRequest::CompilePack {
@@ -1392,8 +1388,8 @@ fn pack_compile_preserves_selected_member_when_it_still_exists() {
     });
 
     assert!(accepted);
-    assert_eq!(state.selected_pack_member.as_deref(), Some("crate"));
-    assert_eq!(state.pack.selected_member.as_deref(), Some("crate"));
+    assert_eq!(state.selected_pack_member.as_deref(), Some("box"));
+    assert_eq!(state.pack.selected_member.as_deref(), Some("box"));
 }
 
 #[test]
@@ -1403,21 +1399,21 @@ fn add_current_to_pack_tracks_membership_and_schedules_pack_compile() {
     let effects = state
         .handle_command(FoundryAppCommand::run(FoundryCommand::AddCurrentToPack {
             pack_id: "props".to_owned(),
-            member_id: "crate".to_owned(),
+            member_id: "box".to_owned(),
         }))
         .expect("pack membership should schedule compile");
 
     assert_eq!(state.pack.pack_id.as_deref(), Some("props"));
-    assert!(state.pack.members.contains_key("crate"));
+    assert!(state.pack.members.contains_key("box"));
     assert_eq!(
         state
             .pack
             .members
-            .get("crate")
+            .get("box")
             .map(|document_id| document_id.0.as_str()),
-        Some("crate")
+        Some("box")
     );
-    assert_eq!(state.selected_pack_member.as_deref(), Some("crate"));
+    assert_eq!(state.selected_pack_member.as_deref(), Some("box"));
     let [FoundryAppEffect::StartJob(job)] = effects.as_slice() else {
         panic!("expected one pack compile job effect");
     };
@@ -1426,9 +1422,9 @@ fn add_current_to_pack_tracks_membership_and_schedules_pack_compile() {
             assert_eq!(*job_id, 1);
             assert_eq!(
                 pack.members
-                    .get("crate")
+                    .get("box")
                     .map(|document| document.document_id.0.as_str()),
-                Some("crate")
+                Some("box")
             );
         }
         other => panic!("expected pack compile job effect, got {other:?}"),
@@ -1489,13 +1485,13 @@ fn pack_export_job_writes_member_packages() {
         },
     );
     pack.members
-        .insert("bridge_a".to_owned(), fixture.document.clone());
+        .insert("box_a".to_owned(), fixture.document.clone());
     let mut second = fixture.document.clone();
-    second.document_id = FoundryDocumentId("bridge_b".to_owned());
+    second.document_id = FoundryDocumentId("box_b".to_owned());
     second
         .control_state
         .insert("radius".to_owned(), ControlValue::Scalar(0.2));
-    pack.members.insert("bridge_b".to_owned(), second);
+    pack.members.insert("box_b".to_owned(), second);
     let out_dir = temp_test_dir("foundry-pack-export");
     let _ = fs::remove_dir_all(&out_dir);
 
@@ -1519,18 +1515,8 @@ fn pack_export_job_writes_member_packages() {
     };
     assert_eq!(actual_dir, out_dir);
     assert_eq!(member_count, 2);
-    assert!(
-        out_dir
-            .join("bridge_a")
-            .join("asset-manifest.json")
-            .is_file()
-    );
-    assert!(
-        out_dir
-            .join("bridge_b")
-            .join("asset-manifest.json")
-            .is_file()
-    );
+    assert!(out_dir.join("box_a").join("asset-manifest.json").is_file());
+    assert!(out_dir.join("box_b").join("asset-manifest.json").is_file());
 
     let _ = fs::remove_dir_all(&out_dir);
 }
@@ -1808,56 +1794,56 @@ impl FoundryCatalogResolver for TestCatalog {
 struct RuntimeFixture {
     document: FoundryAssetDocument,
     catalog: TestCatalog,
-    modern_style_ref: CatalogContentRef,
-    modern_style_impl_ref: CatalogContentRef,
+    soft_style_ref: CatalogContentRef,
+    soft_style_impl_ref: CatalogContentRef,
 }
 
 impl RuntimeFixture {
     fn new() -> Self {
         let family = family_schema();
-        let roman_style = style_kit("roman", "Roman", "bridge", &["roman_body", "heavy_body"]);
-        let modern_style = style_kit("modern", "Modern", "bridge", &["modern_body"]);
+        let plain_style = style_kit("plain", "Plain", "box", &["plain_body", "heavy_body"]);
+        let soft_style = style_kit("soft", "Soft", "box", &["soft_body"]);
         let family_impl = family_implementation();
-        let roman_style_impl = style_implementation(
-            "roman",
-            "bridge",
-            "roman_body",
+        let plain_style_impl = style_implementation(
+            "plain",
+            "box",
+            "plain_body",
             vec![
-                provider_fragment("roman_body", 0.1),
+                provider_fragment("plain_body", 0.1),
                 provider_fragment("heavy_body", 0.2),
             ],
         );
-        let modern_style_impl = style_implementation(
-            "modern",
-            "bridge",
-            "modern_body",
-            vec![provider_fragment("modern_body", 0.12)],
+        let soft_style_impl = style_implementation(
+            "soft",
+            "box",
+            "soft_body",
+            vec![provider_fragment("soft_body", 0.12)],
         );
         let profile = customizer_profile();
 
         let (family_ref, family_json) =
-            catalog_entry("bridge-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
-        let (roman_style_ref, roman_style_json) =
-            catalog_entry("roman-style", STYLE_KIT_SCHEMA_VERSION, &roman_style);
-        let (modern_style_ref, modern_style_json) =
-            catalog_entry("modern-style", STYLE_KIT_SCHEMA_VERSION, &modern_style);
+            catalog_entry("box-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
+        let (plain_style_ref, plain_style_json) =
+            catalog_entry("plain-style", STYLE_KIT_SCHEMA_VERSION, &plain_style);
+        let (soft_style_ref, soft_style_json) =
+            catalog_entry("soft-style", STYLE_KIT_SCHEMA_VERSION, &soft_style);
         let (family_impl_ref, family_impl_json) = catalog_entry(
-            "bridge-family-impl",
+            "box-family-impl",
             FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
             &family_impl,
         );
-        let (roman_style_impl_ref, roman_style_impl_json) = catalog_entry(
-            "roman-style-impl",
+        let (plain_style_impl_ref, plain_style_impl_json) = catalog_entry(
+            "plain-style-impl",
             STYLE_IMPLEMENTATION_SCHEMA_VERSION,
-            &roman_style_impl,
+            &plain_style_impl,
         );
-        let (modern_style_impl_ref, modern_style_impl_json) = catalog_entry(
-            "modern-style-impl",
+        let (soft_style_impl_ref, soft_style_impl_json) = catalog_entry(
+            "soft-style-impl",
             STYLE_IMPLEMENTATION_SCHEMA_VERSION,
-            &modern_style_impl,
+            &soft_style_impl,
         );
         let (profile_ref, profile_json) = catalog_entry(
-            "bridge-profile",
+            "box-profile",
             shape_foundry::CUSTOMIZER_PROFILE_SCHEMA_VERSION,
             &profile,
         );
@@ -1866,9 +1852,9 @@ impl RuntimeFixture {
             schema_version: FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
             document_id: FoundryDocumentId("doc-runtime".to_owned()),
             family_content_ref: family_ref,
-            style_content_ref: roman_style_ref,
+            style_content_ref: plain_style_ref,
             family_implementation_ref: family_impl_ref,
-            style_implementation_ref: roman_style_impl_ref,
+            style_implementation_ref: plain_style_impl_ref,
             customizer_profile_ref: profile_ref,
             control_state: BTreeMap::from([("radius".to_owned(), ControlValue::Scalar(0.15))]),
             provider_overrides: BTreeMap::new(),
@@ -1888,21 +1874,21 @@ impl RuntimeFixture {
 
         let catalog = TestCatalog {
             entries: BTreeMap::from([
-                ("bridge-family".to_owned(), family_json),
-                ("roman-style".to_owned(), roman_style_json),
-                ("modern-style".to_owned(), modern_style_json),
-                ("bridge-family-impl".to_owned(), family_impl_json),
-                ("roman-style-impl".to_owned(), roman_style_impl_json),
-                ("modern-style-impl".to_owned(), modern_style_impl_json),
-                ("bridge-profile".to_owned(), profile_json),
+                ("box-family".to_owned(), family_json),
+                ("plain-style".to_owned(), plain_style_json),
+                ("soft-style".to_owned(), soft_style_json),
+                ("box-family-impl".to_owned(), family_impl_json),
+                ("plain-style-impl".to_owned(), plain_style_impl_json),
+                ("soft-style-impl".to_owned(), soft_style_impl_json),
+                ("box-profile".to_owned(), profile_json),
             ]),
         };
 
         Self {
             document,
             catalog,
-            modern_style_ref,
-            modern_style_impl_ref,
+            soft_style_ref,
+            soft_style_impl_ref,
         }
     }
 }
@@ -1910,9 +1896,9 @@ impl RuntimeFixture {
 fn family_schema() -> AssetFamilySchema {
     AssetFamilySchema {
         schema_version: ASSET_FAMILY_SCHEMA_VERSION,
-        id: "bridge".to_owned(),
-        display_name: "Bridge".to_owned(),
-        summary: "Runtime test bridge family".to_owned(),
+        id: "box".to_owned(),
+        display_name: "Box".to_owned(),
+        summary: "Runtime test box family".to_owned(),
         part_roles: vec![PartRole {
             id: "body".to_owned(),
             display_name: "Body".to_owned(),
@@ -1942,7 +1928,7 @@ fn family_schema() -> AssetFamilySchema {
         constraints: Vec::new(),
         variant_rules: Vec::new(),
         export_requirements: Vec::new(),
-        compatible_style_kits: vec!["roman".to_owned(), "modern".to_owned()],
+        compatible_style_kits: vec!["plain".to_owned(), "soft".to_owned()],
         tags: Vec::new(),
     }
 }
@@ -2002,7 +1988,7 @@ fn style_kit(id: &str, label: &str, family_id: &str, prototypes: &[&str]) -> Sty
 fn family_implementation() -> FamilyImplementation {
     FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
-        family_id: "bridge".to_owned(),
+        family_id: "box".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Base"),
         parameter_bindings: vec![ParameterBinding::Scalar {
             slot: "radius".to_owned(),
@@ -2107,7 +2093,7 @@ fn body_recipe(title: &str, radius: f32) -> AssetRecipe {
 }
 
 fn customizer_profile() -> CustomizerProfile {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("plain".to_owned()));
     profile.controls.push(CustomizerControl {
         id: "radius".to_owned(),
         label: "Radius".to_owned(),

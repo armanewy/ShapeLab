@@ -17,7 +17,7 @@ pub const STATIC_PROP_SURFACE_PACKAGE_AVAILABLE_LABEL: &str =
     "Static prop surface package available";
 
 /// Product-facing export description for the current static-prop surface package.
-pub const STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION: &str = "Exports a frozen crate mesh with UVs, material slots, simple procedural texture files, evidence images, and a validation report.";
+pub const STATIC_PROP_SURFACE_PACKAGE_DESCRIPTION: &str = "Exports a frozen mesh with UVs, material slots, simple procedural texture files, evidence images, and a validation report.";
 
 /// Product-facing export caveat for full game-ready status.
 pub const STATIC_PROP_FULL_READY_BLOCKED_NOTE: &str = "Still blocked from full game-ready status until manual review, engine import proof, and engine-native package handoff are complete.";
@@ -214,8 +214,8 @@ impl VariationChannel {
 /// Product-facing surface package capability summary.
 ///
 /// This is deliberately separate from Surface Lab's backend artifact structs so
-/// Foundry can talk about product availability without depending on gamekit
-/// package internals.
+/// Foundry can talk about product availability without claiming downstream
+/// asset readiness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FoundrySurfaceCapabilityView {
     /// Source profile slug.
@@ -243,34 +243,6 @@ pub struct FoundrySurfaceCapabilityView {
 }
 
 impl FoundrySurfaceCapabilityView {
-    /// Build the known Sci-Fi Crate static-prop capability without enabling
-    /// visual surface variation.
-    #[must_use]
-    pub fn sci_fi_crate_static_prop() -> Self {
-        Self {
-            profile_id: "sci-fi-crate".to_owned(),
-            surface_package_available: true,
-            surface_payload_ready: true,
-            uv_ready: true,
-            material_slot_count: 6,
-            texture_channels: vec![
-                "Base color".to_owned(),
-                "Metallic roughness".to_owned(),
-                "Normal".to_owned(),
-                "Occlusion".to_owned(),
-            ],
-            surface_visual_evidence_ready: true,
-            visual_surface_variation_ready: false,
-            focus_part_surface_ready: false,
-            human_label: "Sci-Fi Crate surface package".to_owned(),
-            unavailable_reasons: vec![
-                SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON.to_owned(),
-                "Focus Part Surface needs part-specific surface editing support.".to_owned(),
-                STATIC_PROP_FULL_READY_BLOCKED_NOTE.to_owned(),
-            ],
-        }
-    }
-
     /// Build an unavailable capability summary for profiles without a known
     /// surface package.
     #[must_use]
@@ -310,12 +282,7 @@ impl FoundrySurfaceCapabilityView {
 /// Return the built-in surface capability known for a Foundry profile.
 #[must_use]
 pub fn built_in_surface_capability_for_profile(profile_id: &str) -> FoundrySurfaceCapabilityView {
-    let normalized = profile_id.replace('_', "-").to_ascii_lowercase();
-    if normalized.contains("sci-fi-crate") || normalized.contains("scifi-crate") {
-        FoundrySurfaceCapabilityView::sci_fi_crate_static_prop()
-    } else {
-        FoundrySurfaceCapabilityView::unavailable(profile_id.to_owned(), "Surface package")
-    }
+    FoundrySurfaceCapabilityView::unavailable(profile_id.to_owned(), "Surface package")
 }
 
 #[must_use]
@@ -323,168 +290,16 @@ pub fn built_in_part_group_descriptors_for_profile(
     profile_id: &str,
 ) -> Vec<FoundryPartGroupDescriptor> {
     let normalized = profile_id.replace('_', "-").to_ascii_lowercase();
-    if normalized.contains("sci-fi-crate") || normalized.contains("scifi-crate") {
-        return vec![
-            focus_group(
-                "body",
-                "Body",
-                "Main container form.",
-                &["overall_proportions", "structural_heft"],
-                &["body"],
-                "Body",
-                [50, 48],
-            ),
-            focus_group(
-                "panels",
-                "Panels",
-                "Front access panels.",
-                &["panel_complexity"],
-                &["panel_fields"],
-                "Panels",
-                [50, 44],
-            ),
-            focus_group(
-                "vents",
-                "Vents",
-                "Cooling vents on the shell.",
-                &["vent_density"],
-                &["vents"],
-                "Vents",
-                [50, 38],
-            ),
-            focus_group(
-                "handles",
-                "Handles",
-                "Lift handles and carry bars.",
-                &["handle_style"],
-                &["handles"],
-                "Handles",
-                [50, 70],
-            ),
-            focus_group(
-                "edge-trim",
-                "Edge Trim",
-                "Outer protective trim.",
-                &["trim_style"],
-                &["edge_trim", "corner_guards"],
-                "Edge Trim",
-                [50, 24],
-            ),
-            focus_group(
-                "fasteners",
-                "Fasteners",
-                "Bolts and small attachment details.",
-                &["detail_density"],
-                &["fasteners"],
-                "Fasteners",
-                [50, 30],
-            ),
-        ];
-    }
-    if normalized.contains("roman-bridge") || normalized.contains("bridge") {
-        return vec![
-            focus_group(
-                "deck",
-                "Deck",
-                "Walkable deck surface.",
-                &["span_length", "deck_width", "edge_finish"],
-                &["deck", "span"],
-                "Deck",
-                [50, 48],
-            ),
-            focus_group(
-                "supports",
-                "Supports",
-                "Posts, piles, and piers.",
-                &["structural_heft", "support_rhythm", "support_style"],
-                &["support"],
-                "Supports",
-                [50, 78],
-            ),
-            focus_group(
-                "bracing",
-                "Bracing",
-                "Under-structure bracing.",
-                &["bracing_style"],
-                &["brace"],
-                "Bracing",
-                [50, 64],
-            ),
-            focus_group(
-                "railing",
-                "Railing",
-                "Side rail courses.",
-                &["railing", "railing_style"],
-                &["rail"],
-                "Railing",
-                [50, 30],
-            ),
-            unavailable_group(
-                "ramps",
-                "Ramps",
-                "Approach ramps.",
-                "This part has no focused variations yet.",
-                "Ramps",
-                [18, 58],
-            ),
-            focus_group(
-                "fasteners",
-                "Fasteners",
-                "Small joinery details.",
-                &["detail_density"],
-                &["connector"],
-                "Fasteners",
-                [50, 42],
-            ),
-        ];
-    }
-    if normalized.contains("stylized-lamp") || normalized.contains("lamp") {
-        return vec![
-            focus_group(
-                "base",
-                "Base",
-                "Weighted lamp base.",
-                &["base_weight"],
-                &["base"],
-                "Base",
-                [45, 82],
-            ),
-            focus_group(
-                "stem",
-                "Stem",
-                "Curved support stem.",
-                &["overall_height", "stem_curvature", "edge_softness"],
-                &["stem"],
-                "Stem",
-                [46, 52],
-            ),
-            focus_group(
-                "joints",
-                "Joints",
-                "Pivot joints.",
-                &["joint_size", "edge_softness"],
-                &["joint"],
-                "Joints",
-                [54, 40],
-            ),
-            focus_group(
-                "shade",
-                "Shade",
-                "Lamp shade form.",
-                &["shade_style", "shade_scale", "edge_softness"],
-                &["shade"],
-                "Shade",
-                [68, 24],
-            ),
-            unavailable_group(
-                "trim",
-                "Trim",
-                "Shade trim rings.",
-                "This part has no focused variations yet.",
-                "Trim",
-                [68, 28],
-            ),
-        ];
+    if normalized.contains("box-primitive") {
+        return vec![focus_group(
+            "body",
+            "Body",
+            "Closed box-like volume.",
+            &["proportions", "edge_softness"],
+            &["body"],
+            "Body",
+            [50, 48],
+        )];
     }
     Vec::new()
 }
@@ -525,37 +340,6 @@ fn focus_group(
             unavailable_reasons: vec![
                 "Surface options need textured previews before they can be shown.".to_owned(),
             ],
-        },
-    }
-}
-
-fn unavailable_group(
-    group_id: &str,
-    display_name: &str,
-    description: &str,
-    reason: &str,
-    preview_label: &str,
-    anchor_percent: [u16; 2],
-) -> FoundryPartGroupDescriptor {
-    FoundryPartGroupDescriptor {
-        group_id: group_id.to_owned(),
-        display_name: display_name.to_owned(),
-        description: description.to_owned(),
-        supported_channels: Vec::new(),
-        bound_control_ids: Vec::new(),
-        bound_provider_roles: Vec::new(),
-        lockable: false,
-        focusable: false,
-        preview_hint: PartPreviewHint {
-            label: preview_label.to_owned(),
-            approximate_screen_anchor: Some(anchor_percent),
-            highlight_color_name: None,
-        },
-        capability: PartGroupCapability {
-            shape_ready: false,
-            surface_ready: false,
-            detail_ready: false,
-            unavailable_reasons: vec![reason.to_owned()],
         },
     }
 }

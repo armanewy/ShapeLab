@@ -21,8 +21,8 @@ use shape_family_compile::{
 };
 
 #[test]
-fn bridge_support_attachments() {
-    let mut recipe = AssetRecipe::new(AssetId(1), "bridge");
+fn box_body_attachments() {
+    let mut recipe = AssetRecipe::new(AssetId(1), "box_primitive");
     let support = add_fragment(
         &mut recipe,
         FragmentSpec::new("support_fragment", "support", "top", &["load_path"]).with_instances(
@@ -199,17 +199,14 @@ fn repeated_supports_bind_by_occurrence_index() {
 }
 
 #[test]
-fn all_pairs_bind_multiple_fasteners_to_one_parent() {
+fn all_pairs_bind_multiple_edge_details_to_one_parent() {
     let mut recipe = AssetRecipe::new(AssetId(1), "all pairs");
-    let fastener = add_fragment(
-        &mut recipe,
-        FragmentSpec::new("fastener_fragment", "fastener", "pin", &["mount"]).with_instances(
-            10,
-            100,
-            1000,
-            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-        ),
-    );
+    let edge_detail =
+        add_fragment(
+            &mut recipe,
+            FragmentSpec::new("edge_detail_fragment", "edge_detail", "pin", &["mount"])
+                .with_instances(10, 100, 1000, &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        );
     let plate = add_fragment(
         &mut recipe,
         FragmentSpec::new("plate_fragment", "plate", "mount", &["mount"]).with_instances(
@@ -223,20 +220,20 @@ fn all_pairs_bind_multiple_fasteners_to_one_parent() {
     let report = apply_family_attachment_bindings(
         &mut recipe,
         &family(vec![rule(
-            "fastener_plate",
-            "fastener",
+            "edge_detail_plate",
+            "edge_detail",
             "plate",
             &["mount"],
         )]),
         &implementation(vec![binding(
-            "fastener_plate",
-            "fastener",
+            "edge_detail_plate",
+            "edge_detail",
             "pin",
             "plate",
             "mount",
             FragmentAttachmentPairing::AllPairs,
         )]),
-        &selected(&fastener, &plate),
+        &selected(&edge_detail, &plate),
     )
     .expect("all pairs should bind when each child has one parent");
 
@@ -762,15 +759,12 @@ fn attachment_ordering_is_deterministic() {
 
 fn deterministic_ordering_run(reverse_selected: bool) -> Vec<(PartInstanceId, PartInstanceId)> {
     let mut recipe = AssetRecipe::new(AssetId(1), "deterministic");
-    let fastener = add_fragment(
-        &mut recipe,
-        FragmentSpec::new("fastener_fragment", "fastener", "pin", &["mount"]).with_instances(
-            10,
-            100,
-            1000,
-            &[[2.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-        ),
-    );
+    let edge_detail =
+        add_fragment(
+            &mut recipe,
+            FragmentSpec::new("edge_detail_fragment", "edge_detail", "pin", &["mount"])
+                .with_instances(10, 100, 1000, &[[2.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        );
     let plate = add_fragment(
         &mut recipe,
         FragmentSpec::new("plate_fragment", "plate", "mount", &["mount"]).with_instances(
@@ -781,21 +775,21 @@ fn deterministic_ordering_run(reverse_selected: bool) -> Vec<(PartInstanceId, Pa
         ),
     );
     let selected_fragments = if reverse_selected {
-        selected(&plate, &fastener)
+        selected(&plate, &edge_detail)
     } else {
-        selected(&fastener, &plate)
+        selected(&edge_detail, &plate)
     };
     let report = apply_family_attachment_bindings(
         &mut recipe,
         &family(vec![rule(
-            "fastener_plate",
-            "fastener",
+            "edge_detail_plate",
+            "edge_detail",
             "plate",
             &["mount"],
         )]),
         &implementation(vec![binding(
-            "fastener_plate",
-            "fastener",
+            "edge_detail_plate",
+            "edge_detail",
             "pin",
             "plate",
             "mount",

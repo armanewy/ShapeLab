@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Current schema version for Foundry archetype contracts.
 pub const FOUNDRY_ARCHETYPE_SCHEMA_VERSION: u32 = 1;
 /// The only archetype supported by v0.
-pub const CARGO_CASE_ARCHETYPE_ID: &str = "cargo-case";
+pub const BOX_PRIMITIVE_ARCHETYPE_ID: &str = "box-primitive";
 
 /// Internal/pro authoring contract for one reusable asset grammar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,72 +240,25 @@ impl FoundryArchetypeValidationReport {
 
 /// Return the only v0 archetype contract.
 #[must_use]
-pub fn cargo_case_archetype() -> FoundryArchetype {
-    let required_roles = [
-        role("body", "Body", true, "primary_mass"),
-        role("lid", "Lid", true, "secondary_panels"),
-        role("panel_fields", "Panel Fields", true, "secondary_panels"),
-        role("edge_trim", "Edge Trim", true, "structural_trim"),
-        role("corner_guards", "Corner Guards", true, "structural_trim"),
-        role(
-            "base_feet_or_skids",
-            "Base Feet Or Skids",
-            true,
-            "structural_trim",
-        ),
-    ];
-    let optional_roles = [
-        role("handles", "Handles", false, "structural_trim"),
-        role("latches", "Latches", false, "fasteners_detail"),
-        role("vents", "Vents", false, "recesses_vents"),
-        role("fasteners", "Fasteners", false, "fasteners_detail"),
-        role(
-            "reinforcement_bands",
-            "Reinforcement Bands",
-            false,
-            "structural_trim",
-        ),
-        role("utility_rails", "Utility Rails", false, "structural_trim"),
-        role("side_grilles", "Side Grilles", false, "recesses_vents"),
-        role(
-            "label_plate_geometry",
-            "Label Plate",
-            false,
-            "secondary_panels",
-        ),
-        role(
-            "hinge_or_closure_detail",
-            "Hinge Or Closure Detail",
-            false,
-            "fasteners_detail",
-        ),
-    ];
-    let role_templates = required_roles
-        .into_iter()
-        .map(with_default_slot)
-        .collect::<Vec<_>>();
-    let optional_role_templates = optional_roles
+pub fn box_primitive_archetype() -> FoundryArchetype {
+    let role_templates = [role("body", "Body", true, "primary_mass")]
         .into_iter()
         .map(with_default_slot)
         .collect::<Vec<_>>();
 
     FoundryArchetype {
-        archetype_id: CARGO_CASE_ARCHETYPE_ID.to_owned(),
-        display_name: "Cargo Case".to_owned(),
-        description: "Internal/pro contract for equipment cases with body, lid, panels, trim, guards, feet or skids, and optional handles, vents, fasteners, rails, grilles, labels, and closure detail.".to_owned(),
+        archetype_id: BOX_PRIMITIVE_ARCHETYPE_ID.to_owned(),
+        display_name: "Box Primitive".to_owned(),
+        description:
+            "Internal contract for a closed box-like volume with readable proportions and edge softness."
+                .to_owned(),
         role_templates,
-        optional_role_templates,
-        provider_slot_templates: cargo_case_provider_slots(),
-        control_axis_templates: cargo_case_controls(),
-        candidate_strategy_templates: cargo_case_candidate_strategies(),
-        quality_gate_templates: cargo_case_quality_gates(),
-        compatible_style_tags: vec![
-            "cargo-case".to_owned(),
-            "clean-utility".to_owned(),
-            "sci-fi-industrial".to_owned(),
-            "utility".to_owned(),
-            "industrial".to_owned(),
-        ],
+        optional_role_templates: Vec::new(),
+        provider_slot_templates: box_primitive_provider_slots(),
+        control_axis_templates: box_primitive_controls(),
+        candidate_strategy_templates: box_primitive_candidate_strategies(),
+        quality_gate_templates: box_primitive_quality_gates(),
+        compatible_style_tags: vec!["box-primitive".to_owned(), "plain-clay".to_owned()],
         version: FOUNDRY_ARCHETYPE_SCHEMA_VERSION,
         publish_allowed: false,
         novice_visible: false,
@@ -343,124 +296,39 @@ fn slot_id_for_role(role_id: &str) -> String {
     format!("{role_id}_slot")
 }
 
-fn cargo_case_provider_slots() -> Vec<ArchetypeProviderSlotTemplate> {
-    [
-        ("body", "Body Choices", true, false),
-        ("lid", "Lid Choices", true, false),
-        ("panel_fields", "Panel Field Choices", true, true),
-        ("edge_trim", "Edge Trim Choices", true, true),
-        ("corner_guards", "Corner Guard Choices", true, true),
-        (
-            "base_feet_or_skids",
-            "Base Feet Or Skid Choices",
-            true,
-            true,
-        ),
-        ("handles", "Handle Choices", false, true),
-        ("latches", "Latch Choices", false, true),
-        ("vents", "Vent Choices", false, true),
-        ("fasteners", "Fastener Choices", false, true),
-        (
-            "reinforcement_bands",
-            "Reinforcement Band Choices",
-            false,
-            true,
-        ),
-        ("utility_rails", "Utility Rail Choices", false, true),
-        ("side_grilles", "Side Grille Choices", false, true),
-        ("label_plate_geometry", "Label Plate Choices", false, true),
-        (
-            "hinge_or_closure_detail",
-            "Hinge Or Closure Choices",
-            false,
-            true,
-        ),
-    ]
-    .into_iter()
-    .map(
-        |(role_id, display_name, required, may_be_style_biased)| ArchetypeProviderSlotTemplate {
-            slot_id: slot_id_for_role(role_id),
-            display_name: display_name.to_owned(),
-            target_role_id: role_id.to_owned(),
-            required,
-            compatible_style_tags: vec![
-                "cargo-case".to_owned(),
-                "clean-utility".to_owned(),
-                "sci-fi-industrial".to_owned(),
-            ],
-            may_be_style_biased,
-        },
-    )
-    .collect()
+fn box_primitive_provider_slots() -> Vec<ArchetypeProviderSlotTemplate> {
+    [("body", "Body Choices", true, false)]
+        .into_iter()
+        .map(|(role_id, display_name, required, may_be_style_biased)| {
+            ArchetypeProviderSlotTemplate {
+                slot_id: slot_id_for_role(role_id),
+                display_name: display_name.to_owned(),
+                target_role_id: role_id.to_owned(),
+                required,
+                compatible_style_tags: vec!["box-primitive".to_owned(), "plain-clay".to_owned()],
+                may_be_style_biased,
+            }
+        })
+        .collect()
 }
 
-fn cargo_case_controls() -> Vec<ArchetypeControlAxisTemplate> {
+fn box_primitive_controls() -> Vec<ArchetypeControlAxisTemplate> {
     vec![
         control(
-            "overall_proportions",
-            "Overall Proportions",
-            &["body", "lid", "base_feet_or_skids"],
-            &["body", "lid", "base_feet_or_skids"],
+            "proportions",
+            "Proportions",
+            &["body"],
+            &["body"],
             ArchetypeTopologyBehavior::ContinuousPreservesTopology,
             ArchetypeVisibilityLevel::MajorSilhouette,
         ),
         control(
-            "structural_heft",
-            "Structural Heft",
-            &["body", "edge_trim", "corner_guards", "base_feet_or_skids"],
-            &["body", "edge_trim", "corner_guards", "base_feet_or_skids"],
+            "edge_softness",
+            "Edge Softness",
+            &["body"],
+            &["body"],
             ArchetypeTopologyBehavior::ContinuousPreservesTopology,
             ArchetypeVisibilityLevel::StructuralRead,
-        ),
-        control(
-            "panel_complexity",
-            "Panel Complexity",
-            &["panel_fields", "lid", "label_plate_geometry"],
-            &["panel_fields", "lid", "label_plate_geometry"],
-            ArchetypeTopologyBehavior::DiscreteTopologyChanging,
-            ArchetypeVisibilityLevel::StructuralRead,
-        ),
-        control(
-            "handle_style",
-            "Handle Style",
-            &["handles"],
-            &["handles"],
-            ArchetypeTopologyBehavior::DiscreteTopologyChanging,
-            ArchetypeVisibilityLevel::StructuralRead,
-        ),
-        control(
-            "vent_density",
-            "Vent Density",
-            &["vents", "side_grilles"],
-            &["vents", "side_grilles"],
-            ArchetypeTopologyBehavior::DiscreteTopologyChanging,
-            ArchetypeVisibilityLevel::DetailRead,
-        ),
-        control(
-            "trim_style",
-            "Trim Style",
-            &[
-                "edge_trim",
-                "corner_guards",
-                "reinforcement_bands",
-                "utility_rails",
-            ],
-            &[
-                "edge_trim",
-                "corner_guards",
-                "reinforcement_bands",
-                "utility_rails",
-            ],
-            ArchetypeTopologyBehavior::DiscreteTopologyChanging,
-            ArchetypeVisibilityLevel::StructuralRead,
-        ),
-        control(
-            "detail_density",
-            "Detail Density",
-            &["fasteners", "latches", "hinge_or_closure_detail"],
-            &["fasteners", "latches", "hinge_or_closure_detail"],
-            ArchetypeTopologyBehavior::DiscreteTopologyChanging,
-            ArchetypeVisibilityLevel::DetailRead,
         ),
     ]
 }
@@ -489,43 +357,23 @@ fn control(
     }
 }
 
-fn cargo_case_candidate_strategies() -> Vec<ArchetypeCandidateStrategyTemplate> {
+fn box_primitive_candidate_strategies() -> Vec<ArchetypeCandidateStrategyTemplate> {
     vec![
+        strategy("compact_box", "Compact Box", &["proportions"], &["body"]),
+        strategy("wide_box", "Wide Box", &["proportions"], &["body"]),
+        strategy("tall_box", "Tall Box", &["proportions"], &["body"]),
+        strategy("flat_box", "Flat Box", &["proportions"], &["body"]),
         strategy(
-            "light",
-            "Light",
-            &["structural_heft", "trim_style", "detail_density"],
-            &["body", "edge_trim", "base_feet_or_skids"],
+            "soft_edged_box",
+            "Soft-Edged Box",
+            &["edge_softness"],
+            &["body"],
         ),
         strategy(
-            "reinforced",
-            "Reinforced",
-            &["structural_heft", "trim_style", "detail_density"],
-            &["corner_guards", "reinforcement_bands", "fasteners"],
-        ),
-        strategy(
-            "compact",
-            "Compact",
-            &["overall_proportions", "handle_style"],
-            &["body", "handles"],
-        ),
-        strategy(
-            "wide",
-            "Wide",
-            &["overall_proportions", "panel_complexity"],
-            &["body", "panel_fields"],
-        ),
-        strategy(
-            "minimal",
-            "Minimal",
-            &["panel_complexity", "vent_density", "detail_density"],
-            &["panel_fields", "vents", "fasteners"],
-        ),
-        strategy(
-            "detailed",
-            "Detailed",
-            &["panel_complexity", "vent_density", "detail_density"],
-            &["panel_fields", "vents", "fasteners"],
+            "sharp_utility_box",
+            "Sharp Utility Box",
+            &["edge_softness"],
+            &["body"],
         ),
     ]
 }
@@ -551,7 +399,7 @@ fn strategy(
     }
 }
 
-fn cargo_case_quality_gates() -> Vec<ArchetypeQualityGateTemplate> {
+fn box_primitive_quality_gates() -> Vec<ArchetypeQualityGateTemplate> {
     vec![
         gate(
             "pure_clay_readability",

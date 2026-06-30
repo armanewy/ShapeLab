@@ -6,8 +6,7 @@ use clap::Subcommand;
 use shape_foundry::{
     FoundationDraftValidationReport, FoundryFoundationDraft, foundation_adversarial_report,
     foundation_draft_template, materialize_foundation_draft_package, suggest_foundation_repairs,
-    validate_foundation_draft, weapon_armor_foundation_batch_summary,
-    weapon_armor_foundation_draft_batch,
+    validate_foundation_draft,
 };
 
 use crate::write_json;
@@ -67,12 +66,6 @@ pub enum FoundryFoundationCommand {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Export the deterministic Wave 37 weapon/armor foundation batch.
-    Batch {
-        /// Output directory.
-        #[arg(long)]
-        out_dir: PathBuf,
-    },
 }
 
 /// Run a Foundry foundation CLI command.
@@ -95,7 +88,6 @@ pub fn run_foundry_foundation(args: FoundryFoundationArgs) -> anyhow::Result<()>
             validation_report,
             out,
         } => run_suggest_repair(&draft, &validation_report, &out),
-        FoundryFoundationCommand::Batch { out_dir } => run_batch(&out_dir),
     }
 }
 
@@ -199,53 +191,6 @@ fn run_suggest_repair(
     ensure_parent_dir(out)?;
     write_json(out, &repair)?;
     println!("Wrote foundation repair suggestions to {}", out.display());
-    Ok(())
-}
-
-fn run_batch(out_dir: &Path) -> anyhow::Result<()> {
-    let draft_dir = out_dir.join("drafts");
-    let validation_dir = out_dir.join("validation");
-    let adversarial_dir = out_dir.join("adversarial");
-    fs::create_dir_all(&draft_dir).with_context(|| format!("creating {}", draft_dir.display()))?;
-    fs::create_dir_all(&validation_dir)
-        .with_context(|| format!("creating {}", validation_dir.display()))?;
-    fs::create_dir_all(&adversarial_dir)
-        .with_context(|| format!("creating {}", adversarial_dir.display()))?;
-
-    let drafts = weapon_armor_foundation_draft_batch();
-    for draft in &drafts {
-        let family_id = &draft.family_blueprint.family_id;
-        let report = validate_foundation_draft(draft);
-        let adversarial = foundation_adversarial_report(draft);
-        write_json(
-            draft_dir.join(format!("{family_id}.foundation-draft.json")),
-            draft,
-        )?;
-        write_json(
-            validation_dir.join(format!("{family_id}.validation.json")),
-            &report,
-        )?;
-        write_json(
-            adversarial_dir.join(format!("{family_id}.adversarial-report.json")),
-            &adversarial,
-        )?;
-        if !report.is_valid() {
-            bail!(
-                "Wave 37 foundation draft {} failed validation with {} issue(s)",
-                draft.draft_id,
-                report.issues.len()
-            );
-        }
-    }
-    write_json(
-        out_dir.join("foundation-batch-summary.json"),
-        &weapon_armor_foundation_batch_summary(),
-    )?;
-    println!(
-        "Wrote {} Wave 37 foundation drafts to {}",
-        drafts.len(),
-        out_dir.display()
-    );
     Ok(())
 }
 

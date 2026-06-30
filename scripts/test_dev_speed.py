@@ -27,13 +27,13 @@ class DevGateTests(unittest.TestCase):
         )
         self.assertIn("cargo clippy -p shape-app --all-targets -- -D warnings", commands)
 
-    def test_scifi_catalog_gate_includes_search_adjacency(self) -> None:
-        commands = self.command_strings(["crates/shape-foundry-catalog/src/scifi_crate.rs"])
+    def test_box_catalog_gate_includes_foundry_adjacency(self) -> None:
+        commands = self.command_strings(["crates/shape-foundry-catalog/src/box_primitive.rs"])
         self.assertIn(
-            "cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1",
+            "cargo test -p shape-foundry-catalog --test box_primitive --jobs 1",
             commands,
         )
-        self.assertIn("cargo test -p shape-search foundry --jobs 1", commands)
+        self.assertIn("cargo test -p shape-foundry --test contracts --jobs 1", commands)
 
     def test_docs_gate_avoids_release_build(self) -> None:
         commands = self.command_strings(["docs/CURRENT_PRODUCT_STATUS.md"])

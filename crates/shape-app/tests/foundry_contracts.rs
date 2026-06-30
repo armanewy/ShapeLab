@@ -24,7 +24,7 @@ fn foundry_app_command_wraps_generic_foundry_command() {
     );
 
     let generate = FoundryCommand::GenerateCandidates(GenerateCandidatesRequest {
-        strategy_id: Some("novice_bridge".to_string()),
+        strategy_id: Some("box_primitive".to_string()),
         count: 6,
         seed: 9,
         variation_intent: VariationIntent::default(),
@@ -65,7 +65,7 @@ fn foundry_job_events_expose_matching_job_id() {
         },
         FoundryJobEvent::PackExportFinished {
             job_id: 43,
-            profile: "game-ready".to_string(),
+            profile: "local-pack".to_string(),
             out_dir: std::path::PathBuf::from("pack-out"),
             member_count: 3,
         },
@@ -80,7 +80,7 @@ fn foundry_job_events_expose_matching_job_id() {
         },
         FoundryJobEvent::ExportFinished {
             job_id: 45,
-            profile: "blender".to_string(),
+            profile: "local-file".to_string(),
             out_dir: std::path::PathBuf::from("out"),
         },
         FoundryJobEvent::Failed {

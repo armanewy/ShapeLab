@@ -56,6 +56,7 @@ The Make inspector owns the local workflow banner. Required banner states are:
 - `Older result ignored` with `Try again`
 - `Idea search canceled` with `Try again`
 - `No clear focused ideas survived` with recovery actions
+- `No clear body ideas survived` when the only focused area is the Box body
 
 The bottom status strip may repeat supporting details, but it is not the primary
 Make workflow state.

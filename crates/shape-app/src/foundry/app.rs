@@ -92,14 +92,13 @@ enum FoundryDrawer {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ScreenshotScenario {
-    MakeInitialCrate,
+    MakeInitialBox,
     GeneratingWholeAssetIdeas,
     GeneratedWholeAssetIdeas,
     SelectedComparison,
-    FocusHandles,
-    GeneratingHandleIdeas,
-    HandleIdeas,
-    FocusVents,
+    FocusBody,
+    GeneratingBodyIdeas,
+    BodyIdeas,
     NoClearFocusedIdeas,
     PackDrawer,
     ExportDrawer,
@@ -200,7 +199,7 @@ struct MakeCanvasViewState {
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
-    simple_crate_baseline: bool,
+    box_primitive_baseline: bool,
     try_ideas_action_label: &'static str,
     use_candidate_action_label: &'static str,
     adjust_heading_label: &'static str,
@@ -351,9 +350,8 @@ const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
-const SIMPLE_CRATE_PROFILE_ID: &str = "simple-crate";
-const SCI_FI_CRATE_PROFILE_ID: &str = "sci-fi-crate";
-const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/sci-fi-crate/surface/variants/surface-candidate-report.json";
+const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
+const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/box-primitive/surface/variants/surface-candidate-report.json";
 const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
 const MATERIAL_LOOK_MISSING_MESSAGE: &str = "Material looks are not generated yet.";
 const MATERIAL_LOOK_SECTION_TITLE: &str = "Material looks";
@@ -366,7 +364,8 @@ const MATERIAL_LOOK_EXPORT_INCLUDED_COPY: &str =
 const MATERIAL_LOOK_FULL_READY_BLOCKED_COPY: &str =
     "Full game-ready remains blocked until manual review and engine import proof.";
 const SURFACE_PACKAGE_COMMAND_COPY: &str = "Run static surface package command";
-const SURFACE_PACKAGE_COMMAND: &str = "cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/surface-candidate-evidence-v0/sci-fi-crate";
+const SURFACE_PACKAGE_COMMAND: &str =
+    "Surface packages are not part of the Box Primitive baseline.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
     "Clean Lab White",
     "Worn Hazard Yellow",
@@ -390,7 +389,7 @@ const ACTION_SWITCH_TO_REVISION: &str = "Switch to revision";
 const ACTION_BRANCH_FROM_REVISION: &str = "Branch from revision";
 const ACTION_START: &str = "Start";
 const ACTION_TRY_WHOLE_ASSET_IDEAS: &str = "Try ideas";
-const ACTION_TRY_CRATE_IDEAS: &str = "Try crate ideas";
+const ACTION_TRY_BOX_IDEAS: &str = "Try box ideas";
 const ACTION_GENERATING_IDEAS: &str = "Trying ideas...";
 const ACTION_TRY_WHOLE_ASSET_RECOVERY: &str = "Try whole-asset ideas";
 const ACTION_TRY_MORE_IDEAS: &str = "Try more ideas";
@@ -410,7 +409,7 @@ const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
-const ACTION_USE_THIS_CRATE: &str = "Use this crate";
+const ACTION_USE_THIS_BOX: &str = "Use this box";
 const ACTION_REJECT: &str = "Reject";
 const ACTION_RESET: &str = "Reset";
 const ACTION_UNLOCK: &str = "Unlock";
@@ -422,8 +421,8 @@ const ACTION_CLEAR_FOCUS: &str = "Clear focus";
 const ACTION_CHOOSE_ANOTHER_PART: &str = "Choose another part";
 const ACTION_RETRY_PREPARATION: &str = "Retry preparation";
 const ACTION_UPDATE_PREVIEW: &str = "Update preview";
-const ACTION_ADJUST_CRATE: &str = "Adjust crate";
-const RENDERED_ACTION_LABELS: [&str; 47] = [
+const ACTION_ADJUST_BOX: &str = "Adjust box";
+const RENDERED_ACTION_LABELS: [&str; 48] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -439,7 +438,7 @@ const RENDERED_ACTION_LABELS: [&str; 47] = [
     ACTION_BRANCH_FROM_REVISION,
     ACTION_START,
     ACTION_TRY_WHOLE_ASSET_IDEAS,
-    ACTION_TRY_CRATE_IDEAS,
+    ACTION_TRY_BOX_IDEAS,
     ACTION_GENERATING_IDEAS,
     ACTION_TRY_WHOLE_ASSET_RECOVERY,
     ACTION_TRY_MORE_IDEAS,
@@ -459,7 +458,7 @@ const RENDERED_ACTION_LABELS: [&str; 47] = [
     ACTION_EXPORT_PACK,
     ACTION_SELECT,
     ACTION_CHOOSE_DIRECTION,
-    ACTION_USE_THIS_CRATE,
+    ACTION_USE_THIS_BOX,
     ACTION_REJECT,
     ACTION_RESET,
     ACTION_UNLOCK,
@@ -471,6 +470,7 @@ const RENDERED_ACTION_LABELS: [&str; 47] = [
     ACTION_CHOOSE_ANOTHER_PART,
     ACTION_RETRY_PREPARATION,
     ACTION_UPDATE_PREVIEW,
+    ACTION_ADJUST_BOX,
 ];
 
 impl Default for FoundryDesktopApp {
@@ -850,19 +850,19 @@ impl FoundryDesktopApp {
             })
             .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
-        let simple_crate_baseline = self.active_profile_is_simple_crate();
-        let try_ideas_action_label = if simple_crate_baseline {
-            ACTION_TRY_CRATE_IDEAS
+        let box_primitive_baseline = self.active_profile_is_box_primitive();
+        let try_ideas_action_label = if box_primitive_baseline {
+            ACTION_TRY_BOX_IDEAS
         } else {
             ACTION_TRY_WHOLE_ASSET_IDEAS
         };
-        let use_candidate_action_label = if simple_crate_baseline {
-            ACTION_USE_THIS_CRATE
+        let use_candidate_action_label = if box_primitive_baseline {
+            ACTION_USE_THIS_BOX
         } else {
             ACTION_CHOOSE_DIRECTION
         };
-        let adjust_heading_label = if simple_crate_baseline {
-            ACTION_ADJUST_CRATE
+        let adjust_heading_label = if box_primitive_baseline {
+            ACTION_ADJUST_BOX
         } else {
             "Adjust"
         };
@@ -1002,7 +1002,7 @@ impl FoundryDesktopApp {
                 candidate_output: self.state.candidate_output.as_deref(),
                 local_warning_message: local_warning_message.as_deref(),
                 local_error_message: local_error_message.as_deref(),
-                simple_crate_baseline,
+                box_primitive_baseline,
             });
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
@@ -1072,7 +1072,7 @@ impl FoundryDesktopApp {
             &mode,
             focused_part_label.as_deref(),
             selected_comparison_visible,
-            simple_crate_baseline,
+            box_primitive_baseline,
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
@@ -1121,7 +1121,7 @@ impl FoundryDesktopApp {
             local_warning_message,
             local_error_message,
             next_action_hint,
-            simple_crate_baseline,
+            box_primitive_baseline,
             try_ideas_action_label,
             use_candidate_action_label,
             adjust_heading_label,
@@ -1300,16 +1300,13 @@ impl FoundryDesktopApp {
         })
     }
 
-    fn active_profile_is_simple_crate(&self) -> bool {
-        self.active_profile_matches(SIMPLE_CRATE_PROFILE_ID)
-    }
-
-    fn active_profile_is_scifi_crate(&self) -> bool {
-        self.active_profile_matches(SCI_FI_CRATE_PROFILE_ID)
+    fn active_profile_is_box_primitive(&self) -> bool {
+        self.active_profile_matches(BOX_PRIMITIVE_PROFILE_ID)
     }
 
     fn material_look_action_visible(&self, view_state: &MakeCanvasViewState) -> bool {
-        self.active_profile_is_scifi_crate() && view_state.model_ready && view_state.preview_ready
+        let _ = view_state;
+        false
     }
 
     fn material_look_report_path(&self) -> PathBuf {
@@ -1330,17 +1327,9 @@ impl FoundryDesktopApp {
         self.material_looks.tray_open = true;
         self.material_looks.load_error = None;
 
-        if !self.active_profile_is_scifi_crate() {
-            self.material_looks.load_error =
-                Some("Material looks are available for Sci-Fi Crate only.".to_owned());
-            self.material_looks.evidence = None;
-            self.material_looks.selected_candidate_id = None;
-            return;
-        }
-
         let Some(current_fingerprint) = self.current_artifact_fingerprint_hex() else {
             self.material_looks.load_error =
-                Some("Prepare the Sci-Fi Crate before trying material looks.".to_owned());
+                Some("Prepare the Box Primitive before trying material looks.".to_owned());
             self.material_looks.evidence = None;
             self.material_looks.selected_candidate_id = None;
             return;
@@ -2244,7 +2233,7 @@ impl FoundryDesktopApp {
                 ui.add(
                     egui::Label::new(
                         RichText::new(if error == MATERIAL_LOOK_MISSING_MESSAGE {
-                            "Generate the Sci-Fi Crate surface package before previewing material looks."
+                            "Material looks are not part of the Box Primitive baseline."
                         } else {
                             error.as_str()
                         })
@@ -2268,7 +2257,7 @@ impl FoundryDesktopApp {
             product_compact_empty_state(
                 ui,
                 MATERIAL_LOOK_MISSING_MESSAGE,
-                "Generate the Sci-Fi Crate surface package before previewing material looks.",
+                "Material looks are not part of the Box Primitive baseline.",
             );
             return;
         };
@@ -2365,16 +2354,11 @@ impl FoundryDesktopApp {
     fn make_primary_candidate_command(&self) -> Option<FoundryAppCommand> {
         let document = self.state.document.as_ref()?;
         let active_group = self.active_make_part_group();
-        let variation_intent = active_group.as_ref().map_or_else(
-            || {
-                if self.active_profile_is_simple_crate() {
-                    VariationIntent::whole_asset_shape()
-                } else {
-                    VariationIntent::complete_look()
-                }
-            },
-            |group| VariationIntent::focus_part_shape(&group.group_id, &group.label),
-        );
+        let variation_intent = active_group
+            .as_ref()
+            .map_or_else(VariationIntent::complete_look, |group| {
+                VariationIntent::focus_part_shape(&group.group_id, &group.label)
+            });
         Some(FoundryAppCommand::RequestCandidates(
             FoundryCandidateRequest {
                 seed: document.seed,
@@ -2394,7 +2378,7 @@ impl FoundryDesktopApp {
 
     fn make_whole_asset_candidate_command(&self) -> Option<FoundryAppCommand> {
         self.state.document.as_ref().map(|_| {
-            make_whole_asset_candidate_request(&self.state, self.active_profile_is_simple_crate())
+            make_whole_asset_candidate_request(&self.state, false, FoundryCandidateMode::Explore)
         })
     }
 
@@ -2486,7 +2470,7 @@ impl FoundryDesktopApp {
         } else {
             direction_board_count_label(
                 view_state.candidate_count,
-                view_state.simple_crate_baseline,
+                view_state.box_primitive_baseline,
             )
         };
         if make_canvas_uses_compact_ideas(view_state) {
@@ -2574,8 +2558,8 @@ impl FoundryDesktopApp {
                 } else {
                     (
                         "Ready to try ideas",
-                        if view_state.simple_crate_baseline {
-                            "Try crate ideas when the crate is ready."
+                        if view_state.box_primitive_baseline {
+                            "Try box ideas when the box is ready."
                         } else {
                             "Try ideas or focus a part when the asset is ready."
                         },
@@ -3425,7 +3409,7 @@ impl FoundryDesktopApp {
                 self.screenshot_scenario,
                 Some(
                     ScreenshotScenario::GeneratingWholeAssetIdeas
-                        | ScreenshotScenario::GeneratingHandleIdeas
+                        | ScreenshotScenario::GeneratingBodyIdeas
                 )
             )
     }
@@ -3463,9 +3447,9 @@ impl FoundryDesktopApp {
                     self.complete_screenshot_scenario(scenario);
                     return commands;
                 }
-                ScreenshotScenario::GeneratingHandleIdeas
+                ScreenshotScenario::GeneratingBodyIdeas
                     if view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas
-                        && view_state.focused_part_label.as_deref() == Some("Handles") =>
+                        && view_state.focused_part_label.as_deref() == Some("Body") =>
                 {
                     self.complete_screenshot_scenario(scenario);
                     return commands;
@@ -3478,21 +3462,29 @@ impl FoundryDesktopApp {
         }
 
         match scenario {
-            ScreenshotScenario::MakeInitialCrate => {
+            ScreenshotScenario::MakeInitialBox => {
                 if self.state.active_jobs.is_empty() {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
             ScreenshotScenario::GeneratingWholeAssetIdeas => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(&self.state, false));
+                    commands.push(make_whole_asset_candidate_request(
+                        &self.state,
+                        false,
+                        FoundryCandidateMode::Explore,
+                    ));
                     self.screenshot_scenario_step = 2;
                 }
             }
             ScreenshotScenario::GeneratedWholeAssetIdeas
             | ScreenshotScenario::SelectedComparison => {
                 if self.state.candidates.is_empty() && !self.directions_are_generating() {
-                    commands.push(make_whole_asset_candidate_request(&self.state, false));
+                    commands.push(make_whole_asset_candidate_request(
+                        &self.state,
+                        false,
+                        FoundryCandidateMode::Explore,
+                    ));
                     self.screenshot_scenario_step = 2;
                 } else if !self.state.candidates.is_empty() && self.state.active_jobs.is_empty() {
                     let target_candidate = match scenario {
@@ -3519,29 +3511,29 @@ impl FoundryDesktopApp {
                     }
                 }
             }
-            ScreenshotScenario::FocusHandles => {
-                commands.extend(self.ensure_screenshot_focus("handles"));
-                if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Handles") {
+            ScreenshotScenario::FocusBody => {
+                commands.extend(self.ensure_screenshot_focus("body"));
+                if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Body") {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
-            ScreenshotScenario::GeneratingHandleIdeas => {
-                commands.extend(self.ensure_screenshot_focus("handles"));
+            ScreenshotScenario::GeneratingBodyIdeas => {
+                commands.extend(self.ensure_screenshot_focus("body"));
                 if self.screenshot_scenario_step >= 2
                     && self.state.candidates.is_empty()
                     && !self.directions_are_generating()
-                    && let Some(group) = screenshot_part_group(&self.state, "handles")
+                    && let Some(group) = screenshot_part_group(&self.state, "body")
                 {
                     commands.push(make_focused_candidate_request(&self.state, &group));
                     self.screenshot_scenario_step = 3;
                 }
             }
-            ScreenshotScenario::HandleIdeas => {
-                commands.extend(self.ensure_screenshot_focus("handles"));
+            ScreenshotScenario::BodyIdeas => {
+                commands.extend(self.ensure_screenshot_focus("body"));
                 if self.screenshot_scenario_step >= 2
                     && self.state.candidates.is_empty()
                     && !self.directions_are_generating()
-                    && let Some(group) = screenshot_part_group(&self.state, "handles")
+                    && let Some(group) = screenshot_part_group(&self.state, "body")
                 {
                     commands.push(make_focused_candidate_request(&self.state, &group));
                     self.screenshot_scenario_step = 3;
@@ -3563,25 +3555,19 @@ impl FoundryDesktopApp {
                             candidate.id.clone(),
                         )));
                     } else if self.make_canvas_view_state().focused_part_label.as_deref()
-                        == Some("Handles")
+                        == Some("Body")
                     {
                         self.complete_screenshot_scenario(scenario);
                     }
                 }
             }
-            ScreenshotScenario::FocusVents => {
-                commands.extend(self.ensure_screenshot_focus("vents"));
-                if self.make_canvas_view_state().focused_part_label.as_deref() == Some("Vents") {
-                    self.complete_screenshot_scenario(scenario);
-                }
-            }
             ScreenshotScenario::NoClearFocusedIdeas => {
-                commands.extend(self.ensure_screenshot_focus("vents"));
+                commands.extend(self.ensure_screenshot_focus("body"));
                 if self.screenshot_scenario_step >= 2
                     && self.state.candidates.is_empty()
                     && !self.directions_are_generating()
                     && self.state.candidate_output.is_none()
-                    && let Some(group) = screenshot_part_group(&self.state, "vents")
+                    && let Some(group) = screenshot_part_group(&self.state, "body")
                 {
                     commands.push(make_focused_candidate_request(&self.state, &group));
                     self.screenshot_scenario_step = 3;
@@ -4483,14 +4469,13 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
     let path = env::temp_dir().join("shape-lab-screenshot-scenario.txt");
     let value = fs::read_to_string(path).ok()?;
     match value.trim() {
-        "make_initial_crate" => Some(ScreenshotScenario::MakeInitialCrate),
+        "make_initial_box" => Some(ScreenshotScenario::MakeInitialBox),
         "generating_whole_asset_ideas" => Some(ScreenshotScenario::GeneratingWholeAssetIdeas),
         "generated_whole_asset_ideas" => Some(ScreenshotScenario::GeneratedWholeAssetIdeas),
         "selected_comparison" => Some(ScreenshotScenario::SelectedComparison),
-        "focus_handles" => Some(ScreenshotScenario::FocusHandles),
-        "generating_handle_ideas" => Some(ScreenshotScenario::GeneratingHandleIdeas),
-        "handle_ideas" => Some(ScreenshotScenario::HandleIdeas),
-        "focus_vents" => Some(ScreenshotScenario::FocusVents),
+        "focus_body" => Some(ScreenshotScenario::FocusBody),
+        "generating_body_ideas" => Some(ScreenshotScenario::GeneratingBodyIdeas),
+        "body_ideas" => Some(ScreenshotScenario::BodyIdeas),
         "no_clear_focused_ideas" => Some(ScreenshotScenario::NoClearFocusedIdeas),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
@@ -4500,13 +4485,7 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
 }
 
 fn read_screenshot_fixture_catalog() -> shape_foundry_catalog::FoundryFixtureCatalog {
-    let path = env::temp_dir().join("shape-lab-screenshot-template.txt");
-    let value = fs::read_to_string(path).unwrap_or_default();
-    match value.trim() {
-        "roman_bridge_hq" => shape_foundry_catalog::roman_bridge::hq_fixture_catalog(),
-        "stylized_lamp" => shape_foundry_catalog::stylized_lamp::fixture_catalog(),
-        _ => shape_foundry_catalog::scifi_crate::fixture_catalog(),
-    }
+    shape_foundry_catalog::box_primitive::fixture_catalog()
 }
 
 fn screenshot_scenario_assertion(
@@ -4514,7 +4493,7 @@ fn screenshot_scenario_assertion(
     view_state: &MakeCanvasViewState,
 ) -> Result<(), String> {
     match scenario {
-        ScreenshotScenario::MakeInitialCrate => {
+        ScreenshotScenario::MakeInitialBox => {
             require_screenshot_state(view_state.mode == MakeCanvasMode::Ready, scenario, "Ready")?;
             require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
             require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")
@@ -4535,28 +4514,23 @@ fn screenshot_scenario_assertion(
             scenario,
             "selected_comparison_visible",
         ),
-        ScreenshotScenario::FocusHandles => require_screenshot_state(
-            view_state.focused_part_label.as_deref() == Some("Handles"),
+        ScreenshotScenario::FocusBody => require_screenshot_state(
+            view_state.focused_part_label.as_deref() == Some("Body"),
             scenario,
-            "focused_part_label Handles",
+            "focused_part_label Body",
         ),
-        ScreenshotScenario::GeneratingHandleIdeas => require_screenshot_state(
+        ScreenshotScenario::GeneratingBodyIdeas => require_screenshot_state(
             view_state.local_busy_visible
-                && view_state.focused_part_label.as_deref() == Some("Handles")
+                && view_state.focused_part_label.as_deref() == Some("Body")
                 && view_state.mode == MakeCanvasMode::GeneratingFocusedPartIdeas,
             scenario,
-            "local_busy_visible Handles generation",
+            "local_busy_visible Body generation",
         ),
-        ScreenshotScenario::HandleIdeas => require_screenshot_state(
+        ScreenshotScenario::BodyIdeas => require_screenshot_state(
             view_state.candidate_tray_visible
-                && view_state.focused_part_label.as_deref() == Some("Handles"),
+                && view_state.focused_part_label.as_deref() == Some("Body"),
             scenario,
-            "candidate_tray_visible with Handles focus",
-        ),
-        ScreenshotScenario::FocusVents => require_screenshot_state(
-            view_state.focused_part_label.as_deref() == Some("Vents"),
-            scenario,
-            "focused_part_label Vents",
+            "candidate_tray_visible with Body focus",
         ),
         ScreenshotScenario::NoClearFocusedIdeas => require_screenshot_state(
             view_state.candidate_tray_state == MakeCandidateTrayState::NoCandidatesWithRecovery
@@ -4633,13 +4607,14 @@ fn screenshot_part_group(
 fn make_whole_asset_candidate_request(
     state: &FoundryAppState,
     shape_only: bool,
+    mode: FoundryCandidateMode,
 ) -> FoundryAppCommand {
     let seed = state.document.as_ref().map_or(0, |document| document.seed);
     FoundryAppCommand::RequestCandidates(FoundryCandidateRequest {
         seed,
         proposal_count: directions::DEFAULT_DIRECTION_PROPOSALS,
         result_count: directions::VISIBLE_DIRECTION_CANDIDATE_CARDS,
-        mode: FoundryCandidateMode::Explore,
+        mode,
         strategy_id: None,
         preference_profile: None,
         variation_intent: if shape_only {
@@ -4679,17 +4654,7 @@ fn project_file_title(path: &Path) -> String {
 
 fn asset_title_from_id(document_id: &str) -> &'static str {
     match document_id {
-        id if id.contains("simple-crate") => "Simple Crate",
-        id if id.contains("roman-bridge") => "Roman Timber Bridge",
-        id if id.contains("sci-fi-crate") => "Sci-Fi Industrial Crate",
-        id if id.contains("stylized-lamp") => "Stylized Furniture Lamp",
-        id if id.contains("market-stall") => "Market Stall Kit",
-        id if id.contains("sci-fi-door") => "Sci-Fi Door Panel",
-        id if id.contains("storage-barrel") => "Coopered Storage Barrel",
-        id if id.contains("signpost") => "Wayfinding Signpost",
-        id if id.contains("workshop-chair") => "Workshop Chair",
-        id if id.contains("handcart") => "Market Handcart",
-        id if id.contains("stylized-tree") => "Storybook Tree",
+        id if id.contains("box-primitive") => "Box Primitive",
         _ => "Shape Lab Project",
     }
 }
@@ -4752,38 +4717,8 @@ fn normalize_foundry_project_path(path: PathBuf) -> PathBuf {
 
 fn profile_description(slug: &str) -> &'static str {
     match slug {
-        "simple-crate" => {
-            "A plain clay crate with a body, lid, trim, feet, and five easy controls."
-        }
-        "roman-bridge" => {
-            "A reinforced timber bridge with supports, bracing, railings, and span controls."
-        }
-        "sci-fi-crate" => {
-            "A compact hard-surface prop with vents, handles, trims, and panel detail."
-        }
-        "stylized-lamp" => {
-            "A furniture-scale lamp with height, stem, base, shade, and softness controls."
-        }
-        "market-stall" => {
-            "A modular market stall with canopy, counter, display, and signage choices."
-        }
-        "sci-fi-door" => {
-            "A panelized industrial door with frame, vents, locks, and surface detail."
-        }
-        "storage-barrel" => {
-            "A coopered storage barrel with bands, proportions, lid, and wearable silhouette."
-        }
-        "signpost" => "A wayfinding post with arrows, boards, base, and directional variation.",
-        "workshop-chair" => {
-            "A practical workshop chair with seat, legs, back, braces, and style controls."
-        }
-        "handcart" => {
-            "A market handcart with bed, wheels, handles, rails, and cargo-ready proportions."
-        }
-        "stylized-tree" => {
-            "A storybook tree with trunk, canopy, branch, root, and stylized silhouette controls."
-        }
-        _ => "A built-in asset template ready for visual direction generation.",
+        "box-primitive" => "A closed clay box with proportions and edge softness controls.",
+        _ => "A Box Primitive template ready for visual direction generation.",
     }
 }
 
@@ -4903,16 +4838,14 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Recent Projects",
         "Start",
         "Try ideas",
-        ACTION_TRY_CRATE_IDEAS,
+        ACTION_TRY_BOX_IDEAS,
         "Found 4 clear ideas",
         "Rejected 2 that looked too similar",
-        ACTION_USE_THIS_CRATE,
-        ACTION_ADJUST_CRATE,
-        "Handles",
-        "Focused: Handles",
-        "Try handle ideas",
-        "Try vent ideas",
-        "Lock handles",
+        ACTION_USE_THIS_BOX,
+        "Body",
+        "Focused: Body",
+        "Try body ideas",
+        "Lock body",
         "Clear focus",
         "Add to Pack",
         "Open Pack",
@@ -4933,17 +4866,13 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Compare",
         "What changed",
         "Affected parts",
-        "Focused: Handles",
-        "Focused: Vents",
-        "Handle ideas",
-        "Vent ideas",
+        "Focused: Body",
+        "Body ideas",
         "No clear ideas yet",
         "No clear focused ideas survived",
         "No clear ideas survived",
         "The search found changes that were hidden or too subtle.",
-        "Vents have limited visible variation in this template.",
-        "No clear handle ideas survived. Try unlocking more controls.",
-        "No clear vent ideas survived. Try unlocking more controls.",
+        "No clear body ideas survived. Try unlocking more controls.",
         "No ideas yet",
         "Try whole-asset ideas to compare readable candidates.",
         "Ideas",
@@ -4981,7 +4910,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No matching templates",
         "Make asset",
         "Use the model as the workspace: try ideas, focus parts, tune controls, and compare.",
-        "Try crate ideas, adjust crate, Add to Pack, or Export.",
+        "Try box ideas, adjust box, Add to Pack, or Export.",
         "Current Asset",
         "Ideas",
         "Trying ideas",
@@ -5072,7 +5001,7 @@ pub(crate) fn rendered_action_labels_for_default_shell() -> &'static [&'static s
 pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'static>> {
     vec![
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_IDEAS, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_TRY_CRATE_IDEAS, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_TRY_BOX_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_GENERATING_IDEAS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_WHOLE_ASSET_RECOVERY, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_MORE_IDEAS, ButtonTone::Secondary),
@@ -5080,10 +5009,9 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
-        ActionSpec::enabled("Try handle ideas", ButtonTone::Primary),
-        ActionSpec::enabled("Try vent ideas", ButtonTone::Primary),
+        ActionSpec::enabled("Try body ideas", ButtonTone::Primary),
         ActionSpec::enabled(ACTION_CHOOSE_DIRECTION, ButtonTone::Primary),
-        ActionSpec::enabled(ACTION_USE_THIS_CRATE, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_USE_THIS_BOX, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_APPLY, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_FOCUS, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_LOCK, ButtonTone::Secondary),
@@ -5158,7 +5086,7 @@ struct MakeCanvasBannerContext<'a> {
     candidate_output: Option<&'a FoundryCandidateOutput>,
     local_warning_message: Option<&'a str>,
     local_error_message: Option<&'a str>,
-    simple_crate_baseline: bool,
+    box_primitive_baseline: bool,
 }
 
 fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, String, BannerTone) {
@@ -5175,7 +5103,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         candidate_output,
         local_warning_message,
         local_error_message,
-        simple_crate_baseline,
+        box_primitive_baseline,
     } = context;
     if let Some(message) = local_warning_message {
         return (
@@ -5230,13 +5158,13 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Info,
         ),
         MakeCanvasMode::ReviewingIdeas => (
-            if simple_crate_baseline {
-                "Crate ideas ready".to_owned()
+            if box_primitive_baseline {
+                "Box ideas ready".to_owned()
             } else {
                 "Ideas ready".to_owned()
             },
-            if simple_crate_baseline {
-                "Use this crate, or reject it.".to_owned()
+            if box_primitive_baseline {
+                "Use this box, or reject it.".to_owned()
             } else {
                 "Compare the selected idea, then use it or reject it.".to_owned()
             },
@@ -5258,10 +5186,10 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Error,
         ),
         MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
-            if simple_crate_baseline && matches!(mode, MakeCanvasMode::Ready) {
+            if box_primitive_baseline && matches!(mode, MakeCanvasMode::Ready) {
                 (
                     "Ready".to_owned(),
-                    "Try crate ideas, adjust crate, Add to Pack, or Export.".to_owned(),
+                    "Try box ideas, adjust box, Add to Pack, or Export.".to_owned(),
                     BannerTone::Success,
                 )
             } else {
@@ -5282,15 +5210,8 @@ fn no_candidates_recovery_copy(
     let reason = no_candidates_reason_copy(candidate_output);
     if let Some(group) = active_group {
         let part = singular_part_copy(&group.label).to_ascii_lowercase();
-        let message = if group.label.eq_ignore_ascii_case("Vents") {
-            format!(
-                "Vents have limited visible variation in this template. {reason} Try another part or unlock controls."
-            )
-        } else {
-            format!(
-                "No clear {part} ideas survived. {reason} Try again, choose another part, or unlock controls."
-            )
-        };
+        let message =
+            format!("No clear {part} ideas survived. {reason} Try again or unlock controls.");
         return ("No clear focused ideas survived".to_owned(), message);
     }
 
@@ -5333,15 +5254,15 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::PreparingAsset => ASSET_PREPARING_REASON,
         MakeCanvasMode::GeneratingWholeAssetIdeas => "Trying ideas from the current asset.",
         MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas for the focused part.",
-        MakeCanvasMode::ReviewingIdeas if view_state.simple_crate_baseline => {
-            "Use this crate, or try another idea."
+        MakeCanvasMode::ReviewingIdeas if view_state.box_primitive_baseline => {
+            "Use this box, or try another idea."
         }
         MakeCanvasMode::ReviewingIdeas => "Compare the selected idea against the current asset.",
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
-        MakeCanvasMode::Ready if view_state.simple_crate_baseline => {
-            "Try crate ideas or adjust crate."
+        MakeCanvasMode::Ready if view_state.box_primitive_baseline => {
+            "Try box ideas or adjust box."
         }
         MakeCanvasMode::Ready => "Try ideas, focus a part, or tune controls.",
         MakeCanvasMode::Error => "The current asset needs attention.",
@@ -5352,7 +5273,7 @@ fn make_canvas_next_action_hint(
     mode: &MakeCanvasMode,
     focused_part_label: Option<&str>,
     selected_comparison_visible: bool,
-    simple_crate_baseline: bool,
+    box_primitive_baseline: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => "Start with a template from Choose.".to_owned(),
@@ -5371,8 +5292,8 @@ fn make_canvas_next_action_hint(
         (MakeCanvasMode::GeneratingWholeAssetIdeas, _, _) => {
             "Watch this area for new ideas.".to_owned()
         }
-        (MakeCanvasMode::ReviewingIdeas, _, true) if simple_crate_baseline => {
-            "Use this crate, or reject it.".to_owned()
+        (MakeCanvasMode::ReviewingIdeas, _, true) if box_primitive_baseline => {
+            "Use this box, or reject it.".to_owned()
         }
         (MakeCanvasMode::ReviewingIdeas, _, true) => {
             "Compare the selected idea, then use it or reject it.".to_owned()
@@ -5396,8 +5317,8 @@ fn make_canvas_next_action_hint(
             "Choose an export option when readiness is clear.".to_owned()
         }
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
-        (MakeCanvasMode::Ready, _, _) if simple_crate_baseline => {
-            "Try crate ideas, adjust crate, Add to Pack, or Export.".to_owned()
+        (MakeCanvasMode::Ready, _, _) if box_primitive_baseline => {
+            "Try box ideas, adjust box, Add to Pack, or Export.".to_owned()
         }
         (MakeCanvasMode::Ready, _, _) => {
             "Try ideas, focus a part, add to pack, or export.".to_owned()
@@ -5631,10 +5552,10 @@ fn product_panel_message(message: &str, fallback: &str) -> String {
     }
 }
 
-fn direction_board_count_label(count: usize, simple_crate_baseline: bool) -> String {
+fn direction_board_count_label(count: usize, box_primitive_baseline: bool) -> String {
     if count == 0 {
-        if simple_crate_baseline {
-            "Try crate ideas.".to_owned()
+        if box_primitive_baseline {
+            "Try box ideas.".to_owned()
         } else {
             "Try ideas from the current asset.".to_owned()
         }
@@ -5645,12 +5566,8 @@ fn direction_board_count_label(count: usize, simple_crate_baseline: bool) -> Str
 
 fn make_busy_asset_noun(asset_name: &str) -> &'static str {
     let lower = asset_name.to_ascii_lowercase();
-    if lower.contains("crate") {
-        "crate"
-    } else if lower.contains("bridge") {
-        "bridge"
-    } else if lower.contains("lamp") {
-        "lamp"
+    if lower.contains("box") {
+        "box"
     } else {
         "asset"
     }
@@ -5658,13 +5575,7 @@ fn make_busy_asset_noun(asset_name: &str) -> &'static str {
 
 fn singular_part_copy(label: &str) -> &str {
     match label {
-        "Handles" => "Handle",
-        "Panels" => "Panel",
-        "Vents" => "Vent",
-        "Fasteners" => "Fastener",
-        "Supports" => "Support",
-        "Joints" => "Joint",
-        "Ramps" => "Ramp",
+        "Body" => "Body",
         other => other.trim_end_matches('s'),
     }
 }
@@ -6110,19 +6021,10 @@ impl HomeTemplateFilter {
             .collect::<Vec<_>>();
         match self {
             Self::All => true,
-            Self::Props => chips.iter().any(|chip| chip == "prop" || chip == "weapon"),
-            Self::Architecture => chips
+            Self::Props => chips
                 .iter()
-                .any(|chip| chip == "architecture" || chip == "structure"),
-            Self::Gear => chips
-                .iter()
-                .any(|chip| chip == "armor" || chip == "weapon" || chip == "heroic"),
-            Self::Furniture => chips
-                .iter()
-                .any(|chip| chip == "furniture" || chip == "lighting"),
-            Self::Environment => chips
-                .iter()
-                .any(|chip| chip == "environment" || chip == "market" || chip == "wayfinding"),
+                .any(|chip| chip == "primitive" || chip == "box"),
+            Self::Architecture | Self::Gear | Self::Furniture | Self::Environment => false,
         }
     }
 }
@@ -6148,8 +6050,8 @@ fn load_material_look_evidence(
     if report.schema_version != 1 {
         return Err("Material look report schema is not supported.".to_owned());
     }
-    if report.profile_id != SCI_FI_CRATE_PROFILE_ID {
-        return Err("Material looks are available for Sci-Fi Crate only.".to_owned());
+    if report.profile_id != BOX_PRIMITIVE_PROFILE_ID {
+        return Err("Material looks are not part of the Box Primitive baseline.".to_owned());
     }
     if report.visual_foundry_surface_mode_enabled {
         return Err("Material look report overclaims Surface mode readiness.".to_owned());
@@ -6166,8 +6068,8 @@ fn load_material_look_evidence(
 
     let candidate_set: SurfaceCandidateSetFile =
         read_json_file(&variants_dir.join(SURFACE_CANDIDATE_SET_FILE))?;
-    if candidate_set.schema_version == 0 || candidate_set.profile_id != SCI_FI_CRATE_PROFILE_ID {
-        return Err("Material look candidate set is not for Sci-Fi Crate.".to_owned());
+    if candidate_set.schema_version == 0 || candidate_set.profile_id != BOX_PRIMITIVE_PROFILE_ID {
+        return Err("Material look candidate set is not for Box Primitive.".to_owned());
     }
     let candidate_rows = candidate_set
         .candidates
@@ -6210,7 +6112,7 @@ fn load_material_look_evidence(
         if let Some(fingerprint) = current_artifact_fingerprint
             && set_row.frozen_mesh_fingerprint != fingerprint
         {
-            return Err("Material looks do not match this crate build.".to_owned());
+            return Err("Material looks do not match this box build.".to_owned());
         }
 
         let validation_path = package_root.join(&row.validation_ref);
@@ -6220,7 +6122,7 @@ fn load_material_look_evidence(
         }
         let delta_path = package_root.join(&row.surface_delta_ref);
         let delta: SurfaceCandidateDeltaFile = read_json_file(&delta_path)?;
-        if delta.profile_id != SCI_FI_CRATE_PROFILE_ID
+        if delta.profile_id != BOX_PRIMITIVE_PROFILE_ID
             || delta.candidate_id != row.candidate_id
             || delta.shape_delta_leak_detected
             || delta.result_class == "unsupported"
@@ -6512,10 +6414,10 @@ fn material_look_changed_summary(candidate: &MakeMaterialLookCandidate) -> Strin
         .filter_map(|slot| material_look_slot_summary_label(slot))
         .collect::<BTreeSet<_>>();
     if labels.is_empty() {
-        "Changes the visible finish while keeping the crate shape fixed.".to_owned()
+        "Changes the visible finish while keeping the box shape fixed.".to_owned()
     } else {
         format!(
-            "Changes {} while keeping the crate shape fixed.",
+            "Changes {} while keeping the box shape fixed.",
             human_join(labels.into_iter().collect::<Vec<_>>().as_slice())
         )
     }
@@ -6524,10 +6426,9 @@ fn material_look_changed_summary(candidate: &MakeMaterialLookCandidate) -> Strin
 fn material_look_slot_summary_label(slot: &str) -> Option<&'static str> {
     match slot {
         "painted_metal_body" => Some("body finish"),
-        "dark_recesses_and_vents" => Some("recess contrast"),
-        "exposed_edge_trim" => Some("edge trim"),
-        "fasteners_and_mounts" => Some("fasteners"),
-        "handle_grip" => Some("handle finish"),
+        "shadowed_body_edges" => Some("edge contrast"),
+        "exposed_edge_detail" => Some("edge detail"),
+        "soft_edge_highlights" => Some("edge highlights"),
         "fallback_hard_surface" => Some("secondary surfaces"),
         _ => None,
     }
@@ -7246,12 +7147,12 @@ fn candidate_display_detail(
 }
 
 const DIRECTION_INTENT_TITLES: [&str; 6] = [
-    "Compact Vented",
-    "Reinforced Cargo",
-    "Minimal Industrial",
-    "Side-Rail Utility",
-    "Deep Panel Build",
-    "Clean Service Variant",
+    "Compact Box",
+    "Wide Box",
+    "Tall Box",
+    "Flat Box",
+    "Soft-Edged Box",
+    "Sharp Box",
 ];
 
 fn candidate_title_looks_raw(title: &str) -> bool {
@@ -7267,26 +7168,17 @@ fn candidate_title_looks_trait_derived(title: &str) -> bool {
     let lower = title.to_ascii_lowercase();
     lower.ends_with(" direction")
         || lower.contains("edge softness")
-        || lower.contains("detail density")
-        || lower.contains("panel depth")
-        || lower.contains("structural heft")
-        || lower.contains("handle style")
+        || lower.contains("proportions")
 }
 
 fn candidate_change_phrase(raw: &str) -> Option<String> {
     let lower = raw.to_ascii_lowercase();
     let phrase = if lower.contains("edge") && lower.contains("soft") {
         "softer edges"
-    } else if lower.contains("structural") || lower.contains("heft") {
-        "heavier frame"
-    } else if lower.contains("handle") {
-        "handle variation"
+    } else if lower.contains("proportion") {
+        "new proportions"
     } else if lower.contains("detail") {
         "more surface detail"
-    } else if lower.contains("panel") || lower.contains("depth") {
-        "deeper panels"
-    } else if lower.contains("vent") {
-        "more vents"
     } else if lower.contains("silhouette") {
         "cleaner silhouette"
     } else {
@@ -7708,17 +7600,11 @@ fn make_control_matches_focus(
     };
     let control_text = format!("{} {}", control.id, control.label).to_ascii_lowercase();
     let group_label = group.label.to_ascii_lowercase();
-    if group_label.contains("handle") {
-        control_text.contains("handle") || control_text.contains("heft")
-    } else if group_label.contains("vent") {
-        control_text.contains("vent") || control_text.contains("panel")
-    } else if group_label.contains("body") {
+    if group_label.contains("body") || group_label.contains("box") {
         control_text.contains("body")
             || control_text.contains("proportion")
-            || control_text.contains("heft")
+            || control_text.contains("box")
             || control_text.contains("edge")
-    } else if group_label.contains("panel") {
-        control_text.contains("panel") || control_text.contains("detail")
     } else {
         control_text.contains(group_label.trim_end_matches('s'))
     }
@@ -8176,7 +8062,7 @@ struct FoundryPreviewDraw<'a> {
     max_edge: f32,
 }
 
-fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, asset_name: &str) {
+fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, _asset_name: &str) {
     let edge = max_edge.clamp(180.0, 360.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(edge, edge), egui::Sense::hover());
     let colors = VisualFoundryTokens::dark().colors;
@@ -8190,68 +8076,22 @@ fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, asset_name: &st
     );
 
     let center = rect.center();
-    let name = asset_name.to_ascii_lowercase();
-    if name.contains("lamp") {
-        let shade = egui::Rect::from_center_size(
-            center + egui::vec2(0.0, -edge * 0.15),
-            egui::vec2(edge * 0.42, edge * 0.18),
-        );
-        painter.rect_filled(shade, 4.0, colors.accent_soft);
-        painter.line_segment(
-            [
-                center + egui::vec2(0.0, -edge * 0.05),
-                center + egui::vec2(0.0, edge * 0.22),
-            ],
-            egui::Stroke::new(3.0, colors.accent_hover),
-        );
-        painter.circle_filled(
-            center + egui::vec2(0.0, edge * 0.28),
-            edge * 0.12,
-            colors.panel,
-        );
-    } else if name.contains("bridge") {
-        let deck = egui::Rect::from_center_size(
-            center + egui::vec2(0.0, -edge * 0.08),
-            egui::vec2(edge * 0.62, edge * 0.08),
-        );
-        painter.rect_filled(deck, 3.0, colors.accent_soft);
-        for offset in [-0.22, 0.0, 0.22] {
-            let arch = egui::Rect::from_center_size(
-                center + egui::vec2(edge * offset, edge * 0.14),
-                egui::vec2(edge * 0.18, edge * 0.28),
-            );
-            painter.rect_stroke(
-                arch,
-                edge * 0.08,
-                egui::Stroke::new(3.0, colors.accent_hover),
-                egui::StrokeKind::Inside,
-            );
-        }
-    } else {
-        let body = egui::Rect::from_center_size(center, egui::vec2(edge * 0.56, edge * 0.42));
-        painter.rect_filled(body, 6.0, colors.accent_soft);
+    let body = egui::Rect::from_center_size(center, egui::vec2(edge * 0.58, edge * 0.44));
+    painter.rect_filled(body, 6.0, colors.accent_soft);
+    painter.rect_stroke(
+        body,
+        6.0,
+        egui::Stroke::new(2.0, colors.accent_hover),
+        egui::StrokeKind::Inside,
+    );
+    for inset in [0.08, 0.18] {
+        let outline = body.shrink(edge * inset);
         painter.rect_stroke(
-            body,
-            6.0,
-            egui::Stroke::new(2.0, colors.accent_hover),
+            outline,
+            4.0,
+            egui::Stroke::new(1.25, colors.stroke),
             egui::StrokeKind::Inside,
         );
-        for x in [-0.18, 0.18] {
-            let handle = egui::Rect::from_center_size(
-                center + egui::vec2(edge * x, -edge * 0.28),
-                egui::vec2(edge * 0.16, edge * 0.08),
-            );
-            painter.rect_filled(handle, 3.0, colors.panel);
-        }
-        for x in [-0.20, 0.0, 0.20] {
-            painter.line_segment(
-                [
-                    center + egui::vec2(edge * x, -edge * 0.12),
-                    center + egui::vec2(edge * x, edge * 0.12),
-                ],
-                egui::Stroke::new(1.5, colors.stroke),
-            );
-        }
     }
 }
 
@@ -8314,7 +8154,10 @@ mod tests {
     fn desktop_foundry_effects_execute_background_jobs() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
-        app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
+            &ctx,
+        );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
@@ -8330,14 +8173,17 @@ mod tests {
 
     #[test]
     fn save_as_paths_use_loadable_foundry_suffix() {
-        let normalized = normalize_foundry_project_path(PathBuf::from("bridge.json"));
-        assert_eq!(normalized, PathBuf::from("bridge.shapelab-foundry.json"));
+        let normalized = normalize_foundry_project_path(PathBuf::from("box-primitive.json"));
+        assert_eq!(
+            normalized,
+            PathBuf::from("box-primitive.shapelab-foundry.json")
+        );
         ensure_foundry_project_path(&normalized).expect("normalized path is loadable");
     }
 
     #[test]
     fn desktop_foundry_pack_action_dispatches_through_reducer() {
-        let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+        let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
         let app = FoundryDesktopApp {
             state: FoundryAppState::new(fixture.document).expect("fixture state"),
             ..FoundryDesktopApp::default()
@@ -8354,26 +8200,26 @@ mod tests {
     fn pack_member_ids_increment_for_repeated_ui_adds() {
         let mut pack = crate::foundry::view_model::FoundryPackView::default();
         assert_eq!(
-            unique_pack_member_id(&pack, "roman-bridge-doc"),
-            "roman-bridge-doc"
+            unique_pack_member_id(&pack, "box-primitive-doc"),
+            "box-primitive-doc"
         );
 
         pack.members.insert(
-            "roman-bridge-doc".to_owned(),
-            shape_foundry::FoundryDocumentId("roman-bridge-doc".to_owned()),
+            "box-primitive-doc".to_owned(),
+            shape_foundry::FoundryDocumentId("box-primitive-doc".to_owned()),
         );
         assert_eq!(
-            unique_pack_member_id(&pack, "roman-bridge-doc"),
-            "roman-bridge-doc-2"
+            unique_pack_member_id(&pack, "box-primitive-doc"),
+            "box-primitive-doc-2"
         );
 
         pack.members.insert(
-            "roman-bridge-doc-2".to_owned(),
-            shape_foundry::FoundryDocumentId("roman-bridge-doc-2".to_owned()),
+            "box-primitive-doc-2".to_owned(),
+            shape_foundry::FoundryDocumentId("box-primitive-doc-2".to_owned()),
         );
         assert_eq!(
-            unique_pack_member_id(&pack, "roman-bridge-doc"),
-            "roman-bridge-doc-3"
+            unique_pack_member_id(&pack, "box-primitive-doc"),
+            "box-primitive-doc-3"
         );
     }
 
@@ -8387,22 +8233,16 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 19);
-        assert_eq!(default_product_home_profile_count(), 4);
+        assert_eq!(installed_product_kit_count(), 1);
+        assert_eq!(default_product_home_profile_count(), 1);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
             .iter()
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(default_profiles[0].fixture.slug, "simple-crate");
-        assert!(default_labels.contains(&"Simple Crate"));
-        assert!(default_labels.contains(&"Utility Crate"));
-        assert!(default_labels.contains(&"Sci-Fi Industrial Crate"));
-        assert!(default_labels.contains(&"Stylized Furniture Lamp"));
-        assert!(!default_labels.contains(&"Roman Timber Bridge"));
-        assert!(!default_labels.contains(&"Roman Timber Bridge HQ"));
-        assert!(!default_labels.contains(&"Sci-Fi Door Panel"));
+        assert_eq!(default_profiles[0].fixture.slug, "box-primitive");
+        assert_eq!(default_labels, vec!["Box Primitive"]);
 
         let profiles = product_home_profiles(true);
         let labels = profiles
@@ -8410,26 +8250,8 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 18);
-        assert!(labels.contains(&"Simple Crate"));
-        assert!(labels.contains(&"Utility Crate"));
-        assert!(labels.contains(&"Roman Timber Bridge"));
-        assert!(labels.contains(&"Roman Timber Bridge HQ"));
-        assert!(labels.contains(&"Sci-Fi Industrial Crate"));
-        assert!(labels.contains(&"Stylized Furniture Lamp"));
-        assert!(labels.contains(&"Market Stall Kit"));
-        assert!(labels.contains(&"Sci-Fi Door Panel"));
-        assert!(labels.contains(&"Coopered Storage Barrel"));
-        assert!(labels.contains(&"Wayfinding Signpost"));
-        assert!(labels.contains(&"Workshop Chair"));
-        assert!(labels.contains(&"Market Handcart"));
-        assert!(labels.contains(&"Storybook Tree"));
-        assert!(labels.contains(&"Fantasy Sword"));
-        assert!(labels.contains(&"Round Shield"));
-        assert!(labels.contains(&"Hero Helmet"));
-        assert!(labels.contains(&"Pauldron Pair"));
-        assert!(labels.contains(&"Chest Armor"));
-        assert!(!labels.contains(&"Hero Character"));
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(labels, vec!["Box Primitive"]);
         assert!(!labels.iter().any(|label| label.contains("MVP")));
     }
 
@@ -8445,10 +8267,7 @@ mod tests {
         sorted_family_names.sort_unstable();
 
         assert_eq!(family_names, sorted_family_names);
-        assert!(family_names.contains(&"Bridge"));
-        assert!(family_names.contains(&"Cargo Case"));
-        assert!(family_names.contains(&"Lamp"));
-        assert!(!family_names.contains(&"Hero Character"));
+        assert_eq!(family_names, vec!["Box Primitive"]);
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
         assert!(
             groups
@@ -8472,77 +8291,39 @@ mod tests {
                 .sum::<usize>(),
             profiles.len()
         );
-
-        let bridge = groups
-            .iter()
-            .find(|group| group.family_name == "Bridge")
-            .expect("bridge family group");
-        let bridge_labels = bridge
-            .profiles
-            .iter()
-            .map(|profile| profile.label.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(bridge.profiles.len(), 2);
-        assert!(bridge_labels.contains(&"Roman Timber Bridge"));
-        assert!(bridge_labels.contains(&"Roman Timber Bridge HQ"));
     }
 
     #[test]
     fn home_template_search_defaults_to_first_matching_profile() {
         let profiles = product_home_profiles(false);
         let selected_slug =
-            default_filtered_home_profile_slug(&profiles, "lamp", HomeTemplateFilter::All);
+            default_filtered_home_profile_slug(&profiles, "box", HomeTemplateFilter::All);
 
-        assert_eq!(selected_slug.as_deref(), Some("stylized-lamp"));
+        assert_eq!(selected_slug.as_deref(), Some("box-primitive"));
     }
 
     #[test]
     fn home_template_selection_tracks_filter_visibility() {
         let profiles = product_home_profiles(false);
-        let mut selected_slug = Some("sci-fi-crate".to_owned());
+        let mut selected_slug = Some("box-primitive".to_owned());
 
-        normalize_home_selection(
-            &profiles,
-            "",
-            HomeTemplateFilter::Architecture,
-            &mut selected_slug,
-        );
+        normalize_home_selection(&profiles, "", HomeTemplateFilter::Props, &mut selected_slug);
 
-        assert_eq!(selected_slug.as_deref(), None);
+        assert_eq!(selected_slug.as_deref(), Some("box-primitive"));
         assert!(
             filtered_home_profile_indices(&profiles, "", HomeTemplateFilter::Props)
                 .iter()
-                .any(|index| profiles[*index].fixture.slug == "sci-fi-crate")
+                .all(|index| profiles[*index].fixture.slug == "box-primitive")
         );
     }
 
     #[test]
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
-        let bridge = profiles
-            .iter()
-            .find(|profile| profile.label == "Roman Timber Bridge")
-            .expect("bridge profile")
-            .clone();
-        let mut crate_profile = profiles
-            .iter()
-            .find(|profile| profile.label == "Sci-Fi Industrial Crate")
-            .expect("crate profile")
-            .clone();
-        crate_profile.family_name = bridge.family_name.clone();
-
-        let groups = product_home_profile_groups(vec![bridge.clone(), crate_profile.clone()]);
-        assert_eq!(groups.len(), 2);
-        assert!(
-            groups
-                .iter()
-                .any(|group| group.family_id == bridge.family_id)
-        );
-        assert!(
-            groups
-                .iter()
-                .any(|group| group.family_id == crate_profile.family_id)
-        );
+        let groups = product_home_profile_groups(profiles);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].family_id, "box_primitive");
+        assert_eq!(groups[0].profiles.len(), 1);
     }
 
     #[test]
@@ -8629,368 +8410,6 @@ mod tests {
                 !joined_lower.contains(&forbidden.to_ascii_lowercase()),
                 "default product strings unexpectedly contain {forbidden}: {joined}"
             );
-        }
-    }
-
-    #[test]
-    fn product_docs_record_family_pivot_and_scifi_regression() {
-        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-        assert!(readme.contains("Choose -> Make"));
-        assert!(readme.contains("Sci-Fi Crate"));
-        assert!(readme.contains("Sci-Fi Crate is a regression/advanced profile"));
-        assert!(readme.contains("Simple Crate is the novice Make baseline proof"));
-        assert!(readme.contains("Utility Crate is the next family-maturity rung"));
-        assert!(!readme.contains("Open Directions"));
-        assert!(!readme.contains("Customize controls"));
-
-        let current_status = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CURRENT_PRODUCT_STATUS.md"
-        ));
-        assert!(current_status.contains("FAMILY FOUNDATION PIVOT RECORDED"));
-        assert!(current_status.contains("Product Dogfood Gate v4 passed"));
-        assert!(current_status.contains("Surface Candidate Integration Gate"));
-        assert!(current_status.contains("Cargo Case architecture proof passed"));
-        assert!(current_status.contains("Sci-Fi Crate is not the flagship proof"));
-        assert!(current_status.contains("Simple Crate is the default novice Make baseline"));
-        assert!(current_status.contains("Utility Crate is the next family-maturity rung"));
-        assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
-
-        let dogfood_v4 = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
-        ));
-        assert!(dogfood_v4.contains("PASS - SCI-FI CRATE BASELINE ONLY"));
-        assert!(dogfood_v4.contains("Broader user-facing UV, Texturing, Rigging"));
-
-        let screenshot_results = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/MAKE_CANVAS_SCREENSHOT_GATE_RESULTS.md"
-        ));
-        assert!(screenshot_results.contains("HUMAN DOGFOOD NOT PASSED"));
-        assert!(screenshot_results.contains("NO-GO"));
-
-        let integration_report = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/PRODUCT_QUALITY_RECOVERY_INTEGRATION_REPORT.md"
-        ));
-        assert!(integration_report.contains("HUMAN DOGFOOD NO-GO"));
-        assert!(integration_report.contains("unstable product-recovery baseline"));
-
-        let manual_gate = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/RELEASE_CANDIDATE_MANUAL_GATE.md"
-        ));
-        assert!(manual_gate.contains("human dogfood video audit is"));
-        assert!(manual_gate.contains("NO-GO"));
-    }
-
-    #[test]
-    fn family_foundation_docs_keep_next_flagship_and_blocked_scope_consistent() {
-        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-        let current_status = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CURRENT_PRODUCT_STATUS.md"
-        ));
-        let pivot = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/FAMILY_FOUNDATION_PIVOT.md"
-        ));
-        let ladder = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/FAMILY_MATURITY_LADDER.md"
-        ));
-        let next_work = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md"
-        ));
-        let cargo_report = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md"
-        ));
-        let limitations = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/KNOWN_LIMITATIONS.md"
-        ));
-        let normalized = |doc: &str| doc.split_whitespace().collect::<Vec<_>>().join(" ");
-
-        for doc in [readme, current_status] {
-            let one_line = normalized(doc);
-            assert!(
-                one_line.contains("regression/advanced profile"),
-                "README and current status must agree that Sci-Fi is not flagship: {doc}"
-            );
-            assert!(
-                one_line.contains("not the flagship"),
-                "README and current status must agree that Sci-Fi is not flagship: {doc}"
-            );
-            assert!(
-                one_line.contains("Simple Crate is the novice"),
-                "README and current status must agree on Simple Crate as novice proof: {doc}"
-            );
-            assert!(
-                one_line.contains("Utility Crate is the next family-maturity rung"),
-                "README and current status must agree on Utility Crate as next rung: {doc}"
-            );
-            assert!(
-                one_line.contains("Cargo Case remains valid but scoped to equipment cases only"),
-                "README and current status must scope Cargo Case to equipment cases: {doc}"
-            );
-            assert!(
-                one_line.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"),
-                "README and current status must keep broad UI blocked: {doc}"
-            );
-        }
-
-        assert!(pivot.contains("Shape Lab is not being built for any one specific model"));
-        assert!(pivot.contains("It is no longer the flagship proof"));
-        assert!(
-            normalized(pivot).contains("Clay mesh quality comes before UVs, texturing, materials")
-        );
-        assert!(
-            normalized(pivot)
-                .contains("Rigging, skinning, and animation UI remain blocked entirely")
-        );
-        assert!(ladder.contains("Rung 0 - Primitive Family"));
-        assert!(ladder.contains("Rung 4 - Surface / Material"));
-        assert!(
-            normalized(next_work).contains(
-                "Broad archetype expansion is forbidden until another family proof exists"
-            )
-        );
-        assert!(
-            normalized(current_status).contains(
-                "Broad archetype expansion is forbidden until another family proof exists"
-            )
-        );
-        assert!(normalized(cargo_report).contains("Simple Crate is the novice baseline proof"));
-        assert!(normalized(limitations).contains("Simple Crate is the novice baseline proof"));
-        assert!(
-            normalized(cargo_report).contains("Utility Crate is the next family-maturity rung")
-        );
-        assert!(normalized(limitations).contains("Utility Crate is the next family-maturity rung"));
-
-        for doc in [pivot, ladder, next_work, cargo_report, limitations] {
-            assert!(
-                normalized(doc).contains("scoped to equipment cases only"),
-                "family pivot docs must scope Cargo Case to equipment cases only: {doc}"
-            );
-        }
-
-        for (path, doc) in [
-            ("README.md", readme),
-            ("docs/CURRENT_PRODUCT_STATUS.md", current_status),
-            ("docs/FAMILY_FOUNDATION_PIVOT.md", pivot),
-            ("docs/FAMILY_MATURITY_LADDER.md", ladder),
-            ("docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md", next_work),
-            (
-                "docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md",
-                cargo_report,
-            ),
-            ("docs/KNOWN_LIMITATIONS.md", limitations),
-        ] {
-            let lower = doc.to_ascii_lowercase();
-            for forbidden in [
-                "sci-fi crate is the flagship",
-                "sci-fi crate remains the flagship",
-                "sci-fi industrial crate is the flagship",
-                "flagship proof is sci-fi",
-                "broad uv/texturing support is approved",
-                "broad texturing support is approved",
-                "broad surface mode is approved",
-                "material editor is supported",
-                "rigging/skinning/animation ui is approved",
-                "rigging, skinning, and animation ui is approved",
-                "animation ui is approved",
-            ] {
-                assert!(
-                    !lower.contains(forbidden),
-                    "{path} must not overclaim pivot-blocked scope: {forbidden}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn product_truth_docs_agree_on_narrow_scifi_pass_and_roman_preview_only() {
-        let current_status = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CURRENT_PRODUCT_STATUS.md"
-        ));
-        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-        let surface_integration = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
-        ));
-        let dogfood_v4 = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/PRODUCT_DOGFOOD_GATE_V4_RESULTS.md"
-        ));
-        let integration_v2 = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
-        ));
-        let roman_report = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/ROMAN_BRIDGE_TEMPLATE_HARDENING_REPORT.md"
-        ));
-
-        for doc in [current_status, readme, dogfood_v4] {
-            assert!(
-                doc.contains("Sci-Fi Crate") && doc.contains("baseline"),
-                "current status docs must keep the narrow Sci-Fi baseline visible: {doc}"
-            );
-            assert!(
-                doc.contains("UV/Texturing") || doc.contains("UV, Texturing"),
-                "current status docs must keep broader product expansion caveated: {doc}"
-            );
-        }
-
-        assert!(readme.contains("material-look"));
-        assert!(readme.contains("preview-only"));
-        assert!(current_status.contains("material-look preview baseline passes"));
-        assert!(current_status.contains("Material looks are preview-only"));
-        assert!(surface_integration.contains("PASS - SCI-FI CRATE MAKE BASELINE"));
-        assert!(surface_integration.contains("preview-only"));
-        assert!(integration_v2.contains("product-recovery baseline"));
-        assert!(integration_v2.to_ascii_lowercase().contains("no-go"));
-        assert!(current_status.contains("Roman Bridge HQ is downgraded to `PreviewOnly`"));
-        assert!(roman_report.contains("Current catalog recommendation: `PreviewOnly`"));
-        assert!(integration_v2.contains("| Roman Timber Bridge HQ | Pass | PreviewOnly |"));
-    }
-
-    #[test]
-    fn promoted_status_docs_keep_preview_only_and_blocked_claims_consistent() {
-        let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-        let current_status = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CURRENT_PRODUCT_STATUS.md"
-        ));
-        let surface_integration = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
-        ));
-        let surface_dogfood = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
-        ));
-        let visual_surface = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
-        ));
-
-        for doc in [
-            readme,
-            current_status,
-            surface_integration,
-            surface_dogfood,
-            visual_surface,
-        ] {
-            let lower = doc.to_ascii_lowercase();
-            assert!(
-                lower.contains("preview-only") || lower.contains("preview only"),
-                "surface status docs must keep material looks preview-only: {doc}"
-            );
-            assert!(
-                lower.contains("full game-ready")
-                    && (lower.contains("blocked") || lower.contains("not yet supported")),
-                "surface status docs must block full game-ready claims: {doc}"
-            );
-            for forbidden in [
-                "broad uv/texturing support is approved",
-                "broad texturing support is approved",
-                "rigging/skinning/animation ui is approved",
-                "full game-ready status is approved",
-                "roman bridge is default usable",
-            ] {
-                assert!(
-                    !lower.contains(forbidden),
-                    "status docs must not overclaim unsupported work: {forbidden}"
-                );
-            }
-        }
-
-        assert!(current_status.contains("Current Allowed Product Claims"));
-        assert!(current_status.contains("Clean game-ready export is not yet supported"));
-        assert!(current_status.contains("Current Allowed Next Work"));
-        assert!(current_status.contains("Cargo Case architecture proof"));
-        assert!(current_status.contains("Broad UV/Texturing/Rigging/Animation UI remains blocked"));
-    }
-
-    #[test]
-    fn cargo_case_strategy_docs_define_anti_abstraction_gate() {
-        let strategy = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CARGO_CASE_FOUNDATION_STRATEGY.md"
-        ));
-        let quality_gate = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/CARGO_CASE_CLAY_QUALITY_GATE.md"
-        ));
-
-        assert!(strategy.contains("internal/pro authoring grammar"));
-        assert!(strategy.contains("not a user product"));
-        assert!(strategy.contains("not visible in novice Visual Foundry"));
-        assert!(strategy.contains("Clean Utility Case profile"));
-        assert!(strategy.contains("Sci-Fi Industrial Case profile"));
-        assert!(strategy.contains("same Cargo Case family"));
-        assert!(strategy.contains("Sci-Fi Industrial Crate is Cargo Case family"));
-        assert!(strategy.contains("Direct novice catalog publication from drafts is forbidden"));
-        assert!(strategy.contains("material-look evidence must be marked stale and regenerated"));
-        assert!(strategy.contains("No runtime LLM SDK is required"));
-
-        for role in [
-            "body",
-            "lid",
-            "panel_fields",
-            "edge_trim",
-            "corner_guards",
-            "base_feet_or_skids",
-            "handles",
-            "vents",
-            "label_plate_geometry",
-            "hinge_or_closure_detail",
-        ] {
-            assert!(
-                strategy.contains(role),
-                "Cargo Case strategy must define role {role}"
-            );
-        }
-
-        for control in [
-            "Overall Proportions",
-            "Structural Heft",
-            "Panel Complexity",
-            "Handle Style",
-            "Vent Density",
-            "Trim Style",
-            "Detail Density",
-        ] {
-            assert!(
-                strategy.contains(control),
-                "Cargo Case strategy must define primary control {control}"
-            );
-        }
-
-        assert!(quality_gate.contains("Pure Clay pass/fail must be recorded separately"));
-        assert!(quality_gate.contains("semantic grays are viewport display materials only"));
-        assert!(quality_gate.contains("semantic grays are not UV/texturing/material support"));
-        assert!(quality_gate.contains("at least four visible whole-asset ideas"));
-        assert!(quality_gate.contains("human/adversarial review"));
-
-        for doc in [strategy, quality_gate] {
-            let lower = doc.to_ascii_lowercase();
-            for forbidden in [
-                "uv/texturing/material support is approved",
-                "broad uv/texturing support is approved",
-                "rigging/skinning/animation support is approved",
-                "runtime llm sdk is now required",
-            ] {
-                assert!(
-                    !lower.contains(forbidden),
-                    "Cargo Case docs must not overclaim unsupported work: {forbidden}"
-                );
-            }
         }
     }
 
@@ -9226,7 +8645,7 @@ mod tests {
             "Ready to try ideas",
             "Trying ideas",
             "No clear focused ideas survived",
-            "Vents have limited visible variation",
+            "No clear body ideas survived",
             "EmptyReady",
             "GeneratingSkeletons",
             "HasCandidates",
@@ -9282,17 +8701,17 @@ mod tests {
     }
 
     #[test]
-    fn material_look_evidence_loader_requires_valid_scifi_package() {
+    fn material_look_evidence_loader_requires_valid_box_package() {
         let root = temp_material_look_package_root("valid-material-looks");
         let report = write_test_material_look_evidence(
             &root,
             TestMaterialLookEvidenceOptions {
-                frozen_mesh_fingerprint: "crate-fingerprint",
+                frozen_mesh_fingerprint: "box-fingerprint",
                 ..TestMaterialLookEvidenceOptions::default()
             },
         );
 
-        let evidence = load_material_look_evidence(&report, Some("crate-fingerprint"))
+        let evidence = load_material_look_evidence(&report, Some("box-fingerprint"))
             .expect("valid evidence loads");
 
         assert_eq!(evidence.candidates.len(), MATERIAL_LOOK_TITLES.len());
@@ -9348,13 +8767,13 @@ mod tests {
         let leak_report = write_test_material_look_evidence(
             &leak_root,
             TestMaterialLookEvidenceOptions {
-                frozen_mesh_fingerprint: "crate-fingerprint",
+                frozen_mesh_fingerprint: "box-fingerprint",
                 shape_delta_leak: true,
                 ..TestMaterialLookEvidenceOptions::default()
             },
         );
         assert!(
-            load_material_look_evidence(&leak_report, Some("crate-fingerprint"))
+            load_material_look_evidence(&leak_report, Some("box-fingerprint"))
                 .expect_err("shape delta rejects")
                 .contains("shape change")
         );
@@ -9365,32 +8784,20 @@ mod tests {
     }
 
     #[test]
-    fn material_look_action_is_scifi_only_and_open_uses_recovery_copy() {
-        let ctx = egui::Context::default();
-        let mut crate_app = ready_visible_state_test_app();
-        let visible = crate_app.make_canvas_view_state();
-        assert!(crate_app.material_look_action_visible(&visible));
+    fn material_look_action_disabled_for_box_and_open_uses_recovery_copy() {
+        let mut box_app = ready_visible_state_test_app();
+        let visible = box_app.make_canvas_view_state();
+        assert!(!box_app.material_look_action_visible(&visible));
 
         let missing_root = temp_material_look_package_root("missing-action-material-looks");
-        crate_app.material_looks.evidence_report_path =
+        box_app.material_looks.evidence_report_path =
             Some(missing_root.join("surface/variants/surface-candidate-report.json"));
-        crate_app.open_material_looks_panel();
-        assert!(crate_app.material_looks.tray_open);
+        box_app.open_material_looks_panel();
+        assert!(box_app.material_looks.tray_open);
         assert_eq!(
-            crate_app.material_looks.load_error.as_deref(),
+            box_app.material_looks.load_error.as_deref(),
             Some(MATERIAL_LOOK_MISSING_MESSAGE)
         );
-
-        let mut bridge_app = FoundryDesktopApp::default();
-        bridge_app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
-        assert!(!bridge_app.active_profile_is_scifi_crate());
-
-        let mut lamp_app = FoundryDesktopApp::default();
-        lamp_app.load_fixture(
-            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
-            &ctx,
-        );
-        assert!(!lamp_app.active_profile_is_scifi_crate());
 
         let _ = std::fs::remove_dir_all(missing_root);
     }
@@ -9531,7 +8938,7 @@ mod tests {
 
         for required in [
             "Try ideas",
-            "Try handle ideas",
+            "Try body ideas",
             "Try more ideas",
             "Try whole-asset ideas",
             "Use this idea",
@@ -9552,7 +8959,7 @@ mod tests {
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
@@ -9567,11 +8974,8 @@ mod tests {
         assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
         assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
-        assert_eq!(
-            visible.next_action_hint,
-            "Compare the selected idea, then use it or reject it."
-        );
+        assert_eq!(visible.primary_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(visible.next_action_hint, "Use this box, or reject it.");
     }
 
     #[test]
@@ -9581,7 +8985,7 @@ mod tests {
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
@@ -9594,11 +8998,8 @@ mod tests {
         assert!(visible.candidate_tray_visible);
         assert!(!visible.selected_candidate_present);
         assert!(visible.selected_comparison_visible);
-        assert_eq!(visible.primary_action_label, ACTION_CHOOSE_DIRECTION);
-        assert_eq!(
-            visible.next_action_hint,
-            "Compare the selected idea, then use it or reject it."
-        );
+        assert_eq!(visible.primary_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(visible.next_action_hint, "Use this box, or reject it.");
     }
 
     #[test]
@@ -9607,61 +9008,61 @@ mod tests {
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
         app.state.current_preview = Some(test_preview_image("current"));
-        set_test_focus_scope(&mut app, "handles", "Handles");
+        set_test_focus_scope(&mut app, "body", "Body");
 
         let visible = app.make_canvas_view_state();
 
         assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(visible.primary_title, "Handles");
-        assert_eq!(visible.focused_part_label.as_deref(), Some("Handles"));
+        assert_eq!(visible.primary_title, "Body");
+        assert_eq!(visible.focused_part_label.as_deref(), Some("Body"));
         assert!(visible.focused_part_visible);
         assert!(visible.focused_part_actions_visible);
-        assert_eq!(visible.primary_action_label, "Try handle ideas");
+        assert_eq!(visible.primary_action_label, "Try body ideas");
         assert_eq!(
             visible.next_action_hint,
-            "Try handle ideas, lock this part, or clear focus."
+            "Try body ideas, lock this part, or clear focus."
         );
     }
 
     #[test]
-    fn focus_vents_changes_visible_scope_and_action() {
+    fn focus_body_changes_visible_scope_and_action() {
         let mut app = visible_state_test_app();
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
         app.state.current_preview = Some(test_preview_image("current"));
-        set_test_focus_scope(&mut app, "vents", "Vents");
+        set_test_focus_scope(&mut app, "body", "Body");
 
         let visible = app.make_canvas_view_state();
 
         assert_eq!(visible.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(visible.primary_title, "Vents");
-        assert_eq!(visible.focused_part_label.as_deref(), Some("Vents"));
+        assert_eq!(visible.primary_title, "Body");
+        assert_eq!(visible.focused_part_label.as_deref(), Some("Body"));
         assert!(visible.focused_part_visible);
-        assert_eq!(visible.primary_action_label, "Try vent ideas");
+        assert_eq!(visible.primary_action_label, "Try body ideas");
     }
 
     #[test]
     fn make_canvas_primary_action_changes_by_state() {
         let ready = ready_visible_state_test_app().make_canvas_view_state();
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_WHOLE_ASSET_IDEAS);
+        assert_eq!(ready.primary_action_label, ACTION_TRY_BOX_IDEAS);
         assert!(ready.primary_action_enabled);
 
         let mut focused = ready_visible_state_test_app();
-        set_test_focus_scope(&mut focused, "handles", "Handles");
+        set_test_focus_scope(&mut focused, "body", "Body");
         let focused = focused.make_canvas_view_state();
         assert_eq!(focused.mode, MakeCanvasMode::FocusedPart);
-        assert_eq!(focused.primary_action_label, "Try handle ideas");
+        assert_eq!(focused.primary_action_label, "Try body ideas");
 
         let mut generating = ready_visible_state_test_app();
         generating
@@ -9684,29 +9085,26 @@ mod tests {
         reviewing.state.candidates = vec![test_candidate_card("candidate-a", false, None)];
         let reviewing = reviewing.make_canvas_view_state();
         assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_CHOOSE_DIRECTION);
+        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
         assert!(reviewing.primary_action_enabled);
     }
 
     #[test]
     fn focused_inspector_filters_controls_and_keeps_show_all_available() {
         let controls = vec![
-            test_control_view("body_proportions", "Body Proportions"),
-            test_control_view("structural_heft", "Structural Heft"),
-            test_control_view("panel_depth", "Panel Depth"),
-            test_control_view("vent_density", "Vent Density"),
-            test_control_view("handle_style", "Handle Style"),
+            test_control_view("proportions", "Proportions"),
             test_control_view("edge_softness", "Edge Softness"),
-            test_control_view("detail_density", "Detail Density"),
+            test_control_view("box_profile", "Box Profile"),
+            test_control_view("draft_note", "Draft Note"),
         ];
-        let handles = directions::DirectionPartGroup {
-            group_id: "handles".to_owned(),
-            label: "Handles".to_owned(),
+        let body = directions::DirectionPartGroup {
+            group_id: "body".to_owned(),
+            label: "Body".to_owned(),
             focusable: true,
             unavailable_reason: None,
         };
 
-        let sections = make_context_inspector_controls(&controls, Some(&handles));
+        let sections = make_context_inspector_controls(&controls, Some(&body));
         let visible_ids = sections
             .visible
             .iter()
@@ -9718,23 +9116,21 @@ mod tests {
             .map(|control| control.id.as_str())
             .collect::<Vec<_>>();
 
-        assert!(visible_ids.contains(&"handle_style"));
-        assert!(visible_ids.contains(&"structural_heft"));
-        assert!(!visible_ids.contains(&"body_proportions"));
-        assert!(!visible_ids.contains(&"vent_density"));
-        assert!(overflow_ids.contains(&"body_proportions"));
+        assert!(visible_ids.contains(&"proportions"));
+        assert!(visible_ids.contains(&"edge_softness"));
+        assert!(visible_ids.contains(&"box_profile"));
+        assert!(!visible_ids.contains(&"draft_note"));
+        assert!(overflow_ids.contains(&"draft_note"));
         assert_eq!(sections.disclosure_label, "Show all controls");
     }
 
     #[test]
     fn whole_asset_inspector_starts_with_short_control_list() {
         let controls = vec![
-            test_control_view("body_proportions", "Body Proportions"),
-            test_control_view("structural_heft", "Structural Heft"),
-            test_control_view("panel_depth", "Panel Depth"),
-            test_control_view("vent_density", "Vent Density"),
-            test_control_view("handle_style", "Handle Style"),
+            test_control_view("proportions", "Proportions"),
             test_control_view("edge_softness", "Edge Softness"),
+            test_control_view("box_profile", "Box Profile"),
+            test_control_view("draft_note", "Draft Note"),
         ];
 
         let sections = make_context_inspector_controls(&controls, None);
@@ -9753,23 +9149,23 @@ mod tests {
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
-        set_test_focus_scope(&mut app, "handles", "Handles");
-        let selected = shape_foundry::FoundryCandidateId("handle-candidate".to_owned());
+        set_test_focus_scope(&mut app, "body", "Body");
+        let selected = shape_foundry::FoundryCandidateId("body-candidate".to_owned());
         app.state.current_preview = Some(test_preview_image("current"));
         app.state.selected_candidate = Some(selected.clone());
         app.state.candidates = vec![test_candidate_card(
             &selected.0,
             true,
-            Some("Handles".to_owned()),
+            Some("Body".to_owned()),
         )];
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.primary_title, "Handles");
+        assert_eq!(visible.primary_title, "Body");
         assert_eq!(visible.candidate_count, 1);
         assert!(visible.candidate_tray_visible);
         assert!(visible.selected_candidate_present);
@@ -9797,7 +9193,7 @@ mod tests {
     fn screenshot_focus_scenario_helper_waits_for_visible_focus() {
         let mut app = visible_state_test_app();
 
-        let commands = app.ensure_screenshot_focus("handles");
+        let commands = app.ensure_screenshot_focus("body");
         assert_eq!(app.screenshot_scenario_step, 1);
         assert_eq!(commands.len(), 1);
         assert_eq!(
@@ -9805,13 +9201,13 @@ mod tests {
             None
         );
 
-        set_test_focus_scope(&mut app, "handles", "Handles");
-        let commands = app.ensure_screenshot_focus("handles");
+        set_test_focus_scope(&mut app, "body", "Body");
+        let commands = app.ensure_screenshot_focus("body");
         assert!(commands.is_empty());
         assert_eq!(app.screenshot_scenario_step, 2);
         assert_eq!(
             app.make_canvas_view_state().focused_part_label.as_deref(),
-            Some("Handles")
+            Some("Body")
         );
     }
 
@@ -9820,7 +9216,7 @@ mod tests {
         let mut app = ready_visible_state_test_app();
         assert!(
             screenshot_scenario_assertion(
-                ScreenshotScenario::MakeInitialCrate,
+                ScreenshotScenario::MakeInitialBox,
                 &app.make_canvas_view_state(),
             )
             .is_ok()
@@ -9858,24 +9254,17 @@ mod tests {
             screenshot_scenario_assertion(ScreenshotScenario::SelectedComparison, &view).is_ok()
         );
 
-        set_test_focus_scope(&mut app, "handles", "Handles");
+        set_test_focus_scope(&mut app, "body", "Body");
         app.state.candidates = vec![test_candidate_card(
             &selected.0,
             true,
-            Some("Handles".to_owned()),
+            Some("Body".to_owned()),
         )];
         let view = app.make_canvas_view_state();
-        assert!(screenshot_scenario_assertion(ScreenshotScenario::FocusHandles, &view).is_ok());
-        assert!(screenshot_scenario_assertion(ScreenshotScenario::HandleIdeas, &view).is_ok());
+        assert!(screenshot_scenario_assertion(ScreenshotScenario::FocusBody, &view).is_ok());
+        assert!(screenshot_scenario_assertion(ScreenshotScenario::BodyIdeas, &view).is_ok());
 
-        set_test_focus_scope(&mut app, "vents", "Vents");
-        assert!(
-            screenshot_scenario_assertion(
-                ScreenshotScenario::FocusVents,
-                &app.make_canvas_view_state(),
-            )
-            .is_ok()
-        );
+        set_test_focus_scope(&mut app, "body", "Body");
         app.state.candidates.clear();
         app.state.candidate_output = Some(Box::new(empty_test_candidate_output(4, 0, 0)));
         assert!(
@@ -9926,7 +9315,7 @@ mod tests {
         );
         assert_eq!(
             visible.local_busy_label.as_deref(),
-            Some("Preparing Sci-Fi Industrial Crate...")
+            Some("Preparing Box Primitive...")
         );
         assert!(visible.local_busy_visible);
     }
@@ -9941,16 +9330,13 @@ mod tests {
             visible.preparation_phase,
             MakePreparationPhase::PreparingModel
         );
-        assert_eq!(
-            visible.local_banner_title,
-            "Preparing Sci-Fi Industrial Crate"
-        );
+        assert_eq!(visible.local_banner_title, "Preparing Box Primitive");
         assert_eq!(visible.local_banner_message, "Preparing model");
         assert!(!visible.preparation_fallback_visible);
 
         let output = compile_foundry_document(
             app.state.document.as_ref().expect("document"),
-            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+            &shape_foundry_catalog::box_primitive::fixture_catalog(),
         )
         .expect("fixture compiles");
         app.state.current_build = Some(output.build_stamp.clone());
@@ -9971,7 +9357,7 @@ mod tests {
         let visible = app.make_canvas_view_state();
         assert_eq!(visible.preparation_phase, MakePreparationPhase::Ready);
         assert_eq!(visible.mode, MakeCanvasMode::Ready);
-        assert_eq!(visible.local_banner_title, "Ready to try ideas");
+        assert_eq!(visible.local_banner_title, "Ready");
 
         let mut timed_out = visible_state_test_app();
         timed_out.make_preparation_started_at =
@@ -9995,7 +9381,7 @@ mod tests {
         let mut app = visible_state_test_app();
         let output = compile_foundry_document(
             app.state.document.as_ref().expect("document"),
-            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+            &shape_foundry_catalog::box_primitive::fixture_catalog(),
         )
         .expect("fixture compiles");
         app.state.current_build = Some(output.build_stamp.clone());
@@ -10142,9 +9528,9 @@ mod tests {
     }
 
     #[test]
-    fn focused_zero_candidates_show_why_and_vents_recovery_copy() {
+    fn focused_zero_candidates_show_why_and_body_recovery_copy() {
         let mut app = ready_visible_state_test_app();
-        set_test_focus_scope(&mut app, "vents", "Vents");
+        set_test_focus_scope(&mut app, "body", "Body");
         app.state.candidates.clear();
         app.state.candidate_output = Some(Box::new(empty_test_candidate_output(4, 0, 0)));
 
@@ -10162,7 +9548,7 @@ mod tests {
         assert!(
             visible
                 .local_banner_message
-                .contains("Vents have limited visible variation in this template")
+                .contains("No clear body ideas survived")
         );
         assert!(
             visible
@@ -10358,7 +9744,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
 
-        app.load_fixture(shape_foundry_catalog::simple_crate::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
+            &ctx,
+        );
 
         assert_eq!(app.tab, FoundryTab::Make);
         assert!(
@@ -10381,23 +9770,24 @@ mod tests {
     }
 
     #[test]
-    fn simple_crate_make_baseline_flow_is_plain_and_complete() {
-        let fixture = shape_foundry_catalog::simple_crate::fixture_catalog();
-        let mut app = simple_crate_ready_state_test_app();
+    fn box_primitive_make_baseline_flow_is_plain_and_complete() {
+        let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
+        let mut app = box_primitive_ready_state_test_app();
         let ready = app.make_canvas_view_state();
 
         assert_eq!(ready.mode, MakeCanvasMode::Ready);
-        assert_eq!(ready.primary_action_label, ACTION_TRY_CRATE_IDEAS);
-        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_CRATE);
-        assert!(ready.next_action_hint.contains("adjust crate"));
+        assert_eq!(ready.primary_action_label, ACTION_TRY_BOX_IDEAS);
+        assert_eq!(ready.adjust_heading_label, ACTION_ADJUST_BOX);
+        assert!(ready.next_action_hint.contains("adjust box"));
         assert!(!app.material_look_action_visible(&ready));
-        assert!(
-            app.state
-                .document
-                .as_ref()
-                .map(directions::direction_part_groups_for_document)
-                .is_some_and(|groups| groups.is_empty())
-        );
+        let groups = app
+            .state
+            .document
+            .as_ref()
+            .map(directions::direction_part_groups_for_document)
+            .expect("box document has direction groups");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].group_id, "body");
 
         let request_command = app
             .make_primary_candidate_command()
@@ -10407,7 +9797,7 @@ mod tests {
         };
         assert_eq!(
             request.variation_intent.channels,
-            vec![shape_foundry::VariationChannel::Shape]
+            vec![shape_foundry::VariationChannel::CompleteLook]
         );
         for forbidden_channel in [
             shape_foundry::VariationChannel::Surface,
@@ -10425,7 +9815,7 @@ mod tests {
         let candidate_effects = app
             .state
             .handle_command(request_command)
-            .expect("Try crate ideas schedules");
+            .expect("Try box ideas schedules");
         let candidate_event = run_fixture_effect(candidate_effects, &fixture);
         let (preview_request, candidate_output) = match &candidate_event {
             FoundryJobEvent::CandidatesGenerated {
@@ -10433,7 +9823,9 @@ mod tests {
             } => {
                 assert!(
                     !output.candidates.is_empty(),
-                    "Try crate ideas should yield candidates"
+                    "Try box ideas should yield candidates: {:?} {:?}",
+                    output.diagnostics,
+                    output.reliability_report
                 );
                 (request.clone(), output.as_ref().clone())
             }
@@ -10450,8 +9842,8 @@ mod tests {
 
         let reviewing = app.make_canvas_view_state();
         assert_eq!(reviewing.mode, MakeCanvasMode::ReviewingIdeas);
-        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_CRATE);
-        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_CRATE);
+        assert_eq!(reviewing.primary_action_label, ACTION_USE_THIS_BOX);
+        assert_eq!(reviewing.use_candidate_action_label, ACTION_USE_THIS_BOX);
         assert!(reviewing.selected_comparison_visible);
         assert!(
             app.state
@@ -10465,9 +9857,9 @@ mod tests {
             .state
             .handle_command(
                 app.accept_visible_candidate_command()
-                    .expect("selectable crate idea"),
+                    .expect("selectable box idea"),
             )
-            .expect("Use this crate schedules");
+            .expect("Use this box schedules");
         let accept_event = run_fixture_effect(accept_effects, &fixture);
         assert!(app.state.handle_job_event(accept_event));
         assert_ne!(app.state.current_build, build_before_accept);
@@ -10479,7 +9871,7 @@ mod tests {
                 control_id: "edge_softness".to_owned(),
                 value: shape_foundry::ControlValue::Scalar(0.55),
             }))
-            .expect("adjust crate schedules");
+            .expect("adjust box schedules");
         let adjust_event = run_fixture_effect(adjust_effects, &fixture);
         assert!(app.state.handle_job_event(adjust_event));
         assert_eq!(
@@ -10515,7 +9907,7 @@ mod tests {
         for forbidden in ["surface", "material", "rig", "motion", "focus part"] {
             assert!(
                 !simple_make_copy.contains(forbidden),
-                "Simple Crate baseline copy must not expose {forbidden}: {simple_make_copy}"
+                "Box Primitive baseline copy must not expose {forbidden}: {simple_make_copy}"
             );
         }
     }
@@ -10526,7 +9918,7 @@ mod tests {
         app.state.current_output = Some(Box::new(
             compile_foundry_document(
                 app.state.document.as_ref().expect("document"),
-                &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+                &shape_foundry_catalog::box_primitive::fixture_catalog(),
             )
             .expect("fixture compiles"),
         ));
@@ -10677,13 +10069,13 @@ mod tests {
         );
 
         app.state =
-            FoundryAppState::new(shape_foundry_catalog::roman_bridge::fixture_catalog().document)
+            FoundryAppState::new(shape_foundry_catalog::box_primitive::fixture_catalog().document)
                 .expect("fixture state");
         app.state.project_path = None;
         app.state.dirty = false;
         assert_eq!(app.save_state_pill(), ("Not saved", StatusTone::Warning));
 
-        app.state.project_path = Some(PathBuf::from("roman.shapelab-foundry.json"));
+        app.state.project_path = Some(PathBuf::from("box_primitive.shapelab-foundry.json"));
         app.state.dirty = true;
         assert_eq!(app.save_state_pill(), ("Unsaved", StatusTone::Warning));
 
@@ -10710,7 +10102,10 @@ mod tests {
     fn default_customize_summaries_hide_internal_control_kinds() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
-        app.load_fixture(shape_foundry_catalog::roman_bridge::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
+            &ctx,
+        );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
@@ -10723,12 +10118,8 @@ mod tests {
         let controls = display_customize_controls(&app.state.controls);
         assert!(controls.len() <= CUSTOMIZE_PRIMARY_CONTROL_LIMIT);
         assert!(!controls.is_empty());
-        assert!(
-            controls
-                .iter()
-                .any(|control| control.kind.to_ascii_lowercase().contains("provider")),
-            "fixture should cover internal provider-style control kinds"
-        );
+        assert!(controls.iter().any(|control| control.id == "proportions"));
+        assert!(controls.iter().any(|control| control.id == "edge_softness"));
         let visible = controls
             .iter()
             .map(|control| product_control_summary(control))
@@ -10740,66 +10131,57 @@ mod tests {
     }
 
     #[test]
-    fn compact_filmstrip_does_not_hide_remaining_options() {
+    fn box_primitive_filmstrip_shows_all_options_without_overflow() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(
-            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
             &ctx,
         );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
-            if app
-                .state
-                .controls
-                .iter()
-                .filter(|control| control.primary && control.visible)
-                .any(|control| control.options.len() > CONTROL_FILMSTRIP_LIMIT)
-            {
+            if !app.state.controls.is_empty() {
                 break;
             }
             thread::sleep(Duration::from_millis(10));
         }
 
-        let control = display_customize_controls(&app.state.controls)
-            .into_iter()
-            .find(|control| control.options.len() > CONTROL_FILMSTRIP_LIMIT)
-            .expect("fixture exposes a control with more options than the filmstrip");
-        let filmstrip_count = control.options.iter().take(CONTROL_FILMSTRIP_LIMIT).count();
-        let more_count = control.options.iter().skip(CONTROL_FILMSTRIP_LIMIT).count();
-
-        assert_eq!(filmstrip_count, CONTROL_FILMSTRIP_LIMIT);
-        assert!(more_count > 0);
-        assert_eq!(filmstrip_count + more_count, control.options.len());
+        let controls = display_customize_controls(&app.state.controls);
+        assert!(!controls.is_empty());
+        assert!(
+            controls
+                .iter()
+                .all(|control| control.options.len() <= CONTROL_FILMSTRIP_LIMIT)
+        );
     }
 
     #[test]
     fn pack_member_labels_hide_source_document_ids() {
         let member = pack::PackMemberRow {
-            member_id: "roman-bridge-doc".to_owned(),
-            name: "roman-bridge-doc".to_owned(),
-            document_id: "roman-bridge-doc".to_owned(),
+            member_id: "box-primitive-doc".to_owned(),
+            name: "box-primitive-doc".to_owned(),
+            document_id: "box-primitive-doc".to_owned(),
             selected: false,
             override_count: 0,
         };
 
         let label = pack_member_display_name(&member);
-        assert_eq!(label, "Roman Timber Bridge");
+        assert_eq!(label, "Box Primitive");
         assert!(!label.contains("-doc"));
 
         let cell = pack::PackContactSheetCell {
             row: 0,
             column: 0,
-            member_id: "roman-bridge-doc".to_owned(),
-            name: "roman-bridge-doc".to_owned(),
-            document_id: "roman-bridge-doc".to_owned(),
+            member_id: "box-primitive-doc".to_owned(),
+            name: "box-primitive-doc".to_owned(),
+            document_id: "box-primitive-doc".to_owned(),
             status: pack::PackMemberStatus::Ready,
             override_count: 0,
             selected: false,
         };
         let cell_label = pack_cell_display_name(&cell);
-        assert_eq!(cell_label, "Roman Timber Bridge");
+        assert_eq!(cell_label, "Box Primitive");
         assert!(!cell_label.contains("-doc"));
     }
 
@@ -10808,9 +10190,9 @@ mod tests {
         let current_cell = pack::PackContactSheetCell {
             row: 0,
             column: 0,
-            member_id: "roman-bridge-doc".to_owned(),
-            name: "roman-bridge-doc".to_owned(),
-            document_id: "roman-bridge-doc".to_owned(),
+            member_id: "box-primitive-doc".to_owned(),
+            name: "box-primitive-doc".to_owned(),
+            document_id: "box-primitive-doc".to_owned(),
             status: pack::PackMemberStatus::Ready,
             override_count: 0,
             selected: true,
@@ -10832,7 +10214,7 @@ mod tests {
     fn product_panel_messages_replace_raw_backend_details() {
         assert_eq!(
             product_panel_message(
-                "members.roman-bridge-doc.document_id failed validation",
+                "members.box-primitive-doc.document_id failed validation",
                 "Pack needs attention before export."
             ),
             "Pack needs attention before export."
@@ -10864,11 +10246,11 @@ mod tests {
     #[test]
     fn product_status_hides_raw_paths_from_status_strip() {
         assert_eq!(
-            product_safe_status("Saved C:\\work\\roman.shapelab-foundry.json"),
+            product_safe_status("Saved C:\\work\\box.shapelab-foundry.json"),
             "Project saved"
         );
         assert_eq!(
-            product_safe_status("Loaded C:\\work\\roman.shapelab-foundry.json"),
+            product_safe_status("Loaded C:\\work\\box.shapelab-foundry.json"),
             "Project loaded"
         );
         assert_eq!(
@@ -10876,7 +10258,7 @@ mod tests {
             "Project path needs attention"
         );
         assert_eq!(
-            product_safe_status("Exported default to C:\\exports\\bridge"),
+            product_safe_status("Exported default to C:\\exports\\box"),
             "Export complete"
         );
         assert_eq!(
@@ -10895,13 +10277,9 @@ mod tests {
 
     #[test]
     fn preview_texture_identity_tracks_render_metadata_without_pixel_scan() {
-        let bridge = shape_foundry_catalog::roman_bridge::fixture_catalog();
-        let crate_fixture = shape_foundry_catalog::scifi_crate::fixture_catalog();
-        let build_a = compile_foundry_document(&bridge.document, &bridge)
-            .expect("bridge fixture compiles")
-            .build_stamp;
-        let build_b = compile_foundry_document(&crate_fixture.document, &crate_fixture)
-            .expect("crate fixture compiles")
+        let box_a = shape_foundry_catalog::box_primitive::fixture_catalog();
+        let build_a = compile_foundry_document(&box_a.document, &box_a)
+            .expect("box fixture compiles")
             .build_stamp;
 
         let identity = FoundryTextureIdentity::new("option-a", Some(&build_a), 2, 1);
@@ -10914,9 +10292,9 @@ mod tests {
             identity,
             FoundryTextureIdentity::new("option-b", Some(&build_a), 2, 1)
         );
-        assert_ne!(
+        assert_eq!(
             identity,
-            FoundryTextureIdentity::new("option-a", Some(&build_b), 2, 1)
+            FoundryTextureIdentity::new("option-a", Some(&build_a), 2, 1)
         );
         assert_ne!(
             identity,
@@ -10925,14 +10303,14 @@ mod tests {
     }
 
     #[test]
-    fn desktop_foundry_exposes_product_steps_and_lamp_profile() {
+    fn desktop_foundry_exposes_product_steps_and_box_profile() {
         let tabs = [FoundryTab::Home, FoundryTab::Make, FoundryTab::History];
         assert_eq!(tabs.len(), 3);
 
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
         app.load_fixture(
-            shape_foundry_catalog::stylized_lamp::fixture_catalog(),
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
             &ctx,
         );
 
@@ -10950,14 +10328,14 @@ mod tests {
                 .document
                 .as_ref()
                 .map(|document| document.family_content_ref.stable_id.as_str()),
-            Some("stylized-lamp-family")
+            Some("box-primitive-family")
         );
         assert!(app.state.current_output.is_some());
     }
 
     #[test]
     fn loading_project_enters_workflow_step() {
-        let fixture = shape_foundry_catalog::roman_bridge::fixture_catalog();
+        let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
         let state = FoundryAppState::new(fixture.document).expect("fixture state");
         let mut project_file = state.project_file.expect("project file");
         let path = temp_foundry_project_path("load-enters-workflow");
@@ -10975,12 +10353,15 @@ mod tests {
     fn default_customize_surface_hides_non_primary_and_hidden_controls() {
         let ctx = egui::Context::default();
         let mut app = FoundryDesktopApp::default();
-        app.load_fixture(shape_foundry_catalog::scifi_crate::fixture_catalog(), &ctx);
+        app.load_fixture(
+            shape_foundry_catalog::box_primitive::fixture_catalog(),
+            &ctx,
+        );
 
         for _ in 0..3000 {
             app.poll_jobs(&ctx);
             if default_customize_controls(&app.state.controls)
-                .any(|control| control.id == "overall_proportions")
+                .any(|control| control.id == "proportions")
             {
                 break;
             }
@@ -10990,12 +10371,8 @@ mod tests {
         let default_ids = default_customize_controls(&app.state.controls)
             .map(|control| control.id.as_str())
             .collect::<Vec<_>>();
-        assert!(default_ids.contains(&"overall_proportions"));
-        assert!(default_ids.contains(&"structural_heft"));
-        assert!(default_ids.contains(&"panel_complexity"));
-        assert!(default_ids.contains(&"handle_style"));
-        assert!(!default_ids.contains(&"runtime_wear"));
-        assert!(!default_ids.contains(&"advisory_weathering"));
+        assert!(default_ids.contains(&"proportions"));
+        assert!(default_ids.contains(&"edge_softness"));
         assert!(
             default_customize_controls(&app.state.controls)
                 .all(|control| control.primary && control.visible)
@@ -11006,7 +10383,7 @@ mod tests {
         FoundryDesktopApp {
             tab: FoundryTab::Make,
             state: FoundryAppState::new(
-                shape_foundry_catalog::scifi_crate::fixture_catalog().document,
+                shape_foundry_catalog::box_primitive::fixture_catalog().document,
             )
             .expect("fixture state"),
             ..FoundryDesktopApp::default()
@@ -11017,7 +10394,7 @@ mod tests {
         let mut app = visible_state_test_app();
         let output = compile_foundry_document(
             app.state.document.as_ref().expect("document"),
-            &shape_foundry_catalog::scifi_crate::fixture_catalog(),
+            &shape_foundry_catalog::box_primitive::fixture_catalog(),
         )
         .expect("fixture compiles");
         let build = output.build_stamp.clone();
@@ -11027,8 +10404,8 @@ mod tests {
         app
     }
 
-    fn simple_crate_ready_state_test_app() -> FoundryDesktopApp {
-        let fixture = shape_foundry_catalog::simple_crate::fixture_catalog();
+    fn box_primitive_ready_state_test_app() -> FoundryDesktopApp {
+        let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
         let mut app = FoundryDesktopApp {
             tab: FoundryTab::Make,
             state: FoundryAppState::new(fixture.document.clone()).expect("fixture state"),
@@ -11127,7 +10504,7 @@ mod tests {
             slot: 0,
             mode: Some(FoundryCandidateMode::Explore),
             parent: false,
-            title: "Reinforced cargo idea".to_owned(),
+            title: "Readable box idea".to_owned(),
             subtitle: "Clear model change".to_owned(),
             preview_id: Some(format!("{candidate_id}-preview")),
             rgba8: vec![220, 225, 214, 255],
@@ -11135,19 +10512,19 @@ mod tests {
             height: 1,
             camera: Some(OrbitCamera::default()),
             preview_failure: None,
-            changed_controls: vec!["Handle Style".to_owned()],
-            changed_roles: vec!["Handles".to_owned()],
+            changed_controls: vec!["Proportions".to_owned()],
+            changed_roles: vec!["Body".to_owned()],
             explanations: Vec::new(),
             rejections: std::collections::BTreeMap::new(),
             validation_label: "Ready".to_owned(),
             validation_detail: None,
             selectable: true,
             selected,
-            variation_intent_label: "Handle idea".to_owned(),
-            variation_scope_label: "Focused: Handles".to_owned(),
+            variation_intent_label: "Body idea".to_owned(),
+            variation_scope_label: "Focused: Body".to_owned(),
             variation_channel_labels: vec!["Shape".to_owned()],
             visible_delta_label: "Clear change".to_owned(),
-            what_changed_summary: "Handles change with visible attached mounts.".to_owned(),
+            what_changed_summary: "Body proportions change visibly.".to_owned(),
             legibility_class: shape_foundry::CandidateLegibilityClass::Clear,
             focus_part_label,
             surface_unavailable_reason: None,
@@ -11201,8 +10578,8 @@ mod tests {
     impl Default for TestMaterialLookEvidenceOptions<'_> {
         fn default() -> Self {
             Self {
-                frozen_mesh_fingerprint: "crate-fingerprint",
-                profile_id: SCI_FI_CRATE_PROFILE_ID,
+                frozen_mesh_fingerprint: "box-fingerprint",
+                profile_id: BOX_PRIMITIVE_PROFILE_ID,
                 shape_delta_leak: false,
                 missing_preview: false,
                 full_ready_status: "blocked",
@@ -11221,8 +10598,8 @@ mod tests {
             "worn-hazard-yellow",
             "dark-industrial-metal",
             "field-blue-utility",
-            "graphite-cargo",
-            "orange-warning-trim",
+            "graphite-box",
+            "orange-warning-edge-detail",
         ];
         let blockers = [
             "manual_review_pending",
@@ -11305,10 +10682,9 @@ mod tests {
                 "display_name": display_name,
                 "changed_material_slots": [
                     "painted_metal_body",
-                    "dark_recesses_and_vents",
-                    "exposed_edge_trim",
-                    "fasteners_and_mounts",
-                    "handle_grip",
+                    "shadowed_body_edges",
+                    "exposed_edge_detail",
+                    "soft_edge_highlights",
                     "fallback_hard_surface"
                 ],
                 "material_override_ref": material_override_ref,

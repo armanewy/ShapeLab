@@ -6,7 +6,7 @@
 //! parameters, constraints, variant rules, and export needs. A style kit
 //! describes visual language that can be applied to compatible families.
 //! Runtime-specific placement metadata belongs in adapter crates such as
-//! `shape-gamekit`, not here.
+//! downstream export packages, not here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,7 +24,7 @@ const LEGACY_STYLE_KIT_SCHEMA_VERSION: u32 = 3;
 pub struct AssetFamilySchema {
     /// Asset-family schema version.
     pub schema_version: u32,
-    /// Stable family identifier, such as `bridge` or `crate`.
+    /// Stable family identifier, such as `box_primitive`.
     pub id: String,
     /// Human-facing family name.
     pub display_name: String,
@@ -63,7 +63,7 @@ pub struct PartRole {
     pub multiplicity: RoleMultiplicity,
     /// How this role is expected to receive an executable provider.
     pub provision: RoleProvision,
-    /// Functional tags, such as `support`, `panel`, or `handle`.
+    /// Functional tags, such as `body`, `edge`, or `primitive`.
     pub semantic_tags: Vec<String>,
 }
 
