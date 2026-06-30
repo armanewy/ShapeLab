@@ -19,7 +19,9 @@ use shape_foundry::{
     QualityGateProfile, STYLE_PACK_SCHEMA_VERSION, StylePack, StyleProviderCompatibility,
 };
 
-use crate::{FoundryFixtureCatalog, box_primitive, built_in_fixture_catalogs_with_labels};
+use crate::{
+    FoundryFixtureCatalog, box_primitive, built_in_fixture_catalogs_with_labels, flat_panel,
+};
 
 /// Return every built-in Visual Foundry profile as a curated kit package.
 #[must_use]
@@ -532,9 +534,9 @@ fn provider_slot_id(role_id: &str) -> String {
 
 fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
     match slug {
-        box_primitive::BOX_PRIMITIVE_SLUG | box_primitive::LIDDED_BOX_SLUG => {
-            FoundryKitQualityTier::Usable
-        }
+        box_primitive::BOX_PRIMITIVE_SLUG
+        | box_primitive::LIDDED_BOX_SLUG
+        | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -543,6 +545,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
     match slug {
         box_primitive::BOX_PRIMITIVE_SLUG => vec!["Primitive", "Box"],
         box_primitive::LIDDED_BOX_SLUG => vec!["Box", "Lidded"],
+        flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => vec!["Primitive", "Panel"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -554,6 +557,7 @@ fn normalize_kit_slug(slug: &str) -> String {
     match slug {
         "box" | "box_primitive" => box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
         "lidded_box" => box_primitive::LIDDED_BOX_SLUG.to_owned(),
+        "flat_panel" | "panel" => flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -567,7 +571,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 2);
+        assert_eq!(packages.len(), 3);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -611,6 +615,18 @@ mod tests {
             Some(box_primitive::LIDDED_BOX_SLUG)
         );
         assert_eq!(lidded_package.kit.category_chips, vec!["Box", "Lidded"]);
+
+        let panel_package = built_in_foundry_kit_package(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
+            .expect("flat panel kit");
+        assert_eq!(
+            panel_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            panel_package.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
+        );
+        assert_eq!(panel_package.kit.category_chips, vec!["Primitive", "Panel"]);
     }
 
     #[test]
@@ -619,6 +635,12 @@ mod tests {
         assert_eq!(
             box_kit.kit.source_profile_slug.as_deref(),
             Some(box_primitive::BOX_PRIMITIVE_SLUG)
+        );
+
+        let panel_kit = built_in_foundry_kit_package("panel").expect("panel alias");
+        assert_eq!(
+            panel_kit.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
         );
     }
 }

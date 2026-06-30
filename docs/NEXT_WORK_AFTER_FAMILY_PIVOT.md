@@ -9,9 +9,9 @@ box ladder is:
 Box Primitive -> Lidded Box -> Trimmed Box
 ```
 
-Only Box Primitive and Lidded Box are app-visible product baselines today.
-Trimmed Box is internal feature-module evidence until a later Make gate chooses
-to expose it.
+Only Box Primitive, Lidded Box, and Flat Panel Primitive are app-visible
+product baselines today. Trimmed Box is internal feature-module evidence until a
+later Make gate chooses to expose it.
 
 ## Gate Results
 
@@ -40,25 +40,33 @@ target/trim-band-feature-module-v0/
 docs/TRIM_BAND_FEATURE_MODULE_V0.md
 ```
 
+The Flat Panel Primitive baseline passed automated catalog/app gates on
+2026-06-30. Evidence is recorded in:
+
+```text
+docs/FLAT_PANEL_PRIMITIVE_BASELINE.md
+target/flat-panel-primitive-baseline/
+```
+
 ## Preferred Next Step
 
 Stop the box ladder. The next visible family proof should be:
 
 ```text
-Door Primitive
+Hinge Edge
 ```
 
-Door Primitive is preferred because it proves the kernel/module protocol on a
-different object identity while staying simple:
+Hinge Edge is preferred because Flat Panel Primitive already proves the second
+kernel baseline. The next gate should add exactly one visible feature to that
+panel:
 
-- flat vertical panel identity
-- front/back orientation
-- hinge side and handle side
-- panel zones
-- future open/close capability, still blocked for now
+- visible hinge-side edge geometry
+- no handle/knob
+- no open/close motion
+- no Door naming unless a later human visual gate approves it
 
 Do not add Feet / Skids, panels, handles, crate language, material looks,
-Family Studio public UI, or broad archetype work before the Door Primitive gate.
+Family Studio public UI, or broad archetype work before the Hinge Edge gate.
 
 ## Continuing Criteria
 
@@ -74,7 +82,8 @@ Family Studio public UI, or broad archetype work before the Door Primitive gate.
 ## Blocked
 
 - Crate language before a model visually earns the name.
-- Feet / Skids before the Door Primitive proof.
+- Door naming before visible door cues pass a later gate.
+- Feet / Skids before the Flat Panel and Hinge Edge proof.
 - Material looks, UV/texturing, rigging, animation, or game-ready UI.
 - Runtime LLM integration.
 - Full Family Studio public flow before two different kernels pass visual gates.

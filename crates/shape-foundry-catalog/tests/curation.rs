@@ -5,12 +5,12 @@ use std::collections::BTreeSet;
 use shape_foundry_catalog::{
     CatalogCurationState, StarterTemplateQualityEvidence, box_primitive,
     built_in_catalog_curation_metadata, built_in_fixture_catalogs_with_labels,
-    catalog_curation_metadata_for_slug, curated_fixture_catalogs_with_labels,
+    catalog_curation_metadata_for_slug, curated_fixture_catalogs_with_labels, flat_panel,
     starter_template_curation_state_from_quality,
 };
 
 #[test]
-fn curation_metadata_covers_visible_box_family_profiles_once() {
+fn curation_metadata_covers_visible_starter_profiles_once() {
     let fixture_slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
@@ -26,9 +26,10 @@ fn curation_metadata_covers_visible_box_family_profiles_once() {
         BTreeSet::from([
             box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
             box_primitive::LIDDED_BOX_SLUG.to_owned(),
+            flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
         ])
     );
-    assert_eq!(curation.len(), 2);
+    assert_eq!(curation.len(), 3);
     assert_eq!(curation_slugs, fixture_slugs);
     assert!(
         curation
@@ -39,7 +40,7 @@ fn curation_metadata_covers_visible_box_family_profiles_once() {
 }
 
 #[test]
-fn default_and_preview_catalogs_show_supported_box_ladder_profiles() {
+fn default_and_preview_catalogs_show_supported_starter_profiles() {
     for preview_enabled in [false, true] {
         let slugs = curated_fixture_catalogs_with_labels(preview_enabled)
             .into_iter()
@@ -50,6 +51,7 @@ fn default_and_preview_catalogs_show_supported_box_ladder_profiles() {
             vec![
                 box_primitive::BOX_PRIMITIVE_SLUG,
                 box_primitive::LIDDED_BOX_SLUG,
+                flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
             ]
         );
     }
@@ -78,6 +80,20 @@ fn lidded_box_is_usable_after_lid_seam_gate_but_not_showcase() {
     assert!(metadata.has_readable_control_evidence);
     assert!(!metadata.has_human_showcase_review);
     assert!(metadata.note.contains("no crate claim"));
+}
+
+#[test]
+fn flat_panel_is_usable_second_kernel_but_not_showcase() {
+    let metadata = catalog_curation_metadata_for_slug(flat_panel::FLAT_PANEL_PRIMITIVE_SLUG)
+        .expect("flat panel curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(metadata.has_visual_direction_evidence);
+    assert!(metadata.has_readable_control_evidence);
+    assert!(!metadata.has_human_showcase_review);
+    assert!(metadata.note.contains("second kernel proof"));
+    assert!(metadata.note.contains("no Door"));
 }
 
 fn passing_starter_template_quality_evidence() -> StarterTemplateQualityEvidence {

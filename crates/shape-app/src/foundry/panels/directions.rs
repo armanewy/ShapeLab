@@ -609,7 +609,10 @@ pub(crate) fn direction_part_groups_for_document(
         document.family_content_ref.stable_id, document.customizer_profile_ref.stable_id
     );
     let normalized = profile_hint.replace('_', "-").to_ascii_lowercase();
-    if normalized.contains("box-primitive") || normalized.contains("lidded-box") {
+    if normalized.contains("box-primitive")
+        || normalized.contains("lidded-box")
+        || normalized.contains("flat-panel-primitive")
+    {
         return Vec::new();
     }
     built_in_part_group_descriptors_for_profile(&profile_hint)

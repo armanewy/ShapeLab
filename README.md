@@ -2,23 +2,25 @@
 
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
-The current product baseline is the small **Box ladder**: Box Primitive and
-Lidded Box. It is intentionally small: closed clay box-like volumes with
-readable proportions, edge softness, and one visible lid seam feature.
-The active built-in Visual Foundry catalog contains only these two profiles.
+The current product baseline is a small set of honest clay starter profiles:
+Box Primitive, Lidded Box, and Flat Panel Primitive. It is intentionally small:
+box-like volumes with readable proportions, edge softness, and one visible lid
+seam feature, plus one upright flat panel proof.
+The active built-in Visual Foundry catalog contains only these three profiles.
 
-This branch starts fresh from the Box Primitive baseline. It does not claim a
-non-box model family, surface/material workflow, UV/texturing, rigging,
-animation, runtime LLM integration, or public catalog publishing.
+This branch starts from the Box Primitive and Lidded Box baselines and adds a
+second primitive kernel proof. It does not claim Door behavior,
+surface/material workflow, UV/texturing, rigging, animation, runtime LLM
+integration, or public catalog publishing.
 
 The product slice targets a narrow `Choose -> Make` loop:
 
-1. Choose `Box Primitive` or `Lidded Box`.
-2. Enter Make and wait for the box and preview to become ready.
-3. Try box ideas or lidded box ideas.
-4. Use one box idea.
+1. Choose `Box Primitive`, `Lidded Box`, or `Flat Panel Primitive`.
+2. Enter Make and wait for the clay asset and preview to become ready.
+3. Try box, lidded box, or panel ideas.
+4. Use one idea.
 5. Adjust Proportions, Edge Softness, or Lid Seam when present.
-6. Add the current box to Pack.
+6. Add the current asset to Pack.
 7. Export.
 
 ## Build
@@ -56,13 +58,16 @@ clippy unless the branch touches build/profile/release/export code.
 
 ## Current Scope
 
-- Box Primitive is the novice baseline.
+- Box Primitive is the baseline box-like object.
 - Lidded Box is Box Primitive plus one visible Lid Seam feature.
-- The built-in catalog and curation metadata contain only Box Primitive and
-  Lidded Box.
+- Flat Panel Primitive is the second primitive kernel proof.
+- The built-in catalog and curation metadata contain only Box Primitive,
+  Lidded Box, and Flat Panel Primitive.
 - Box Primitive has two controls: Proportions and Edge Softness.
 - Lidded Box has three controls: Proportions, Edge Softness, and Lid Seam.
-- The app may create, vary, pack, and export a box-like asset.
+- Flat Panel Primitive has two controls: Proportions and Edge Softness.
+- The app may create, vary, pack, and export a box-like or panel-like clay
+  asset.
 - The Box Primitive screenshot/manual visual gate passed with release-app
   evidence under `target/box-primitive-dogfood-gate/`.
 - The Box Primitive UI truth-pass gate passed with release-app evidence under
@@ -73,10 +78,12 @@ clippy unless the branch touches build/profile/release/export code.
   `target/lidded-box-make-baseline-gate/`.
 - The Trim Band feature-module gate passed with internal evidence under
   `target/trim-band-feature-module-v0/`; Trimmed Box is not app-visible yet.
+- The Flat Panel Primitive baseline is documented in
+  `docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- After Trimmed Box passes, stop the box ladder and prove Door Primitive before
-  Family Studio Lite.
+- The next single visible feature is Hinge Edge; Door naming remains blocked
+  until visible door cues pass a later gate.
 
 Status details are documented in:
 
@@ -86,5 +93,6 @@ Status details are documented in:
 - [`docs/BOX_PRIMITIVE_VISUAL_READABILITY.md`](docs/BOX_PRIMITIVE_VISUAL_READABILITY.md)
 - [`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`](docs/LIDDED_BOX_MAKE_BASELINE_GATE.md)
 - [`docs/TRIM_BAND_FEATURE_MODULE_V0.md`](docs/TRIM_BAND_FEATURE_MODULE_V0.md)
+- [`docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`](docs/FLAT_PANEL_PRIMITIVE_BASELINE.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

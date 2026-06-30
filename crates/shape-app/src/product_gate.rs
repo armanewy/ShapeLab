@@ -266,8 +266,8 @@ mod tests {
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
         assert_eq!(report.product_home_profiles, report.installed_kit_count);
-        assert_eq!(report.installed_kit_count, 2);
-        assert_eq!(report.developer_preview_kit_count, 2);
+        assert_eq!(report.installed_kit_count, 3);
+        assert_eq!(report.developer_preview_kit_count, 3);
         assert_eq!(report.direction_candidate_slots, 6);
         assert_eq!(
             report.direction_modes,

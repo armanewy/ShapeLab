@@ -3472,7 +3472,7 @@ fn build_candidate_edit(
     if commands.is_empty() || commands.len() < required_command_count {
         return None;
     }
-    let label = candidate_intent_label(variation_intent, mode, proposal_index);
+    let label = candidate_intent_label(profile, variation_intent, mode, proposal_index);
     Some(CandidateEditProposal {
         edit: FoundryEdit { label, commands },
         changed_controls,
@@ -3481,10 +3481,35 @@ fn build_candidate_edit(
 }
 
 fn candidate_intent_label(
+    profile: &CustomizerProfile,
     intent: &VariationIntent,
     mode: FoundryCandidateMode,
     proposal_index: usize,
 ) -> String {
+    const FLAT_PANEL_COMPLETE_LOOK_LABELS: [&str; 6] = [
+        "Narrow Panel",
+        "Wide Panel",
+        "Tall Panel",
+        "Short Panel",
+        "Soft-Edged Panel",
+        "Sharp Panel",
+    ];
+    const FLAT_PANEL_SHAPE_LABELS: [&str; 6] = [
+        "Narrow Panel",
+        "Wide Panel",
+        "Tall Panel",
+        "Short Panel",
+        "Balanced Panel",
+        "Clean Panel",
+    ];
+    const FLAT_PANEL_DETAIL_LABELS: [&str; 6] = [
+        "Sharper Panel",
+        "Softer Panel",
+        "Cleaner Panel",
+        "Rounder Panel",
+        "Square Edge Panel",
+        "Plain Edge Panel",
+    ];
     const COMPLETE_LOOK_LABELS: [&str; 6] = [
         "Compact Box",
         "Wide Box",
@@ -3518,7 +3543,26 @@ fn candidate_intent_label(
         "Focused Softness",
     ];
 
-    let labels = if intent.scope.is_focus_part() {
+    let flat_panel_profile =
+        profile.family_id.contains("flat_panel") || profile.family_id.contains("flat-panel");
+
+    let labels = if flat_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Shape)
+            || matches!(
+                mode,
+                FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
+            )) {
+        &FLAT_PANEL_SHAPE_LABELS
+    } else if flat_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Detail)
+            || mode == FoundryCandidateMode::Detail)
+    {
+        &FLAT_PANEL_DETAIL_LABELS
+    } else if flat_panel_profile && !intent.scope.is_focus_part() {
+        &FLAT_PANEL_COMPLETE_LOOK_LABELS
+    } else if intent.scope.is_focus_part() {
         &FOCUS_LABELS
     } else if intent.includes_channel(&VariationChannel::Shape)
         || matches!(
@@ -4188,4 +4232,47 @@ fn increment_rejection(
     reason: FoundryCandidateRejectionReason,
 ) {
     *diagnostics.rejections.entry(reason).or_insert(0) += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use shape_foundry::VariationIntent;
+
+    use super::*;
+
+    #[test]
+    fn flat_panel_candidate_labels_do_not_fall_back_to_box_names() {
+        let fixture = shape_foundry_catalog::flat_panel::fixture_catalog();
+        let output = generate_foundry_candidate_draft_plans(
+            &fixture.document,
+            &fixture,
+            &FoundryCandidateRequest {
+                seed: 42,
+                proposal_count: 12,
+                result_count: 6,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            },
+        )
+        .expect("flat panel candidates generate");
+
+        assert!(
+            !output.candidates.is_empty(),
+            "Flat Panel should generate candidate ideas"
+        );
+        for candidate in output.candidates {
+            assert!(
+                candidate.label.contains("Panel"),
+                "Flat Panel idea should use panel language: {}",
+                candidate.label
+            );
+            assert!(
+                !candidate.label.contains("Box"),
+                "Flat Panel idea must not use box language: {}",
+                candidate.label
+            );
+        }
+    }
 }

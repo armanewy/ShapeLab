@@ -38,6 +38,7 @@ use shape_foundry::{
 
 pub mod authoring;
 pub mod box_primitive;
+pub mod flat_panel;
 pub mod kits;
 
 pub use authoring::*;
@@ -318,6 +319,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
     vec![
         ("Box Primitive", box_primitive::fixture_catalog()),
         ("Lidded Box", box_primitive::lidded_box_fixture_catalog()),
+        ("Flat Panel Primitive", flat_panel::fixture_catalog()),
     ]
 }
 
@@ -327,6 +329,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
     vec![
         box_primitive::curation_metadata(),
         box_primitive::lidded_box_curation_metadata(),
+        flat_panel::curation_metadata(),
     ]
 }
 
@@ -1093,7 +1096,7 @@ mod tests {
 
     #[test]
     fn choose_visible_fixtures_keep_default_parts_visually_connected() {
-        let visible_slugs = BTreeSet::from(["box-primitive", "lidded-box"]);
+        let visible_slugs = BTreeSet::from(["box-primitive", "lidded-box", "flat-panel-primitive"]);
         for fixture in headless_fixture_catalogs()
             .into_iter()
             .filter(|fixture| visible_slugs.contains(fixture.slug.as_str()))
