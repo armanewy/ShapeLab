@@ -26,8 +26,16 @@ pub const LIDDED_BOX_SLUG: &str = "lidded-box";
 pub const LIDDED_BOX_FAMILY_ID: &str = "lidded_box";
 /// Neutral clay style ID for Lidded Box.
 pub const LIDDED_BOX_STYLE_ID: &str = "lidded_box_clay";
+/// Trimmed Box internal preview profile slug.
+pub const TRIMMED_BOX_SLUG: &str = "trimmed-box";
+/// Trimmed Box internal preview family ID.
+pub const TRIMMED_BOX_FAMILY_ID: &str = "trimmed_box";
+/// Neutral clay style ID for Trimmed Box.
+pub const TRIMMED_BOX_STYLE_ID: &str = "trimmed_box_clay";
 /// Internal Lid Seam module ID.
 pub const LID_SEAM_MODULE_ID: &str = "lid-seam";
+/// Internal Trim Band module ID.
+pub const TRIM_BAND_MODULE_ID: &str = "trim-band";
 
 #[derive(Debug, Copy, Clone)]
 struct BoxProportion {
@@ -45,6 +53,20 @@ struct LiddedBoxProportion {
     lid_half_extents: [f32; 3],
     body_translation: [f32; 3],
     lid_translation: [f32; 3],
+}
+
+#[derive(Debug, Copy, Clone)]
+struct TrimmedBoxProportion {
+    choice: &'static str,
+    body_provider: &'static str,
+    seam_provider: &'static str,
+    trim_provider: &'static str,
+    body_half_extents: [f32; 3],
+    lid_half_extents: [f32; 3],
+    trim_half_extents: [f32; 3],
+    body_translation: [f32; 3],
+    lid_translation: [f32; 3],
+    trim_translation: [f32; 3],
 }
 
 const PROPORTIONS: [BoxProportion; 4] = [
@@ -109,6 +131,57 @@ const LIDDED_PROPORTIONS: [LiddedBoxProportion; 4] = [
     },
 ];
 
+const TRIMMED_PROPORTIONS: [TrimmedBoxProportion; 4] = [
+    TrimmedBoxProportion {
+        choice: "compact_box",
+        body_provider: "compact_trimmed_body",
+        seam_provider: "compact_trimmed_lid_seam",
+        trim_provider: "compact_trim_band",
+        body_half_extents: [0.78, 0.48, 0.58],
+        lid_half_extents: [0.64, 0.08, 0.055],
+        trim_half_extents: [0.82, 0.065, 0.06],
+        body_translation: [0.0, 0.48, 0.0],
+        lid_translation: [0.0, 0.74, 0.637],
+        trim_translation: [0.0, 0.38, 0.644],
+    },
+    TrimmedBoxProportion {
+        choice: "wide_box",
+        body_provider: "wide_trimmed_body",
+        seam_provider: "wide_trimmed_lid_seam",
+        trim_provider: "wide_trim_band",
+        body_half_extents: [1.28, 0.42, 0.56],
+        lid_half_extents: [1.08, 0.08, 0.055],
+        trim_half_extents: [1.34, 0.06, 0.06],
+        body_translation: [0.0, 0.42, 0.0],
+        lid_translation: [0.0, 0.65, 0.617],
+        trim_translation: [0.0, 0.34, 0.624],
+    },
+    TrimmedBoxProportion {
+        choice: "tall_box",
+        body_provider: "tall_trimmed_body",
+        seam_provider: "tall_trimmed_lid_seam",
+        trim_provider: "tall_trim_band",
+        body_half_extents: [0.62, 0.78, 0.48],
+        lid_half_extents: [0.50, 0.08, 0.055],
+        trim_half_extents: [0.68, 0.075, 0.06],
+        body_translation: [0.0, 0.78, 0.0],
+        lid_translation: [0.0, 1.20, 0.537],
+        trim_translation: [0.0, 0.56, 0.544],
+    },
+    TrimmedBoxProportion {
+        choice: "flat_box",
+        body_provider: "flat_trimmed_body",
+        seam_provider: "flat_trimmed_lid_seam",
+        trim_provider: "flat_trim_band",
+        body_half_extents: [1.30, 0.26, 0.78],
+        lid_half_extents: [1.10, 0.08, 0.055],
+        trim_half_extents: [1.36, 0.055, 0.065],
+        body_translation: [0.0, 0.26, 0.0],
+        lid_translation: [0.0, 0.40, 0.837],
+        trim_translation: [0.0, 0.22, 0.849],
+    },
+];
+
 /// Quality evidence used to gate novice catalog exposure for Box Primitive.
 #[must_use]
 pub const fn quality_evidence() -> StarterTemplateQualityEvidence {
@@ -168,6 +241,24 @@ pub fn lidded_box_curation_metadata() -> CatalogCurationMetadata {
         has_readable_control_evidence: true,
         has_human_showcase_review: false,
         note: "Lidded Box is Box Primitive plus one visible Lid Seam feature, with pure-clay evidence and no crate claim.",
+    }
+}
+
+/// Quality evidence for the internal Trimmed Box feature-module gate.
+#[must_use]
+pub const fn trimmed_box_quality_evidence() -> StarterTemplateQualityEvidence {
+    StarterTemplateQualityEvidence {
+        profile_slug: TRIMMED_BOX_SLUG,
+        visible_idea_count: 6,
+        distinct_visible_idea_count: 6,
+        primary_control_count: 4,
+        endpoint_reported_primary_control_count: 4,
+        endpoint_readable_primary_control_count: 4,
+        returned_too_subtle_candidate_count: 0,
+        broken_or_floating_part_count: 0,
+        export_conformance_clean: true,
+        advanced_recipe_required: false,
+        raw_technical_summary_count: 0,
     }
 }
 
@@ -408,6 +499,162 @@ pub fn lidded_box_fixture_catalog() -> FoundryFixtureCatalog {
     })
 }
 
+/// Build the internal Trimmed Box fixture catalog.
+///
+/// This fixture proves exactly one feature after Lidded Box: a visible trim
+/// band. It is not surfaced in the Make loop until a later integration gate.
+#[must_use]
+pub fn trimmed_box_fixture_catalog() -> FoundryFixtureCatalog {
+    let family = family_schema(FamilySchemaSpec {
+        id: TRIMMED_BOX_FAMILY_ID,
+        display_name: "Trimmed Box",
+        summary: "A simple lidded box with a visible trim band.",
+        roles: vec![
+            role("body", RoleMultiplicity::Single, true),
+            role("lid_seam", RoleMultiplicity::Single, true),
+            role("trim_band", RoleMultiplicity::Single, true),
+        ],
+        allowed_operations: vec![
+            AllowedOperationKind::Primitive,
+            AllowedOperationKind::Array,
+            AllowedOperationKind::Transform,
+            AllowedOperationKind::Bevel,
+        ],
+        parameter_slots: vec![
+            choice_slot(
+                "proportions",
+                "Proportions",
+                "body",
+                TRIMMED_PROPORTIONS
+                    .iter()
+                    .map(|proportion| proportion.choice.to_owned())
+                    .collect(),
+            ),
+            crate::ratio_slot(
+                "edge_softness",
+                "Edge Softness",
+                "body",
+                0.0,
+                1.0,
+                0.05,
+                0.35,
+            ),
+            crate::ratio_slot("lid_height", "Lid Seam", "lid_seam", 0.0, 1.0, 0.05, 0.35),
+            crate::ratio_slot(
+                "trim_thickness",
+                "Trim Thickness",
+                "trim_band",
+                0.0,
+                1.0,
+                0.05,
+                0.35,
+            ),
+        ],
+        compatible_style_kits: vec![TRIMMED_BOX_STYLE_ID.to_owned()],
+        tags: vec![
+            "trimmed-box".to_owned(),
+            "lid-seam".to_owned(),
+            "trim-band".to_owned(),
+            "clay".to_owned(),
+        ],
+    });
+
+    let style = style_kit(
+        TRIMMED_BOX_STYLE_ID,
+        "Trimmed Box Clay",
+        TRIMMED_BOX_FAMILY_ID,
+        &trimmed_style_prototypes(),
+        vec![
+            "trimmed-box".to_owned(),
+            "lid-seam".to_owned(),
+            "trim-band".to_owned(),
+            "clay".to_owned(),
+        ],
+    );
+
+    let family_impl = family_implementation(
+        TRIMMED_BOX_FAMILY_ID,
+        "Trimmed Box family",
+        trimmed_parameter_bindings(),
+    );
+
+    let style_impl = style_implementation(
+        TRIMMED_BOX_STYLE_ID,
+        TRIMMED_BOX_FAMILY_ID,
+        trimmed_default_provider_map(),
+        trimmed_recipe_fragments(),
+    );
+
+    let mut profile = crate::customizer_profile(
+        TRIMMED_BOX_FAMILY_ID,
+        TRIMMED_BOX_STYLE_ID,
+        vec![
+            choice_control(
+                "proportions",
+                "Proportions",
+                "proportions",
+                &["compact_box", "wide_box", "tall_box", "flat_box"],
+            ),
+            continuous_control(
+                "edge_softness",
+                "Edge Softness",
+                "edge_softness",
+                0.35,
+                0.0,
+                1.0,
+            ),
+            continuous_control("lid_height", "Lid Seam", "lid_height", 0.35, 0.0, 1.0),
+            continuous_control(
+                "trim_thickness",
+                "Trim Thickness",
+                "trim_thickness",
+                0.35,
+                0.0,
+                1.0,
+            ),
+        ],
+    );
+    profile.candidate_strategies = vec![
+        strategy(
+            "clean-trimmed-box",
+            "Clean Trimmed Box",
+            &["trim_thickness"],
+        ),
+        strategy(
+            "reinforced-trimmed-box",
+            "Reinforced Trimmed Box",
+            &["trim_thickness"],
+        ),
+        strategy(
+            "compact-trimmed-box",
+            "Compact Trimmed Box",
+            &["proportions"],
+        ),
+        strategy("wide-trimmed-box", "Wide Trimmed Box", &["proportions"]),
+        strategy("low-trim-box", "Low Trim Box", &["lid_height"]),
+        strategy("soft-trimmed-box", "Soft Trimmed Box", &["edge_softness"]),
+    ];
+
+    build_fixture_catalog(FixtureCatalogSpec {
+        slug: TRIMMED_BOX_SLUG,
+        document_id: "trimmed-box-doc",
+        family,
+        style,
+        family_implementation: family_impl,
+        style_implementation: style_impl,
+        customizer_profile: profile,
+        control_state: BTreeMap::from([
+            (
+                "proportions".to_owned(),
+                ControlValue::Choice("compact_box".to_owned()),
+            ),
+            ("edge_softness".to_owned(), ControlValue::Scalar(0.35)),
+            ("lid_height".to_owned(), ControlValue::Scalar(0.35)),
+            ("trim_thickness".to_owned(), ControlValue::Scalar(0.35)),
+        ]),
+    })
+}
+
 fn style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> {
     PROPORTIONS
         .into_iter()
@@ -431,6 +678,27 @@ fn lidded_style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> 
         .collect()
 }
 
+fn trimmed_style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> {
+    TRIMMED_PROPORTIONS
+        .into_iter()
+        .flat_map(|proportion| {
+            [
+                (proportion.body_provider, "Closed lower box body", "body"),
+                (
+                    proportion.seam_provider,
+                    "Raised clay line for visible lid seam",
+                    "lid_seam",
+                ),
+                (
+                    proportion.trim_provider,
+                    "Raised clay geometry for visible trim band",
+                    "trim_band",
+                ),
+            ]
+        })
+        .collect()
+}
+
 fn default_provider_map() -> BTreeMap<String, String> {
     BTreeMap::from([("body".to_owned(), "compact_body".to_owned())])
 }
@@ -439,6 +707,14 @@ fn lidded_default_provider_map() -> BTreeMap<String, String> {
     BTreeMap::from([
         ("body".to_owned(), "compact_lidded_body".to_owned()),
         ("lid_seam".to_owned(), "compact_lid_seam".to_owned()),
+    ])
+}
+
+fn trimmed_default_provider_map() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("body".to_owned(), "compact_trimmed_body".to_owned()),
+        ("lid_seam".to_owned(), "compact_trimmed_lid_seam".to_owned()),
+        ("trim_band".to_owned(), "compact_trim_band".to_owned()),
     ])
 }
 
@@ -526,6 +802,98 @@ fn lidded_parameter_bindings() -> Vec<ParameterBinding> {
     ]
 }
 
+fn trimmed_parameter_bindings() -> Vec<ParameterBinding> {
+    vec![
+        ParameterBinding::ChoiceToPrototype {
+            slot: "proportions".to_owned(),
+            role: "body".to_owned(),
+            choices: TRIMMED_PROPORTIONS
+                .into_iter()
+                .map(|proportion| {
+                    (
+                        proportion.choice.to_owned(),
+                        proportion.body_provider.to_owned(),
+                    )
+                })
+                .collect(),
+        },
+        ParameterBinding::ChoiceToPrototype {
+            slot: "proportions".to_owned(),
+            role: "lid_seam".to_owned(),
+            choices: TRIMMED_PROPORTIONS
+                .into_iter()
+                .map(|proportion| {
+                    (
+                        proportion.choice.to_owned(),
+                        proportion.seam_provider.to_owned(),
+                    )
+                })
+                .collect(),
+        },
+        ParameterBinding::ChoiceToPrototype {
+            slot: "proportions".to_owned(),
+            role: "trim_band".to_owned(),
+            choices: TRIMMED_PROPORTIONS
+                .into_iter()
+                .map(|proportion| {
+                    (
+                        proportion.choice.to_owned(),
+                        proportion.trim_provider.to_owned(),
+                    )
+                })
+                .collect(),
+        },
+        definition_binding(
+            "edge_softness",
+            "body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.radius",
+            0.004,
+            0.16,
+        ),
+        definition_binding(
+            "edge_softness",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.radius",
+            0.003,
+            0.028,
+        ),
+        definition_binding(
+            "edge_softness",
+            "trim_band",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.radius",
+            0.006,
+            0.032,
+        ),
+        definition_binding(
+            "lid_height",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.y",
+            0.055,
+            0.145,
+        ),
+        definition_binding(
+            "lid_height",
+            "lid_seam",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.x",
+            0.45,
+            0.92,
+        ),
+        definition_binding(
+            "trim_thickness",
+            "trim_band",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.y",
+            0.05,
+            0.14,
+        ),
+    ]
+}
+
 fn definition_binding(
     slot: &str,
     role_name: &str,
@@ -588,6 +956,40 @@ fn lidded_recipe_fragments() -> Vec<RecipeFragment> {
                     proportion.lid_half_extents,
                     0.035,
                     proportion.lid_translation,
+                    Vec::new(),
+                ),
+            ]
+        })
+        .collect()
+}
+
+fn trimmed_recipe_fragments() -> Vec<RecipeFragment> {
+    TRIMMED_PROPORTIONS
+        .into_iter()
+        .flat_map(|proportion| {
+            [
+                rounded_box_fragment(
+                    proportion.body_provider,
+                    "body",
+                    proportion.body_half_extents,
+                    0.05,
+                    proportion.body_translation,
+                    Vec::new(),
+                ),
+                rounded_box_fragment(
+                    proportion.seam_provider,
+                    "lid_seam",
+                    proportion.lid_half_extents,
+                    0.035,
+                    proportion.lid_translation,
+                    Vec::new(),
+                ),
+                rounded_box_fragment(
+                    proportion.trim_provider,
+                    "trim_band",
+                    proportion.trim_half_extents,
+                    0.024,
+                    proportion.trim_translation,
                     Vec::new(),
                 ),
             ]

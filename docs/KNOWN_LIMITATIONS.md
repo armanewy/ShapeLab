@@ -20,14 +20,16 @@
 
 - The Box Primitive screenshot/manual visual gate passed on 2026-06-30.
 - The Lidded Box Make baseline gate passed on 2026-06-30.
-- Trim Band is the next allowed visible box feature.
-- After Trimmed Box passes, stop the box ladder and prove Stool Primitive
-  before Family Studio Lite.
+- The Trim Band feature-module gate passed on 2026-06-30 with internal
+  Trimmed Box evidence.
+- After Trimmed Box passes, stop the box ladder and prove Door Primitive before
+  Family Studio Lite.
 
 ## Product Boundaries
 
 - Box Primitive does not prove a broad archetype library.
 - Lidded Box does not prove a broad archetype library.
+- Trimmed Box does not prove a broad archetype library.
 - Box Primitive does not prove procedural authoring for every object category.
 - Box Primitive does not approve public catalog publishing.
 - Box Primitive does not approve imported mesh editing.

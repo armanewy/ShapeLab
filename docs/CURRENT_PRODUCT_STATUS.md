@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Verdict
 
-`LIDDED BOX MAKE BASELINE PROVEN`
+`TRIM BAND FEATURE MODULE PROVEN`
 
 Shape Lab is growing from one honest novice baseline into a tiny box ladder.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -14,6 +14,9 @@ Box Primitive is a pure-clay closed box-like volume. It has two novice controls:
 Proportions and Edge Softness. It does not claim to be any richer non-box model
 family. Lidded Box is Box Primitive plus one visible Lid Seam feature, not a
 crate.
+
+Trimmed Box has internal feature-module evidence as Lidded Box plus one visible
+Trim Band. It is not exposed in the app Make loop yet and is not a crate.
 
 ## Current Truth
 
@@ -33,6 +36,7 @@ crate.
 - The Box Primitive baseline cleanup integration gate passed locally on
   2026-06-30.
 - The Lidded Box Make baseline gate passed locally on 2026-06-30.
+- The Trim Band feature-module gate passed locally on 2026-06-30.
 - No public catalog publishing is approved.
 - No non-box family, surface/material, UV/texturing, rigging, animation,
   runtime LLM, or game-ready UI is approved.
@@ -63,21 +67,23 @@ crate.
   textured, rigged, animated, or game-ready package.
 - Lidded Box export may say that the current clay lidded box asset is not a
   textured, rigged, animated, or game-ready package.
+- Trimmed Box may be referenced in internal docs as Lidded Box plus one visible
+  Trim Band feature with evidence under `target/trim-band-feature-module-v0/`.
 
 ## Allowed Next Work
 
 - Repair-loop polish for weak box variations.
 - Local Personal Kit persistence for Box Primitive and Lidded Box.
-- The next visible feature module is Trim Band, on its own gate.
-- After Trimmed Box passes, stop the box ladder and prove Stool Primitive before
-  Family Studio Lite.
+- Stop the box ladder and prove Door Primitive as the next different kernel
+  proof before Family Studio Lite.
 
 ## Still Blocked
 
 - Calling the current baseline a richer non-box family.
 - Calling Lidded Box a crate.
+- Calling Trimmed Box a crate.
 - Adding multiple visible concepts in one branch.
-- Feet / Skids before the Stool Primitive proof.
+- Feet / Skids before the Door Primitive proof.
 - Broad archetype expansion.
 - Surface/material editor work.
 - UV/texturing UI.

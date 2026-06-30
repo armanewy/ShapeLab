@@ -121,18 +121,63 @@ approve reviewed and showcase quality.
 
 ### Family kernel
 
-A kernel defines what must always remain true.
+A kernel defines what must always remain true. It is not a model, not a mesh,
+and not a user-facing concept.
+
+The user sees:
+
+```text
+what stays the same
+```
+
+The system sees:
+
+```text
+kernel
+```
+
+A kernel is an identity contract plus usable geometry facts. It defines:
+
+- identity invariants
+- canonical axes
+- support and orientation rules
+- placement-zone templates
+- disallowed concerns
 
 For the current box baseline:
 
 ```text
 BoxKernel
-- closed box-like volume
-- canonical width/depth/height axes
-- support plane
-- exterior faces
-- preview camera policy
-- identity constraints
+- Identity:
+  - closed box-like volume
+  - one primary body
+  - readable width / depth / height
+  - sits on a support plane
+  - remains box-like across variants
+- Axes:
+  - X = width
+  - Y = depth
+  - Z = height
+- Placement zones:
+  - front face
+  - back face
+  - left face
+  - right face
+  - top face
+  - bottom/support face
+  - edge bands
+  - corner zones
+- Does NOT contain:
+  - lid seam
+  - handles
+  - panels
+  - trim
+  - feet
+  - vents
+  - materials
+  - UVs
+  - rigging
+  - animation
 ```
 
 The kernel must stay small. It must not accumulate every possible future field.
@@ -321,23 +366,25 @@ Gate:
 - no new dead-end UI states
 - no hidden technical terms
 
-### Rung 3 — Stool Primitive
+### Rung 3 — Door Primitive
 
 Purpose: prove the family-authoring protocol is not a box generator.
 
 Allowed:
 
-- seat shape
-- seat proportions
-- leg count
-- leg thickness
+- flat vertical panel identity
+- front/back orientation
+- hinge side
+- handle side
+- simple panel proportions
 - edge softness
 
 Gate:
 
-- object reads as a stool, not a box
-- legs reach the support plane
-- stool appears stable
+- object reads as a door, not a box
+- hinge side and handle side are unambiguous
+- front/back orientation is clear
+- panel remains flat and door-like
 - at least four ideas are visually distinct
 - the same user-facing kit workflow can drive the second kernel
 
@@ -348,7 +395,7 @@ Purpose: expose the reusable-kit authoring flow after two kernels work.
 User-facing flow:
 
 - Create reusable kit
-- Start from Box Primitive or Stool Primitive
+- Start from Box Primitive or Door Primitive
 - What stays the same?
 - What can change?
 - Test variations
@@ -362,7 +409,7 @@ Gate:
 
 ### Future — Storage Crate / Utility Crate and Cargo Case
 
-Purpose: earn richer object names only after the box and stool proofs.
+Purpose: earn richer object names only after the box and door proofs.
 
 Potential modules:
 
@@ -487,9 +534,9 @@ Every user-visible concept needs its own pass.
 
 - Box Primitive must work before Lid Seam.
 - Lid Seam must work before Trim Band.
-- Trim Band must work before Stool Primitive.
-- Stool Primitive must work before Family Studio Lite.
-- Feet / Skids and crate language remain blocked until after the Stool
+- Trim Band must work before Door Primitive.
+- Door Primitive must work before Family Studio Lite.
+- Feet / Skids and crate language remain blocked until after the Door
   Primitive proof.
 - No branch may add multiple visible object concepts without a prior visual
   gate.
@@ -505,7 +552,7 @@ Gate it.
 Add Trim Band.
 Gate it.
 Stop the box ladder.
-Add Stool Primitive.
+Add Door Primitive.
 Gate it.
 ```
 
@@ -520,7 +567,7 @@ adding another concept.
 
 ## Current next milestone
 
-The next milestone is not a crate.
+The current milestone is not a crate.
 
 It is:
 
@@ -551,8 +598,11 @@ Pass criteria:
 - buttons and next actions are clear
 - export remains truthful
 
-Lid Seam Feature Module v0 and the Lidded Box Make baseline have local evidence
-in `docs/LID_SEAM_FEATURE_MODULE_V0.md` and
-`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`. The next branch may add Trim Band as
-exactly one visible feature. Do not add Feet / Skids, panels, handles, latches,
-materials, crate language, or Family Studio public UI in that gate.
+Lid Seam Feature Module v0, the Lidded Box Make baseline, and the Trim Band
+Feature Module v0 have local evidence in `docs/LID_SEAM_FEATURE_MODULE_V0.md`,
+`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`, and
+`docs/TRIM_BAND_FEATURE_MODULE_V0.md`.
+
+After Trim Band, stop the box ladder. The next different-kernel proof should be
+Door Primitive. Do not add Feet / Skids, panels, handles, latches, materials,
+crate language, or Family Studio public UI before that gate.

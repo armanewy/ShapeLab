@@ -71,10 +71,12 @@ clippy unless the branch touches build/profile/release/export code.
   `target/box-primitive-visual-readability/`.
 - The Lidded Box Make baseline gate passed with evidence under
   `target/lidded-box-make-baseline-gate/`.
+- The Trim Band feature-module gate passed with internal evidence under
+  `target/trim-band-feature-module-v0/`; Trimmed Box is not app-visible yet.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- The next visible feature may be Trim Band. After Trimmed Box passes, stop the
-  box ladder and prove Stool Primitive before Family Studio Lite.
+- After Trimmed Box passes, stop the box ladder and prove Door Primitive before
+  Family Studio Lite.
 
 Status details are documented in:
 
@@ -83,5 +85,6 @@ Status details are documented in:
 - [`docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md`](docs/BOX_PRIMITIVE_UI_TRUTH_PASS.md)
 - [`docs/BOX_PRIMITIVE_VISUAL_READABILITY.md`](docs/BOX_PRIMITIVE_VISUAL_READABILITY.md)
 - [`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`](docs/LIDDED_BOX_MAKE_BASELINE_GATE.md)
+- [`docs/TRIM_BAND_FEATURE_MODULE_V0.md`](docs/TRIM_BAND_FEATURE_MODULE_V0.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)

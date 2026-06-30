@@ -348,6 +348,65 @@ pub fn lid_seam_feature_module_contract() -> FeatureModuleContract {
     }
 }
 
+/// Internal Trim Band module contract used by the trimmed-box preview fixture.
+#[must_use]
+pub fn trim_band_feature_module_contract() -> FeatureModuleContract {
+    FeatureModuleContract {
+        schema_version: FEATURE_MODULE_CONTRACT_SCHEMA_VERSION,
+        module_id: "trim-band".to_owned(),
+        display_name: "Trim Band".to_owned(),
+        requires: vec![
+            FeatureModuleRequirement {
+                id: "box-body".to_owned(),
+                summary: "Requires an export-safe box body.".to_owned(),
+            },
+            FeatureModuleRequirement {
+                id: "exterior-band-placement-zone".to_owned(),
+                summary: "Requires a readable exterior zone for a physical band.".to_owned(),
+            },
+        ],
+        provides: vec![
+            FeatureModuleProvision::VisibleRole {
+                role: "trim_band".to_owned(),
+                label: "Visible trim band".to_owned(),
+            },
+            FeatureModuleProvision::Control {
+                control_id: "trim_thickness".to_owned(),
+                label: "Trim Thickness".to_owned(),
+            },
+            FeatureModuleProvision::CandidateHook {
+                hook_id: "trimmed-box-ideas".to_owned(),
+                label: "Trimmed box ideas".to_owned(),
+            },
+        ],
+        owns_controls: vec!["trim_thickness".to_owned()],
+        candidate_hooks: vec!["trimmed-box-ideas".to_owned()],
+        quality_gates: vec![
+            FeatureModuleQualityGate {
+                id: "trim-visible-in-pure-clay".to_owned(),
+                summary: "The trim band is visible without texture or material color.".to_owned(),
+            },
+            FeatureModuleQualityGate {
+                id: "trim-does-not-float".to_owned(),
+                summary: "The trim band remains attached to the box body.".to_owned(),
+            },
+            FeatureModuleQualityGate {
+                id: "trim-not-material-stripe".to_owned(),
+                summary: "The trim reads as geometry, not a material stripe.".to_owned(),
+            },
+            FeatureModuleQualityGate {
+                id: "trim-endpoint-visible".to_owned(),
+                summary: "The Trim Thickness endpoint creates a visible change.".to_owned(),
+            },
+        ],
+        behavior_hooks: vec![
+            "apply-trim-band-geometry".to_owned(),
+            "generate-trimmed-box-candidates".to_owned(),
+            "validate-trim-band-readability".to_owned(),
+        ],
+    }
+}
+
 fn validate_non_empty(
     report: &mut FeatureModuleValidationReport,
     subject: &'static str,
@@ -433,6 +492,30 @@ mod tests {
                 .requires
                 .iter()
                 .any(|requirement| requirement.id == "top-lid-candidate-zone")
+        );
+    }
+
+    #[test]
+    fn trim_band_feature_module_contract_validates() {
+        let contract = trim_band_feature_module_contract();
+        let report = validate_feature_module_contract(&contract);
+        assert!(
+            report.is_valid(),
+            "Trim Band feature module should validate: {report:#?}"
+        );
+        assert_eq!(contract.module_id, "trim-band");
+        assert_eq!(contract.owns_controls, vec!["trim_thickness"]);
+        assert!(
+            contract
+                .requires
+                .iter()
+                .any(|requirement| requirement.id == "box-body")
+        );
+        assert!(
+            contract
+                .requires
+                .iter()
+                .any(|requirement| requirement.id == "exterior-band-placement-zone")
         );
     }
 

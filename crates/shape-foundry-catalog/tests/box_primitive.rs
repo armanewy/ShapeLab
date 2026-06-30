@@ -12,7 +12,7 @@ use shape_family::AssetFamilySchema;
 use shape_foundry::{
     CandidateLegibilityClass, ControlKind, ControlValue, CustomizerProfile,
     FoundryCompilationOutput, compile_foundry_document, lid_seam_feature_module_contract,
-    validate_feature_module_contract,
+    trim_band_feature_module_contract, validate_feature_module_contract,
 };
 use shape_foundry_catalog::{
     CatalogCurationState, FoundryFixtureCatalog, box_primitive, built_in_catalog_curation_metadata,
@@ -40,6 +40,11 @@ fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput 
 
 fn compile_lidded_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
     let fixture = box_primitive::lidded_box_fixture_catalog();
+    compile_fixture_with(&fixture, overrides)
+}
+
+fn compile_trimmed_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    let fixture = box_primitive::trimmed_box_fixture_catalog();
     compile_fixture_with(&fixture, overrides)
 }
 
@@ -278,6 +283,236 @@ fn lidded_box_validates_exports_and_has_only_lid_seam_feature_role() {
         "package verification should pass: {verification:#?}"
     );
     fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn lidded_box_without_trim_band_remains_unchanged() {
+    let output = compile_lidded_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "body").len(), 1);
+    assert_eq!(role_instances(&output, "lid_seam").len(), 1);
+    assert!(role_instances(&output, "trim_band").is_empty());
+    assert_eq!(
+        output
+            .catalog
+            .customizer_profile
+            .controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Proportions", "Edge Softness", "Lid Seam"]
+    );
+}
+
+#[test]
+fn trimmed_box_includes_trim_band_module_contract() {
+    let contract = trim_band_feature_module_contract();
+    let report = validate_feature_module_contract(&contract);
+    assert!(
+        report.is_valid(),
+        "Trim Band module contract should validate: {report:#?}"
+    );
+    assert_eq!(contract.module_id, box_primitive::TRIM_BAND_MODULE_ID);
+    assert_eq!(contract.owns_controls, vec!["trim_thickness"]);
+    assert!(
+        contract
+            .quality_gates
+            .iter()
+            .any(|gate| gate.id == "trim-visible-in-pure-clay")
+    );
+    assert!(
+        contract
+            .quality_gates
+            .iter()
+            .any(|gate| gate.id == "trim-not-material-stripe")
+    );
+}
+
+#[test]
+fn trimmed_box_validates_exports_and_has_only_lid_seam_and_trim_band_roles() {
+    let output = compile_trimmed_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "body").len(), 1);
+    assert_eq!(role_instances(&output, "lid_seam").len(), 1);
+    assert_eq!(role_instances(&output, "trim_band").len(), 1);
+    for forbidden_role in ["feet_or_skids", "panel", "handle", "latch", "vent"] {
+        assert!(
+            role_instances(&output, forbidden_role).is_empty(),
+            "Trimmed Box must not expose {forbidden_role}"
+        );
+    }
+
+    let package_dir = std::env::temp_dir().join(format!(
+        "shape-lab-trimmed-box-export-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&package_dir);
+    write_model_package(&output.recipe, &output.artifact, &package_dir).expect("write package");
+    let verification = verify_model_package(&package_dir).expect("verify package");
+    assert!(
+        verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads,
+        "package verification should pass: {verification:#?}"
+    );
+    fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn trimmed_box_controls_and_copy_are_honest() {
+    let fixture = box_primitive::trimmed_box_fixture_catalog();
+    let family = family(&fixture);
+    let profile = profile(&fixture);
+
+    assert_eq!(fixture.slug, box_primitive::TRIMMED_BOX_SLUG);
+    assert_eq!(family.id, box_primitive::TRIMMED_BOX_FAMILY_ID);
+    assert_eq!(family.display_name, "Trimmed Box");
+    assert_eq!(
+        family.summary,
+        "A simple lidded box with a visible trim band."
+    );
+    assert_eq!(profile.family_id, box_primitive::TRIMMED_BOX_FAMILY_ID);
+    assert_eq!(
+        profile.style_id.as_deref(),
+        Some(box_primitive::TRIMMED_BOX_STYLE_ID)
+    );
+    assert_eq!(
+        family
+            .part_roles
+            .iter()
+            .map(|role| role.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body", "lid_seam", "trim_band"]
+    );
+
+    let primary = profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+    assert_eq!(primary.len(), 4);
+    assert_eq!(
+        primary
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Proportions", "Edge Softness", "Lid Seam", "Trim Thickness"]
+    );
+
+    let strategy_copy = profile
+        .candidate_strategies
+        .iter()
+        .map(|strategy| strategy.label.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Clean Trimmed Box",
+            "Reinforced Trimmed Box",
+            "Compact Trimmed Box",
+            "Wide Trimmed Box",
+            "Low Trim Box",
+            "Soft Trimmed Box",
+        ]
+    );
+    let visible_copy = [
+        family.display_name.as_str(),
+        family.summary.as_str(),
+        strategy_copy.as_str(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    for forbidden in [
+        "crate",
+        "case",
+        "feet",
+        "skid",
+        "panel",
+        "handle",
+        "vent",
+        "latch",
+        "uv",
+        "texture",
+        "material",
+        "rig",
+        "animation",
+    ] {
+        assert!(
+            !visible_copy.contains(forbidden),
+            "Trimmed Box copy must not claim {forbidden}: {visible_copy}"
+        );
+    }
+}
+
+#[test]
+fn trimmed_box_trim_thickness_endpoint_is_visible_in_pure_clay() {
+    let fixture = box_primitive::trimmed_box_fixture_catalog();
+    let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
+        .expect("endpoint report should generate");
+
+    assert_eq!(report.controls.len(), 4);
+    let trim_row = report
+        .controls
+        .iter()
+        .find(|row| row.control_id == "trim_thickness")
+        .expect("Trim Thickness endpoint row");
+    assert!(
+        matches!(
+            trim_row.legibility_class,
+            CandidateLegibilityClass::Strong
+                | CandidateLegibilityClass::Clear
+                | CandidateLegibilityClass::SubtleButExplainable
+        ),
+        "Trim Thickness endpoint should produce visible geometry: {trim_row:#?}"
+    );
+}
+
+#[test]
+fn trimmed_box_candidate_ideas_compile_to_distinct_shapes() {
+    let variants = [
+        (
+            "Clean Trimmed Box",
+            vec![("trim_thickness", ControlValue::Scalar(0.0))],
+        ),
+        (
+            "Reinforced Trimmed Box",
+            vec![("trim_thickness", ControlValue::Scalar(1.0))],
+        ),
+        (
+            "Compact Trimmed Box",
+            vec![(
+                "proportions",
+                ControlValue::Choice("compact_box".to_owned()),
+            )],
+        ),
+        (
+            "Wide Trimmed Box",
+            vec![("proportions", ControlValue::Choice("wide_box".to_owned()))],
+        ),
+        (
+            "Low Trim Box",
+            vec![("lid_height", ControlValue::Scalar(0.0))],
+        ),
+        (
+            "Soft Trimmed Box",
+            vec![("edge_softness", ControlValue::Scalar(1.0))],
+        ),
+    ];
+
+    let mut fingerprints = BTreeSet::new();
+    for (label, overrides) in variants {
+        let output = compile_trimmed_with(&overrides);
+        assert_valid_model(&output);
+        assert!(
+            fingerprints.insert(output.build_stamp.artifact_fingerprint.0.to_hex()),
+            "{label} should produce a distinct compiled trimmed box"
+        );
+    }
 }
 
 #[test]

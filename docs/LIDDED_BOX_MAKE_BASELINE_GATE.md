@@ -97,5 +97,5 @@ Still blocked:
 - public Family Studio flow
 - runtime LLM
 
-After Trimmed Box passes, stop the box ladder and prove Stool Primitive before
+After Trimmed Box passes, stop the box ladder and prove Door Primitive before
 Family Studio Lite.
