@@ -50,11 +50,11 @@ fn deterministic_build_emits_stable_stamp_and_snapshot() {
 fn catalog_fingerprint_mismatch_is_reported() {
     let mut fixture = RuntimeFixture::new();
     let mut wrong_family = family_schema();
-    wrong_family.display_name = "Wrong Bridge".to_owned();
+    wrong_family.display_name = "Wrong Box Primitive".to_owned();
     fixture
         .catalog
         .entries
-        .insert("bridge-family".to_owned(), json(&wrong_family));
+        .insert("box_primitive-family".to_owned(), json(&wrong_family));
 
     let error = compile_foundry_document(&fixture.document, &fixture.catalog)
         .expect_err("catalog mismatch should fail");
@@ -105,7 +105,7 @@ fn final_conformance_rejects_missing_required_export_metadata() {
         triangle_budget_hint: None,
     });
     let (family_ref, family_json) =
-        catalog_entry("bridge-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
+        catalog_entry("box_primitive-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
     fixture.document.family_content_ref = family_ref;
     fixture.document.catalog_lock = Some(FoundryCatalogLock {
         exact_refs: document_catalog_refs(&fixture.document),
@@ -116,7 +116,7 @@ fn final_conformance_rejects_missing_required_export_metadata() {
     fixture
         .catalog
         .entries
-        .insert("bridge-family".to_owned(), family_json);
+        .insert("box_primitive-family".to_owned(), family_json);
 
     let error = compile_foundry_document(&fixture.document, &fixture.catalog)
         .expect_err("missing required metadata should reject final conformance");
@@ -180,7 +180,7 @@ fn revalidated_override_survives_changed_style_when_edit_still_applies() {
         .keys()
         .next()
         .expect("base recipe should expose a radius parameter");
-    fixture.switch_to_modern_style();
+    fixture.switch_to_soft_style();
     fixture
         .document
         .local_recipe_overrides
@@ -223,7 +223,7 @@ fn pinned_override_rejects_changed_style() {
         .keys()
         .next()
         .expect("base recipe should expose a radius parameter");
-    fixture.switch_to_modern_style();
+    fixture.switch_to_soft_style();
     fixture
         .document
         .local_recipe_overrides
@@ -330,8 +330,8 @@ impl FoundryCatalogResolver for TestCatalog {
 struct RuntimeFixture {
     document: FoundryAssetDocument,
     catalog: TestCatalog,
-    modern_style_ref: CatalogContentRef,
-    modern_style_impl_ref: CatalogContentRef,
+    soft_style_ref: CatalogContentRef,
+    soft_style_impl_ref: CatalogContentRef,
     incompatible_style_ref: CatalogContentRef,
     incompatible_style_impl_ref: CatalogContentRef,
 }
@@ -339,63 +339,76 @@ struct RuntimeFixture {
 impl RuntimeFixture {
     fn new() -> Self {
         let family = family_schema();
-        let roman_style = style_kit("roman", "Roman", "bridge", &["roman_body", "heavy_body"]);
-        let modern_style = style_kit("modern", "Modern", "bridge", &["modern_body"]);
-        let incompatible_style = style_kit("alien", "Alien", "crate", &["alien_body"]);
+        let plain_style = style_kit(
+            "plain_clay",
+            "Plain Clay",
+            "box_primitive",
+            &["plain_body", "heavy_body"],
+        );
+        let soft_style = style_kit("soft_clay", "Soft Clay", "box_primitive", &["soft_body"]);
+        let incompatible_style = style_kit(
+            "unsupported",
+            "Unsupported",
+            "other_family",
+            &["unsupported_body"],
+        );
         let family_impl = family_implementation();
-        let roman_style_impl = style_implementation(
-            "roman",
-            "bridge",
-            "roman_body",
+        let plain_style_impl = style_implementation(
+            "plain_clay",
+            "box_primitive",
+            "plain_body",
             vec![
-                provider_fragment("roman_body", 0.1),
+                provider_fragment("plain_body", 0.1),
                 provider_fragment("heavy_body", 0.2),
             ],
         );
-        let modern_style_impl = style_implementation(
-            "modern",
-            "bridge",
-            "modern_body",
-            vec![provider_fragment("modern_body", 0.12)],
+        let soft_style_impl = style_implementation(
+            "soft_clay",
+            "box_primitive",
+            "soft_body",
+            vec![provider_fragment("soft_body", 0.12)],
         );
         let incompatible_style_impl = style_implementation(
-            "alien",
-            "crate",
-            "alien_body",
-            vec![provider_fragment("alien_body", 0.1)],
+            "unsupported",
+            "other_family",
+            "unsupported_body",
+            vec![provider_fragment("unsupported_body", 0.1)],
         );
         let profile = customizer_profile();
 
         let (family_ref, family_json) =
-            catalog_entry("bridge-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
-        let (roman_style_ref, roman_style_json) =
-            catalog_entry("roman-style", STYLE_KIT_SCHEMA_VERSION, &roman_style);
-        let (modern_style_ref, modern_style_json) =
-            catalog_entry("modern-style", STYLE_KIT_SCHEMA_VERSION, &modern_style);
-        let (incompatible_style_ref, incompatible_style_json) =
-            catalog_entry("alien-style", STYLE_KIT_SCHEMA_VERSION, &incompatible_style);
+            catalog_entry("box_primitive-family", ASSET_FAMILY_SCHEMA_VERSION, &family);
+        let (plain_style_ref, plain_style_json) =
+            catalog_entry("plain_clay-style", STYLE_KIT_SCHEMA_VERSION, &plain_style);
+        let (soft_style_ref, soft_style_json) =
+            catalog_entry("soft_clay-style", STYLE_KIT_SCHEMA_VERSION, &soft_style);
+        let (incompatible_style_ref, incompatible_style_json) = catalog_entry(
+            "unsupported-style",
+            STYLE_KIT_SCHEMA_VERSION,
+            &incompatible_style,
+        );
         let (family_impl_ref, family_impl_json) = catalog_entry(
-            "bridge-family-impl",
+            "box_primitive-family-impl",
             FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
             &family_impl,
         );
-        let (roman_style_impl_ref, roman_style_impl_json) = catalog_entry(
-            "roman-style-impl",
+        let (plain_style_impl_ref, plain_style_impl_json) = catalog_entry(
+            "plain_clay-style-impl",
             STYLE_IMPLEMENTATION_SCHEMA_VERSION,
-            &roman_style_impl,
+            &plain_style_impl,
         );
-        let (modern_style_impl_ref, modern_style_impl_json) = catalog_entry(
-            "modern-style-impl",
+        let (soft_style_impl_ref, soft_style_impl_json) = catalog_entry(
+            "soft_clay-style-impl",
             STYLE_IMPLEMENTATION_SCHEMA_VERSION,
-            &modern_style_impl,
+            &soft_style_impl,
         );
         let (incompatible_style_impl_ref, incompatible_style_impl_json) = catalog_entry(
-            "alien-style-impl",
+            "unsupported-style-impl",
             STYLE_IMPLEMENTATION_SCHEMA_VERSION,
             &incompatible_style_impl,
         );
         let (profile_ref, profile_json) = catalog_entry(
-            "bridge-profile",
+            "box_primitive-profile",
             shape_foundry::CUSTOMIZER_PROFILE_SCHEMA_VERSION,
             &profile,
         );
@@ -404,9 +417,9 @@ impl RuntimeFixture {
             schema_version: FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
             document_id: FoundryDocumentId("doc-runtime".to_owned()),
             family_content_ref: family_ref,
-            style_content_ref: roman_style_ref,
+            style_content_ref: plain_style_ref,
             family_implementation_ref: family_impl_ref,
-            style_implementation_ref: roman_style_impl_ref,
+            style_implementation_ref: plain_style_impl_ref,
             customizer_profile_ref: profile_ref,
             control_state: BTreeMap::from([("radius".to_owned(), ControlValue::Scalar(0.15))]),
             provider_overrides: BTreeMap::new(),
@@ -426,31 +439,34 @@ impl RuntimeFixture {
 
         let catalog = TestCatalog {
             entries: BTreeMap::from([
-                ("bridge-family".to_owned(), family_json),
-                ("roman-style".to_owned(), roman_style_json),
-                ("modern-style".to_owned(), modern_style_json),
-                ("alien-style".to_owned(), incompatible_style_json),
-                ("bridge-family-impl".to_owned(), family_impl_json),
-                ("roman-style-impl".to_owned(), roman_style_impl_json),
-                ("modern-style-impl".to_owned(), modern_style_impl_json),
-                ("alien-style-impl".to_owned(), incompatible_style_impl_json),
-                ("bridge-profile".to_owned(), profile_json),
+                ("box_primitive-family".to_owned(), family_json),
+                ("plain_clay-style".to_owned(), plain_style_json),
+                ("soft_clay-style".to_owned(), soft_style_json),
+                ("unsupported-style".to_owned(), incompatible_style_json),
+                ("box_primitive-family-impl".to_owned(), family_impl_json),
+                ("plain_clay-style-impl".to_owned(), plain_style_impl_json),
+                ("soft_clay-style-impl".to_owned(), soft_style_impl_json),
+                (
+                    "unsupported-style-impl".to_owned(),
+                    incompatible_style_impl_json,
+                ),
+                ("box_primitive-profile".to_owned(), profile_json),
             ]),
         };
 
         Self {
             document,
             catalog,
-            modern_style_ref,
-            modern_style_impl_ref,
+            soft_style_ref,
+            soft_style_impl_ref,
             incompatible_style_ref,
             incompatible_style_impl_ref,
         }
     }
 
-    fn switch_to_modern_style(&mut self) {
-        self.document.style_content_ref = self.modern_style_ref.clone();
-        self.document.style_implementation_ref = self.modern_style_impl_ref.clone();
+    fn switch_to_soft_style(&mut self) {
+        self.document.style_content_ref = self.soft_style_ref.clone();
+        self.document.style_implementation_ref = self.soft_style_impl_ref.clone();
         self.document.catalog_lock = Some(FoundryCatalogLock {
             exact_refs: document_catalog_refs(&self.document),
             embedded_snapshots: Vec::new(),
@@ -484,9 +500,9 @@ impl RuntimeFixture {
 fn family_schema() -> AssetFamilySchema {
     AssetFamilySchema {
         schema_version: ASSET_FAMILY_SCHEMA_VERSION,
-        id: "bridge".to_owned(),
-        display_name: "Bridge".to_owned(),
-        summary: "Runtime test bridge family".to_owned(),
+        id: "box_primitive".to_owned(),
+        display_name: "Box Primitive".to_owned(),
+        summary: "Runtime test box_primitive family".to_owned(),
         part_roles: vec![PartRole {
             id: "body".to_owned(),
             display_name: "Body".to_owned(),
@@ -516,7 +532,7 @@ fn family_schema() -> AssetFamilySchema {
         constraints: Vec::new(),
         variant_rules: Vec::new(),
         export_requirements: Vec::new(),
-        compatible_style_kits: vec!["roman".to_owned(), "modern".to_owned()],
+        compatible_style_kits: vec!["plain_clay".to_owned(), "soft_clay".to_owned()],
         tags: Vec::new(),
     }
 }
@@ -576,7 +592,7 @@ fn style_kit(id: &str, label: &str, family_id: &str, prototypes: &[&str]) -> Sty
 fn family_implementation() -> FamilyImplementation {
     FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
-        family_id: "bridge".to_owned(),
+        family_id: "box_primitive".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "Base"),
         parameter_bindings: vec![ParameterBinding::Scalar {
             slot: "radius".to_owned(),
@@ -681,7 +697,7 @@ fn body_recipe(title: &str, radius: f32) -> AssetRecipe {
 }
 
 fn customizer_profile() -> CustomizerProfile {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box_primitive", Some("plain_clay".to_owned()));
     profile.controls.push(CustomizerControl {
         id: "radius".to_owned(),
         label: "Radius".to_owned(),

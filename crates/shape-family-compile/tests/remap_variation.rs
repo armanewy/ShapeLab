@@ -172,7 +172,7 @@ fn remaps_cut_group() {
     let remap = sample_remap();
     let mut metadata = AuthoredVariationMetadata::default();
     metadata.semantic_cut_groups.insert(
-        "vents".to_owned(),
+        "edge_marks".to_owned(),
         SemanticCutGroupHint {
             label: "Vents".to_owned(),
             definition: PartDefinitionId(10),
@@ -187,7 +187,7 @@ fn remaps_cut_group() {
 
     let remapped =
         remap_variation_metadata("fragment", &metadata, &remap).expect("cut group should remap");
-    let group = &remapped.semantic_cut_groups["vents"];
+    let group = &remapped.semantic_cut_groups["edge_marks"];
 
     assert_eq!(group.definition, PartDefinitionId(110));
     assert_eq!(group.operations, vec![OperationId(441), OperationId(442)]);
@@ -266,7 +266,7 @@ fn remapping_is_deterministic() {
         },
     );
     metadata.semantic_cut_groups.insert(
-        "vents".to_owned(),
+        "edge_marks".to_owned(),
         SemanticCutGroupHint {
             label: "Vents".to_owned(),
             definition: PartDefinitionId(11),

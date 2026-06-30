@@ -18,12 +18,12 @@ use shape_project::foundry::{
 #[test]
 fn save_load_preserves_replayable_branch_history() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("bridge.shapelab-foundry.json");
+    let path = temp_dir.path().join("box_primitive.shapelab-foundry.json");
     let root_document = document_fixture();
-    let root_recipe = recipe("Generated Bridge");
+    let root_recipe = recipe("Generated Box Primitive");
     let root_snapshot = GeneratedRecipeSnapshot::from_recipe(&root_recipe).unwrap();
     let mut project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -79,7 +79,7 @@ fn role_presence_program_replays_as_persisted_toggle_state() {
     let path = temp_dir.path().join("role-presence.shapelab-foundry.json");
     let root_document = document_fixture();
     let mut project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -127,7 +127,7 @@ fn load_rejects_revision_when_replay_does_not_match_child_snapshot() {
     let path = temp_dir.path().join("bad-replay.shapelab-foundry.json");
     let root_document = document_fixture();
     let mut project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -169,14 +169,14 @@ fn catalog_mismatch_with_embedded_snapshot_loads_read_only_and_marks_stale() {
     let path = temp_dir.path().join("recovery.shapelab-foundry.json");
     let mut root_document = document_fixture();
     let embedded_json = r#"{"style":"embedded"}"#;
-    root_document.style_content_ref = catalog_ref_for_json("roman-style", embedded_json);
+    root_document.style_content_ref = catalog_ref_for_json("plain_clay-style", embedded_json);
     let mut lock = catalog_lock_for(&root_document);
     lock.embedded_snapshots.push(EmbeddedCatalogSnapshot {
         content_ref: root_document.style_content_ref.clone(),
         canonical_json: embedded_json.to_owned(),
     });
     let project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         lock,
         None,
@@ -189,7 +189,7 @@ fn catalog_mismatch_with_embedded_snapshot_loads_read_only_and_marks_stale() {
     let mut context = FoundryProjectLoadContext::default();
     context
         .catalog_refs
-        .insert("style".to_owned(), content_ref("roman-style", 99));
+        .insert("style".to_owned(), content_ref("plain_clay-style", 99));
     let outcome = FoundryProject::load_json_with_context(&path, &context).unwrap();
 
     assert!(outcome.report.read_only_recovery);
@@ -206,7 +206,7 @@ fn catalog_mismatch_with_embedded_snapshot_loads_read_only_and_marks_stale() {
 fn corrupted_embedded_catalog_snapshot_is_rejected() {
     let mut root_document = document_fixture();
     let embedded_json = r#"{"style":"embedded"}"#;
-    root_document.style_content_ref = catalog_ref_for_json("roman-style", embedded_json);
+    root_document.style_content_ref = catalog_ref_for_json("plain_clay-style", embedded_json);
     let mut lock = catalog_lock_for(&root_document);
     lock.embedded_snapshots.push(EmbeddedCatalogSnapshot {
         content_ref: root_document.style_content_ref.clone(),
@@ -215,7 +215,7 @@ fn corrupted_embedded_catalog_snapshot_is_rejected() {
 
     assert!(matches!(
         FoundryProject::new(
-            "Bridge Foundry",
+            "Box Primitive Foundry",
             root_document,
             lock,
             None,
@@ -242,7 +242,7 @@ fn provider_override_refs_are_part_of_the_exact_catalog_lock() {
 
     assert!(matches!(
         FoundryProject::new(
-            "Bridge Foundry",
+            "Box Primitive Foundry",
             root_document.clone(),
             missing_provider_lock,
             None,
@@ -263,7 +263,7 @@ fn provider_override_refs_are_part_of_the_exact_catalog_lock() {
         .insert("provider.extra".to_owned(), content_ref("extra", 7));
     assert!(matches!(
         FoundryProject::new(
-            "Bridge Foundry",
+            "Box Primitive Foundry",
             root_document,
             extra_lock,
             None,
@@ -287,7 +287,7 @@ fn catalog_mismatch_without_embedded_snapshot_is_rejected() {
         .join("catalog-mismatch.shapelab-foundry.json");
     let root_document = document_fixture();
     let project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -300,7 +300,7 @@ fn catalog_mismatch_without_embedded_snapshot_is_rejected() {
     let mut context = FoundryProjectLoadContext::default();
     context
         .catalog_refs
-        .insert("style".to_owned(), content_ref("roman-style", 99));
+        .insert("style".to_owned(), content_ref("plain_clay-style", 99));
 
     assert!(matches!(
         FoundryProject::load_json_with_context(&path, &context),
@@ -314,9 +314,9 @@ fn available_recipe_inputs_must_match_exact_stored_snapshot() {
     let temp_dir = tempdir();
     let path = temp_dir.path().join("recipe.shapelab-foundry.json");
     let root_document = document_fixture();
-    let recipe = recipe("Generated Bridge");
+    let recipe = recipe("Generated Box Primitive");
     let project = FoundryProject::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -337,7 +337,7 @@ fn available_recipe_inputs_must_match_exact_stored_snapshot() {
     );
 
     let mut changed_recipe = recipe;
-    changed_recipe.title = "Different Generated Bridge".to_owned();
+    changed_recipe.title = "Different Generated Box Primitive".to_owned();
     context
         .available_recipes
         .insert(RevisionId(0), changed_recipe);
@@ -352,7 +352,7 @@ fn project_file_enforces_suffix_and_writes_recovery_snapshot() {
     let temp_dir = tempdir();
     let root_document = document_fixture();
     let mut file = FoundryProjectFile::new(
-        "Bridge Foundry",
+        "Box Primitive Foundry",
         root_document.clone(),
         catalog_lock_for(&root_document),
         None,
@@ -362,13 +362,13 @@ fn project_file_enforces_suffix_and_writes_recovery_snapshot() {
     .unwrap();
 
     assert!(matches!(
-        file.save_as(temp_dir.path().join("bridge.json")),
+        file.save_as(temp_dir.path().join("box_primitive.json")),
         Err(FoundryProjectError::InvalidProjectPath { .. })
     ));
 
     let project_path = temp_dir
         .path()
-        .join(format!("bridge{FOUNDRY_PROJECT_FILE_SUFFIX}"));
+        .join(format!("box_primitive{FOUNDRY_PROJECT_FILE_SUFFIX}"));
     file.save_as(&project_path).unwrap();
     assert!(!file.is_dirty());
 
@@ -384,12 +384,12 @@ fn project_file_enforces_suffix_and_writes_recovery_snapshot() {
 
 fn document_fixture() -> FoundryAssetDocument {
     let mut document = FoundryAssetDocument::new(
-        FoundryDocumentId("doc-bridge".to_owned()),
-        content_ref("bridge-family", 1),
-        content_ref("roman-style", 2),
-        content_ref("bridge-family-impl", 3),
-        content_ref("roman-style-impl", 4),
-        content_ref("bridge-profile", 5),
+        FoundryDocumentId("doc-box_primitive".to_owned()),
+        content_ref("box_primitive-family", 1),
+        content_ref("plain_clay-style", 2),
+        content_ref("box_primitive-family-impl", 3),
+        content_ref("plain_clay-style-impl", 4),
+        content_ref("box_primitive-profile", 5),
     );
     document
         .control_state

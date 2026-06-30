@@ -9,13 +9,13 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
-    OperationId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, SocketId,
-    SocketSpec, Transform3, definition_scalar_path, validate_asset_recipe,
+    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, SocketId, SocketSpec,
+    Transform3, definition_scalar_path, validate_asset_recipe,
 };
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, BevelPolicy,
     ExaggerationPolicy, FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot,
-    FamilyStyleFacet, FamilyStylePolicyOverrides, LengthUnit, LengthValue, NormalizedBevelProfile,
+    FamilyStyleFacet, FamilyStylePolicyOverrides, LengthValue, NormalizedBevelProfile,
     ParameterExecutionPolicy, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
     RepetitionPolicy, RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement,
     STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
@@ -37,16 +37,8 @@ use shape_foundry::{
 };
 
 pub mod authoring;
-pub mod cargo_case;
-pub mod expanded_profiles;
+pub mod box_primitive;
 pub mod kits;
-pub mod moba_hero;
-pub mod roman_bridge;
-pub mod scifi_crate;
-pub mod showcase_gear;
-pub mod simple_crate;
-pub mod stylized_lamp;
-pub mod utility_crate;
 
 pub use authoring::*;
 pub use kits::*;
@@ -323,199 +315,13 @@ pub fn headless_fixture_catalogs() -> Vec<FoundryFixtureCatalog> {
 /// Return every built-in headless fixture catalog with its product label.
 #[must_use]
 pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixtureCatalog)> {
-    vec![
-        ("Simple Crate", simple_crate::fixture_catalog()),
-        ("Utility Crate", utility_crate::fixture_catalog()),
-        ("Roman Timber Bridge", roman_bridge::fixture_catalog()),
-        ("Roman Timber Bridge HQ", roman_bridge::hq_fixture_catalog()),
-        ("Sci-Fi Industrial Crate", scifi_crate::fixture_catalog()),
-        ("Stylized Furniture Lamp", stylized_lamp::fixture_catalog()),
-        (
-            "Market Stall Kit",
-            expanded_profiles::market_stall_fixture_catalog(),
-        ),
-        (
-            "Sci-Fi Door Panel",
-            expanded_profiles::scifi_door_fixture_catalog(),
-        ),
-        (
-            "Coopered Storage Barrel",
-            expanded_profiles::barrel_fixture_catalog(),
-        ),
-        (
-            "Wayfinding Signpost",
-            expanded_profiles::signpost_fixture_catalog(),
-        ),
-        ("Workshop Chair", expanded_profiles::chair_fixture_catalog()),
-        (
-            "Market Handcart",
-            expanded_profiles::handcart_fixture_catalog(),
-        ),
-        (
-            "Storybook Tree",
-            expanded_profiles::stylized_tree_fixture_catalog(),
-        ),
-        (
-            "Fantasy Sword",
-            showcase_gear::fantasy_sword_fixture_catalog(),
-        ),
-        (
-            "Round Shield",
-            showcase_gear::round_shield_fixture_catalog(),
-        ),
-        ("Hero Helmet", showcase_gear::hero_helmet_fixture_catalog()),
-        (
-            "Pauldron Pair",
-            showcase_gear::pauldron_pair_fixture_catalog(),
-        ),
-        ("Chest Armor", showcase_gear::chest_armor_fixture_catalog()),
-        ("Hero Foundry, Clay MVP", moba_hero::fixture_catalog()),
-    ]
+    vec![("Box Primitive", box_primitive::fixture_catalog())]
 }
 
 /// Return product-catalog curation metadata for every built-in profile.
 #[must_use]
 pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
-    vec![
-        simple_crate::curation_metadata(),
-        utility_crate::curation_metadata(),
-        CatalogCurationMetadata {
-            profile_slug: "roman-bridge",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Legacy bridge profile compiles, but the HQ profile carries current legibility evidence.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "roman-bridge-hq",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "HQ Roman Bridge has refreshed starter-template evidence, but remains PreviewOnly until the six-direction Usable gate passes.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "sci-fi-crate",
-            state: CatalogCurationState::Usable,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Sci-Fi Crate is default-visible only for current dogfood regression continuity; Simple Crate is the first novice crate baseline.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "stylized-lamp",
-            state: CatalogCurationState::Usable,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Stylized Lamp has authored direction and primary-control endpoint evidence.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "market-stall",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: false,
-            has_human_showcase_review: false,
-            note: "Expansion profile remains preview-only until six legible directions are documented.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "sci-fi-door",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Older automated evidence exists, but this branch keeps it out of the novice catalog until refreshed review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "storage-barrel",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: false,
-            has_human_showcase_review: false,
-            note: "Expansion profile remains preview-only until direction survival and control evidence are documented.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "signpost",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Older automated evidence exists, but this branch keeps it out of the novice catalog until refreshed review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "workshop-chair",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: false,
-            has_human_showcase_review: false,
-            note: "Expansion profile remains preview-only until six legible directions are documented.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "handcart",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: false,
-            has_human_showcase_review: false,
-            note: "Expansion profile remains preview-only until six legible directions are documented.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "stylized-tree",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: false,
-            has_readable_control_evidence: false,
-            has_human_showcase_review: false,
-            note: "Storybook Tree remains preview-only until current clay legibility evidence is recorded.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "fantasy-sword",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Automated gear evidence exists, but Showcase and novice exposure remain blocked pending review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "round-shield",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Automated gear evidence exists, but Showcase and novice exposure remain blocked pending review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "hero-helmet",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Automated gear evidence exists, but Showcase and novice exposure remain blocked pending review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "pauldron-pair",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Automated gear evidence exists, but Showcase and novice exposure remain blocked pending review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: "chest-armor",
-            state: CatalogCurationState::PreviewOnly,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Automated gear evidence exists, but Showcase and novice exposure remain blocked pending review.",
-        },
-        CatalogCurationMetadata {
-            profile_slug: moba_hero::MOBA_HERO_CLAY_SLUG,
-            state: CatalogCurationState::HiddenDraft,
-            has_visual_direction_evidence: true,
-            has_readable_control_evidence: true,
-            has_human_showcase_review: false,
-            note: "Clay hero profile remains direct-test only and is not part of the product catalog.",
-        },
-    ]
+    vec![box_primitive::curation_metadata()]
 }
 
 /// Return curation metadata for one built-in profile slug.
@@ -764,33 +570,6 @@ fn role(id: &str, multiplicity: RoleMultiplicity, required: bool) -> PartRole {
     }
 }
 
-fn length_slot(
-    id: &str,
-    label: &str,
-    role: &str,
-    minimum: f32,
-    maximum: f32,
-    step: f32,
-    default: f32,
-) -> FamilyParameterSlot {
-    FamilyParameterSlot {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        target_role: Some(role.to_owned()),
-        kind: FamilyParameterKind::Length {
-            unit: LengthUnit::Meters,
-        },
-        range: Some(ParameterRange {
-            minimum,
-            maximum,
-            step,
-        }),
-        default_value: Some(FamilyDefaultValue::Scalar(default)),
-        execution_policy: ParameterExecutionPolicy::RequiredBinding,
-        topology_changing: false,
-    }
-}
-
 fn ratio_slot(
     id: &str,
     label: &str,
@@ -813,44 +592,6 @@ fn ratio_slot(
         default_value: Some(FamilyDefaultValue::Scalar(default)),
         execution_policy: ParameterExecutionPolicy::RequiredBinding,
         topology_changing: false,
-    }
-}
-
-fn count_slot(
-    id: &str,
-    label: &str,
-    role: &str,
-    minimum: f32,
-    maximum: f32,
-    step: f32,
-    default: u32,
-) -> FamilyParameterSlot {
-    FamilyParameterSlot {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        target_role: Some(role.to_owned()),
-        kind: FamilyParameterKind::Count,
-        range: Some(ParameterRange {
-            minimum,
-            maximum,
-            step,
-        }),
-        default_value: Some(FamilyDefaultValue::Integer(default)),
-        execution_policy: ParameterExecutionPolicy::RequiredBinding,
-        topology_changing: true,
-    }
-}
-
-fn toggle_slot(id: &str, label: &str, role: &str, default: bool) -> FamilyParameterSlot {
-    FamilyParameterSlot {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        target_role: Some(role.to_owned()),
-        kind: FamilyParameterKind::Toggle,
-        range: None,
-        default_value: Some(FamilyDefaultValue::Toggle(default)),
-        execution_policy: ParameterExecutionPolicy::RequiredBinding,
-        topology_changing: true,
     }
 }
 
@@ -980,61 +721,6 @@ fn continuous_control(
     }
 }
 
-fn integer_control(
-    id: &str,
-    label: &str,
-    slot: &str,
-    default: i64,
-    minimum: i64,
-    maximum: i64,
-) -> CustomizerControl {
-    CustomizerControl {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        section: None,
-        primary: true,
-        visible: true,
-        kind: ControlKind::IntegerStepper { default },
-        bindings: vec![ControlSlotBinding {
-            slot: slot.to_owned(),
-            slot_policy: ParameterExecutionPolicy::RequiredBinding,
-            response: ResponseCurve::Linear,
-        }],
-        domain: FeasibleControlDomain {
-            continuous_intervals: Vec::new(),
-            discrete_values: (minimum..=maximum).map(ControlValue::Integer).collect(),
-            unavailable_options: BTreeMap::new(),
-            certification: DomainCertification::DiscreteSamples,
-        },
-        topology_behavior: ControlTopologyBehavior::TopologyChanging,
-        divergence: shape_foundry::ControlDivergence::Synced,
-    }
-}
-
-fn toggle_control(id: &str, label: &str, slot: &str, default: bool) -> CustomizerControl {
-    CustomizerControl {
-        id: id.to_owned(),
-        label: label.to_owned(),
-        section: None,
-        primary: true,
-        visible: true,
-        kind: ControlKind::Toggle { default },
-        bindings: vec![ControlSlotBinding {
-            slot: slot.to_owned(),
-            slot_policy: ParameterExecutionPolicy::RequiredBinding,
-            response: ResponseCurve::Linear,
-        }],
-        domain: FeasibleControlDomain {
-            continuous_intervals: Vec::new(),
-            discrete_values: vec![ControlValue::Toggle(false), ControlValue::Toggle(true)],
-            unavailable_options: BTreeMap::new(),
-            certification: DomainCertification::DiscreteSamples,
-        },
-        topology_behavior: ControlTopologyBehavior::TopologyChanging,
-        divergence: shape_foundry::ControlDivergence::Synced,
-    }
-}
-
 fn choice_control(id: &str, label: &str, slot: &str, values: &[&str]) -> CustomizerControl {
     CustomizerControl {
         id: id.to_owned(),
@@ -1131,33 +817,6 @@ fn rounded_box_fragment(
             ("geometry.rounded_box.half_extents.y", 0.05, 5.0, 0.05),
             ("geometry.rounded_box.half_extents.z", 0.05, 5.0, 0.05),
             ("geometry.rounded_box.radius", 0.0, 0.5, 0.01),
-        ],
-    )
-}
-
-fn cylinder_fragment(
-    id: &str,
-    role: &str,
-    radius: f32,
-    height: f32,
-    radial_segments: u32,
-    translation: [f32; 3],
-    operations: Vec<ModelingOperationSpec>,
-) -> RecipeFragment {
-    fragment(
-        id,
-        role,
-        GeometrySource::Cylinder {
-            radius,
-            height,
-            radial_segments,
-        },
-        translation,
-        operations,
-        &[
-            ("geometry.cylinder.radius", 0.01, 2.0, 0.01),
-            ("geometry.cylinder.height", 0.01, 5.0, 0.01),
-            ("geometry.cylinder.radial_segments", 6.0, 64.0, 1.0),
         ],
     )
 }
@@ -1268,14 +927,6 @@ fn fragment(
     }
 }
 
-fn linear_array(operation: u64, count: u32, offset: [f32; 3]) -> ModelingOperationSpec {
-    ModelingOperationSpec::LinearArray {
-        operation: OperationId(operation),
-        count,
-        offset,
-    }
-}
-
 /// Error while constructing a catalog lock from a manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FoundryCatalogManifestError {
@@ -1330,10 +981,10 @@ mod tests {
             catalog_id: "test-catalog".to_owned(),
             catalog_version: 4,
             entries: BTreeMap::from([(
-                "bridge-family-content".to_owned(),
+                "box-family-content".to_owned(),
                 FoundryCatalogEntry {
-                    content_ref: content_ref("bridge-family-content", 1),
-                    label: "Bridge Family".to_owned(),
+                    content_ref: content_ref("box-family-content", 1),
+                    label: "Box Family".to_owned(),
                     tags: Vec::new(),
                 },
             )]),
@@ -1341,13 +992,13 @@ mod tests {
 
         let lock = manifest
             .lock_selected(
-                [("family".to_owned(), "bridge-family-content".to_owned())],
+                [("family".to_owned(), "box-family-content".to_owned())],
                 "0.1.0",
             )
             .expect("lock should resolve");
 
         assert!(lock.exact_refs.contains_key("family"));
-        assert!(!lock.exact_refs.contains_key("bridge-family-content"));
+        assert!(!lock.exact_refs.contains_key("box-family-content"));
     }
 
     #[test]
@@ -1436,17 +1087,7 @@ mod tests {
 
     #[test]
     fn choose_visible_fixtures_keep_default_parts_visually_connected() {
-        let visible_slugs = BTreeSet::from([
-            "sci-fi-crate",
-            "stylized-lamp",
-            "sci-fi-door",
-            "signpost",
-            "fantasy-sword",
-            "round-shield",
-            "hero-helmet",
-            "pauldron-pair",
-            "chest-armor",
-        ]);
+        let visible_slugs = BTreeSet::from(["box-primitive"]);
         for fixture in headless_fixture_catalogs()
             .into_iter()
             .filter(|fixture| visible_slugs.contains(fixture.slug.as_str()))
@@ -1467,7 +1108,8 @@ mod tests {
     }
 
     fn max_nearest_part_gap_for_fixture(slug: &str) -> f32 {
-        if slug == "stylized-lamp" { 0.5 } else { 0.36 }
+        let _ = slug;
+        0.36
     }
 
     fn visually_disconnected_parts(
@@ -1526,56 +1168,18 @@ mod tests {
     }
 
     #[test]
-    fn advisory_and_runtime_controls_do_not_change_geometry_identity_but_required_controls_do() {
-        let fixture = scifi_crate::fixture_catalog();
-        let base = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
-            .expect("base crate should compile");
-
-        let mut runtime_document = fixture.document.clone();
-        runtime_document
-            .control_state
-            .insert("runtime_wear".to_owned(), ControlValue::Scalar(0.85));
-        let runtime = shape_foundry::compile_foundry_document(&runtime_document, &fixture)
-            .expect("runtime-only change should compile");
-        assert_eq!(
-            base.build_stamp.geometry_input_fingerprint,
-            runtime.build_stamp.geometry_input_fingerprint
-        );
-
-        let mut advisory_document = fixture.document.clone();
-        advisory_document
-            .control_state
-            .insert("advisory_weathering".to_owned(), ControlValue::Scalar(0.9));
-        let advisory = shape_foundry::compile_foundry_document(&advisory_document, &fixture)
-            .expect("advisory-only change should compile");
-        assert_eq!(
-            base.build_stamp.geometry_input_fingerprint,
-            advisory.build_stamp.geometry_input_fingerprint
-        );
-
-        let mut required_document = fixture.document.clone();
-        required_document
-            .control_state
-            .insert("overall_proportions".to_owned(), ControlValue::Scalar(0.9));
-        let required = shape_foundry::compile_foundry_document(&required_document, &fixture)
-            .expect("required change should compile");
-        assert_ne!(
-            base.build_stamp.geometry_input_fingerprint,
-            required.build_stamp.geometry_input_fingerprint
-        );
-    }
-
-    #[test]
     fn effective_family_request_contains_defaulted_slots() {
-        let fixture = scifi_crate::fixture_catalog();
+        let fixture = box_primitive::fixture_catalog();
         let mut document = fixture.document.clone();
-        document.control_state.remove("overall_proportions");
+        document.control_state.remove("proportions");
 
         let output = shape_foundry::compile_foundry_document(&document, &fixture)
             .expect("defaulted required control should compile");
         assert_eq!(
-            output.family_request.parameters.get("overall_proportions"),
-            Some(&shape_family_compile::FamilyValue::Scalar(0.52))
+            output.family_request.parameters.get("proportions"),
+            Some(&shape_family_compile::FamilyValue::Choice(
+                "compact_box".to_owned()
+            ))
         );
     }
 
@@ -1588,15 +1192,15 @@ mod tests {
             OverrideSurvivalPolicy, TouchedSemanticTarget,
         };
 
-        let fixture = scifi_crate::fixture_catalog();
+        let fixture = box_primitive::fixture_catalog();
         let base = shape_foundry::compile_foundry_document(&fixture.document, &fixture)
-            .expect("base crate should compile");
+            .expect("base box should compile");
         let parameter = base
             .recipe
             .parameters
             .values()
-            .find(|parameter| parameter.path.contains("rounded_box.half_extents.x"))
-            .expect("body width parameter should survive remapping")
+            .find(|parameter| parameter.path.contains("rounded_box.radius"))
+            .expect("edge softness parameter should survive remapping")
             .id;
 
         let mut document = fixture.document.clone();
@@ -1608,7 +1212,7 @@ mod tests {
                 seed: 11,
                 operations: vec![AssetEdit::SetScalar {
                     parameter,
-                    value: 1.45,
+                    value: 0.12,
                 }],
             },
             touched_targets: vec![TouchedSemanticTarget::Parameter(parameter)],
@@ -1623,7 +1227,7 @@ mod tests {
             LocalOverrideApplicationStatus::Revalidated
         );
         assert_eq!(
-            output.control_divergence.get("overall_proportions"),
+            output.control_divergence.get("edge_softness"),
             Some(&shape_foundry::ControlDivergence::DivergedByOverride)
         );
         assert_eq!(output.local_override_divergence_reports.len(), 1);
@@ -1633,7 +1237,7 @@ mod tests {
                 .iter()
                 .map(|control| control.control_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["overall_proportions"]
+            vec!["edge_softness"]
         );
     }
 }

@@ -38,7 +38,7 @@ fn semantic_revision_tree_rows_keep_branch_structure() {
     );
     assert_eq!(rows[1].summary.label, "Height change");
     assert_eq!(rows[1].summary.detail.as_deref(), Some("Changed Height"));
-    assert_eq!(rows[2].summary.label, "Changed Shade");
+    assert_eq!(rows[2].summary.label, "Changed Body");
     assert_eq!(rows[2].summary.detail.as_deref(), Some("Option updated"));
     assert!(rows[2].selected);
     assert!(rows[2].on_current_path);
@@ -60,18 +60,18 @@ fn summaries_identify_controls_providers_and_accepted_candidates() {
     assert_eq!(control.detail.as_deref(), Some("Value set to 0.75"));
     assert_eq!(control.changed_controls, vec!["height"]);
 
-    let provider_ref = content_ref("brass-shade", 9);
+    let provider_ref = content_ref("body.round", 9);
     let provider = history::command_summary(&FoundryCommand::SelectProvider {
-        role: "shade".to_owned(),
+        role: "body".to_owned(),
         provider_ref,
     });
     assert_eq!(
         provider.kind,
         history::FoundryHistorySummaryKind::ProviderChange
     );
-    assert_eq!(provider.label, "Changed Shade");
+    assert_eq!(provider.label, "Changed Body");
     assert_eq!(provider.detail.as_deref(), Some("Option updated"));
-    assert_eq!(provider.changed_provider_roles, vec!["shade"]);
+    assert_eq!(provider.changed_provider_roles, vec!["body"]);
 
     let candidate_id = FoundryCandidateId("candidate-7".to_owned());
     let accepted = history::command_summary(&FoundryCommand::AcceptCandidate {
@@ -90,10 +90,10 @@ fn local_overrides_and_stale_catalogs_surface_as_badges() {
     let mut document = minimal_foundry_document("override-doc");
     document
         .local_recipe_overrides
-        .push(local_override("panel-nudge", "Pinned"));
+        .push(local_override("body-nudge", "Pinned"));
     document
         .local_recipe_overrides
-        .push(local_override("trim-replay", "Revalidate"));
+        .push(local_override("edge-replay", "Revalidate"));
     let project = FoundryProject::new(
         "Override asset",
         document.clone(),
@@ -348,12 +348,12 @@ fn branched_project() -> FoundryProject {
 
     project.undo().expect("root should be undo target");
 
-    let provider_ref = content_ref("brass-shade", 9);
+    let provider_ref = content_ref("body.round", 9);
     let mut provider_document = root_document;
     provider_document.provider_overrides.insert(
-        "shade".to_owned(),
+        "body".to_owned(),
         ProviderOverride {
-            role: "shade".to_owned(),
+            role: "body".to_owned(),
             provider_ref: provider_ref.clone(),
         },
     );
@@ -361,7 +361,7 @@ fn branched_project() -> FoundryProject {
         .accept_commands(
             "Provider change",
             vec![FoundryCommand::SelectProvider {
-                role: "shade".to_owned(),
+                role: "body".to_owned(),
                 provider_ref,
             }],
             provider_document.clone(),

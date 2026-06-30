@@ -422,7 +422,7 @@ pub struct FoundryFoundationDraft {
 /// Archetype materializer report schema version.
 pub const ARCHETYPE_DRAFT_MATERIALIZATION_REPORT_SCHEMA_VERSION: u32 = 1;
 /// The only archetype supported by the v0 draft materializer.
-pub const CARGO_CASE_MATERIALIZER_ARCHETYPE_ID: &str = "cargo-case";
+pub const BOX_PRIMITIVE_MATERIALIZER_ARCHETYPE_ID: &str = "box-primitive";
 
 /// Deterministic report for one archetype draft materialization run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -971,9 +971,9 @@ pub fn materialize_archetype_foundation_draft(
     style_id: &str,
 ) -> Result<FoundryFoundationDraft, String> {
     let normalized_archetype = archetype_id.trim().replace('_', "-").to_ascii_lowercase();
-    if normalized_archetype != CARGO_CASE_MATERIALIZER_ARCHETYPE_ID {
+    if normalized_archetype != BOX_PRIMITIVE_MATERIALIZER_ARCHETYPE_ID {
         return Err(format!(
-            "unsupported archetype '{archetype_id}'; v0 supports cargo-case only"
+            "unsupported archetype '{archetype_id}'; v0 supports box-primitive only"
         ));
     }
     let family_id = normalize_id(family_id);
@@ -981,7 +981,7 @@ pub fn materialize_archetype_foundation_draft(
     if family_id.is_empty() || style_id.is_empty() {
         return Err("family-id and style-id must normalize to non-empty IDs".to_owned());
     }
-    Ok(cargo_case_archetype_draft(&family_id, &style_id))
+    Ok(box_primitive_archetype_draft(&family_id, &style_id))
 }
 
 /// Build a materialization report for an archetype draft.
@@ -993,7 +993,7 @@ pub fn archetype_draft_materialization_report(
     let validation = validate_foundation_draft(draft);
     ArchetypeDraftMaterializationReport {
         schema_version: ARCHETYPE_DRAFT_MATERIALIZATION_REPORT_SCHEMA_VERSION,
-        archetype_id: CARGO_CASE_MATERIALIZER_ARCHETYPE_ID.to_owned(),
+        archetype_id: BOX_PRIMITIVE_MATERIALIZER_ARCHETYPE_ID.to_owned(),
         family_id: draft.family_blueprint.family_id.clone(),
         style_id: draft.style_pack.style_id.clone(),
         publish_allowed: draft.publish_allowed,
@@ -1009,7 +1009,7 @@ pub fn archetype_draft_materialization_report(
             .iter()
             .any(|attempt| attempt.to_ascii_lowercase().contains("vertex")),
         missing_taste_bearing_providers: vec![
-            "authored Cargo Case provider geometry choices".to_owned(),
+            "authored Box Primitive provider geometry choices".to_owned(),
             "contact sheets and human review before any profile promotion".to_owned(),
         ],
         validation_issue_count: validation.issues.len(),
@@ -1017,39 +1017,22 @@ pub fn archetype_draft_materialization_report(
     }
 }
 
-fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundationDraft {
-    let required_roles = [
-        "body",
-        "lid",
-        "panel_fields",
-        "edge_trim",
-        "corner_guards",
-        "base_feet_or_skids",
-    ];
-    let optional_roles = [
-        "handles",
-        "latches",
-        "vents",
-        "fasteners",
-        "reinforcement_bands",
-        "utility_rails",
-        "side_grilles",
-        "label_plate_geometry",
-        "hinge_or_closure_detail",
-    ];
+fn box_primitive_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundationDraft {
+    let required_roles = ["body"];
+    let optional_roles: [&str; 0] = [];
     let roles = required_roles
         .iter()
         .map(|role| DraftFamilyRole {
             role_id: (*role).to_owned(),
             label: title_from_id(role),
             required: true,
-            tags: vec!["cargo_case".to_owned(), "required".to_owned()],
+            tags: vec!["box_primitive".to_owned(), "required".to_owned()],
         })
         .chain(optional_roles.iter().map(|role| DraftFamilyRole {
             role_id: (*role).to_owned(),
             label: title_from_id(role),
             required: false,
-            tags: vec!["cargo_case".to_owned(), "optional".to_owned()],
+            tags: vec!["box_primitive".to_owned(), "optional".to_owned()],
         }))
         .collect::<Vec<_>>();
     let provider_slots = roles
@@ -1058,7 +1041,7 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
             slot_id: format!("{}_slot", role.role_id),
             role_id: role.role_id.clone(),
             required: role.required,
-            compatibility_tags: vec!["cargo_case".to_owned()],
+            compatibility_tags: vec!["box_primitive".to_owned()],
         })
         .collect::<Vec<_>>();
     let slot_ids = provider_slots
@@ -1068,7 +1051,7 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
     let provider_pack_id = format!("{family_id}_draft_providers");
     let quality_profile_id = format!("{family_id}_draft_quality");
     let matrix_id = format!("{family_id}_draft_compatibility");
-    let draft_id = format!("{family_id}_cargo_case_archetype_draft");
+    let draft_id = format!("{family_id}_box_primitive_archetype_draft");
 
     FoundryFoundationDraft {
         schema_version: FOUNDRY_FOUNDATION_DRAFT_SCHEMA_VERSION,
@@ -1078,7 +1061,7 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
         catalog_visibility: FoundationCatalogVisibility::InternalOnly,
         human_review_required: true,
         publish_allowed: false,
-        category: "cargo-case".to_owned(),
+        category: "box-primitive".to_owned(),
         family_blueprint: DraftFamilyBlueprint {
             family_id: family_id.to_owned(),
             display_name: title_from_id(family_id),
@@ -1091,67 +1074,47 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
                 .iter()
                 .map(|role| (*role).to_owned())
                 .collect(),
-            sockets: vec![
-                DraftSocket {
-                    socket_id: "lid_to_body".to_owned(),
-                    from_role: "lid".to_owned(),
-                    to_role: "body".to_owned(),
-                    compatibility_tags: vec!["attached".to_owned()],
-                    required: true,
-                },
-                DraftSocket {
-                    socket_id: "handles_to_body".to_owned(),
-                    from_role: "handles".to_owned(),
-                    to_role: "body".to_owned(),
-                    compatibility_tags: vec!["attached".to_owned()],
-                    required: false,
-                },
-            ],
+            sockets: Vec::new(),
             export_part_names: required_roles
                 .iter()
                 .map(|role| title_from_id(role))
                 .collect(),
         },
         provider_taxonomy: DraftProviderTaxonomy {
-            taxonomy_id: format!("{family_id}_cargo_case_provider_taxonomy"),
+            taxonomy_id: format!("{family_id}_box_primitive_provider_taxonomy"),
             provider_slots,
             provider_packs: vec![DraftProviderPack {
                 pack_id: provider_pack_id.clone(),
-                label: format!("{} Cargo Case Draft Providers", title_from_id(family_id)),
+                label: format!("{} Box Primitive Draft Providers", title_from_id(family_id)),
                 supplied_slots: slot_ids.clone(),
-                compatibility_tags: vec!["cargo_case".to_owned()],
+                compatibility_tags: vec!["box_primitive".to_owned()],
             }],
         },
         style_pack: DraftStylePack {
             style_id: style_id.to_owned(),
             display_name: title_from_id(style_id),
-            bevel_language:
-                "Cargo Case drafts reserve bevel/chamfer language for authored providers."
-                    .to_owned(),
-            proportion_language: "Use visible case proportions without changing topology."
+            bevel_language: "Box Primitive uses simple edge softness only.".to_owned(),
+            proportion_language: "Use visible box proportions without changing topology."
                 .to_owned(),
-            detail_density_policy: "Detail density must operate through declared Cargo Case slots."
+            detail_density_policy: "No detail modules are part of the Box Primitive baseline."
                 .to_owned(),
-            silhouette_policy: "Preserve a readable equipment-case silhouette in pure clay."
-                .to_owned(),
-            symmetry_policy: "Default to bilateral case symmetry unless reviewed otherwise."
-                .to_owned(),
-            allowed_provider_tags: vec!["cargo_case".to_owned()],
+            silhouette_policy: "Preserve a readable closed box silhouette in pure clay.".to_owned(),
+            symmetry_policy: "Default to axis-aligned bilateral symmetry.".to_owned(),
+            allowed_provider_tags: vec!["box_primitive".to_owned()],
             forbidden_provider_tags: vec!["raw_mesh_payload".to_owned()],
             compatibility_style_ids: Vec::new(),
         },
         control_profile: DraftControlProfile {
-            profile_id: format!("{family_id}_cargo_case_controls"),
+            profile_id: format!("{family_id}_box_primitive_controls"),
             maximum_primary_controls: DEFAULT_MAX_PRIMARY_NOVICE_CONTROLS,
-            controls: cargo_case_draft_controls(),
+            controls: box_primitive_draft_controls(),
         },
         candidate_strategy_pack: DraftCandidateStrategyPack {
-            pack_id: format!("{family_id}_cargo_case_strategies"),
-            strategies: cargo_case_draft_strategies(),
+            pack_id: format!("{family_id}_box_primitive_strategies"),
+            strategies: box_primitive_draft_strategies(),
             diversity_goals: vec![
                 "whole-asset proportions".to_owned(),
-                "panel/trim/vent/handle provider variation".to_owned(),
-                "detail density endpoints".to_owned(),
+                "edge softness endpoints".to_owned(),
             ],
         },
         compatibility_matrix: DraftCompatibilityMatrix {
@@ -1160,7 +1123,8 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
                 style_id: style_id.to_owned(),
                 provider_pack_id,
                 compatible: true,
-                reason: "Cargo Case archetype draft uses matching cargo_case tags.".to_owned(),
+                reason: "Box Primitive archetype draft uses matching box_primitive tags."
+                    .to_owned(),
             }],
         },
         quality_gate_profile: Some(DraftQualityGateProfile {
@@ -1176,7 +1140,7 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
             ],
         }),
         test_plan: DraftTestPlan {
-            test_plan_id: format!("{family_id}_cargo_case_test_plan"),
+            test_plan_id: format!("{family_id}_box_primitive_test_plan"),
             tests: vec![
                 "Validate generated draft schema.".to_owned(),
                 "Confirm publish_allowed false and novice_visible false.".to_owned(),
@@ -1185,9 +1149,9 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
             ],
         },
         review_checklist: DraftReviewChecklist {
-            checklist_id: format!("{family_id}_cargo_case_review"),
+            checklist_id: format!("{family_id}_box_primitive_review"),
             items: vec![
-                "Confirm all required Cargo Case roles are present.".to_owned(),
+                "Confirm the required Box Primitive body role is present.".to_owned(),
                 "Confirm taste-bearing providers are authored, not generated as raw vertices."
                     .to_owned(),
                 "Confirm no novice catalog visibility before human review.".to_owned(),
@@ -1199,60 +1163,21 @@ fn cargo_case_archetype_draft(family_id: &str, style_id: &str) -> FoundryFoundat
     }
 }
 
-fn cargo_case_draft_controls() -> Vec<DraftControl> {
+fn box_primitive_draft_controls() -> Vec<DraftControl> {
     vec![
         draft_control(
-            "overall_proportions",
-            "Overall Proportions",
-            &["overall_proportions"],
+            "proportions",
+            "Proportions",
+            &["body_proportions"],
             &[],
             ControlProfileTopologyBehavior::TopologyPreserving,
         ),
         draft_control(
-            "structural_heft",
-            "Structural Heft",
-            &["structural_heft"],
+            "edge_softness",
+            "Edge Softness",
+            &["body_edge_softness"],
             &[],
             ControlProfileTopologyBehavior::TopologyPreserving,
-        ),
-        draft_control(
-            "panel_complexity",
-            "Panel Complexity",
-            &[],
-            &["panel_fields_slot"],
-            ControlProfileTopologyBehavior::TopologyChanging,
-        ),
-        draft_control(
-            "handle_style",
-            "Handle Style",
-            &[],
-            &["handles_slot"],
-            ControlProfileTopologyBehavior::TopologyChanging,
-        ),
-        draft_control(
-            "vent_density",
-            "Vent Density",
-            &[],
-            &["vents_slot", "side_grilles_slot"],
-            ControlProfileTopologyBehavior::TopologyChanging,
-        ),
-        draft_control(
-            "trim_style",
-            "Trim Style",
-            &[],
-            &["edge_trim_slot", "corner_guards_slot", "utility_rails_slot"],
-            ControlProfileTopologyBehavior::TopologyChanging,
-        ),
-        draft_control(
-            "detail_density",
-            "Detail Density",
-            &[],
-            &[
-                "fasteners_slot",
-                "latches_slot",
-                "hinge_or_closure_detail_slot",
-            ],
-            ControlProfileTopologyBehavior::TopologyChanging,
         ),
     ]
 }
@@ -1267,7 +1192,7 @@ fn draft_control(
     DraftControl {
         control_id: control_id.to_owned(),
         label: label.to_owned(),
-        description: format!("{label} must visibly change the Cargo Case clay preview."),
+        description: format!("{label} must visibly change the Box Primitive clay preview."),
         kind: if matches!(
             topology_behavior,
             ControlProfileTopologyBehavior::TopologyPreserving
@@ -1289,44 +1214,24 @@ fn draft_control(
     }
 }
 
-fn cargo_case_draft_strategies() -> Vec<DraftCandidateStrategy> {
+fn box_primitive_draft_strategies() -> Vec<DraftCandidateStrategy> {
     [
+        ("compact_box", "Compact Box", &["proportions"][..]),
+        ("wide_box", "Wide Box", &["proportions"][..]),
+        ("tall_box", "Tall Box", &["proportions"][..]),
+        ("flat_box", "Flat Box", &["proportions"][..]),
+        ("soft_edged_box", "Soft-Edged Box", &["edge_softness"][..]),
         (
-            "light",
-            "Light",
-            &["overall_proportions", "structural_heft"][..],
-        ),
-        (
-            "reinforced",
-            "Reinforced",
-            &["structural_heft", "trim_style", "detail_density"][..],
-        ),
-        (
-            "compact",
-            "Compact",
-            &["overall_proportions", "handle_style"][..],
-        ),
-        (
-            "wide",
-            "Wide",
-            &["overall_proportions", "panel_complexity"][..],
-        ),
-        (
-            "minimal",
-            "Minimal",
-            &["panel_complexity", "detail_density"][..],
-        ),
-        (
-            "detailed",
-            "Detailed",
-            &["panel_complexity", "vent_density", "detail_density"][..],
+            "sharp_utility_box",
+            "Sharp Utility Box",
+            &["edge_softness"][..],
         ),
     ]
     .into_iter()
     .map(|(id, name, controls)| DraftCandidateStrategy {
         strategy_id: id.to_owned(),
         name: name.to_owned(),
-        explanation: format!("{name} Cargo Case draft direction through visible controls."),
+        explanation: format!("{name} Box Primitive draft direction through visible controls."),
         allowed_controls: controls
             .iter()
             .map(|control| (*control).to_owned())
@@ -1339,24 +1244,19 @@ fn cargo_case_draft_strategies() -> Vec<DraftCandidateStrategy> {
 /// Return deterministic internal foundation fixtures.
 #[must_use]
 pub fn foundation_draft_fixtures() -> Vec<FoundryFoundationDraft> {
-    [
-        ("weapons", "fantasy_sword_core"),
-        ("armor", "round_shield_core"),
-        ("armor", "helmet_core"),
-        ("architecture", "rustic_bridge_detail_pack"),
-    ]
-    .into_iter()
-    .map(|(category, family)| {
-        let mut draft = foundation_draft_template(category, family);
-        draft.source_kind = FoundationDraftSourceKind::GeneratedFixture;
-        draft.draft_id = format!("{family}_draft");
-        draft.quality_target = FoundationQualityTarget::Draft;
-        draft.catalog_visibility = FoundationCatalogVisibility::InternalOnly;
-        draft.human_review_required = true;
-        draft.publish_allowed = false;
-        draft
-    })
-    .collect()
+    [("boxes", "box_primitive_core")]
+        .into_iter()
+        .map(|(category, family)| {
+            let mut draft = foundation_draft_template(category, family);
+            draft.source_kind = FoundationDraftSourceKind::GeneratedFixture;
+            draft.draft_id = format!("{family}_draft");
+            draft.quality_target = FoundationQualityTarget::Draft;
+            draft.catalog_visibility = FoundationCatalogVisibility::InternalOnly;
+            draft.human_review_required = true;
+            draft.publish_allowed = false;
+            draft
+        })
+        .collect()
 }
 
 /// Validate a foundation draft.
@@ -2167,7 +2067,7 @@ pub fn foundation_adversarial_report(draft: &FoundryFoundationDraft) -> DraftAdv
             "fewer_controls",
             "Does the kit need fewer controls?",
             if primary_count > 5 {
-                "Primary controls are approaching novice complexity; trim before promotion."
+                "Primary controls are approaching novice complexity; reduce before promotion."
             } else {
                 "Primary control count is restrained for a draft."
             },
@@ -2347,31 +2247,13 @@ fn contains_raw_authoring_marker(value: &str) -> bool {
 }
 
 fn primary_role_for_family(family_id: &str) -> String {
-    if family_id.contains("sword") {
-        "blade".to_owned()
-    } else if family_id.contains("shield") {
-        "shield_body".to_owned()
-    } else if family_id.contains("helmet") {
-        "helmet_shell".to_owned()
-    } else if family_id.contains("bridge") {
-        "span".to_owned()
-    } else {
-        "body".to_owned()
-    }
+    let _ = family_id;
+    "body".to_owned()
 }
 
 fn secondary_role_for_family(family_id: &str) -> String {
-    if family_id.contains("sword") {
-        "guard".to_owned()
-    } else if family_id.contains("shield") {
-        "rim".to_owned()
-    } else if family_id.contains("helmet") {
-        "trim".to_owned()
-    } else if family_id.contains("bridge") {
-        "supports".to_owned()
-    } else {
-        "detail".to_owned()
-    }
+    let _ = family_id;
+    "detail".to_owned()
 }
 
 fn normalize_id(value: &str) -> String {
@@ -2409,7 +2291,7 @@ mod tests {
 
     #[test]
     fn foundation_draft_schema_roundtrips() {
-        let draft = foundation_draft_template("weapons", "sword");
+        let draft = foundation_draft_template("boxes", "box_primitive");
         let json = serde_json::to_string(&draft).expect("serialize");
         let roundtrip: FoundryFoundationDraft = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(roundtrip, draft);
@@ -2421,7 +2303,7 @@ mod tests {
 
     #[test]
     fn new_draft_defaults_to_internal_reviewed_unpublished() {
-        let draft = foundation_draft_template("weapons", "sword");
+        let draft = foundation_draft_template("boxes", "box_primitive");
         assert_eq!(
             draft.catalog_visibility,
             FoundationCatalogVisibility::InternalOnly
@@ -2439,13 +2321,13 @@ mod tests {
         let extra_args = r#"{
             "command": "CreateFamilyBlueprint",
             "args": {
-                "family_id": "sword",
-                "display_name": "Sword",
+                "family_id": "box_primitive",
+                "display_name": "Box Primitive",
                 "raw_vertex_positions": [[0, 0, 0]]
             }
         }"#;
         assert!(parse_foundation_authoring_command_json(extra_args).is_err());
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft
             .rejected_command_attempts
             .push("InjectMeshPayload".to_owned());
@@ -2460,7 +2342,7 @@ mod tests {
 
     #[test]
     fn foundation_draft_rejects_unknown_geometry_fields() {
-        let draft = foundation_draft_template("weapons", "sword");
+        let draft = foundation_draft_template("boxes", "box_primitive");
         let mut value = serde_json::to_value(&draft).expect("to value");
         let object = value.as_object_mut().expect("object");
         object.insert(
@@ -2476,12 +2358,12 @@ mod tests {
 
     #[test]
     fn allowed_commands_execute_in_structured_space() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         execute_foundation_authoring_command(
             &mut draft,
             FoundationAuthoringCommand::AddRole {
-                role_id: "pommel".to_owned(),
-                label: "Pommel".to_owned(),
+                role_id: "edge_detail".to_owned(),
+                label: "Edge Detail".to_owned(),
                 required: false,
             },
         )
@@ -2491,18 +2373,18 @@ mod tests {
                 .family_blueprint
                 .roles
                 .iter()
-                .any(|role| role.role_id == "pommel")
+                .any(|role| role.role_id == "edge_detail")
         );
     }
 
     #[test]
     fn draft_validation_rejects_primary_control_overload_and_technical_labels() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.control_profile.controls = (0..8)
             .map(|index| DraftControl {
                 control_id: format!("control_{index}"),
                 label: if index == 0 {
-                    "scalar::blade.path".to_owned()
+                    "scalar::body.path".to_owned()
                 } else {
                     format!("Control {index}")
                 },
@@ -2524,11 +2406,11 @@ mod tests {
 
     #[test]
     fn draft_validation_rejects_missing_quality_gate_and_contact_sheet_gap() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.quality_gate_profile = None;
         assert!(issue_codes(&validate_foundation_draft(&draft)).contains("missing_quality_gate"));
 
-        let mut usable = foundation_draft_template("weapons", "sword");
+        let mut usable = foundation_draft_template("boxes", "box_primitive");
         usable.quality_target = FoundationQualityTarget::Usable;
         usable
             .quality_gate_profile
@@ -2543,7 +2425,7 @@ mod tests {
 
     #[test]
     fn draft_validation_rejects_slot_and_candidate_incoherence() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.control_profile.controls.push(DraftControl {
             control_id: "conflict".to_owned(),
             label: "Conflict".to_owned(),
@@ -2573,7 +2455,7 @@ mod tests {
 
     #[test]
     fn draft_validation_rejects_unknown_control_provider_slots() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.control_profile.controls[0]
             .owned_provider_slots
             .push("missing_slot".to_owned());
@@ -2583,7 +2465,7 @@ mod tests {
 
     #[test]
     fn draft_validation_rejects_unknown_compatibility_references() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft
             .compatibility_matrix
             .rules
@@ -2598,7 +2480,7 @@ mod tests {
         assert!(codes.contains("compatibility_unknown_style"));
         assert!(codes.contains("compatibility_unknown_provider_pack"));
 
-        let mut explicit_review_style = foundation_draft_template("weapons", "sword");
+        let mut explicit_review_style = foundation_draft_template("boxes", "box_primitive");
         explicit_review_style
             .style_pack
             .compatibility_style_ids
@@ -2619,7 +2501,7 @@ mod tests {
 
     #[test]
     fn draft_validation_rejects_publish_and_visibility_overclaims() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.human_review_required = false;
         draft.publish_allowed = true;
         draft.catalog_visibility = FoundationCatalogVisibility::NoviceCatalog;
@@ -2633,7 +2515,7 @@ mod tests {
 
     #[test]
     fn usable_or_showcase_drafts_still_cannot_publish_or_leave_internal_catalog() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.quality_target = FoundationQualityTarget::Usable;
         draft.publish_allowed = true;
         draft.catalog_visibility = FoundationCatalogVisibility::NoviceCatalog;
@@ -2650,7 +2532,7 @@ mod tests {
 
     #[test]
     fn materialized_kit_remains_draft_until_reviewed() {
-        let draft = foundation_draft_template("weapons", "sword");
+        let draft = foundation_draft_template("boxes", "box_primitive");
         let package = materialize_foundation_draft_package(&draft).expect("materialize");
         assert_eq!(package.kit.quality_tier, FoundryKitQualityTier::Draft);
         assert!(!package.kit.catalog_visibility_policy.default_novice_catalog);
@@ -2672,7 +2554,7 @@ mod tests {
             package
                 .candidate_strategy_pack
                 .allowed_provider_choices
-                .contains_key("blade_slot")
+                .contains_key("body_slot")
         );
         let decision =
             foundry_kit_visibility_decision(&package.kit, &package.review_manifest, false);
@@ -2681,7 +2563,7 @@ mod tests {
 
     #[test]
     fn materialization_maps_invalid_package_report_back_to_foundation_errors() {
-        let mut draft = foundation_draft_template("weapons", "sword");
+        let mut draft = foundation_draft_template("boxes", "box_primitive");
         draft.compatibility_matrix.rules = vec![DraftCompatibilityRule {
             style_id: draft.style_pack.style_id.clone(),
             provider_pack_id: draft.provider_taxonomy.provider_packs[0].pack_id.clone(),
@@ -2695,14 +2577,15 @@ mod tests {
     }
 
     #[test]
-    fn archetype_materializer_cargo_case_draft_is_internal_only() {
+    fn archetype_materializer_box_primitive_draft_is_internal_only() {
         for (family_id, style_id) in [
-            ("clean-medical-case", "clean-medical"),
-            ("rugged-field-case", "rugged-field"),
-            ("industrial-storage-case", "industrial-storage"),
+            ("box-primitive", "plain-clay"),
+            ("wide-box", "plain-clay"),
+            ("soft-box", "plain-clay"),
         ] {
-            let draft = materialize_archetype_foundation_draft("cargo-case", family_id, style_id)
-                .expect("cargo case archetype materializes");
+            let draft =
+                materialize_archetype_foundation_draft("box-primitive", family_id, style_id)
+                    .expect("box primitive archetype materializes");
             assert!(validate_foundation_draft(&draft).is_valid());
             assert!(!draft.publish_allowed);
             assert_eq!(
@@ -2711,46 +2594,32 @@ mod tests {
             );
             assert!(draft.human_review_required);
             assert!(draft.direct_geometry_payload_attempts.is_empty());
-            assert_eq!(draft.control_profile.controls.len(), 7);
-            assert_eq!(
-                draft.family_blueprint.required_roles,
-                vec![
-                    "body",
-                    "lid",
-                    "panel_fields",
-                    "edge_trim",
-                    "corner_guards",
-                    "base_feet_or_skids",
-                ]
-            );
+            assert_eq!(draft.control_profile.controls.len(), 2);
+            assert_eq!(draft.family_blueprint.required_roles, vec!["body"]);
+            assert!(draft.family_blueprint.optional_roles.is_empty());
+            assert!(draft.family_blueprint.sockets.is_empty());
         }
-        let draft = materialize_archetype_foundation_draft(
-            "cargo-case",
-            "clean-medical-case",
-            "clean-medical",
-        )
-        .expect("cargo case archetype materializes");
+        let draft =
+            materialize_archetype_foundation_draft("box-primitive", "box-primitive", "plain-clay")
+                .expect("box primitive archetype materializes");
         assert!(validate_foundation_draft(&draft).is_valid());
-        assert_eq!(draft.family_blueprint.family_id, "clean_medical_case");
-        assert_eq!(draft.style_pack.style_id, "clean_medical");
+        assert_eq!(draft.family_blueprint.family_id, "box_primitive");
+        assert_eq!(draft.style_pack.style_id, "plain_clay");
     }
 
     #[test]
     fn archetype_materializer_rejects_invalid_archetype_and_geometry_payloads() {
         assert!(
             materialize_archetype_foundation_draft(
-                "span-structure",
-                "clean-medical-case",
-                "clean-medical",
+                "unsupported-archetype",
+                "box-primitive",
+                "plain-clay",
             )
             .is_err()
         );
-        let mut draft = materialize_archetype_foundation_draft(
-            "cargo-case",
-            "clean-medical-case",
-            "clean-medical",
-        )
-        .expect("cargo case archetype materializes");
+        let mut draft =
+            materialize_archetype_foundation_draft("box-primitive", "box-primitive", "plain-clay")
+                .expect("box primitive archetype materializes");
         draft
             .direct_geometry_payload_attempts
             .push("raw vertex payload".to_owned());
@@ -2760,18 +2629,12 @@ mod tests {
 
     #[test]
     fn archetype_materializer_report_is_deterministic() {
-        let first = materialize_archetype_foundation_draft(
-            "cargo-case",
-            "rugged-field-case",
-            "rugged-field",
-        )
-        .expect("first draft");
-        let second = materialize_archetype_foundation_draft(
-            "cargo-case",
-            "rugged-field-case",
-            "rugged-field",
-        )
-        .expect("second draft");
+        let first =
+            materialize_archetype_foundation_draft("box-primitive", "box-primitive", "plain-clay")
+                .expect("first draft");
+        let second =
+            materialize_archetype_foundation_draft("box-primitive", "box-primitive", "plain-clay")
+                .expect("second draft");
         assert_eq!(first, second);
         let files = vec![
             "family-blueprint-draft.json".to_owned(),
@@ -2789,7 +2652,7 @@ mod tests {
     #[test]
     fn fixture_drafts_are_internal_draft_only() {
         let fixtures = foundation_draft_fixtures();
-        assert_eq!(fixtures.len(), 4);
+        assert_eq!(fixtures.len(), 1);
         for draft in fixtures {
             assert_eq!(draft.quality_target, FoundationQualityTarget::Draft);
             assert_eq!(
@@ -2803,7 +2666,7 @@ mod tests {
 
     #[test]
     fn adversarial_report_is_deterministic_and_complete() {
-        let draft = foundation_draft_template("weapons", "sword");
+        let draft = foundation_draft_template("boxes", "box_primitive");
         let first = foundation_adversarial_report(&draft);
         let second = foundation_adversarial_report(&draft);
         assert_eq!(first, second);

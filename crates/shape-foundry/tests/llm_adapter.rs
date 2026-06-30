@@ -646,7 +646,7 @@ fn unlock_provider_control_clears_provider_role_lock_target() {
 }
 
 fn profile_fixture() -> CustomizerProfile {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box_primitive", Some("plain_clay".to_owned()));
     profile.controls = vec![
         slider_control("span_length", "Span Length", true),
         integer_control(),
@@ -796,11 +796,11 @@ fn document_fixture() -> FoundryAssetDocument {
     FoundryAssetDocument {
         schema_version: FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
         document_id: FoundryDocumentId("doc-1".to_owned()),
-        family_content_ref: content_ref("bridge-family", 1),
-        style_content_ref: content_ref("roman-style", 2),
-        family_implementation_ref: content_ref("bridge-family-impl", 3),
-        style_implementation_ref: content_ref("roman-style-impl", 4),
-        customizer_profile_ref: content_ref("bridge-profile", 5),
+        family_content_ref: content_ref("box_primitive-family", 1),
+        style_content_ref: content_ref("plain_clay-style", 2),
+        family_implementation_ref: content_ref("box_primitive-family-impl", 3),
+        style_implementation_ref: content_ref("plain_clay-style-impl", 4),
+        customizer_profile_ref: content_ref("box_primitive-profile", 5),
         control_state: BTreeMap::from([(
             "span_length".to_owned(),
             shape_foundry::ControlValue::Scalar(0.0),

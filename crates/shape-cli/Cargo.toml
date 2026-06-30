@@ -17,7 +17,6 @@ serde.workspace = true
 serde_json.workspace = true
 shape-app = { path = "../shape-app" }
 shape-asset.workspace = true
-shape-character.workspace = true
 shape-core.workspace = true
 shape-compile.workspace = true
 shape-decompiler.workspace = true
@@ -25,8 +24,6 @@ shape-field.workspace = true
 shape-family-compile.workspace = true
 shape-foundry.workspace = true
 shape-foundry-catalog.workspace = true
-shape-gamekit.workspace = true
-shape-inverse.workspace = true
 shape-mesh.workspace = true
 shape-modeling-assets.workspace = true
 shape-poly.workspace = true

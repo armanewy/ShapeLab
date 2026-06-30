@@ -8,11 +8,11 @@ use shape_foundry::{
     DomainCertification, FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION, FeasibleControlDomain,
     FoundryAssetDocument, FoundryCommand, FoundryDocumentId, FoundryPackDocument,
     FoundryPackExportProfile, GenerateCandidatesRequest, PackCoherencePolicy, ResponseCurve,
-    SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON, SharedProviderPolicy, VariationChannel,
-    VariationIntent, VariationScope, WholeModelPreviewRef, apply_foundry_command,
-    built_in_surface_capability_for_profile, parse_foundry_surface_capability_sidecar_json,
-    validate_customizer_profile, validate_foundry_command, validate_foundry_document,
-    validate_foundry_pack,
+    SURFACE_PACKAGE_UNAVAILABLE_REASON, SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON,
+    SharedProviderPolicy, VariationChannel, VariationIntent, VariationScope, WholeModelPreviewRef,
+    apply_foundry_command, built_in_surface_capability_for_profile,
+    parse_foundry_surface_capability_sidecar_json, validate_customizer_profile,
+    validate_foundry_command, validate_foundry_document, validate_foundry_pack,
 };
 
 #[test]
@@ -52,7 +52,7 @@ fn exact_catalog_lock_mismatch_is_reported() {
 
 #[test]
 fn control_validation_rejects_conflicts_and_uncertified_sliders() {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("plain".to_owned()));
     profile.controls = vec![
         slider_control("heft", "Structural Heft", "span_length"),
         slider_control("heft_duplicate", "Duplicate Heft", "span_length"),
@@ -79,7 +79,7 @@ fn control_validation_rejects_conflicts_and_uncertified_sliders() {
 
 #[test]
 fn discrete_gallery_with_whole_model_previews_is_valid() {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("plain".to_owned()));
     profile.controls.push(CustomizerControl {
         id: "support_count".to_owned(),
         label: "Support Count".to_owned(),
@@ -115,7 +115,7 @@ fn discrete_gallery_with_whole_model_previews_is_valid() {
 
 #[test]
 fn command_validation_checks_profile_references() {
-    let profile = CustomizerProfile::empty("crate", None);
+    let profile = CustomizerProfile::empty("box_primitive", None);
     let command = FoundryCommand::GenerateCandidates(GenerateCandidatesRequest {
         strategy_id: Some("missing".to_owned()),
         count: 0,
@@ -142,12 +142,12 @@ fn command_validation_checks_profile_references() {
 #[test]
 fn variation_scope_and_channel_round_trip_through_serde() {
     let scope = VariationScope::SemanticPartGroup {
-        group_id: "edge-trim".to_owned(),
-        display_name: "Edge Trim".to_owned(),
+        group_id: "body".to_owned(),
+        display_name: "Body".to_owned(),
     };
     let channel = VariationChannel::Custom {
-        channel_id: "future-material-pass".to_owned(),
-        display_name: "Future Material Pass".to_owned(),
+        channel_id: "box-shape-pass".to_owned(),
+        display_name: "Box Shape Pass".to_owned(),
     };
 
     assert_eq!(
@@ -215,24 +215,21 @@ fn variation_focus_commands_replay_deterministically() {
 }
 
 #[test]
-fn sci_fi_crate_reports_surface_package_without_enabling_surface_candidates() {
-    let capability = built_in_surface_capability_for_profile("sci-fi-crate-profile");
+fn box_primitive_reports_no_surface_package() {
+    let capability = built_in_surface_capability_for_profile("box-primitive");
 
-    assert!(capability.surface_package_available);
-    assert!(capability.surface_payload_ready);
-    assert!(capability.uv_ready);
-    assert!(capability.surface_visual_evidence_ready);
-    assert_eq!(capability.material_slot_count, 6);
-    assert_eq!(
-        capability.texture_channels,
-        vec!["Base color", "Metallic roughness", "Normal", "Occlusion"]
-    );
+    assert!(!capability.surface_package_available);
+    assert!(!capability.surface_payload_ready);
+    assert!(!capability.uv_ready);
+    assert!(!capability.surface_visual_evidence_ready);
+    assert_eq!(capability.material_slot_count, 0);
+    assert!(capability.texture_channels.is_empty());
     assert!(!capability.visual_surface_variation_ready);
     assert!(!capability.surface_candidate_mode_available());
     assert!(!capability.focus_part_surface_ready);
     assert_eq!(
         capability.surface_mode_unavailable_reason(),
-        SURFACE_VISUAL_VARIATION_UNAVAILABLE_REASON
+        SURFACE_PACKAGE_UNAVAILABLE_REASON
     );
 }
 
@@ -240,7 +237,7 @@ fn sci_fi_crate_reports_surface_package_without_enabling_surface_candidates() {
 fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
     let sidecar = r#"{
         "schema_version": 1,
-        "profile_id": "sci-fi-crate",
+        "profile_id": "box-primitive",
         "surface_payload_ready": true,
         "uv_ready": true,
         "material_slots": [
@@ -259,7 +256,7 @@ fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
         },
         "surface_visual_evidence_ready": true,
         "focus_part_surface_ready": false,
-        "human_label": "Sci-Fi Crate Surface Payload",
+        "human_label": "Box Primitive Surface Payload",
         "unavailable_reasons": [
             "Wear variation is metadata-only in Surface Lab v1."
         ]
@@ -290,7 +287,7 @@ fn surface_capability_sidecar_maps_to_product_view_without_ui_overclaim() {
 fn surface_capability_visual_evidence_does_not_enable_app_surface_modes() {
     let sidecar = r#"{
         "schema_version": 1,
-        "profile_id": "sci-fi-crate",
+        "profile_id": "box-primitive",
         "surface_payload_ready": true,
         "uv_ready": true,
         "material_slots": [
@@ -305,7 +302,7 @@ fn surface_capability_visual_evidence_does_not_enable_app_surface_modes() {
         },
         "surface_visual_evidence_ready": true,
         "focus_part_surface_ready": true,
-        "human_label": "Sci-Fi Crate Surface Payload",
+        "human_label": "Box Primitive Surface Payload",
         "unavailable_reasons": []
     }"#;
 
@@ -329,14 +326,14 @@ fn surface_capability_visual_evidence_does_not_enable_app_surface_modes() {
 fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
     let malformed = r#"{
         "schema_version": 1,
-        "profile_id": "sci-fi-crate",
+        "profile_id": "box-primitive",
         "surface_payload_ready": true,
         "uv_ready": false,
         "material_slots": [],
         "texture_channels": [],
         "variation_channels_supported": ["surface"],
         "focus_part_surface_ready": false,
-        "human_label": "Sci-Fi Crate Surface Payload",
+        "human_label": "Box Primitive Surface Payload",
         "unavailable_reasons": []
     }"#;
     let error = parse_foundry_surface_capability_sidecar_json(malformed)
@@ -349,7 +346,7 @@ fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
 
     let absolute_path = r#"{
         "schema_version": 1,
-        "profile_id": "sci-fi-crate",
+        "profile_id": "box-primitive",
         "surface_payload_ready": false,
         "uv_ready": false,
         "material_slots": [],
@@ -365,7 +362,7 @@ fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
 
     let visual_without_payload = r#"{
         "schema_version": 1,
-        "profile_id": "sci-fi-crate",
+        "profile_id": "box-primitive",
         "surface_payload_ready": false,
         "uv_ready": true,
         "material_slots": ["painted_metal_body"],
@@ -373,7 +370,7 @@ fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
         "variation_channels_supported": ["surface"],
         "surface_visual_evidence_ready": true,
         "focus_part_surface_ready": false,
-        "human_label": "Sci-Fi Crate Surface Payload",
+        "human_label": "Box Primitive Surface Payload",
         "unavailable_reasons": []
     }"#;
     let error = parse_foundry_surface_capability_sidecar_json(visual_without_payload)
@@ -387,7 +384,7 @@ fn surface_capability_sidecar_rejects_malformed_or_local_path_data() {
 
 #[test]
 fn set_control_validation_checks_kind_and_feasible_domain() {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("plain".to_owned()));
     profile
         .controls
         .push(slider_control("span_length", "Span Length", "span_length"));
@@ -417,7 +414,7 @@ fn set_control_validation_checks_kind_and_feasible_domain() {
 
 #[test]
 fn provider_gallery_round_trips_through_set_control() {
-    let mut profile = CustomizerProfile::empty("bridge", Some("roman".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("plain".to_owned()));
     profile.controls.push(provider_control());
     let command = FoundryCommand::SetControl {
         control_id: "support_provider".to_owned(),
@@ -429,10 +426,10 @@ fn provider_gallery_round_trips_through_set_control() {
 
 #[test]
 fn exact_family_style_pack_rejects_incompatible_member() {
-    let shared_family = content_ref("bridge-family", 1);
-    let shared_style = content_ref("roman-style", 2);
+    let shared_family = content_ref("box-family", 1);
+    let shared_style = content_ref("plain-style", 2);
     let mut pack = FoundryPackDocument::new(
-        "bridge-pack",
+        "box-pack",
         shared_family,
         shared_style,
         FoundryPackExportProfile {
@@ -441,9 +438,9 @@ fn exact_family_style_pack_rejects_incompatible_member() {
         },
     );
     pack.coherence_policy = PackCoherencePolicy::ExactFamilyAndStyle;
-    let mut incompatible = document_fixture_with_style("scifi-style");
-    incompatible.family_content_ref = content_ref("crate-family", 8);
-    pack.members.insert("crate".to_owned(), incompatible);
+    let mut incompatible = document_fixture_with_style("other-box-style");
+    incompatible.family_content_ref = content_ref("other-box-family", 8);
+    pack.members.insert("other-box".to_owned(), incompatible);
 
     let report = validate_foundry_pack(&pack);
 
@@ -463,11 +460,11 @@ fn exact_family_style_pack_rejects_incompatible_member() {
 
 #[test]
 fn pack_validation_rejects_shared_provider_conflicts_and_lock_mismatch() {
-    let shared_family = content_ref("bridge-family", 1);
-    let shared_style = content_ref("roman-style", 2);
+    let shared_family = content_ref("box-family", 1);
+    let shared_style = content_ref("plain-style", 2);
     let shared_provider = content_ref("timber-support", 7);
     let mut pack = FoundryPackDocument::new(
-        "bridge-pack",
+        "box-pack",
         shared_family,
         shared_style,
         FoundryPackExportProfile {
@@ -589,18 +586,18 @@ fn provider_control() -> CustomizerControl {
 }
 
 fn document_fixture() -> FoundryAssetDocument {
-    document_fixture_with_style("roman-style")
+    document_fixture_with_style("plain-style")
 }
 
 fn document_fixture_with_style(style_id: &str) -> FoundryAssetDocument {
     FoundryAssetDocument {
         schema_version: FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
         document_id: FoundryDocumentId("doc-1".to_owned()),
-        family_content_ref: content_ref("bridge-family", 1),
+        family_content_ref: content_ref("box-family", 1),
         style_content_ref: content_ref(style_id, 2),
-        family_implementation_ref: content_ref("bridge-family-impl", 3),
-        style_implementation_ref: content_ref("roman-style-impl", 4),
-        customizer_profile_ref: content_ref("bridge-profile", 5),
+        family_implementation_ref: content_ref("box-family-impl", 3),
+        style_implementation_ref: content_ref("plain-style-impl", 4),
+        customizer_profile_ref: content_ref("box-profile", 5),
         control_state: BTreeMap::from([(
             "span_length".to_owned(),
             shape_foundry::ControlValue::Scalar(3.0),

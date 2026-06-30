@@ -32,7 +32,7 @@ pub(crate) fn apply_visual_foundry_theme(ctx: &egui::Context) {
         FontId::new(12.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
-        TextStyle::Name("foundry.hero".into()),
+        TextStyle::Name("foundry.title".into()),
         FontId::new(26.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
@@ -80,7 +80,7 @@ mod tests {
         assert!(
             style
                 .text_styles
-                .contains_key(&TextStyle::Name("foundry.hero".into()))
+                .contains_key(&TextStyle::Name("foundry.title".into()))
         );
         assert!(
             style

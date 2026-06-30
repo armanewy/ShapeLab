@@ -22,15 +22,15 @@ use shape_foundry::{
 };
 
 #[test]
-fn linked_structural_heft_axis_fans_out_and_samples_preview() {
-    let control = structural_heft_control();
+fn linked_edge_softness_axis_fans_out_and_samples_preview() {
+    let control = edge_softness_control();
     let slots = heft_slots();
     let context = ControlEvaluationContext::new(&slots);
 
     let evaluated = evaluate_control(&control, context, ControlValue::Scalar(0.5)).unwrap();
 
-    assert_family_scalar(evaluated.slot_values.get("span_length"), 1.55);
-    assert_family_scalar(evaluated.slot_values.get("support_width"), 0.75);
+    assert_family_scalar(evaluated.slot_values.get("box_width"), 1.55);
+    assert_family_scalar(evaluated.slot_values.get("edge_radius"), 0.75);
 
     let previews = whole_model_preview_sample_requests(&control, context).unwrap();
     assert_eq!(previews.len(), 5);
@@ -69,20 +69,20 @@ fn linked_structural_heft_axis_fans_out_and_samples_preview() {
 
 #[test]
 fn piecewise_curve_evaluates_and_rejects_unsafe_authored_curves() {
-    let mut control = structural_heft_control();
+    let mut control = edge_softness_control();
     control.bindings = vec![ControlSlotBinding {
-        slot: "span_length".to_owned(),
+        slot: "box_width".to_owned(),
         slot_policy: ParameterExecutionPolicy::RequiredBinding,
         response: ResponseCurve::Piecewise {
             points: vec![[-1.0, 0.0], [0.0, 0.5], [1.0, 2.0]],
             monotonic: true,
         },
     }];
-    let slots = vec![length_slot("span_length", 0.0, 3.0, 0.1)];
+    let slots = vec![length_slot("box_width", 0.0, 3.0, 0.1)];
     let context = ControlEvaluationContext::new(&slots);
 
     let evaluated = evaluate_control(&control, context, ControlValue::Scalar(0.5)).unwrap();
-    assert_family_scalar(evaluated.slot_values.get("span_length"), 1.25);
+    assert_family_scalar(evaluated.slot_values.get("box_width"), 1.25);
 
     let mut non_monotonic = profile_with(control.clone());
     non_monotonic.controls[0].bindings[0].response = ResponseCurve::Piecewise {
@@ -114,12 +114,12 @@ fn piecewise_curve_evaluates_and_rejects_unsafe_authored_curves() {
 #[test]
 fn count_stepper_snaps_to_available_integer_domain() {
     let control = count_stepper_control();
-    let slots = vec![count_slot("support_count", 2.0, 8.0, 2.0)];
+    let slots = vec![count_slot("box_count", 2.0, 8.0, 2.0)];
     let context = ControlEvaluationContext::new(&slots);
 
     let default_state = default_control_state(&profile_with(control.clone()), context).unwrap();
     assert_eq!(
-        default_state.get("support_count"),
+        default_state.get("box_count"),
         Some(&ControlValue::Integer(4))
     );
     assert_eq!(
@@ -129,7 +129,7 @@ fn count_stepper_snaps_to_available_integer_domain() {
 
     let evaluated = evaluate_control(&control, context, ControlValue::Integer(5)).unwrap();
     assert_eq!(
-        evaluated.slot_values.get("support_count"),
+        evaluated.slot_values.get("box_count"),
         Some(&FamilyValue::Integer(4))
     );
 }
@@ -141,19 +141,19 @@ fn provider_gallery_uses_available_options_and_rejects_unavailable_selection() {
 
     assert_eq!(
         default_control_value(&control, context).unwrap(),
-        ControlValue::Provider("timber_support".to_owned())
+        ControlValue::Provider("compact_body".to_owned())
     );
     assert_eq!(
         canonicalize_control_value(
             &control,
             context,
-            ControlValue::Provider("stone_support".to_owned())
+            ControlValue::Provider("wide_body".to_owned())
         )
         .unwrap_err(),
         ControlEvaluationError::UnavailableOption {
-            control_id: "support_provider".to_owned(),
-            option: "stone_support".to_owned(),
-            reason: "provider fails clearance constraint".to_owned(),
+            control_id: "body_provider".to_owned(),
+            option: "wide_body".to_owned(),
+            reason: "option is unavailable for Box Primitive".to_owned(),
         }
     );
 
@@ -161,12 +161,12 @@ fn provider_gallery_uses_available_options_and_rejects_unavailable_selection() {
     assert_eq!(previews.len(), 1);
     assert_eq!(
         previews[0].value,
-        ControlValue::Provider("timber_support".to_owned())
+        ControlValue::Provider("compact_body".to_owned())
     );
 
     let command = FoundryCommand::SetControl {
-        control_id: "support_provider".to_owned(),
-        value: ControlValue::Provider("stone_support".to_owned()),
+        control_id: "body_provider".to_owned(),
+        value: ControlValue::Provider("wide_body".to_owned()),
     };
     let report = validate_foundry_command(&command, None, Some(&profile_with(control)));
     assert!(
@@ -179,13 +179,13 @@ fn provider_gallery_uses_available_options_and_rejects_unavailable_selection() {
 
 #[test]
 fn constraint_provider_narrows_with_full_feasible_domain() {
-    let control = structural_heft_control();
+    let control = edge_softness_control();
     let slots = vec![
-        length_slot("span_length", 1.0, 1.6, 0.1),
-        length_slot("support_width", 0.25, 1.0, 0.05),
+        length_slot("box_width", 1.0, 1.6, 0.1),
+        length_slot("edge_radius", 0.25, 1.0, 0.05),
     ];
     let conformance_domains = BTreeMap::from([(
-        "structural_heft".to_owned(),
+        "edge_softness".to_owned(),
         FeasibleControlDomain {
             continuous_intervals: vec![ClosedInterval {
                 minimum: -0.5,
@@ -218,10 +218,10 @@ fn constraint_provider_narrows_with_full_feasible_domain() {
 
 #[test]
 fn uncertified_continuous_domains_use_discrete_preview_samples() {
-    let control = structural_heft_control();
+    let control = edge_softness_control();
     let slots = heft_slots();
     let conformance_domains = BTreeMap::from([(
-        "structural_heft".to_owned(),
+        "edge_softness".to_owned(),
         FeasibleControlDomain {
             continuous_intervals: vec![ClosedInterval {
                 minimum: -0.5,
@@ -250,7 +250,7 @@ fn uncertified_continuous_domains_use_discrete_preview_samples() {
 
 #[test]
 fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
-    let control = structural_heft_control();
+    let control = edge_softness_control();
     let profile = profile_with(control.clone());
     let slots = heft_slots();
     let context = ControlEvaluationContext::new(&slots);
@@ -259,11 +259,11 @@ fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
         id: LocalRecipeOverrideId("override-1".to_owned()),
         base_geometry_fingerprint: GeometryInputFingerprint(ContentFingerprint([9; 32])),
         edit_program: AssetEditProgram {
-            label: "Manual span tweak".to_owned(),
+            label: "Manual edge tweak".to_owned(),
             seed: 0,
             operations: Vec::new(),
         },
-        touched_targets: vec![TouchedSemanticTarget::FamilySlot("span_length".to_owned())],
+        touched_targets: vec![TouchedSemanticTarget::FamilySlot("box_width".to_owned())],
         survival_policy: OverrideSurvivalPolicy::Revalidate,
     });
 
@@ -272,12 +272,9 @@ fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
         ControlDivergence::DivergedByOverride
     );
 
-    let mut state = BTreeMap::from([("structural_heft".to_owned(), ControlValue::Scalar(0.75))]);
-    let delta = reset_control_state(&profile, context, &mut state, "structural_heft").unwrap();
-    assert_eq!(
-        state.get("structural_heft"),
-        Some(&ControlValue::Scalar(0.0))
-    );
+    let mut state = BTreeMap::from([("edge_softness".to_owned(), ControlValue::Scalar(0.75))]);
+    let delta = reset_control_state(&profile, context, &mut state, "edge_softness").unwrap();
+    assert_eq!(state.get("edge_softness"), Some(&ControlValue::Scalar(0.0)));
     assert_eq!(delta.current, ControlValue::Scalar(0.0));
     assert_eq!(
         delta
@@ -286,13 +283,13 @@ fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
             .map(|explanation| (explanation.subject.as_str(), explanation.code.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("controls.structural_heft", "control_reset_to_default"),
+            ("controls.edge_softness", "control_reset_to_default"),
             (
-                "controls.structural_heft.bindings.span_length",
+                "controls.edge_softness.bindings.box_width",
                 "slot_value_changed"
             ),
             (
-                "controls.structural_heft.bindings.support_width",
+                "controls.edge_softness.bindings.edge_radius",
                 "slot_value_changed"
             ),
         ]
@@ -301,7 +298,7 @@ fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
     let repeat = explain_control_delta(
         &profile,
         context,
-        "structural_heft",
+        "edge_softness",
         Some(ControlValue::Scalar(0.75)),
         ControlValue::Scalar(0.0),
     )
@@ -311,26 +308,26 @@ fn local_override_marks_bound_control_diverged_and_reset_is_explained() {
 
 #[test]
 fn reset_control_state_is_atomic_when_previous_value_is_invalid() {
-    let control = structural_heft_control();
+    let control = edge_softness_control();
     let profile = profile_with(control);
     let slots = heft_slots();
     let context = ControlEvaluationContext::new(&slots);
     let mut state = BTreeMap::from([(
-        "structural_heft".to_owned(),
+        "edge_softness".to_owned(),
         ControlValue::Provider("wrong-kind".to_owned()),
     )]);
 
-    let error = reset_control_state(&profile, context, &mut state, "structural_heft")
+    let error = reset_control_state(&profile, context, &mut state, "edge_softness")
         .expect_err("invalid previous value should fail explanation");
 
     assert_eq!(
         error,
         ControlEvaluationError::WrongValueKind {
-            control_id: "structural_heft".to_owned()
+            control_id: "edge_softness".to_owned()
         }
     );
     assert_eq!(
-        state.get("structural_heft"),
+        state.get("edge_softness"),
         Some(&ControlValue::Provider("wrong-kind".to_owned()))
     );
 }
@@ -338,10 +335,10 @@ fn reset_control_state_is_atomic_when_previous_value_is_invalid() {
 #[test]
 fn validation_rejects_provider_role_conflicts_and_unknown_reset_controls() {
     let mut first = provider_control();
-    first.id = "support_provider_a".to_owned();
+    first.id = "body_provider_a".to_owned();
     let mut second = provider_control();
-    second.id = "support_provider_b".to_owned();
-    let mut profile = CustomizerProfile::empty("bridge", Some("test-style".to_owned()));
+    second.id = "body_provider_b".to_owned();
+    let mut profile = CustomizerProfile::empty("box", Some("test-style".to_owned()));
     profile.controls = vec![first, second];
 
     let report = validate_customizer_profile(&profile);
@@ -364,17 +361,17 @@ fn validation_rejects_provider_role_conflicts_and_unknown_reset_controls() {
     );
 }
 
-fn structural_heft_control() -> CustomizerControl {
+fn edge_softness_control() -> CustomizerControl {
     CustomizerControl {
-        id: "structural_heft".to_owned(),
-        label: "Structural Heft".to_owned(),
+        id: "edge_softness".to_owned(),
+        label: "Edge Softness".to_owned(),
         section: None,
         primary: true,
         visible: true,
         kind: ControlKind::ContinuousAxis { default: 0.0 },
         bindings: vec![
             ControlSlotBinding {
-                slot: "span_length".to_owned(),
+                slot: "box_width".to_owned(),
                 slot_policy: ParameterExecutionPolicy::RequiredBinding,
                 response: ResponseCurve::Piecewise {
                     points: vec![[-1.0, 0.8], [1.0, 1.8]],
@@ -382,7 +379,7 @@ fn structural_heft_control() -> CustomizerControl {
                 },
             },
             ControlSlotBinding {
-                slot: "support_width".to_owned(),
+                slot: "edge_radius".to_owned(),
                 slot_policy: ParameterExecutionPolicy::RequiredBinding,
                 response: ResponseCurve::Piecewise {
                     points: vec![[-1.0, 0.3], [1.0, 0.9]],
@@ -406,14 +403,14 @@ fn structural_heft_control() -> CustomizerControl {
 
 fn count_stepper_control() -> CustomizerControl {
     CustomizerControl {
-        id: "support_count".to_owned(),
-        label: "Support Count".to_owned(),
+        id: "box_count".to_owned(),
+        label: "Box Count".to_owned(),
         section: None,
         primary: true,
         visible: true,
         kind: ControlKind::IntegerStepper { default: 5 },
         bindings: vec![ControlSlotBinding {
-            slot: "support_count".to_owned(),
+            slot: "box_count".to_owned(),
             slot_policy: ParameterExecutionPolicy::RequiredBinding,
             response: ResponseCurve::Linear,
         }],
@@ -434,40 +431,40 @@ fn count_stepper_control() -> CustomizerControl {
 
 fn provider_control() -> CustomizerControl {
     CustomizerControl {
-        id: "support_provider".to_owned(),
-        label: "Support Provider".to_owned(),
+        id: "body_provider".to_owned(),
+        label: "Body Provider".to_owned(),
         section: None,
         primary: true,
         visible: true,
         kind: ControlKind::ProviderGallery {
-            role: "support".to_owned(),
+            role: "body".to_owned(),
             options: vec![
                 ProviderOption {
-                    provider_id: "timber_support".to_owned(),
-                    label: "Timber Support".to_owned(),
-                    preview: preview("timber-support"),
+                    provider_id: "compact_body".to_owned(),
+                    label: "Compact Body".to_owned(),
+                    preview: preview("compact-body"),
                 },
                 ProviderOption {
-                    provider_id: "stone_support".to_owned(),
-                    label: "Stone Support".to_owned(),
-                    preview: preview("stone-support"),
+                    provider_id: "wide_body".to_owned(),
+                    label: "Wide Body".to_owned(),
+                    preview: preview("wide-body"),
                 },
             ],
         },
         bindings: vec![ControlSlotBinding {
-            slot: "support_provider".to_owned(),
+            slot: "body_provider".to_owned(),
             slot_policy: ParameterExecutionPolicy::RequiredBinding,
             response: ResponseCurve::Linear,
         }],
         domain: FeasibleControlDomain {
             continuous_intervals: Vec::new(),
             discrete_values: vec![
-                ControlValue::Provider("timber_support".to_owned()),
-                ControlValue::Provider("stone_support".to_owned()),
+                ControlValue::Provider("compact_body".to_owned()),
+                ControlValue::Provider("wide_body".to_owned()),
             ],
             unavailable_options: BTreeMap::from([(
-                "stone_support".to_owned(),
-                "provider fails clearance constraint".to_owned(),
+                "wide_body".to_owned(),
+                "option is unavailable for Box Primitive".to_owned(),
             )]),
             certification: DomainCertification::DiscreteSamples,
         },
@@ -477,15 +474,15 @@ fn provider_control() -> CustomizerControl {
 }
 
 fn profile_with(control: CustomizerControl) -> CustomizerProfile {
-    let mut profile = CustomizerProfile::empty("bridge", Some("test-style".to_owned()));
+    let mut profile = CustomizerProfile::empty("box", Some("test-style".to_owned()));
     profile.controls.push(control);
     profile
 }
 
 fn heft_slots() -> Vec<FamilyParameterSlot> {
     vec![
-        length_slot("span_length", 0.5, 2.0, 0.1),
-        length_slot("support_width", 0.25, 1.0, 0.05),
+        length_slot("box_width", 0.5, 2.0, 0.1),
+        length_slot("edge_radius", 0.25, 1.0, 0.05),
     ]
 }
 
@@ -536,11 +533,11 @@ fn document_fixture() -> FoundryAssetDocument {
     FoundryAssetDocument {
         schema_version: FOUNDRY_ASSET_DOCUMENT_SCHEMA_VERSION,
         document_id: FoundryDocumentId("doc-1".to_owned()),
-        family_content_ref: content_ref("bridge-family", 1),
+        family_content_ref: content_ref("box-family", 1),
         style_content_ref: content_ref("test-style", 2),
-        family_implementation_ref: content_ref("bridge-family-impl", 3),
+        family_implementation_ref: content_ref("box-family-impl", 3),
         style_implementation_ref: content_ref("test-style-impl", 4),
-        customizer_profile_ref: content_ref("bridge-profile", 5),
+        customizer_profile_ref: content_ref("box-profile", 5),
         control_state: BTreeMap::new(),
         provider_overrides: BTreeMap::new(),
         foundry_locks: Vec::new(),

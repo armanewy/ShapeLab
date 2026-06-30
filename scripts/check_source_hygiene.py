@@ -14,30 +14,22 @@ APP_SOURCE = "crates/shape-app/src/foundry/app.rs"
 
 DEFAULT_FILES = (
     APP_SOURCE,
-    "crates/shape-foundry-catalog/src/cargo_case.rs",
-    "crates/shape-foundry-catalog/src/scifi_crate.rs",
+    "crates/shape-foundry-catalog/src/box_primitive.rs",
     "crates/shape-foundry-catalog/src/lib.rs",
+    "crates/shape-foundry-catalog/src/kits.rs",
     "README.md",
-    "docs/CARGO_CASE_STABILIZATION_REPORT.md",
-    "docs/CARGO_CASE_SOURCE_HYGIENE_REPORT.md",
-    "docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md",
-    "docs/CARGO_CASE_BASE_FAMILY_V1_REPORT.md",
-    "docs/CLEAN_UTILITY_CASE_PROFILE_REPORT.md",
-    "docs/SCIFI_INDUSTRIAL_CARGO_CASE_PROFILE_REPORT.md",
+    "docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md",
     "docs/CURRENT_PRODUCT_STATUS.md",
-    "docs/CARGO_CASE_FOUNDATION_STRATEGY.md",
+    "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
+    "docs/KNOWN_LIMITATIONS.md",
 )
 
 DEFAULT_MARKDOWN_REPORTS = frozenset(
     {
-        "docs/CARGO_CASE_STABILIZATION_REPORT.md",
-        "docs/CARGO_CASE_SOURCE_HYGIENE_REPORT.md",
-        "docs/CARGO_CASE_ARCHITECTURE_INTEGRATION_REPORT.md",
-        "docs/CARGO_CASE_BASE_FAMILY_V1_REPORT.md",
-        "docs/CLEAN_UTILITY_CASE_PROFILE_REPORT.md",
-        "docs/SCIFI_INDUSTRIAL_CARGO_CASE_PROFILE_REPORT.md",
+        "docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md",
         "docs/CURRENT_PRODUCT_STATUS.md",
-        "docs/CARGO_CASE_FOUNDATION_STRATEGY.md",
+        "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
+        "docs/KNOWN_LIMITATIONS.md",
     }
 )
 
@@ -182,7 +174,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "files",
         nargs="*",
-        help="Files to check. Defaults to the Cargo Case source/report hygiene list.",
+        help="Files to check. Defaults to the Box Primitive source/report hygiene list.",
     )
     parser.add_argument(
         "--extra-file",

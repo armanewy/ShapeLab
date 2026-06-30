@@ -44,13 +44,6 @@ use shape_foundry_catalog::{
     FoundryAuthorProfilePackage, FoundryFixtureCatalog, author_profile_template,
     headless_fixture_catalogs, validate_author_profile_package,
 };
-use shape_inverse::{
-    external_character::{ExternalCharacterAnalysisConfig, ExternalCleanCharacterMeshInput},
-    import_triage::{
-        ImportTriageOutcome, ImportTriageReport, ImportTriageSourceKind,
-        invalid_external_character_import_triage_report, triage_external_clean_character_import,
-    },
-};
 use shape_mesh::{MeshSettings, TriangleMesh, mesh_field, read_obj_from_path, write_obj_to_path};
 use shape_modeling_assets::{BenchmarkAsset, benchmark_assets};
 use shape_poly::{EdgeKey, PolygonMesh, TriangulatedPolygonMesh};
@@ -77,12 +70,8 @@ use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candida
 mod foundry_cli;
 mod foundry_foundation_cli;
 mod foundry_kit_cli;
-mod foundry_visual_benchmark;
-mod game_ready_static;
-mod hq_quality;
-mod starter_template_quality;
 
-const DEFAULT_PRESET: &str = "desk-lamp";
+const DEFAULT_PRESET: &str = "box-primitive";
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_PROPOSAL_COUNT: usize = 64;
 const DEFAULT_RESULT_COUNT: usize = 6;
@@ -132,26 +121,12 @@ enum Command {
     FoundryPreviewProfile(FoundryPreviewProfileArgs),
     /// Package a typed Foundry Author profile into an exact local catalog.
     FoundryPackageProfile(FoundryPackageProfileArgs),
-    /// Triage an external clean-character descriptor without claiming magic import.
-    ImportTriageCharacter(ImportTriageCharacterArgs),
-    /// Render the cross-domain headless visual Foundry benchmark.
-    FoundryVisualBenchmark(foundry_visual_benchmark::FoundryVisualBenchmarkArgs),
     /// Validate, inspect, preview, package, and review curated Foundry kits.
     FoundryKit(foundry_kit_cli::FoundryKitArgs),
     /// Create, validate, materialize, and review internal Foundry foundation drafts.
     FoundryFoundation(foundry_foundation_cli::FoundryFoundationArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
-    /// Emit an HQ asset quality report and contact-sheet evidence.
-    HqQualityBenchmark(hq_quality::HqQualityBenchmarkArgs),
-    /// Emit starter-template quality benchmark evidence and pass/fail reports.
-    StarterTemplateQualityBenchmark(starter_template_quality::StarterTemplateQualityBenchmarkArgs),
-    /// Emit starter-template dogfood evidence and pass/fail reports.
-    StarterTemplateDogfoodBenchmark(starter_template_quality::StarterTemplateDogfoodBenchmarkArgs),
-    /// Emit a deterministic adversarial review over an HQ benchmark evidence directory.
-    HqAdversarialReview(hq_quality::HqAdversarialReviewArgs),
-    /// Emit the first static-prop game-readiness package with truthful blockers.
-    GameReadyStaticProp(game_ready_static::GameReadyStaticPropArgs),
     /// Decompile a same-topology source/target OBJ pair into deformation IR.
     Decompile(DecompileArgs),
     /// Replay-verify a serialized decompile package.
@@ -269,9 +244,8 @@ struct FoundryBuildArgs {
 
 #[derive(Debug, clap::Args)]
 struct FoundryNewProfileArgs {
-    /// Built-in template slug such as roman-bridge, sci-fi-crate, stylized-lamp, market-stall,
-    /// sci-fi-door, storage-barrel, signpost, workshop-chair, handcart, or stylized-tree.
-    #[arg(long, default_value = "roman-bridge")]
+    /// Built-in template slug. The current baseline supports box-primitive.
+    #[arg(long, default_value = "box-primitive")]
     template: String,
     /// Output profile JSON file.
     #[arg(long)]
@@ -297,15 +271,6 @@ struct FoundryPreviewProfileArgs {
 struct FoundryPackageProfileArgs {
     /// Typed Foundry Author profile JSON file.
     profile: PathBuf,
-    /// Output directory.
-    #[arg(long)]
-    out_dir: PathBuf,
-}
-
-#[derive(Debug, clap::Args)]
-struct ImportTriageCharacterArgs {
-    /// External clean-character descriptor JSON file.
-    descriptor: PathBuf,
     /// Output directory.
     #[arg(long)]
     out_dir: PathBuf,
@@ -652,22 +617,9 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryValidateProfile(args) => run_foundry_validate_profile(args),
         Command::FoundryPreviewProfile(args) => run_foundry_preview_profile(args),
         Command::FoundryPackageProfile(args) => run_foundry_package_profile(args),
-        Command::ImportTriageCharacter(args) => run_import_triage_character(args),
-        Command::FoundryVisualBenchmark(args) => {
-            foundry_visual_benchmark::run_foundry_visual_benchmark(args)
-        }
         Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
-        Command::HqQualityBenchmark(args) => hq_quality::run_hq_quality_benchmark(args),
-        Command::StarterTemplateQualityBenchmark(args) => {
-            starter_template_quality::run_starter_template_quality_benchmark(args)
-        }
-        Command::StarterTemplateDogfoodBenchmark(args) => {
-            starter_template_quality::run_starter_template_dogfood_benchmark(args)
-        }
-        Command::HqAdversarialReview(args) => hq_quality::run_hq_adversarial_review(args),
-        Command::GameReadyStaticProp(args) => game_ready_static::run_game_ready_static_prop(args),
         Command::Decompile(args) => run_decompile(args),
         Command::VerifyDecompile(args) => run_verify_decompile(args),
     }
@@ -1299,30 +1251,6 @@ fn run_foundry_package_profile(args: FoundryPackageProfileArgs) -> anyhow::Resul
     Ok(())
 }
 
-fn run_import_triage_character(args: ImportTriageCharacterArgs) -> anyhow::Result<()> {
-    fs::create_dir_all(&args.out_dir)
-        .with_context(|| format!("creating {}", args.out_dir.display()))?;
-    clear_import_triage_outputs(&args.out_dir)?;
-    let report = match load_external_character_input(&args.descriptor)? {
-        LoadedExternalCharacterInput::Input(input) => triage_external_clean_character_import(
-            input.as_ref(),
-            &ExternalCharacterAnalysisConfig::default(),
-        ),
-        LoadedExternalCharacterInput::InvalidReport(report) => *report,
-    };
-    write_json(args.out_dir.join("import-triage-report.json"), &report)?;
-    write_json(
-        args.out_dir.join("external-character-analysis.json"),
-        &report.external_character_analysis,
-    )?;
-    write_json(
-        args.out_dir.join("strict-known-base-recovery.json"),
-        &report.strict_known_base_recovery,
-    )?;
-    print_import_triage_report(&report);
-    Ok(())
-}
-
 fn run_release_readiness(args: ReleaseReadinessArgs) -> anyhow::Result<()> {
     let report = release_readiness_report(args.verify_visual_gate, args.verify_product_ui_gate)?;
     if let Some(path) = args.out.as_ref() {
@@ -1354,7 +1282,7 @@ fn release_readiness_report(
 
     Ok(ReleaseReadinessReport {
         schema_version: RELEASE_READINESS_SCHEMA_VERSION,
-        milestone: "Wave 42 - Sci-Fi Crate Static Prop Game-Readiness v1",
+        milestone: "Box Primitive Baseline",
         visual_product_gate,
         product_ui_gate,
         performance: ReleasePerformanceReadiness {
@@ -1394,27 +1322,9 @@ fn release_readiness_report(
         },
         verification_commands: vec![
             "cargo fmt --all --check",
-            "cargo test -p shape-app release_gate_all_builtin_profiles_render_real_option_thumbnails -- --ignored",
-            "cargo test -p shape-cli release_readiness_verifies_visual_product_gate_when_requested -- --ignored",
-            "cargo run -p shape-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json",
+            "cargo test -p shape-foundry-catalog --test box_primitive --jobs 1",
             "cargo run -p shape-cli -- release-readiness --verify-product-ui-gate --out target/release-readiness-product-ui.json",
-            "cargo test -p shape-render --test foundry_preview",
-            "cargo test -p shape-search --test foundry_candidates",
             "cargo test -p shape-cli release_readiness",
-            "cargo test -p shape-cli hq_quality",
-            "cargo test -p shape-cli foundry_kit",
-            "cargo run -p shape-cli -- foundry-kit inspect roman-bridge",
-            "cargo run -p shape-cli -- foundry-kit inspect roman-bridge-hq",
-            "cargo run -p shape-cli -- foundry-kit review roman-bridge --quality-report target/hq-benchmark/roman-bridge/quality-report.json --out target/foundry-kit/roman-review.json",
-            "cargo run -p shape-cli -- foundry-kit review roman-bridge-hq --quality-report target/hq-benchmark/roman-bridge-hq/quality-report.json --out target/foundry-kit/roman-hq-review.json",
-            "cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge --out-dir target/hq-benchmark/roman-bridge --verify-export",
-            "cargo run -p shape-cli -- hq-quality-benchmark --profile roman-bridge-hq --out-dir target/hq-benchmark/roman-bridge-hq --verify-export",
-            "cargo run -p shape-cli -- hq-quality-benchmark --profile moba-hero-clay --out-dir target/hq-benchmark/moba-hero-clay",
-            "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/roman-bridge-hq --out target/hq-benchmark/roman-bridge-hq/adversarial-review.json",
-            "cargo run -p shape-cli -- hq-adversarial-review --benchmark-dir target/hq-benchmark/moba-hero-clay --out target/hq-benchmark/moba-hero-clay/adversarial-review.json",
-            "cargo run -p shape-cli -- game-ready-static-prop --profile sci-fi-crate --out-dir target/game-ready/sci-fi-crate-static-prop-v1",
-            "cargo clippy --workspace --all-targets -- -D warnings",
-            "cargo test --workspace --no-fail-fast",
             "cargo build --release --workspace",
         ],
     })
@@ -1753,109 +1663,9 @@ fn orbit_camera_is_finite(camera: &shape_render::OrbitCamera) -> bool {
         && camera.vertical_fov_degrees.is_finite()
 }
 
-enum LoadedExternalCharacterInput {
-    Input(Box<ExternalCleanCharacterMeshInput>),
-    InvalidReport(Box<ImportTriageReport>),
-}
-
-fn clear_import_triage_outputs(out_dir: &Path) -> anyhow::Result<()> {
-    for name in [
-        "import-triage-report.json",
-        "external-character-analysis.json",
-        "strict-known-base-recovery.json",
-    ] {
-        let path = out_dir.join(name);
-        if path.exists() {
-            fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
-        }
-    }
-    Ok(())
-}
-
 fn load_author_profile(path: &Path) -> anyhow::Result<FoundryAuthorProfilePackage> {
     let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
-}
-
-fn load_external_character_input(path: &Path) -> anyhow::Result<LoadedExternalCharacterInput> {
-    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    let fallback_source_id = path.display().to_string();
-    let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) => value,
-        Err(error) => {
-            return Ok(LoadedExternalCharacterInput::InvalidReport(Box::new(
-                invalid_external_character_import_triage_report(
-                    fallback_source_id,
-                    format!("descriptor JSON could not be parsed: {error}"),
-                ),
-            )));
-        }
-    };
-    let source_id = value
-        .get("source_id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|source_id| !source_id.trim().is_empty())
-        .unwrap_or(&fallback_source_id)
-        .to_owned();
-    match serde_json::from_value::<ExternalCleanCharacterMeshInput>(value) {
-        Ok(input) => Ok(LoadedExternalCharacterInput::Input(Box::new(input))),
-        Err(error) => Ok(LoadedExternalCharacterInput::InvalidReport(Box::new(
-            invalid_external_character_import_triage_report(
-                source_id,
-                format!("external clean-character descriptor could not be parsed: {error}"),
-            ),
-        ))),
-    }
-}
-
-fn print_import_triage_report(report: &ImportTriageReport) {
-    println!("Import triage {}", report.source_id);
-    println!(
-        "  source kind: {}",
-        import_triage_source_kind_label(report.source_kind)
-    );
-    println!("  outcome: {}", import_triage_outcome_label(report.outcome));
-    println!("  label: {}", report.user_facing_label);
-    println!(
-        "  strict recovery proven: {}",
-        report.strict_recovery_proven
-    );
-    println!(
-        "  strict recovery confidence: {:.3}",
-        report.strict_recovery_confidence.0
-    );
-    println!(
-        "  classification confidence: {:.3}",
-        report.classification_confidence.0
-    );
-    println!(
-        "  candidates: {}",
-        report.external_character_analysis.candidates.len()
-    );
-    println!(
-        "  issues: {}",
-        report.external_character_analysis.issues.len()
-    );
-    for reason in &report.external_character_analysis.rejection_reasons {
-        println!("  rejection: {}: {}", reason.path, reason.message);
-    }
-}
-
-fn import_triage_source_kind_label(source_kind: ImportTriageSourceKind) -> &'static str {
-    match source_kind {
-        ImportTriageSourceKind::ExternalCleanCharacterDescriptor => {
-            "external_clean_character_descriptor"
-        }
-    }
-}
-
-fn import_triage_outcome_label(outcome: ImportTriageOutcome) -> &'static str {
-    match outcome {
-        ImportTriageOutcome::ExactEditableRecovery => "exact_editable_recovery",
-        ImportTriageOutcome::KnownBasePartialDiagnostic => "known_base_partial_diagnostic",
-        ImportTriageOutcome::DiagnosticOnlyUnsupported => "diagnostic_only_unsupported",
-        ImportTriageOutcome::InvalidInput => "invalid_input",
-    }
 }
 
 fn print_author_validation_report(report: &shape_foundry_catalog::FoundryAuthorValidationReport) {
@@ -2530,10 +2340,7 @@ fn model_validation_config(
     artifact: &shape_compile::AssetArtifact,
 ) -> ModelValidationConfig {
     let maximum_triangle_count = match loaded.benchmark {
-        Some(BenchmarkAsset::IndustrialCrate) => 30_000,
-        Some(BenchmarkAsset::MultiCutPanel) => 18_000,
-        Some(BenchmarkAsset::ExplicitDeskLamp) => 25_000,
-        Some(BenchmarkAsset::StylizedStool) => 20_000,
+        Some(BenchmarkAsset::BoxPrimitive) => 12_000,
         None => u64::MAX,
     };
     validation_config_from_recipe_with_limits(

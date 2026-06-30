@@ -306,9 +306,9 @@ fn grouped_cut_recipe() -> AssetRecipe {
             .insert(region_id, region(region_id.0, name, role));
     }
     recipe.variation.semantic_cut_groups.insert(
-        "vents".to_owned(),
+        "edge_marks".to_owned(),
         SemanticCutGroupHint {
-            label: "Vent slots".to_owned(),
+            label: "Edge marks".to_owned(),
             definition: PartDefinitionId(7),
             operations: vec![OperationId(5), OperationId(6), OperationId(7)],
             role: CutGroupRole::Vents,
@@ -767,7 +767,7 @@ fn explore_generates_semantic_cut_group_edits() {
         grouped_fields
             .windows(3)
             .any(|fields| fields.iter().all(|field| *field == fields[0])),
-        "expected at least one semantic cut group proposal to edit all vents together"
+        "expected at least one semantic cut group proposal to edit all edge marks together"
     );
 }
 

@@ -649,8 +649,8 @@ mod tests {
     #[test]
     fn primary_product_specs_validate() {
         let profile = ProfileCardSpec {
-            title: "Roman Timber Bridge",
-            description: "A sturdy bridge family with direction and width choices.",
+            title: "Box Primitive",
+            description: "A closed box with proportions and edge softness choices.",
             badge: Some("Preview"),
             action: ActionSpec::enabled("Start", ButtonTone::Primary),
         };

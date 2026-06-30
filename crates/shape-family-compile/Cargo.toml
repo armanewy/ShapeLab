@@ -16,6 +16,3 @@ shape-family.workspace = true
 shape-modeling.workspace = true
 shape-poly.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-shape-caesar-assets.workspace = true

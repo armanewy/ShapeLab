@@ -1,6 +1,6 @@
 param(
     [string]$OutDir = "target/demo-assets",
-    [string[]]$Preset = @("desk-lamp", "toy-submarine", "alien-plant", "sky-shrine"),
+    [string[]]$Preset = @("box-primitive"),
     [UInt64]$Seed = 42,
     [ValidateSet("explore", "refine")]
     [string]$Mode = "explore",
@@ -24,7 +24,7 @@ Usage:
 
 Options:
   -OutDir <path>                Output root. Default: target/demo-assets
-  -Preset <id[]>                Presets to generate. Default: all built-in demos
+  -Preset <id[]>                Presets to generate. Default: box-primitive
   -Seed <number>                Deterministic search seed. Default: 42
   -Mode <explore|refine>        Search mode. Default: explore
   -ProposalCount <number>       Raw proposals per preset. Default: 24

@@ -22,12 +22,12 @@ use shape_foundry::{
 
 #[test]
 fn add_current_asset_uses_foundry_pack_command() {
-    let command = add_current_asset_to_pack_command("roman_bridge_pack", "wide_span");
+    let command = add_current_asset_to_pack_command("box_primitive_pack", "wide_box");
 
     assert!(matches!(
         command.single_foundry_command(),
         Some(FoundryCommand::AddCurrentToPack { pack_id, member_id })
-            if pack_id == "roman_bridge_pack" && member_id == "wide_span"
+            if pack_id == "box_primitive_pack" && member_id == "wide_box"
     ));
 }
 
@@ -37,14 +37,14 @@ fn pack_panel_exposes_members_shared_state_overrides_and_actions() {
     let panel = pack_panel_view(&view);
 
     assert!(panel.active);
-    assert_eq!(panel.pack_id.as_deref(), Some("roman_bridge_pack"));
+    assert_eq!(panel.pack_id.as_deref(), Some("box_primitive_pack"));
     assert_eq!(panel.members.len(), 2);
     assert_eq!(panel.members[1].member_id, "tall_variant");
     assert_eq!(panel.members[1].name, "tall variant");
     assert!(panel.members[1].selected);
 
     assert_eq!(panel.shared_locks.len(), 1);
-    assert_eq!(panel.shared_locks[0].target, "control:height");
+    assert_eq!(panel.shared_locks[0].target, "control:edge_softness");
     assert_eq!(panel.shared_locks[0].mode, "locked");
     assert_eq!(
         panel.shared_locks[0].reason.as_deref(),
@@ -52,8 +52,8 @@ fn pack_panel_exposes_members_shared_state_overrides_and_actions() {
     );
 
     assert_eq!(panel.shared_providers.len(), 1);
-    assert_eq!(panel.shared_providers[0].role, "trim");
-    assert_eq!(panel.shared_providers[0].provider_id, "trim.stone");
+    assert_eq!(panel.shared_providers[0].role, "body");
+    assert_eq!(panel.shared_providers[0].provider_id, "body.round");
 
     let tall_overrides = panel
         .member_overrides
@@ -61,13 +61,13 @@ fn pack_panel_exposes_members_shared_state_overrides_and_actions() {
         .find(|row| row.member_id == "tall_variant")
         .expect("tall member overrides should be present");
     assert_eq!(tall_overrides.control_count, 1);
-    assert_eq!(tall_overrides.provider_count, 1);
-    assert_eq!(tall_overrides.total_count, 2);
+    assert_eq!(tall_overrides.provider_count, 0);
+    assert_eq!(tall_overrides.total_count, 1);
 
     assert!(panel.validation.valid);
     assert_eq!(panel.validation.issue_count, 0);
     assert!(panel.export.enabled);
-    assert_eq!(panel.export.profile.as_deref(), Some("game-ready"));
+    assert_eq!(panel.export.profile.as_deref(), Some("local-pack"));
     assert!(panel.export.require_all_members);
 
     let action_labels = panel
@@ -156,14 +156,14 @@ fn batch_export_request_requires_destination_directory() {
 }
 
 fn fixture_pack() -> FoundryPackDocument {
-    let family_ref = content_ref("family.bridge", 1);
-    let style_ref = content_ref("style.roman", 2);
-    let family_impl_ref = content_ref("family_impl.bridge", 3);
-    let style_impl_ref = content_ref("style_impl.roman", 4);
-    let profile_ref = content_ref("profile.bridge", 5);
+    let family_ref = content_ref("family.box", 1);
+    let style_ref = content_ref("style.plain", 2);
+    let family_impl_ref = content_ref("family_impl.box", 3);
+    let style_impl_ref = content_ref("style_impl.plain", 4);
+    let profile_ref = content_ref("profile.box", 5);
 
     let mut small = foundry_document(
-        "bridge_small",
+        "box_small",
         &family_ref,
         &style_ref,
         &family_impl_ref,
@@ -172,10 +172,10 @@ fn fixture_pack() -> FoundryPackDocument {
     );
     small
         .control_state
-        .insert("height".to_owned(), ControlValue::Scalar(1.0));
+        .insert("edge_softness".to_owned(), ControlValue::Scalar(1.0));
 
     let mut tall = foundry_document(
-        "bridge_tall",
+        "box_tall",
         &family_ref,
         &style_ref,
         &family_impl_ref,
@@ -183,36 +183,36 @@ fn fixture_pack() -> FoundryPackDocument {
         &profile_ref,
     );
     tall.control_state
-        .insert("height".to_owned(), ControlValue::Scalar(1.0));
+        .insert("edge_softness".to_owned(), ControlValue::Scalar(1.0));
     tall.control_state
-        .insert("span".to_owned(), ControlValue::Integer(3));
+        .insert("proportions".to_owned(), ControlValue::Integer(3));
     tall.provider_overrides.insert(
-        "arch".to_owned(),
+        "body".to_owned(),
         ProviderOverride {
-            role: "arch".to_owned(),
-            provider_ref: content_ref("arch.round", 6),
+            role: "body".to_owned(),
+            provider_ref: content_ref("body.round", 6),
         },
     );
 
     let mut pack = FoundryPackDocument::new(
-        "roman_bridge_pack",
+        "box_primitive_pack",
         family_ref,
         style_ref,
         FoundryPackExportProfile {
-            profile: "game-ready".to_owned(),
+            profile: "local-pack".to_owned(),
             require_all_members: true,
         },
     );
     pack.shared_controls
-        .insert("height".to_owned(), ControlValue::Scalar(1.0));
+        .insert("edge_softness".to_owned(), ControlValue::Scalar(1.0));
     pack.shared_locks.push(FoundryLock {
-        target: FoundryLockTarget::Control("height".to_owned()),
+        target: FoundryLockTarget::Control("edge_softness".to_owned()),
         mode: FoundryLockMode::Locked,
         reason: Some("Keep silhouettes aligned.".to_owned()),
     });
     pack.shared_provider_policy = SharedProviderPolicy::SharedExact(BTreeMap::from([(
-        "trim".to_owned(),
-        content_ref("trim.stone", 7),
+        "body".to_owned(),
+        content_ref("body.round", 6),
     )]));
     pack.members.insert("small".to_owned(), small);
     pack.members.insert("tall_variant".to_owned(), tall);

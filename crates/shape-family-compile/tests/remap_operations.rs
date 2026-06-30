@@ -418,7 +418,7 @@ fn reference_helpers_remap_cut_groups_ranges_sockets_and_generated_provenance() 
     );
 
     let cut_group = SemanticCutGroupHint {
-        label: "vent cuts".to_owned(),
+        label: "edge_mark cuts".to_owned(),
         definition: SOURCE_DEFINITION,
         operations: vec![RECESSED_CUT_OP, RECTANGULAR_CUT_OP, CIRCULAR_CUT_OP],
         role: CutGroupRole::Vents,

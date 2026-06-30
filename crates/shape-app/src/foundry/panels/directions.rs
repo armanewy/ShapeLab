@@ -723,16 +723,7 @@ fn active_focus_part<'a>(
 }
 
 fn singular_part_label(label: &str) -> &str {
-    match label {
-        "Handles" => "Handle",
-        "Panels" => "Panel",
-        "Vents" => "Vent",
-        "Fasteners" => "Fastener",
-        "Supports" => "Support",
-        "Joints" => "Joint",
-        "Ramps" => "Ramp",
-        other => other,
-    }
+    label.strip_suffix('s').unwrap_or(label)
 }
 
 /// Human-facing label for a Foundry candidate mode.

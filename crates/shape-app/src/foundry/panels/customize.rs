@@ -1,4 +1,4 @@
-//! Character-customizer-style control deck panel boundary.
+//! Foundry control deck panel boundary.
 
 use shape_foundry::{
     ControlDivergence, ControlEvaluationContext, ControlEvaluationError, ControlKind, ControlValue,

@@ -33,15 +33,12 @@ BUILD_PROFILE_RELEASE_EXPORT_PATHS: tuple[str, ...] = (
     "packaging/",
     "crates/shape-app/Cargo.toml",
     "crates/shape-cli/Cargo.toml",
-    "crates/shape-cli/src/game_ready_static.rs",
     "crates/shape-compile/src/export/",
     "scripts/package_macos_app.sh",
     "scripts/run_shape_app.ps1",
 )
 
 STATIC_SURFACE_PACKAGE_PATHS: tuple[str, ...] = (
-    "crates/shape-cli/src/game_ready_static.rs",
-    "crates/shape-gamekit/src/surface.rs",
     "crates/shape-render/src/surface_preview.rs",
 )
 
@@ -152,9 +149,7 @@ def is_catalog_test_path(path: str, test_name: str) -> bool:
 
 
 def touches_static_surface_package(path: str) -> bool:
-    return path in STATIC_SURFACE_PACKAGE_PATHS or path.startswith(
-        "crates/shape-gamekit/src/surface/"
-    )
+    return path in STATIC_SURFACE_PACKAGE_PATHS
 
 
 def touches_branch_release_stack(path: str) -> bool:
@@ -233,24 +228,7 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
             if "surface" in path:
                 commands.append(cargo("test", "-p", "shape-render", "surface", "--jobs", "1"))
 
-        for catalog_test in ("simple_crate", "utility_crate", "cargo_case"):
-            if is_catalog_test_path(path, catalog_test):
-                commands.extend(
-                    [
-                        cargo(
-                            "test",
-                            "-p",
-                            "shape-foundry-catalog",
-                            "--test",
-                            catalog_test,
-                            "--jobs",
-                            "1",
-                        ),
-                        *CATALOG_FOUNDRY_ADJACENCY_TESTS,
-                    ]
-                )
-
-        if is_catalog_test_path(path, "scifi_crate"):
+        if is_catalog_test_path(path, "box_primitive"):
             commands.extend(
                 [
                     cargo(
@@ -258,60 +236,19 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                         "-p",
                         "shape-foundry-catalog",
                         "--test",
-                        "scifi_crate",
+                        "box_primitive",
                         "--jobs",
                         "1",
                     ),
-                    cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
+                    *CATALOG_FOUNDRY_ADJACENCY_TESTS,
                 ]
             )
-            if static_surface_package_changed:
-                commands.append(cargo("test", "-p", "shape-cli", "game_ready_static", "--jobs", "1"))
-
-        if is_catalog_test_path(path, "roman_bridge"):
-            commands.append(
-                cargo(
-                    "test",
-                    "-p",
-                    "shape-foundry-catalog",
-                    "--test",
-                    "roman_bridge",
-                    "--jobs",
-                    "1",
-                )
-            )
-
-        if is_catalog_test_path(path, "stylized_lamp"):
-            commands.append(
-                cargo(
-                    "test",
-                    "-p",
-                    "shape-foundry-catalog",
-                    "--test",
-                    "stylized_lamp",
-                    "--jobs",
-                    "1",
-                )
-            )
-
-        if path.startswith("crates/shape-gamekit/"):
-            commands.extend(
-                [
-                    cargo("test", "-p", "shape-gamekit", "surface", "--jobs", "1"),
-                    cargo("test", "-p", "shape-gamekit", "rig", "--jobs", "1"),
-                    cargo("test", "-p", "shape-gamekit", "motion", "--jobs", "1"),
-                ]
-            )
-
-        if path == "crates/shape-cli/src/game_ready_static.rs":
-            commands.append(cargo("test", "-p", "shape-cli", "game_ready_static", "--jobs", "1"))
 
         if crate and crate not in {
             "shape-app",
             "shape-search",
             "shape-render",
             "shape-foundry-catalog",
-            "shape-gamekit",
             "shape-cli",
         }:
             commands.append(cargo("check", "-p", crate))
@@ -329,9 +266,15 @@ def integration_commands(paths: Iterable[str]) -> tuple[Command, ...]:
         cargo("test", "-p", "shape-app", "--lib", "foundry", "--jobs", "1"),
         cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
         cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"),
-        cargo("test", "-p", "shape-foundry-catalog", "--test", "scifi_crate", "--jobs", "1"),
-        cargo("test", "-p", "shape-foundry-catalog", "--test", "roman_bridge", "--jobs", "1"),
-        cargo("test", "-p", "shape-foundry-catalog", "--test", "stylized_lamp", "--jobs", "1"),
+        cargo(
+            "test",
+            "-p",
+            "shape-foundry-catalog",
+            "--test",
+            "box_primitive",
+            "--jobs",
+            "1",
+        ),
         cargo("clippy", "--workspace", "--all-targets", "--", "-D", "warnings"),
     ]
     if not path_tuple or any(touches_product_code(path) for path in path_tuple):

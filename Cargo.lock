@@ -3696,29 +3696,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shape-caesar-assets"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "shape-asset",
- "shape-compile",
- "shape-family",
- "shape-gamekit",
-]
-
-[[package]]
-name = "shape-character"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "serde",
- "serde_json",
- "shape-program",
- "shape-program-verify",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "shape-cli"
 version = "0.1.0"
 dependencies = [
@@ -3733,7 +3710,6 @@ dependencies = [
  "serde_json",
  "shape-app",
  "shape-asset",
- "shape-character",
  "shape-compile",
  "shape-core",
  "shape-decompiler",
@@ -3741,8 +3717,6 @@ dependencies = [
  "shape-field",
  "shape-foundry",
  "shape-foundry-catalog",
- "shape-gamekit",
- "shape-inverse",
  "shape-mesh",
  "shape-modeling-assets",
  "shape-poly",
@@ -3803,7 +3777,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shape-asset",
- "shape-caesar-assets",
  "shape-compile",
  "shape-family",
  "shape-modeling",
@@ -3829,7 +3802,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shape-asset",
- "shape-character",
  "shape-compile",
  "shape-family",
  "shape-family-compile",
@@ -3843,38 +3815,12 @@ dependencies = [
  "serde",
  "serde_json",
  "shape-asset",
- "shape-caesar-assets",
- "shape-character",
  "shape-compile",
  "shape-family",
  "shape-family-compile",
  "shape-foundry",
  "shape-search",
  "tempfile",
-]
-
-[[package]]
-name = "shape-gamekit"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "serde_json",
- "shape-asset",
- "shape-core",
- "shape-mesh",
- "tempfile",
-]
-
-[[package]]
-name = "shape-inverse"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "shape-character",
- "shape-program",
- "shape-program-verify",
 ]
 
 [[package]]

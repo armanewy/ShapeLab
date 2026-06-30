@@ -935,8 +935,7 @@ fn preview_ids(previews: &[shape_render::foundry::FoundryRenderedPreview]) -> Ve
 fn semantic_assignments() -> Vec<SemanticClayRoleAssignment> {
     vec![
         SemanticClayRoleAssignment::new("body", "Primary Mass", 0.72, 10, true),
-        SemanticClayRoleAssignment::new("panels", "Secondary Panels", 0.58, 20, true),
-        SemanticClayRoleAssignment::new("vents", "Recesses / Vents", 0.34, 30, true),
+        SemanticClayRoleAssignment::new("edges", "Soft Edges", 0.58, 20, true),
     ]
 }
 

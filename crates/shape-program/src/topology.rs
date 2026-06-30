@@ -813,14 +813,14 @@ mod tests {
         );
         assert!(primitive.selection_requirements.allows_empty);
 
-        let bridge = topology_contract_for(ModelingOperationKind::BridgeLoops).unwrap();
+        let loop_pair = topology_contract_for(ModelingOperationKind::BridgeLoops).unwrap();
         assert_eq!(
-            bridge.selection_requirements.count,
+            loop_pair.selection_requirements.count,
             SelectionCount::ExactlyTwo
         );
-        assert!(bridge.selection_requirements.ordered);
+        assert!(loop_pair.selection_requirements.ordered);
         assert_eq!(
-            bridge.selection_requirements.accepted_subjects,
+            loop_pair.selection_requirements.accepted_subjects,
             vec![SelectionSubject::BoundaryLoop]
         );
 

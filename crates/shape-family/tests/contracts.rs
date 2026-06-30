@@ -12,50 +12,50 @@ use shape_family::{
     validate_family_style_completeness, validate_style_kit,
 };
 
-fn bridge_family(style_kit: &str) -> AssetFamilySchema {
+fn box_family(style_kit: &str) -> AssetFamilySchema {
     AssetFamilySchema {
         schema_version: ASSET_FAMILY_SCHEMA_VERSION,
-        id: "bridge".to_owned(),
-        display_name: "Bridge".to_owned(),
+        id: "box_primitive".to_owned(),
+        display_name: "Box Primitive".to_owned(),
         summary:
-            "Theme-neutral crossing structure with supports, spans, decks, braces, and connectors."
+            "Theme-neutral closed box volume with a body, sides, top, edges, and contact base."
                 .to_owned(),
         part_roles: vec![
-            role("support", RoleMultiplicity::Repeated, true, &["support"]),
+            role("body", RoleMultiplicity::Single, true, &["body"]),
             role(
-                "span",
+                "side",
                 RoleMultiplicity::Range { min: 1, max: 8 },
                 true,
-                &["structure"],
+                &["wall"],
             ),
-            role("deck", RoleMultiplicity::Repeated, true, &["walkable"]),
+            role("top", RoleMultiplicity::Repeated, true, &["surface"]),
             role(
-                "brace",
+                "corner_edge",
                 RoleMultiplicity::Optional,
                 false,
-                &["detail", "support"],
+                &["detail", "edge"],
             ),
             role(
-                "connector",
+                "base_contact",
                 RoleMultiplicity::Repeated,
                 false,
-                &["attachment"],
+                &["contact"],
             ),
         ],
         attachment_rules: vec![
             AttachmentRule {
-                id: "support_span".to_owned(),
-                from_role: "support".to_owned(),
-                to_role: "span".to_owned(),
-                anchor_role: Some("connector".to_owned()),
-                compatibility_tags: vec!["load_path".to_owned()],
+                id: "body_side".to_owned(),
+                from_role: "body".to_owned(),
+                to_role: "side".to_owned(),
+                anchor_role: Some("base_contact".to_owned()),
+                compatibility_tags: vec!["box_structure".to_owned()],
                 required: true,
                 execution_policy: FamilyRuleExecutionPolicy::Required,
             },
             AttachmentRule {
-                id: "deck_span".to_owned(),
-                from_role: "deck".to_owned(),
-                to_role: "span".to_owned(),
+                id: "top_side".to_owned(),
+                from_role: "top".to_owned(),
+                to_role: "side".to_owned(),
                 anchor_role: None,
                 compatibility_tags: vec!["surface".to_owned()],
                 required: true,
@@ -71,9 +71,9 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
         ],
         parameter_slots: vec![
             FamilyParameterSlot {
-                id: "span_length".to_owned(),
-                label: "Span Length".to_owned(),
-                target_role: Some("span".to_owned()),
+                id: "side_width".to_owned(),
+                label: "Side Width".to_owned(),
+                target_role: Some("side".to_owned()),
                 kind: FamilyParameterKind::Length {
                     unit: LengthUnit::Meters,
                 },
@@ -87,9 +87,9 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
                 topology_changing: false,
             },
             FamilyParameterSlot {
-                id: "support_count".to_owned(),
-                label: "Support Count".to_owned(),
-                target_role: Some("support".to_owned()),
+                id: "side_count".to_owned(),
+                label: "Side Count".to_owned(),
+                target_role: Some("side".to_owned()),
                 kind: FamilyParameterKind::Count,
                 range: Some(ParameterRange {
                     minimum: 2.0,
@@ -103,31 +103,31 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
         ],
         constraints: vec![
             GeometricConstraint {
-                id: "supports_touch_spans".to_owned(),
-                roles: vec!["support".to_owned(), "span".to_owned()],
+                id: "sides_touch_body".to_owned(),
+                roles: vec!["side".to_owned(), "body".to_owned()],
                 kind: ConstraintKind::MustSupport,
                 execution_policy: FamilyRuleExecutionPolicy::Required,
             },
             GeometricConstraint {
-                id: "deck_has_clearance".to_owned(),
-                roles: vec!["deck".to_owned(), "connector".to_owned()],
+                id: "top_has_clearance".to_owned(),
+                roles: vec!["top".to_owned(), "base_contact".to_owned()],
                 kind: ConstraintKind::Clearance,
                 execution_policy: FamilyRuleExecutionPolicy::Advisory,
             },
         ],
         variant_rules: vec![
             VariantRule {
-                id: "span_proportions".to_owned(),
-                label: "Span proportions".to_owned(),
+                id: "box_proportions".to_owned(),
+                label: "Box proportions".to_owned(),
                 mode: VariantMode::Proportion,
-                editable_roles: vec!["span".to_owned(), "deck".to_owned()],
-                locked_by_tags: vec!["locked_structure".to_owned()],
+                editable_roles: vec!["side".to_owned(), "top".to_owned()],
+                locked_by_tags: vec!["locked_box".to_owned()],
             },
             VariantRule {
-                id: "brace_density".to_owned(),
-                label: "Brace density".to_owned(),
+                id: "edge_density".to_owned(),
+                label: "Edge density".to_owned(),
                 mode: VariantMode::Repetition,
-                editable_roles: vec!["brace".to_owned()],
+                editable_roles: vec!["corner_edge".to_owned()],
                 locked_by_tags: Vec::new(),
             },
         ],
@@ -141,7 +141,7 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
             triangle_budget_hint: Some(8_000),
         }],
         compatible_style_kits: vec![style_kit.to_owned()],
-        tags: vec!["modular".to_owned(), "hard_surface".to_owned()],
+        tags: vec!["box".to_owned(), "clay".to_owned()],
     }
 }
 
@@ -149,20 +149,20 @@ fn bridge_family(style_kit: &str) -> AssetFamilySchema {
 fn legacy_attachment_rules_derive_execution_policy_from_required_flag() {
     let required: AttachmentRule = serde_json::from_str(
         r#"{
-            "id":"support_span",
-            "from_role":"support",
-            "to_role":"span",
+            "id":"body_side",
+            "from_role":"body",
+            "to_role":"side",
             "anchor_role":null,
-            "compatibility_tags":["load_path"],
+            "compatibility_tags":["box_structure"],
             "required":true
         }"#,
     )
     .expect("legacy required rule parses");
     let optional: AttachmentRule = serde_json::from_str(
         r#"{
-            "id":"trim_panel",
-            "from_role":"trim",
-            "to_role":"panel",
+            "id":"edge_body",
+            "from_role":"corner_edge",
+            "to_role":"body",
             "anchor_role":null,
             "compatibility_tags":[],
             "required":false
@@ -182,7 +182,7 @@ fn legacy_attachment_rules_derive_execution_policy_from_required_flag() {
 
 #[test]
 fn attachment_required_flag_and_execution_policy_must_agree() {
-    let mut family = bridge_family("roman_timber_engineering");
+    let mut family = box_family("plain_box");
     family.attachment_rules[0].execution_policy = FamilyRuleExecutionPolicy::Advisory;
     let report = validate_asset_family_schema(&family);
 
@@ -193,7 +193,7 @@ fn attachment_required_flag_and_execution_policy_must_agree() {
             .any(|issue| issue.code == "required_attachment_policy_mismatch")
     );
 
-    let mut family = bridge_family("roman_timber_engineering");
+    let mut family = box_family("plain_box");
     family.attachment_rules[0].required = false;
     let report = validate_asset_family_schema(&family);
     assert!(
@@ -224,65 +224,65 @@ fn role(
     }
 }
 
-fn industrial_style_kit() -> StyleKit {
+fn box_style_kit() -> StyleKit {
     let proportions = vec![
         RoleProportion {
-            role: "support".to_owned(),
+            role: "body".to_owned(),
             preferred_scale: [
-                LengthValue::FamilyUnits(0.35),
-                LengthValue::FamilyUnits(0.35),
-                LengthValue::FamilyUnits(1.8),
+                LengthValue::FamilyUnits(2.2),
+                LengthValue::FamilyUnits(1.6),
+                LengthValue::FamilyUnits(1.2),
             ],
             taper: 0.0,
         },
         RoleProportion {
-            role: "span".to_owned(),
+            role: "side".to_owned(),
             preferred_scale: [
-                LengthValue::FamilyUnits(3.0),
-                LengthValue::FamilyUnits(0.8),
-                LengthValue::FamilyUnits(0.25),
+                LengthValue::FamilyUnits(2.0),
+                LengthValue::FamilyUnits(0.12),
+                LengthValue::FamilyUnits(1.0),
             ],
             taper: 0.0,
         },
     ];
     let part_prototypes = vec![
         PartPrototype {
-            id: "box_support".to_owned(),
-            display_name: "Box support".to_owned(),
-            role: "support".to_owned(),
+            id: "box_body".to_owned(),
+            display_name: "Box body".to_owned(),
+            role: "body".to_owned(),
             operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Bevel],
-            style_tags: vec!["structural".to_owned()],
+            style_tags: vec!["body".to_owned()],
         },
         PartPrototype {
-            id: "deck_plate".to_owned(),
-            display_name: "Deck plate".to_owned(),
-            role: "deck".to_owned(),
+            id: "box_top".to_owned(),
+            display_name: "Box top".to_owned(),
+            role: "top".to_owned(),
             operation_tags: vec![AllowedOperationKind::Primitive, AllowedOperationKind::Cut],
             style_tags: vec!["surface".to_owned()],
         },
         PartPrototype {
-            id: "box_span".to_owned(),
-            display_name: "Box span".to_owned(),
-            role: "span".to_owned(),
+            id: "box_side".to_owned(),
+            display_name: "Box side".to_owned(),
+            role: "side".to_owned(),
             operation_tags: vec![AllowedOperationKind::Primitive],
-            style_tags: vec!["structural".to_owned()],
+            style_tags: vec!["wall".to_owned()],
         },
     ];
     let detail_modules = vec![DetailModule {
-        id: "bolt_row".to_owned(),
-        display_name: "Bolt row".to_owned(),
-        target_roles: vec!["deck".to_owned(), "connector".to_owned()],
+        id: "edge_line".to_owned(),
+        display_name: "Edge line".to_owned(),
+        target_roles: vec!["top".to_owned(), "base_contact".to_owned()],
         minimum_readability: ReadabilityThreshold {
             pixels: 24,
             camera_profile: "oblique".to_owned(),
         },
-        tags: vec!["fastener".to_owned()],
+        tags: vec!["edge_detail".to_owned()],
     }];
     StyleKit {
         schema_version: STYLE_KIT_SCHEMA_VERSION,
-        id: "industrial_steel".to_owned(),
-        display_name: "Industrial Steel".to_owned(),
-        compatible_families: vec!["bridge".to_owned()],
+        id: "plain_box".to_owned(),
+        display_name: "Plain Box".to_owned(),
+        compatible_families: vec!["box_primitive".to_owned()],
         bevel_policy: BevelPolicy {
             width: LengthValue::FamilyUnits(0.04),
             segments: 2,
@@ -307,16 +307,16 @@ fn industrial_style_kit() -> StyleKit {
             detail: 0.45,
         },
         family_facets: BTreeMap::from([(
-            "bridge".to_owned(),
+            "box_primitive".to_owned(),
             FamilyStyleFacet {
-                family_id: "bridge".to_owned(),
+                family_id: "box_primitive".to_owned(),
                 proportions,
                 part_prototypes,
                 detail_modules,
                 policy_overrides: FamilyStylePolicyOverrides::default(),
             },
         )]),
-        tags: vec!["hard_surface".to_owned()],
+        tags: vec!["clay".to_owned()],
     }
 }
 
@@ -330,8 +330,8 @@ fn issue_codes(report: &shape_family::FamilyValidationReport) -> Vec<&str> {
 
 #[test]
 fn family_and_style_kit_serde_round_trip() {
-    let family = bridge_family("industrial_steel");
-    let kit = industrial_style_kit();
+    let family = box_family("plain_box");
+    let kit = box_style_kit();
 
     assert!(validate_asset_family_schema(&family).is_valid());
     assert!(validate_style_kit(&kit).is_valid());
@@ -349,7 +349,7 @@ fn family_and_style_kit_serde_round_trip() {
 
 #[test]
 fn duplicate_role_id_is_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.part_roles[1].id = family.part_roles[0].id.clone();
 
     let report = validate_asset_family_schema(&family);
@@ -359,7 +359,7 @@ fn duplicate_role_id_is_rejected() {
 
 #[test]
 fn unknown_attachment_role_is_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.attachment_rules[0].to_role = "missing".to_owned();
 
     let report = validate_asset_family_schema(&family);
@@ -369,7 +369,7 @@ fn unknown_attachment_role_is_rejected() {
 
 #[test]
 fn invalid_parameter_range_is_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.parameter_slots[0].range = Some(ParameterRange {
         minimum: 8.0,
         maximum: 2.0,
@@ -383,16 +383,16 @@ fn invalid_parameter_range_is_rejected() {
 
 #[test]
 fn parameter_kind_semantics_are_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.parameter_slots[1].range = Some(ParameterRange {
         minimum: 2.5,
         maximum: 16.0,
         step: 1.0,
     });
     family.parameter_slots.push(FamilyParameterSlot {
-        id: "has_rails".to_owned(),
-        label: "Has Rails".to_owned(),
-        target_role: Some("deck".to_owned()),
+        id: "has_edge_line".to_owned(),
+        label: "Has Edge Line".to_owned(),
+        target_role: Some("top".to_owned()),
         kind: FamilyParameterKind::Toggle,
         range: Some(ParameterRange {
             minimum: 0.0,
@@ -413,7 +413,7 @@ fn parameter_kind_semantics_are_rejected() {
 
 #[test]
 fn parameter_default_semantics_are_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.parameter_slots[0].default_value = Some(FamilyDefaultValue::Scalar(99.0));
     family.parameter_slots[1].default_value = Some(FamilyDefaultValue::Choice("many".to_owned()));
     family.parameter_slots.push(FamilyParameterSlot {
@@ -427,9 +427,9 @@ fn parameter_default_semantics_are_rejected() {
         topology_changing: false,
     });
     family.parameter_slots.push(FamilyParameterSlot {
-        id: "has_rails".to_owned(),
-        label: "Has Rails".to_owned(),
-        target_role: Some("deck".to_owned()),
+        id: "has_edge_line".to_owned(),
+        label: "Has Edge Line".to_owned(),
+        target_role: Some("top".to_owned()),
         kind: FamilyParameterKind::Toggle,
         range: None,
         default_value: None,
@@ -447,7 +447,7 @@ fn parameter_default_semantics_are_rejected() {
 
 #[test]
 fn semantic_parameter_ranges_and_relative_roles_are_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.parameter_slots[0].kind = FamilyParameterKind::Length {
         unit: LengthUnit::RelativeToRole {
             role: "missing".to_owned(),
@@ -474,7 +474,7 @@ fn semantic_parameter_ranges_and_relative_roles_are_rejected() {
 
 #[test]
 fn contradictory_requiredness_is_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.part_roles[3].required = true;
 
     let report = validate_asset_family_schema(&family);
@@ -484,7 +484,7 @@ fn contradictory_requiredness_is_rejected() {
 
 #[test]
 fn unstable_identifier_format_is_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family.part_roles[0].id = "..".to_owned();
 
     let report = validate_asset_family_schema(&family);
@@ -494,18 +494,16 @@ fn unstable_identifier_format_is_rejected() {
 
 #[test]
 fn duplicate_set_like_fields_are_rejected() {
-    let mut family = bridge_family("industrial_steel");
+    let mut family = box_family("plain_box");
     family
         .allowed_operations
         .push(AllowedOperationKind::Primitive);
-    family.part_roles[0]
-        .semantic_tags
-        .push("support".to_owned());
-    family.tags.push("modular".to_owned());
-    family.constraints[0].roles.push("support".to_owned());
+    family.part_roles[0].semantic_tags.push("body".to_owned());
+    family.tags.push("box".to_owned());
+    family.constraints[0].roles.push("side".to_owned());
     family.variant_rules[0]
         .editable_roles
-        .push("span".to_owned());
+        .push("side".to_owned());
 
     let report = validate_asset_family_schema(&family);
     let codes = issue_codes(&report);
@@ -519,13 +517,13 @@ fn duplicate_set_like_fields_are_rejected() {
 
 #[test]
 fn compatibility_and_provider_completeness_are_separate_reports() {
-    let family = bridge_family("industrial_steel");
-    let mut kit = industrial_style_kit();
+    let family = box_family("plain_box");
+    let mut kit = box_style_kit();
     kit.family_facets
-        .get_mut("bridge")
-        .expect("bridge facet")
+        .get_mut("box_primitive")
+        .expect("box_primitive facet")
         .part_prototypes
-        .retain(|prototype| prototype.role != "deck");
+        .retain(|prototype| prototype.role != "top");
 
     let compatibility = validate_family_style_compatibility(&family, &kit);
     let completeness = validate_family_style_completeness(&family, &kit);
@@ -536,56 +534,56 @@ fn compatibility_and_provider_completeness_are_separate_reports() {
 
 #[test]
 fn style_facets_scope_role_references_to_the_selected_family() {
-    let family = bridge_family("industrial_steel");
-    let mut kit = industrial_style_kit();
-    kit.compatible_families.push("crate".to_owned());
+    let family = box_family("plain_box");
+    let mut kit = box_style_kit();
+    kit.compatible_families.push("foreign_family".to_owned());
     kit.family_facets.insert(
-        "crate".to_owned(),
+        "foreign_family".to_owned(),
         FamilyStyleFacet {
-            family_id: "crate".to_owned(),
+            family_id: "foreign_family".to_owned(),
             proportions: Vec::new(),
             part_prototypes: vec![PartPrototype {
-                id: "armored_body".to_owned(),
-                display_name: "Armored Body".to_owned(),
-                role: "body".to_owned(),
+                id: "foreign_body".to_owned(),
+                display_name: "Foreign Body".to_owned(),
+                role: "foreign_body".to_owned(),
                 operation_tags: vec![AllowedOperationKind::Primitive],
-                style_tags: vec!["crate".to_owned()],
+                style_tags: vec!["foreign".to_owned()],
             }],
             detail_modules: Vec::new(),
             policy_overrides: FamilyStylePolicyOverrides::default(),
         },
     );
 
-    let bridge_report = validate_family_style_compatibility(&family, &kit);
+    let box_report = validate_family_style_compatibility(&family, &kit);
     assert!(
-        bridge_report.is_valid(),
-        "crate-only role references should not poison bridge compatibility"
+        box_report.is_valid(),
+        "foreign-role role references should not poison box_primitive compatibility"
     );
 
     kit.family_facets
-        .get_mut("bridge")
-        .expect("bridge facet")
+        .get_mut("box_primitive")
+        .expect("box_primitive facet")
         .part_prototypes
         .push(PartPrototype {
-            id: "bad_bridge_body".to_owned(),
-            display_name: "Bad Bridge Body".to_owned(),
-            role: "body".to_owned(),
+            id: "bad_unknown_box_part".to_owned(),
+            display_name: "Bad Unknown Box Part".to_owned(),
+            role: "unknown_body".to_owned(),
             operation_tags: vec![AllowedOperationKind::Primitive],
             style_tags: vec!["invalid".to_owned()],
         });
-    let bad_bridge_report = validate_family_style_compatibility(&family, &kit);
-    assert!(issue_codes(&bad_bridge_report).contains(&"unknown_style_prototype_role"));
+    let bad_box_report = validate_family_style_compatibility(&family, &kit);
+    assert!(issue_codes(&bad_box_report).contains(&"unknown_style_prototype_role"));
 }
 
 #[test]
 fn global_style_policies_cannot_reference_family_roles() {
-    let mut kit = industrial_style_kit();
+    let mut kit = box_style_kit();
     kit.bevel_policy.width = LengthValue::RelativeToRole {
-        role: "span".to_owned(),
+        role: "side".to_owned(),
         ratio: 0.05,
     };
     kit.repetition.preferred_spacing = LengthValue::RelativeToRole {
-        role: "deck".to_owned(),
+        role: "top".to_owned(),
         ratio: 0.2,
     };
 
@@ -603,7 +601,7 @@ fn global_style_policies_cannot_reference_family_roles() {
 
 #[test]
 fn older_style_kit_payloads_deserialize_before_schema_validation() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     value["schema_version"] = serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 2);
     value
         .as_object_mut()
@@ -619,18 +617,18 @@ fn older_style_kit_payloads_deserialize_before_schema_validation() {
 
 #[test]
 fn schema_v3_style_kit_migrates_global_role_data_into_single_family_facet() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     let object = value.as_object_mut().expect("style kit object");
-    let bridge_facet = object
+    let box_facet = object
         .get_mut("family_facets")
-        .and_then(|facets| facets.get_mut("bridge"))
+        .and_then(|facets| facets.get_mut("box_primitive"))
         .and_then(|facet| facet.as_object_mut())
-        .expect("bridge facet");
-    let proportions = bridge_facet.remove("proportions").expect("proportions");
-    let prototypes = bridge_facet
+        .expect("box_primitive facet");
+    let proportions = box_facet.remove("proportions").expect("proportions");
+    let prototypes = box_facet
         .remove("part_prototypes")
         .expect("part prototypes");
-    let details = bridge_facet.remove("detail_modules").expect("details");
+    let details = box_facet.remove("detail_modules").expect("details");
     object.insert(
         "schema_version".to_owned(),
         serde_json::json!(STYLE_KIT_SCHEMA_VERSION - 1),
@@ -644,24 +642,24 @@ fn schema_v3_style_kit_migrates_global_role_data_into_single_family_facet() {
     assert_eq!(kit.schema_version, STYLE_KIT_SCHEMA_VERSION);
     assert!(
         kit.family_facets
-            .get("bridge")
-            .expect("bridge facet")
+            .get("box_primitive")
+            .expect("box_primitive facet")
             .part_prototypes
             .iter()
-            .any(|prototype| prototype.id == "box_support")
+            .any(|prototype| prototype.id == "box_body")
     );
 }
 
 #[test]
 fn schema_v3_style_kit_migrates_partial_global_role_data_without_false_facet_conflicts() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     let object = value.as_object_mut().expect("style kit object");
-    let bridge_facet = object
+    let box_facet = object
         .get_mut("family_facets")
-        .and_then(|facets| facets.get_mut("bridge"))
+        .and_then(|facets| facets.get_mut("box_primitive"))
         .and_then(|facet| facet.as_object_mut())
-        .expect("bridge facet");
-    let prototypes = bridge_facet
+        .expect("box_primitive facet");
+    let prototypes = box_facet
         .remove("part_prototypes")
         .expect("part prototypes");
     object.insert(
@@ -672,24 +670,27 @@ fn schema_v3_style_kit_migrates_partial_global_role_data_without_false_facet_con
 
     let kit: StyleKit =
         serde_json::from_value(value).expect("partial legacy v3 kit should migrate");
-    let facet = kit.family_facets.get("bridge").expect("bridge facet");
+    let facet = kit
+        .family_facets
+        .get("box_primitive")
+        .expect("box_primitive facet");
     assert!(!facet.proportions.is_empty());
     assert!(
         facet
             .part_prototypes
             .iter()
-            .any(|prototype| prototype.id == "box_support")
+            .any(|prototype| prototype.id == "box_body")
     );
 }
 
 #[test]
 fn schema_v4_rejects_legacy_global_role_data() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     let object = value.as_object_mut().expect("style kit object");
     object.insert(
         "proportions".to_owned(),
         serde_json::json!([{
-            "role": "support",
+            "role": "body",
             "preferred_scale": [
                 {"FamilyUnits": 1.0},
                 {"FamilyUnits": 1.0},
@@ -706,7 +707,7 @@ fn schema_v4_rejects_legacy_global_role_data() {
 
 #[test]
 fn schema_v4_rejects_empty_legacy_global_role_fields() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     value
         .as_object_mut()
         .expect("style kit object")
@@ -719,8 +720,8 @@ fn schema_v4_rejects_empty_legacy_global_role_fields() {
 
 #[test]
 fn family_style_facets_reject_removed_default_provider_field() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
-    value["family_facets"]["bridge"]["default_role_providers"] = serde_json::json!({});
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
+    value["family_facets"]["box_primitive"]["default_role_providers"] = serde_json::json!({});
 
     let result = serde_json::from_value::<StyleKit>(value);
 
@@ -729,7 +730,7 @@ fn family_style_facets_reject_removed_default_provider_field() {
 
 #[test]
 fn facet_only_style_kits_deserialize_and_validate() {
-    let mut value = serde_json::to_value(industrial_style_kit()).expect("style kit json");
+    let mut value = serde_json::to_value(box_style_kit()).expect("style kit json");
     let object = value.as_object_mut().expect("style kit object");
     object.remove("proportions");
     object.remove("part_prototypes");
@@ -738,15 +739,13 @@ fn facet_only_style_kits_deserialize_and_validate() {
     let kit: StyleKit = serde_json::from_value(value).expect("facet-only kit should deserialize");
 
     assert!(validate_style_kit(&kit).is_valid());
-    assert!(
-        validate_family_style_compatibility(&bridge_family("industrial_steel"), &kit).is_valid()
-    );
+    assert!(validate_family_style_compatibility(&box_family("plain_box"), &kit).is_valid());
 }
 
 #[test]
 fn incompatible_style_and_family_are_rejected() {
-    let family = bridge_family("stylized_wood");
-    let kit = industrial_style_kit();
+    let family = box_family("soft_clay");
+    let kit = box_style_kit();
 
     let report = validate_family_style_compatibility(&family, &kit);
     let codes = issue_codes(&report);
@@ -756,11 +755,11 @@ fn incompatible_style_and_family_are_rejected() {
 
 #[test]
 fn prototype_operations_must_be_allowed_by_family() {
-    let family = bridge_family("industrial_steel");
-    let mut kit = industrial_style_kit();
+    let family = box_family("plain_box");
+    let mut kit = box_style_kit();
     kit.family_facets
-        .get_mut("bridge")
-        .expect("bridge facet")
+        .get_mut("box_primitive")
+        .expect("box_primitive facet")
         .part_prototypes[0]
         .operation_tags
         .push(AllowedOperationKind::Lathe);
@@ -772,11 +771,14 @@ fn prototype_operations_must_be_allowed_by_family() {
 
 #[test]
 fn duplicate_style_prototype_and_detail_ids_are_rejected() {
-    let mut kit = industrial_style_kit();
-    let facet = kit.family_facets.get_mut("bridge").expect("bridge facet");
+    let mut kit = box_style_kit();
+    let facet = kit
+        .family_facets
+        .get_mut("box_primitive")
+        .expect("box_primitive facet");
     facet.part_prototypes[1].id = facet.part_prototypes[0].id.clone();
     facet.detail_modules.push(facet.detail_modules[0].clone());
-    kit.tags.push("hard_surface".to_owned());
+    kit.tags.push("clay".to_owned());
 
     let report = validate_style_kit(&kit);
     let codes = issue_codes(&report);
@@ -789,11 +791,23 @@ fn duplicate_style_prototype_and_detail_ids_are_rejected() {
 #[test]
 fn generic_examples_contain_no_pack_specific_names() {
     let family_json =
-        serde_json::to_string(&bridge_family("industrial_steel")).expect("family should serialize");
-    let kit_json = serde_json::to_string(&industrial_style_kit()).expect("kit should serialize");
+        serde_json::to_string(&box_family("plain_box")).expect("family should serialize");
+    let kit_json = serde_json::to_string(&box_style_kit()).expect("kit should serialize");
     let combined = format!("{family_json}\n{kit_json}").to_lowercase();
 
-    for forbidden in ["caesar", "roman", "gallic", "river bend"] {
+    for forbidden in [
+        "legacy-project",
+        "plain_clay",
+        "industrial steel",
+        "deck",
+        "span",
+        "brace",
+        "connector",
+        "crate",
+        "hard_surface",
+        "external-style",
+        "external project",
+    ] {
         assert!(
             !combined.contains(forbidden),
             "generic schema fixture leaked {forbidden}"

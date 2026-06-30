@@ -11,9 +11,6 @@ members = [
     "crates/shape-family-compile",
     "crates/shape-foundry",
     "crates/shape-foundry-catalog",
-    "crates/shape-gamekit",
-    "crates/shape-caesar-assets",
-    "crates/shape-character",
     "crates/shape-mesh",
     "crates/shape-modeling",
     "crates/shape-modeling-assets",
@@ -24,7 +21,6 @@ members = [
     "crates/shape-project",
     "crates/shape-render",
     "crates/shape-search",
-    "crates/shape-inverse",
 ]
 resolver = "3"
 
@@ -59,8 +55,6 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 
 shape-asset = { path = "crates/shape-asset" }
-shape-caesar-assets = { path = "crates/shape-caesar-assets" }
-shape-character = { path = "crates/shape-character" }
 shape-compile = { path = "crates/shape-compile" }
 shape-core = { path = "crates/shape-core" }
 shape-decompiler = { path = "crates/shape-decompiler" }
@@ -69,7 +63,6 @@ shape-family-compile = { path = "crates/shape-family-compile" }
 shape-field = { path = "crates/shape-field" }
 shape-foundry = { path = "crates/shape-foundry" }
 shape-foundry-catalog = { path = "crates/shape-foundry-catalog" }
-shape-gamekit = { path = "crates/shape-gamekit" }
 shape-mesh = { path = "crates/shape-mesh" }
 shape-modeling = { path = "crates/shape-modeling" }
 shape-modeling-assets = { path = "crates/shape-modeling-assets" }
@@ -80,7 +73,6 @@ shape-presets = { path = "crates/shape-presets" }
 shape-project = { path = "crates/shape-project" }
 shape-render = { path = "crates/shape-render" }
 shape-search = { path = "crates/shape-search" }
-shape-inverse = { path = "crates/shape-inverse" }
 
 [profile.dev]
 debug = "line-tables-only"

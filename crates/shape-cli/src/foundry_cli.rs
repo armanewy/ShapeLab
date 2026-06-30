@@ -23,7 +23,7 @@ pub struct FoundryArgs {
 pub enum FoundryCommand {
     /// Materialize an internal foundation draft from one supported archetype.
     MaterializeArchetype {
-        /// Archetype ID. v0 supports cargo-case only.
+        /// Archetype ID. v0 supports box-primitive only.
         #[arg(long)]
         archetype: String,
         /// New family ID.

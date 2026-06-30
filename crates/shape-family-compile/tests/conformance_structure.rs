@@ -21,8 +21,8 @@ use shape_family_compile::{
 };
 
 #[test]
-fn valid_bridge_structural_conformance_passes() {
-    let fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+fn valid_box_structural_conformance_passes() {
+    let fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     let report = structural_report(&fixture);
 
     assert!(report.is_accepted());
@@ -47,7 +47,7 @@ fn valid_bridge_structural_conformance_passes() {
 
 #[test]
 fn missing_support_attachment_is_required_failure() {
-    let fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[]);
+    let fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[]);
     let report = structural_report(&fixture);
     let attachment = &report.attachments[0];
 
@@ -67,7 +67,7 @@ fn missing_support_attachment_is_required_failure() {
 
 #[test]
 fn forbidden_operation_class_is_reported() {
-    let mut fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let mut fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     fixture
         .recipe
         .definitions
@@ -97,7 +97,7 @@ fn forbidden_operation_class_is_reported() {
 
 #[test]
 fn disabled_required_role_is_missing() {
-    let mut fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let mut fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     fixture
         .recipe
         .instances
@@ -121,7 +121,7 @@ fn disabled_required_role_is_missing() {
 
 #[test]
 fn incomplete_repeated_pairing_reports_unmatched_coverage() {
-    let fixture = bridge_fixture(2, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let fixture = box_fixture(2, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     let report = structural_report(&fixture);
     let attachment = &report.attachments[0];
 
@@ -145,12 +145,12 @@ fn incomplete_repeated_pairing_reports_unmatched_coverage() {
 
 #[test]
 fn compatible_and_incompatible_sockets_are_distinguished() {
-    let compatible = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let compatible = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     let compatible_report = structural_report(&compatible);
     assert!(compatible_report.attachments[0].pairs[0].socket_compatible);
     assert!(compatible_report.is_accepted());
 
-    let incompatible = bridge_fixture(1, 1, &["pin"], &["slot"], &[], &[(0, 0)]);
+    let incompatible = box_fixture(1, 1, &["pin"], &["slot"], &[], &[(0, 0)]);
     let incompatible_report = structural_report(&incompatible);
     let attachment = &incompatible_report.attachments[0];
 
@@ -166,7 +166,7 @@ fn compatible_and_incompatible_sockets_are_distinguished() {
 
 #[test]
 fn attachment_compatibility_requires_fragment_port_and_concrete_socket_tags() {
-    let mut socket_mismatch = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let mut socket_mismatch = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     for definition in socket_mismatch.recipe.definitions.values_mut() {
         for socket in definition.sockets.values_mut() {
             socket.tags = BTreeSet::from(["private".to_owned()]);
@@ -182,7 +182,7 @@ fn attachment_compatibility_requires_fragment_port_and_concrete_socket_tags() {
         "incompatible_attachment_socket"
     ));
 
-    let mut port_mismatch = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let mut port_mismatch = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     for port in &mut port_mismatch.span.fragment.exports.socket_ports {
         port.compatibility_tags = vec!["private".to_owned()];
     }
@@ -202,7 +202,7 @@ fn attachment_compatibility_requires_fragment_port_and_concrete_socket_tags() {
 
 #[test]
 fn runtime_only_attachment_rules_are_deferred() {
-    let mut fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[]);
+    let mut fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[]);
     fixture.family.attachment_rules[0].execution_policy = FamilyRuleExecutionPolicy::RuntimeOnly;
     fixture.family.attachment_rules[0].required = false;
 
@@ -282,7 +282,7 @@ fn ranged_role_multiplicity_is_enforced() {
 
 #[test]
 fn structural_report_order_is_deterministic() {
-    let mut fixture = bridge_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
+    let mut fixture = box_fixture(1, 1, &["load"], &["load"], &["load"], &[(0, 0)]);
     fixture.family.part_roles = vec![
         role("support", RoleMultiplicity::Repeated, true),
         role("deck", RoleMultiplicity::Optional, false),
@@ -377,7 +377,7 @@ struct FragmentFixture {
     remap: FragmentRemap,
 }
 
-fn bridge_fixture(
+fn box_fixture(
     support_count: u64,
     span_count: u64,
     support_tags: &[&str],
@@ -385,7 +385,7 @@ fn bridge_fixture(
     rule_tags: &[&str],
     connected_pairs: &[(usize, usize)],
 ) -> BridgeFixture {
-    let mut recipe = AssetRecipe::new(AssetId(7), "bridge");
+    let mut recipe = AssetRecipe::new(AssetId(7), "box_primitive");
     recipe.definitions.insert(
         SPAN_DEFINITION,
         definition(SPAN_DEFINITION, SPAN_SOCKET, span_tags),
@@ -437,9 +437,9 @@ fn bridge_fixture(
 
     let family = AssetFamilySchema {
         schema_version: ASSET_FAMILY_SCHEMA_VERSION,
-        id: "bridge".to_owned(),
-        display_name: "Bridge".to_owned(),
-        summary: "Structural bridge conformance.".to_owned(),
+        id: "box_primitive".to_owned(),
+        display_name: "Box Primitive".to_owned(),
+        summary: "Structural box_primitive conformance.".to_owned(),
         part_roles: vec![
             role("span", RoleMultiplicity::Single, true),
             role("support", RoleMultiplicity::Repeated, true),
@@ -511,7 +511,7 @@ fn structural_report(fixture: &BridgeFixture) -> FamilyConformanceReport {
 fn implementation(bindings: Vec<FragmentAttachmentBinding>) -> FamilyImplementation {
     FamilyImplementation {
         schema_version: FAMILY_IMPLEMENTATION_SCHEMA_VERSION,
-        family_id: "bridge".to_owned(),
+        family_id: "box_primitive".to_owned(),
         base_recipe: AssetRecipe::new(AssetId(1), "base"),
         parameter_bindings: Vec::new(),
         default_role_providers: BTreeMap::new(),
