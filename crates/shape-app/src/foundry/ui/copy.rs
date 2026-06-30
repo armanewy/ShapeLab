@@ -20,11 +20,10 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     },
 ];
 
-pub(crate) const PRIMARY_ACTION_LABELS: [&str; 13] = [
+pub(crate) const PRIMARY_ACTION_LABELS: [&str; 12] = [
     "Try ideas",
     "Try box ideas",
     "Use this idea",
-    "Use this box",
     "Add to Pack",
     "Add Current Asset",
     "Export Pack",
@@ -49,7 +48,7 @@ pub(crate) const STATUS_LABELS: [&str; 8] = [
 
 pub(crate) const DEFAULT_SECTION_LABELS: [&str; 8] = [
     "Visual Foundry",
-    "Choose what to make",
+    "Start with Box Primitive",
     "Make",
     "Make asset",
     "Current asset",

@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Verdict
 
-`BOX PRIMITIVE BASELINE ACTIVE - SCREENSHOT GATE PASSED`
+`BOX PRIMITIVE BASELINE ACTIVE - UI TRUTH PASS SCREENSHOT GATE PASSED`
 
 Shape Lab is starting fresh from one honest novice baseline: Box Primitive.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -19,9 +19,15 @@ family.
 - Box Primitive is the active novice Make baseline.
 - The default catalog contains only Box Primitive.
 - The preview catalog also contains only Box Primitive.
+- The Choose screen is a single-profile Box Primitive start screen, not a broad
+  template browser.
+- The Make screen hides part/focus controls, Material Looks, surface-only UI,
+  and Family Studio entry points for Box Primitive.
 - The baseline model must read visually as a box.
 - Box ideas must visibly differ by proportions or edge softness.
 - The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
+- The Box Primitive UI truth-pass screenshot/manual gate passed locally on
+  2026-06-30.
 - No public catalog publishing is approved.
 - No non-box family, surface/material, UV/texturing, rigging, animation,
   runtime LLM, or game-ready UI is approved.
@@ -34,6 +40,10 @@ family.
 - Box Primitive is the only current built-in product baseline.
 - Box Primitive has release-app screenshot evidence under
   `target/box-primitive-dogfood-gate/`.
+- Box Primitive has UI truth-pass screenshot evidence under
+  `target/box-primitive-ui-truth-pass/screenshots/`.
+- Box Primitive export may say that the current clay box asset is not a
+  textured, rigged, animated, or game-ready package.
 
 ## Allowed Next Work
 

@@ -12,16 +12,14 @@ min_width="${2:-1000}"
 min_height="${3:-700}"
 
 required=(
-  "01_choose.png"
-  "02_make_ready.png"
-  "03_generating_ideas.png"
-  "04_generated_ideas.png"
-  "05_selected_comparison.png"
-  "06_focus_body.png"
-  "07_generating_body_ideas.png"
-  "08_body_ideas.png"
-  "09_pack_drawer.png"
-  "10_export_drawer.png"
+  "choose_box_primitive.png"
+  "make_ready_box_primitive.png"
+  "generating_box_ideas.png"
+  "generated_box_ideas.png"
+  "selected_box_idea.png"
+  "adjusted_box_control.png"
+  "pack_drawer.png"
+  "export_drawer.png"
 )
 
 hash_names=()
@@ -75,14 +73,12 @@ hash_for() {
 }
 
 pairs=(
-  "03_generating_ideas.png 02_make_ready.png"
-  "04_generated_ideas.png 03_generating_ideas.png"
-  "05_selected_comparison.png 04_generated_ideas.png"
-  "06_focus_body.png 05_selected_comparison.png"
-  "07_generating_body_ideas.png 06_focus_body.png"
-  "08_body_ideas.png 07_generating_body_ideas.png"
-  "09_pack_drawer.png 08_body_ideas.png"
-  "10_export_drawer.png 09_pack_drawer.png"
+  "generating_box_ideas.png make_ready_box_primitive.png"
+  "generated_box_ideas.png generating_box_ideas.png"
+  "selected_box_idea.png generated_box_ideas.png"
+  "adjusted_box_control.png make_ready_box_primitive.png"
+  "pack_drawer.png adjusted_box_control.png"
+  "export_drawer.png pack_drawer.png"
 )
 
 for pair in "${pairs[@]}"; do
