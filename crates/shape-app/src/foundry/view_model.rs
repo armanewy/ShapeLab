@@ -103,10 +103,23 @@ pub(crate) struct FoundryControlView {
     pub divergence: ControlDivergence,
     /// Feasible options or filmstrip samples.
     pub options: Vec<FoundryOptionCard>,
+    /// Numeric range for direct bounded controls.
+    pub numeric_range: Option<FoundryNumericRange>,
     /// Technical path shown only in tooltips or Advanced Recipe.
     pub advanced_path: Option<String>,
     /// Human-facing helper text.
     pub help: Option<String>,
+}
+
+/// Bounded numeric range for a direct property control.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub(crate) struct FoundryNumericRange {
+    /// Inclusive minimum value.
+    pub minimum: f32,
+    /// Inclusive maximum value.
+    pub maximum: f32,
+    /// Stepper increment.
+    pub step: f32,
 }
 
 /// Deterministic presentation kind for one customizer control.

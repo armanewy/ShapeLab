@@ -15,7 +15,7 @@ use shape_asset::{
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, BevelPolicy,
     ExaggerationPolicy, FamilyDefaultValue, FamilyParameterKind, FamilyParameterSlot,
-    FamilyStyleFacet, FamilyStylePolicyOverrides, LengthValue, NormalizedBevelProfile,
+    FamilyStyleFacet, FamilyStylePolicyOverrides, LengthUnit, LengthValue, NormalizedBevelProfile,
     ParameterExecutionPolicy, ParameterRange, PartPrototype, PartRole, ProfileLanguage,
     RepetitionPolicy, RoleMultiplicity, RoleProvision, RuntimeMetadataRequirement,
     STYLE_KIT_SCHEMA_VERSION, StyleKit, SymmetryPolicy,
@@ -597,6 +597,33 @@ fn ratio_slot(
         label: label.to_owned(),
         target_role: Some(role.to_owned()),
         kind: FamilyParameterKind::Ratio,
+        range: Some(ParameterRange {
+            minimum,
+            maximum,
+            step,
+        }),
+        default_value: Some(FamilyDefaultValue::Scalar(default)),
+        execution_policy: ParameterExecutionPolicy::RequiredBinding,
+        topology_changing: false,
+    }
+}
+
+fn length_slot(
+    id: &str,
+    label: &str,
+    role: &str,
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+    default: f32,
+) -> FamilyParameterSlot {
+    FamilyParameterSlot {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        target_role: Some(role.to_owned()),
+        kind: FamilyParameterKind::Length {
+            unit: LengthUnit::FamilyUnits,
+        },
         range: Some(ParameterRange {
             minimum,
             maximum,

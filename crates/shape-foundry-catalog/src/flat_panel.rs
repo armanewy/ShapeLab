@@ -10,8 +10,9 @@ use shape_foundry::{CandidateStrategy, ControlValue};
 use crate::{
     CatalogCurationMetadata, FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog,
     StarterTemplateQualityEvidence, build_fixture_catalog, choice_control, choice_slot,
-    continuous_control, family_implementation, family_schema, role, rounded_box_fragment,
-    starter_template_curation_state_from_quality, style_implementation, style_kit,
+    continuous_control, family_implementation, family_schema, length_slot, role,
+    rounded_box_fragment, starter_template_curation_state_from_quality, style_implementation,
+    style_kit,
 };
 
 /// Flat Panel Primitive profile slug.
@@ -39,7 +40,6 @@ pub const HANDLE_KNOB_MODULE_ID: &str = "handle-knob";
 
 #[derive(Debug, Copy, Clone)]
 struct FlatPanelProportion {
-    choice: &'static str,
     provider: &'static str,
     half_extents: [f32; 3],
 }
@@ -60,22 +60,18 @@ struct HingedPanelProportion {
 
 const PANEL_PROPORTIONS: [FlatPanelProportion; 4] = [
     FlatPanelProportion {
-        choice: "narrow_panel",
         provider: "narrow_panel_body",
         half_extents: [0.42, 0.92, 0.055],
     },
     FlatPanelProportion {
-        choice: "wide_panel",
         provider: "wide_panel_body",
         half_extents: [1.10, 0.70, 0.06],
     },
     FlatPanelProportion {
-        choice: "tall_panel",
         provider: "tall_panel_body",
         half_extents: [0.58, 1.24, 0.055],
     },
     FlatPanelProportion {
-        choice: "short_panel",
         provider: "short_panel_body",
         half_extents: [0.98, 0.46, 0.06],
     },
@@ -139,9 +135,9 @@ pub const fn quality_evidence() -> StarterTemplateQualityEvidence {
         profile_slug: FLAT_PANEL_PRIMITIVE_SLUG,
         visible_idea_count: 6,
         distinct_visible_idea_count: 6,
-        primary_control_count: 2,
-        endpoint_reported_primary_control_count: 2,
-        endpoint_readable_primary_control_count: 2,
+        primary_control_count: 4,
+        endpoint_reported_primary_control_count: 4,
+        endpoint_readable_primary_control_count: 4,
         returned_too_subtle_candidate_count: 0,
         broken_or_floating_part_count: 0,
         export_conformance_clean: true,
@@ -240,23 +236,25 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             AllowedOperationKind::Bevel,
         ],
         parameter_slots: vec![
-            choice_slot(
-                "proportions",
-                "Proportions",
+            length_slot("width", "Width", "panel_body", 0.4, 4.0, 0.05, 1.8),
+            length_slot("height", "Height", "panel_body", 0.5, 4.0, 0.05, 2.6),
+            length_slot(
+                "thickness",
+                "Thickness",
                 "panel_body",
-                PANEL_PROPORTIONS
-                    .iter()
-                    .map(|proportion| proportion.choice.to_owned())
-                    .collect(),
+                0.05,
+                1.2,
+                0.01,
+                0.18,
             ),
             crate::ratio_slot(
                 "edge_softness",
                 "Edge Softness",
                 "panel_body",
                 0.0,
-                1.0,
+                0.30,
+                0.01,
                 0.05,
-                0.35,
             ),
         ],
         compatible_style_kits: vec![FLAT_PANEL_PRIMITIVE_STYLE_ID.to_owned()],
@@ -296,30 +294,20 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
         FLAT_PANEL_PRIMITIVE_FAMILY_ID,
         FLAT_PANEL_PRIMITIVE_STYLE_ID,
         vec![
-            choice_control(
-                "proportions",
-                "Proportions",
-                "proportions",
-                &["narrow_panel", "wide_panel", "tall_panel", "short_panel"],
-            ),
+            continuous_control("width", "Width", "width", 1.8, 0.4, 4.0),
+            continuous_control("height", "Height", "height", 2.6, 0.5, 4.0),
+            continuous_control("thickness", "Thickness", "thickness", 0.18, 0.05, 1.2),
             continuous_control(
                 "edge_softness",
                 "Edge Softness",
                 "edge_softness",
-                0.30,
+                0.05,
                 0.0,
-                1.0,
+                0.30,
             ),
         ],
     );
-    profile.candidate_strategies = vec![
-        strategy("narrow-panel", "Narrow Panel", &["proportions"]),
-        strategy("wide-panel", "Wide Panel", &["proportions"]),
-        strategy("tall-panel", "Tall Panel", &["proportions"]),
-        strategy("short-panel", "Short Panel", &["proportions"]),
-        strategy("soft-edged-panel", "Soft-Edged Panel", &["edge_softness"]),
-        strategy("sharp-panel", "Sharp Panel", &["edge_softness"]),
-    ];
+    profile.candidate_strategies = Vec::new();
 
     build_fixture_catalog(FixtureCatalogSpec {
         slug: FLAT_PANEL_PRIMITIVE_SLUG,
@@ -330,11 +318,10 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
         style_implementation: style_impl,
         customizer_profile: profile,
         control_state: BTreeMap::from([
-            (
-                "proportions".to_owned(),
-                ControlValue::Choice("narrow_panel".to_owned()),
-            ),
-            ("edge_softness".to_owned(), ControlValue::Scalar(0.30)),
+            ("width".to_owned(), ControlValue::Scalar(1.8)),
+            ("height".to_owned(), ControlValue::Scalar(2.6)),
+            ("thickness".to_owned(), ControlValue::Scalar(0.18)),
+            ("edge_softness".to_owned(), ControlValue::Scalar(0.05)),
         ]),
     })
 }
@@ -732,21 +719,31 @@ fn handled_panel_default_provider_map() -> BTreeMap<String, String> {
 
 fn parameter_bindings() -> Vec<ParameterBinding> {
     vec![
-        ParameterBinding::ChoiceToPrototype {
-            slot: "proportions".to_owned(),
-            role: "panel_body".to_owned(),
-            choices: PANEL_PROPORTIONS
-                .into_iter()
-                .map(|proportion| (proportion.choice.to_owned(), proportion.provider.to_owned()))
-                .collect(),
-        },
-        definition_binding(
+        half_extent_binding(
+            "width",
+            "panel_body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.x",
+        ),
+        half_extent_binding(
+            "height",
+            "panel_body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.y",
+        ),
+        half_extent_binding(
+            "thickness",
+            "panel_body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.z",
+        ),
+        scaled_definition_binding(
             "edge_softness",
             "panel_body",
             crate::LOCAL_DEFINITION,
             "geometry.rounded_box.radius",
-            0.002,
-            0.075,
+            0.25,
+            0.0,
         ),
     ]
 }
@@ -887,6 +884,31 @@ fn definition_binding(
         role: role_name.to_owned(),
         local_path: definition_scalar_path(definition, local_key),
         transform: ScalarTransform::Ratio { minimum, maximum },
+    }
+}
+
+fn half_extent_binding(
+    slot: &str,
+    role_name: &str,
+    definition: PartDefinitionId,
+    local_key: &str,
+) -> ParameterBinding {
+    scaled_definition_binding(slot, role_name, definition, local_key, 0.5, 0.0)
+}
+
+fn scaled_definition_binding(
+    slot: &str,
+    role_name: &str,
+    definition: PartDefinitionId,
+    local_key: &str,
+    scale: f32,
+    offset: f32,
+) -> ParameterBinding {
+    ParameterBinding::Scalar {
+        slot: slot.to_owned(),
+        role: role_name.to_owned(),
+        local_path: definition_scalar_path(definition, local_key),
+        transform: ScalarTransform::ScaleOffset { scale, offset },
     }
 }
 

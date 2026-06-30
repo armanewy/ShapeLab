@@ -11,7 +11,9 @@ use shape_render::OrbitCamera;
 
 use crate::foundry::{
     FoundryAppCommand,
-    view_model::{FoundryControlPresentation, FoundryControlView, FoundryOptionCard},
+    view_model::{
+        FoundryControlPresentation, FoundryControlView, FoundryNumericRange, FoundryOptionCard,
+    },
 };
 
 /// Options used when building the customizer deck.
@@ -139,9 +141,21 @@ pub(crate) fn control_view(
         topology_behavior: control.topology_behavior,
         divergence,
         options,
+        numeric_range: numeric_range_for_domain(&effective_domain),
         advanced_path: Some(control_technical_path(control)),
         help: None,
     })
+}
+
+fn numeric_range_for_domain(domain: &FeasibleControlDomain) -> Option<FoundryNumericRange> {
+    domain
+        .continuous_intervals
+        .first()
+        .map(|interval| FoundryNumericRange {
+            minimum: interval.minimum,
+            maximum: interval.maximum,
+            step: 0.01_f32.max((interval.maximum - interval.minimum) / 100.0),
+        })
 }
 
 /// Return Advanced Recipe rows, including technical paths.

@@ -10,8 +10,9 @@ use shape_foundry::{CandidateStrategy, ControlValue};
 use crate::{
     CatalogCurationMetadata, FamilySchemaSpec, FixtureCatalogSpec, FoundryFixtureCatalog,
     StarterTemplateQualityEvidence, build_fixture_catalog, choice_control, choice_slot,
-    continuous_control, family_implementation, family_schema, role, rounded_box_fragment,
-    starter_template_curation_state_from_quality, style_implementation, style_kit,
+    continuous_control, family_implementation, family_schema, length_slot, role,
+    rounded_box_fragment, starter_template_curation_state_from_quality, style_implementation,
+    style_kit,
 };
 
 /// Box Primitive profile slug.
@@ -39,7 +40,6 @@ pub const TRIM_BAND_MODULE_ID: &str = "trim-band";
 
 #[derive(Debug, Copy, Clone)]
 struct BoxProportion {
-    choice: &'static str,
     provider: &'static str,
     half_extents: [f32; 3],
 }
@@ -71,22 +71,18 @@ struct TrimmedBoxProportion {
 
 const PROPORTIONS: [BoxProportion; 4] = [
     BoxProportion {
-        choice: "compact_box",
         provider: "compact_body",
         half_extents: [0.78, 0.48, 0.58],
     },
     BoxProportion {
-        choice: "wide_box",
         provider: "wide_body",
         half_extents: [1.28, 0.42, 0.56],
     },
     BoxProportion {
-        choice: "tall_box",
         provider: "tall_body",
         half_extents: [0.62, 0.78, 0.48],
     },
     BoxProportion {
-        choice: "flat_box",
         provider: "flat_body",
         half_extents: [1.30, 0.26, 0.78],
     },
@@ -189,9 +185,9 @@ pub const fn quality_evidence() -> StarterTemplateQualityEvidence {
         profile_slug: BOX_PRIMITIVE_SLUG,
         visible_idea_count: 6,
         distinct_visible_idea_count: 6,
-        primary_control_count: 2,
-        endpoint_reported_primary_control_count: 2,
-        endpoint_readable_primary_control_count: 2,
+        primary_control_count: 4,
+        endpoint_reported_primary_control_count: 4,
+        endpoint_readable_primary_control_count: 4,
         returned_too_subtle_candidate_count: 0,
         broken_or_floating_part_count: 0,
         export_conformance_clean: true,
@@ -277,23 +273,17 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
             AllowedOperationKind::Bevel,
         ],
         parameter_slots: vec![
-            choice_slot(
-                "proportions",
-                "Proportions",
-                "body",
-                PROPORTIONS
-                    .iter()
-                    .map(|proportion| proportion.choice.to_owned())
-                    .collect(),
-            ),
+            length_slot("width", "Width", "body", 0.4, 4.0, 0.05, 2.0),
+            length_slot("depth", "Depth", "body", 0.3, 3.2, 0.05, 1.4),
+            length_slot("height", "Height", "body", 0.3, 3.0, 0.05, 1.0),
             crate::ratio_slot(
                 "edge_softness",
                 "Edge Softness",
                 "body",
                 0.0,
-                1.0,
-                0.05,
                 0.35,
+                0.01,
+                0.08,
             ),
         ],
         compatible_style_kits: vec![BOX_PRIMITIVE_STYLE_ID.to_owned()],
@@ -329,30 +319,20 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
         BOX_PRIMITIVE_FAMILY_ID,
         BOX_PRIMITIVE_STYLE_ID,
         vec![
-            choice_control(
-                "proportions",
-                "Proportions",
-                "proportions",
-                &["compact_box", "wide_box", "tall_box", "flat_box"],
-            ),
+            continuous_control("width", "Width", "width", 2.0, 0.4, 4.0),
+            continuous_control("depth", "Depth", "depth", 1.4, 0.3, 3.2),
+            continuous_control("height", "Height", "height", 1.0, 0.3, 3.0),
             continuous_control(
                 "edge_softness",
                 "Edge Softness",
                 "edge_softness",
-                0.35,
+                0.08,
                 0.0,
-                1.0,
+                0.35,
             ),
         ],
     );
-    profile.candidate_strategies = vec![
-        strategy("compact-box", "Compact Box", &["proportions"]),
-        strategy("wide-box", "Wide Box", &["proportions"]),
-        strategy("tall-box", "Tall Box", &["proportions"]),
-        strategy("flat-box", "Flat Box", &["proportions"]),
-        strategy("soft-edged-box", "Soft-Edged Box", &["edge_softness"]),
-        strategy("sharp-box", "Sharp Box", &["edge_softness"]),
-    ];
+    profile.candidate_strategies = Vec::new();
 
     build_fixture_catalog(FixtureCatalogSpec {
         slug: BOX_PRIMITIVE_SLUG,
@@ -363,11 +343,10 @@ pub fn fixture_catalog() -> FoundryFixtureCatalog {
         style_implementation: style_impl,
         customizer_profile: profile,
         control_state: BTreeMap::from([
-            (
-                "proportions".to_owned(),
-                ControlValue::Choice("compact_box".to_owned()),
-            ),
-            ("edge_softness".to_owned(), ControlValue::Scalar(0.35)),
+            ("width".to_owned(), ControlValue::Scalar(2.0)),
+            ("depth".to_owned(), ControlValue::Scalar(1.4)),
+            ("height".to_owned(), ControlValue::Scalar(1.0)),
+            ("edge_softness".to_owned(), ControlValue::Scalar(0.08)),
         ]),
     })
 }
@@ -720,21 +699,31 @@ fn trimmed_default_provider_map() -> BTreeMap<String, String> {
 
 fn parameter_bindings() -> Vec<ParameterBinding> {
     vec![
-        ParameterBinding::ChoiceToPrototype {
-            slot: "proportions".to_owned(),
-            role: "body".to_owned(),
-            choices: PROPORTIONS
-                .into_iter()
-                .map(|proportion| (proportion.choice.to_owned(), proportion.provider.to_owned()))
-                .collect(),
-        },
-        definition_binding(
+        half_extent_binding(
+            "width",
+            "body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.x",
+        ),
+        half_extent_binding(
+            "depth",
+            "body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.z",
+        ),
+        half_extent_binding(
+            "height",
+            "body",
+            crate::LOCAL_DEFINITION,
+            "geometry.rounded_box.half_extents.y",
+        ),
+        scaled_definition_binding(
             "edge_softness",
             "body",
             crate::LOCAL_DEFINITION,
             "geometry.rounded_box.radius",
-            0.004,
-            0.16,
+            0.45,
+            0.0,
         ),
     ]
 }
@@ -907,6 +896,31 @@ fn definition_binding(
         role: role_name.to_owned(),
         local_path: definition_scalar_path(definition, local_key),
         transform: ScalarTransform::Ratio { minimum, maximum },
+    }
+}
+
+fn half_extent_binding(
+    slot: &str,
+    role_name: &str,
+    definition: PartDefinitionId,
+    local_key: &str,
+) -> ParameterBinding {
+    scaled_definition_binding(slot, role_name, definition, local_key, 0.5, 0.0)
+}
+
+fn scaled_definition_binding(
+    slot: &str,
+    role_name: &str,
+    definition: PartDefinitionId,
+    local_key: &str,
+    scale: f32,
+    offset: f32,
+) -> ParameterBinding {
+    ParameterBinding::Scalar {
+        slot: slot.to_owned(),
+        role: role_name.to_owned(),
+        local_path: definition_scalar_path(definition, local_key),
+        transform: ScalarTransform::ScaleOffset { scale, offset },
     }
 }
 
