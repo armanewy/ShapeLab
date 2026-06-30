@@ -33,6 +33,9 @@ rename happens. Product-facing docs and future UI may use Object Orchard.
 
 The rename is a separate migration. Do not mix the rename with family-authoring
 logic, geometry, material, rigging, or export changes.
+Do not opportunistically rename files, crates, packages, executables, modules,
+or commands in feature branches. See `docs/OBJECT_ORCHARD_NAMING_TRANSITION.md`
+for the dedicated naming-transition scaffold.
 
 ## Core product promise
 
@@ -59,6 +62,7 @@ Use these terms in the product:
 - what stays the same
 - what can change
 - parts
+- style
 - style direction
 - ideas
 - test variations
@@ -95,16 +99,25 @@ The internal model remains rigorous and typed.
 Family kernel
 + Placement zones
 + Feature/capability modules
++ Capability graph
 + Capability cards
 + Style policy
 + Variation plans
 + Candidate generation
 + Quality gates
 + Contact sheets
-+ Review tier
++ Review tiers
 ```
 
-The user sees capability cards. The system sees feature modules and validators.
+The user sees capability cards. The system sees feature modules, a capability
+graph, validators, renderers, contact sheets, and review tiers.
+
+User-facing UI must not expose `kernel`, `module`, `provider`, or `slot` terms.
+Those are implementation concepts, not product language.
+
+Validators, renderers, and contact sheets decide legality and visibility. LLMs
+may draft plans and repairs, but they do not decide final mesh taste. Humans
+approve reviewed and showcase quality.
 
 ### Family kernel
 
@@ -407,9 +420,10 @@ Seeds must not:
 
 ## Future surface, rigging, animation, and export capabilities
 
-The same user-facing pattern should extend later.
+The same user-facing pattern should extend later, but these capabilities are
+not active product UI today.
 
-Do not ask noobs:
+Do not ask novice users:
 
 ```text
 Do you want UVs?
@@ -417,33 +431,40 @@ Do you want a rig?
 Do you want animation clips?
 ```
 
-Ask capability questions:
+User asks:
 
 ```text
-Should this object support material looks?
-Should this object open or close?
-Should this object be walkable?
-Should this character hold a weapon?
-Should this character have idle/walk/run animations?
+material looks
+open/close
+walkable
+hold weapon
+idle/walk/run
 ```
 
 Internal mapping:
 
 ```text
 material looks -> Surface capability
-open / close -> simple mechanical rig + motion capability
+open/close -> mechanical rig/motion
 walkable -> collision/gameplay metadata
-hold weapon -> rig socket / attachment capability
-idle / walk / run -> motion set capability
+hold weapon -> rig socket
+idle/walk/run -> motion set
 ```
 
-For now, only shape/clay capabilities are allowed in the baseline.
-Surface/material looks, UV/texturing, rigging, and animation remain blocked for
-the current baseline.
+For now, only shape/clay capabilities are active. No broad
+surface/material/rig/motion UI is approved. Surface/material looks,
+UV/texturing, rigging, and animation remain blocked for the current baseline.
 
-## Development rule
+## One Visible Concept Per Gate
 
 Every user-visible concept needs its own pass.
+
+- Box Primitive must work before Lid Seam.
+- Lid Seam must work before Trim Band.
+- Trim Band must work before Feet / Skids.
+- No branch may add multiple visible object concepts without a prior visual
+  gate.
+- If a visual gate fails, stop and fix; do not add architecture to compensate.
 
 Good:
 
