@@ -25,7 +25,7 @@ use shape_render::foundry::{
 };
 use shape_render::{
     OrbitCamera, RenderSettings, RenderedImage, clay_readability_render_settings,
-    fit_camera_to_bounds, render_mesh,
+    fit_camera_to_bounds, fit_camera_to_bounds_from_angles, render_mesh,
 };
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRejectionReason,
@@ -472,7 +472,14 @@ fn render_preview(
     height: u32,
     preview_cache: &mut FoundryPreviewCache,
 ) -> Result<FoundryJobEvent, String> {
+    let mesh = preview_mesh_from_output(output);
+    let readable_camera = readable_preview_camera_for_output(
+        output,
+        mesh.bounds,
+        width as f32 / height.max(1) as f32,
+    );
     if width == height
+        && readable_camera.is_none()
         && let Some(resolution) = FoundryPreviewResolution::from_pixels(width)
     {
         let request = foundry_preview_request(output);
@@ -498,8 +505,7 @@ fn render_preview(
         });
     }
 
-    let mesh = preview_mesh_from_output(output);
-    let camera = fit_camera_to_bounds(mesh.bounds);
+    let camera = readable_camera.unwrap_or_else(|| fit_camera_to_bounds(mesh.bounds));
     let settings = clay_readability_render_settings(width, height);
     let image = render_mesh(&mesh, &camera, &settings).map_err(|error| error.to_string())?;
     Ok(FoundryJobEvent::PreviewRendered {
@@ -511,6 +517,18 @@ fn render_preview(
         camera,
         build: Some(output.build_stamp.clone()),
     })
+}
+
+fn readable_preview_camera_for_output(
+    output: &FoundryCompilationOutput,
+    bounds: Aabb,
+    aspect_ratio: f32,
+) -> Option<OrbitCamera> {
+    let family_id = output.catalog.customizer_profile.family_id.as_str();
+    let panel_like = family_id.contains("flat_panel")
+        || family_id.contains("hinged_panel")
+        || family_id.contains("handled_panel");
+    panel_like.then(|| fit_camera_to_bounds_from_angles(bounds, 35.0, 20.0, aspect_ratio))
 }
 
 fn export_foundry_pack(
@@ -784,6 +802,9 @@ pub(crate) fn candidate_cards_from_output_with_previews(
             return Ok(cards);
         }
     };
+    let parent_preview_mesh = preview_mesh_from_output(&parent_output);
+    let parent_preview_camera =
+        readable_preview_camera_for_output(&parent_output, parent_preview_mesh.bounds, 1.0);
     let mut parent_request = preview_request_for_output(
         CANDIDATE_PARENT_PREVIEW_ID,
         FoundryPreviewKind::CandidateCard {
@@ -836,6 +857,7 @@ pub(crate) fn candidate_cards_from_output_with_previews(
 
     let mut batch =
         FoundryPreviewBatchRequest::new("candidate-directions", requests, preview_resolution);
+    batch.camera = parent_preview_camera.clone();
     batch.max_parallel_jobs = 4;
     if let Ok(rendered) = preview_cache.render_batch(batch) {
         let rendered_by_id = rendered
@@ -874,6 +896,7 @@ pub(crate) fn candidate_cards_from_output_with_previews(
             vec![parent_request.clone(), request],
             preview_resolution,
         );
+        batch.camera = parent_preview_camera.clone();
         batch.max_parallel_jobs = 2;
         match preview_cache.render_batch(batch) {
             Ok(rendered) => {

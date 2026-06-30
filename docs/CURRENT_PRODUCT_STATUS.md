@@ -4,11 +4,12 @@ Date: 2026-06-30
 
 ## Verdict
 
-`SECOND_KERNEL_FLAT_PANEL_INTEGRATION_PROVEN`
+`HANDLED_PANEL_MAKE_BASELINE_PROVEN`
 
 Shape Lab has one honest box-like ladder and a second primitive kernel proof.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
-Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel.
+Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
+Panel.
 
 Box Primitive is a pure-clay closed box-like volume. It has two novice controls:
 Proportions and Edge Softness. It does not claim to be any richer non-box model
@@ -25,20 +26,24 @@ Hinged Panel is Flat Panel Primitive plus one visible Hinge Edge feature. It is
 now exposed in the Make loop after the Hinge Edge visual gate. It is not Door,
 does not open or close, and does not claim rigging or animation.
 
+Handled Panel is Hinged Panel plus one visible Handle / Knob feature. It is now
+exposed in the Make loop after the Handle / Knob visual gate. It is still not
+Door, does not open or close, and does not claim rigging or animation.
+
 ## Current Truth
 
 - Box Primitive remains the active novice baseline.
 - Lidded Box is the first incremental Make baseline after Box Primitive.
 - Flat Panel Primitive is the second visible primitive baseline.
 - The default catalog contains only Box Primitive, Lidded Box, Flat Panel
-  Primitive, and Hinged Panel.
+  Primitive, Hinged Panel, and Handled Panel.
 - The preview catalog contains only Box Primitive, Lidded Box, Flat Panel
-  Primitive, and Hinged Panel.
-- The Choose screen shows four simple starter profiles, not a broad template
+  Primitive, Hinged Panel, and Handled Panel.
+- The Choose screen shows five simple starter profiles, not a broad template
   browser.
 - The Make screen hides part/focus controls, Material Looks, surface-only UI,
   and Family Studio entry points for Box Primitive, Lidded Box, Flat Panel
-  Primitive, and Hinged Panel.
+  Primitive, Hinged Panel, and Handled Panel.
 - The baseline model must read visually as a box.
 - Box ideas must visibly differ by proportions or edge softness.
 - The Box Primitive screenshot/manual visual gate passed locally on 2026-06-30.
@@ -57,6 +62,10 @@ does not open or close, and does not claim rigging or animation.
   validation on 2026-06-30.
 - The second-kernel Flat Panel integration gate passed release-app Computer Use
   regression validation and automated workspace gates on 2026-06-30.
+- The Door Handle / Knob feature-module gate passed catalog/visual evidence
+  tests on 2026-06-30.
+- The Handled Panel Make baseline gate passed release-app Computer Use
+  validation on 2026-06-30.
 - No public catalog publishing is approved.
 - No Door naming, surface/material, UV/texturing, rigging, animation, runtime
   LLM, or game-ready UI is approved.
@@ -67,6 +76,8 @@ does not open or close, and does not claim rigging or animation.
 - Shape Lab can start from a Lidded Box profile after the Lid Seam gate.
 - Shape Lab can start from a Flat Panel Primitive profile.
 - Shape Lab can start from a Hinged Panel profile after the Hinge Edge gate.
+- Shape Lab can start from a Handled Panel profile after the Handle / Knob
+  gate.
 - Box Primitive can compile as a valid clay model.
 - Box Primitive can expose Proportions and Edge Softness controls.
 - Lidded Box can compile as a valid clay model with one visible lid seam.
@@ -76,8 +87,12 @@ does not open or close, and does not claim rigging or animation.
 - Hinged Panel can compile as a valid upright clay panel with one visible
   hinge-side edge.
 - Hinged Panel can expose Proportions, Edge Softness, and Hinge Edge controls.
-- Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel are the only
-  current built-in product baselines.
+- Handled Panel can compile as a valid upright clay panel with one visible
+  hinge-side edge and one visible handle.
+- Handled Panel can expose Proportions, Edge Softness, Hinge Edge, and
+  Handle / Knob Style controls.
+- Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
+  Panel are the only current built-in product baselines.
 - Box Primitive has release-app screenshot evidence under
   `target/box-primitive-dogfood-gate/`.
 - Box Primitive has UI truth-pass screenshot evidence under
@@ -99,11 +114,16 @@ does not open or close, and does not claim rigging or animation.
   textured, rigged, animated, or game-ready package.
 - Hinged Panel export may say that the current clay hinged panel asset is not a
   textured, rigged, animated, or game-ready package.
+- Handled Panel export may say that the current clay handled panel asset is not
+  a textured, rigged, animated, or game-ready package.
 - Trimmed Box may be referenced in internal docs as Lidded Box plus one visible
   Trim Band feature with evidence under `target/trim-band-feature-module-v0/`.
 - Hinged Panel has Make baseline evidence under
   `target/hinged-panel-make-baseline-gate/` and in
   `docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`.
+- Handled Panel has Make baseline evidence under
+  `target/handled-panel-make-baseline-gate/` and in
+  `docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md`.
 - The two-kernel integration has evidence under
   `target/second-kernel-flat-panel-integration/` and in
   `docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`.
@@ -112,8 +132,8 @@ does not open or close, and does not claim rigging or animation.
 
 - Repair-loop polish for weak box or panel variations.
 - Local Personal Kit persistence for Box Primitive, Lidded Box, Flat Panel
-  Primitive, and Hinged Panel.
-- Door Handle / Knob as the next single visible feature.
+  Primitive, Hinged Panel, and Handled Panel.
+- Door naming review after another visible Door cue earns it.
 - Family Studio draft flow using Box and Flat Panel as two proven kernels.
 
 ## Still Blocked
@@ -123,6 +143,7 @@ does not open or close, and does not claim rigging or animation.
 - Calling Trimmed Box a crate.
 - Calling Flat Panel Primitive a Door.
 - Calling Hinged Panel a Door.
+- Calling Handled Panel a Door.
 - Adding multiple visible concepts in one branch.
 - Door naming before visible door cues pass a later gate.
 - Open/close motion before a dedicated mechanical rig/motion gate.

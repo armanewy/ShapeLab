@@ -537,7 +537,8 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
         box_primitive::BOX_PRIMITIVE_SLUG
         | box_primitive::LIDDED_BOX_SLUG
         | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG
-        | flat_panel::HINGED_PANEL_SLUG => FoundryKitQualityTier::Usable,
+        | flat_panel::HINGED_PANEL_SLUG
+        | flat_panel::HANDLED_PANEL_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -548,6 +549,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         box_primitive::LIDDED_BOX_SLUG => vec!["Box", "Lidded"],
         flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => vec!["Primitive", "Panel"],
         flat_panel::HINGED_PANEL_SLUG => vec!["Panel", "Hinged"],
+        flat_panel::HANDLED_PANEL_SLUG => vec!["Panel", "Handled"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -561,6 +563,7 @@ fn normalize_kit_slug(slug: &str) -> String {
         "lidded_box" => box_primitive::LIDDED_BOX_SLUG.to_owned(),
         "flat_panel" | "panel" => flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
         "hinged_panel" => flat_panel::HINGED_PANEL_SLUG.to_owned(),
+        "handled_panel" => flat_panel::HANDLED_PANEL_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -642,6 +645,18 @@ mod tests {
             Some(flat_panel::HINGED_PANEL_SLUG)
         );
         assert_eq!(hinged_package.kit.category_chips, vec!["Panel", "Hinged"]);
+
+        let handled_package =
+            built_in_foundry_kit_package(flat_panel::HANDLED_PANEL_SLUG).expect("handled kit");
+        assert_eq!(
+            handled_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            handled_package.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::HANDLED_PANEL_SLUG)
+        );
+        assert_eq!(handled_package.kit.category_chips, vec!["Panel", "Handled"]);
     }
 
     #[test]
@@ -662,6 +677,12 @@ mod tests {
         assert_eq!(
             hinged_kit.kit.source_profile_slug.as_deref(),
             Some(flat_panel::HINGED_PANEL_SLUG)
+        );
+
+        let handled_kit = built_in_foundry_kit_package("handled_panel").expect("handled alias");
+        assert_eq!(
+            handled_kit.kit.source_profile_slug.as_deref(),
+            Some(flat_panel::HANDLED_PANEL_SLUG)
         );
     }
 }

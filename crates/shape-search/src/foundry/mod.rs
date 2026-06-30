@@ -3534,6 +3534,30 @@ fn candidate_intent_label(
         "Plain Hinge Edge",
         "Clean Hinge Edge",
     ];
+    const HANDLED_PANEL_COMPLETE_LOOK_LABELS: [&str; 6] = [
+        "Knob Panel",
+        "Pull Handle Panel",
+        "Wide Handled Panel",
+        "Tall Handled Panel",
+        "Clean Handled Panel",
+        "Heavy Edge Handled Panel",
+    ];
+    const HANDLED_PANEL_SHAPE_LABELS: [&str; 6] = [
+        "Wide Handled Panel",
+        "Tall Handled Panel",
+        "Short Handled Panel",
+        "Narrow Handled Panel",
+        "Balanced Handled Panel",
+        "Clean Handled Panel",
+    ];
+    const HANDLED_PANEL_DETAIL_LABELS: [&str; 6] = [
+        "Knob Panel",
+        "Pull Handle Panel",
+        "Small Handle Panel",
+        "Tall Handle Panel",
+        "Plain Handle Panel",
+        "Clean Handle Panel",
+    ];
     const COMPLETE_LOOK_LABELS: [&str; 6] = [
         "Compact Box",
         "Wide Box",
@@ -3571,14 +3595,33 @@ fn candidate_intent_label(
         profile.family_id.contains("flat_panel") || profile.family_id.contains("flat-panel");
     let hinged_panel_profile =
         profile.family_id.contains("hinged_panel") || profile.family_id.contains("hinged-panel");
+    let handled_panel_profile =
+        profile.family_id.contains("handled_panel") || profile.family_id.contains("handled-panel");
 
-    let labels = if hinged_panel_profile
+    let labels = if handled_panel_profile
         && !intent.scope.is_focus_part()
         && (intent.includes_channel(&VariationChannel::Shape)
             || matches!(
                 mode,
                 FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
             )) {
+        &HANDLED_PANEL_SHAPE_LABELS
+    } else if handled_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Detail)
+            || mode == FoundryCandidateMode::Detail)
+    {
+        &HANDLED_PANEL_DETAIL_LABELS
+    } else if handled_panel_profile && !intent.scope.is_focus_part() {
+        &HANDLED_PANEL_COMPLETE_LOOK_LABELS
+    } else if hinged_panel_profile
+        && !intent.scope.is_focus_part()
+        && (intent.includes_channel(&VariationChannel::Shape)
+            || matches!(
+                mode,
+                FoundryCandidateMode::Silhouette | FoundryCandidateMode::Structure
+            ))
+    {
         &HINGED_PANEL_SHAPE_LABELS
     } else if hinged_panel_profile
         && !intent.scope.is_focus_part()
@@ -4351,6 +4394,44 @@ mod tests {
                 assert!(
                     !candidate.label.contains(forbidden),
                     "Hinged Panel idea must not use {forbidden} language: {}",
+                    candidate.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn handled_panel_candidate_labels_do_not_fall_back_to_box_or_door_names() {
+        let fixture = shape_foundry_catalog::flat_panel::handled_panel_fixture_catalog();
+        let output = generate_foundry_candidate_draft_plans(
+            &fixture.document,
+            &fixture,
+            &FoundryCandidateRequest {
+                seed: 42,
+                proposal_count: 12,
+                result_count: 6,
+                mode: FoundryCandidateMode::Explore,
+                strategy_id: None,
+                preference_profile: None,
+                variation_intent: VariationIntent::complete_look(),
+            },
+        )
+        .expect("handled panel candidates generate");
+
+        assert!(
+            !output.candidates.is_empty(),
+            "Handled Panel should generate candidate ideas"
+        );
+        for candidate in output.candidates {
+            assert!(
+                candidate.label.contains("Panel") || candidate.label.contains("Handle"),
+                "Handled Panel idea should use panel/handle language: {}",
+                candidate.label
+            );
+            for forbidden in ["Box", "Door", "Open", "Close", "Animation"] {
+                assert!(
+                    !candidate.label.contains(forbidden),
+                    "Handled Panel idea must not use {forbidden} language: {}",
                     candidate.label
                 );
             }

@@ -3,26 +3,28 @@
 Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D modeling.
 
 The current product baseline is a small set of honest clay starter profiles:
-Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel. It is
+Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
+Panel. It is
 intentionally small: box-like volumes with readable proportions, edge softness,
 and one visible lid seam feature, plus upright panel proofs with one visible
-hinge-edge feature. The active built-in Visual Foundry catalog contains only
-these four profiles.
+hinge-edge feature and one visible handle feature. The active built-in Visual
+Foundry catalog contains only these five profiles.
 
 This branch starts from the Box Primitive and Lidded Box baselines and proves a
 second primitive kernel with Flat Panel Primitive and Hinged Panel. It does not
-claim Door behavior, open/close motion, surface/material workflow,
+claim Door naming, Door behavior, open/close motion, surface/material workflow,
 UV/texturing, rigging, animation, runtime LLM integration, or public catalog
 publishing.
 
 The product slice targets a narrow `Choose -> Make` loop:
 
-1. Choose `Box Primitive`, `Lidded Box`, `Flat Panel Primitive`, or
-   `Hinged Panel`.
+1. Choose `Box Primitive`, `Lidded Box`, `Flat Panel Primitive`,
+   `Hinged Panel`, or `Handled Panel`.
 2. Enter Make and wait for the clay asset and preview to become ready.
-3. Try box, lidded box, panel, or hinged panel ideas.
+3. Try box, lidded box, panel, hinged panel, or handled panel ideas.
 4. Use one idea.
-5. Adjust Proportions, Edge Softness, Lid Seam, or Hinge Edge when present.
+5. Adjust Proportions, Edge Softness, Lid Seam, Hinge Edge, or Handle when
+   present.
 6. Add the current asset to Pack.
 7. Export.
 
@@ -65,12 +67,15 @@ clippy unless the branch touches build/profile/release/export code.
 - Lidded Box is Box Primitive plus one visible Lid Seam feature.
 - Flat Panel Primitive is the second primitive kernel proof.
 - Hinged Panel is Flat Panel Primitive plus one visible Hinge Edge feature.
+- Handled Panel is Hinged Panel plus one visible Handle / Knob feature.
 - The built-in catalog and curation metadata contain only Box Primitive,
-  Lidded Box, Flat Panel Primitive, and Hinged Panel.
+  Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled Panel.
 - Box Primitive has two controls: Proportions and Edge Softness.
 - Lidded Box has three controls: Proportions, Edge Softness, and Lid Seam.
 - Flat Panel Primitive has two controls: Proportions and Edge Softness.
 - Hinged Panel has three controls: Proportions, Edge Softness, and Hinge Edge.
+- Handled Panel has four controls: Proportions, Edge Softness, Hinge Edge, and
+  Handle / Knob Style.
 - The app may create, vary, pack, and export a box-like or panel-like clay
   asset.
 - The Box Primitive screenshot/manual visual gate passed with release-app
@@ -87,12 +92,14 @@ clippy unless the branch touches build/profile/release/export code.
   `docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`.
 - The Hinged Panel Make baseline gate passed with release-app evidence under
   `target/hinged-panel-make-baseline-gate/`.
+- The Handled Panel Make baseline gate passed with release-app evidence under
+  `target/handled-panel-make-baseline-gate/`.
 - The second-kernel Flat Panel integration gate passed with release-app
   regression evidence under `target/second-kernel-flat-panel-integration/`.
 - Surface/material, UV/texturing, rigging, animation, and game-ready UI remain
   blocked.
-- The next allowed visible feature is Door Handle / Knob; Door naming remains
-  blocked until visible door cues pass a later gate.
+- The next allowed visible feature is still a later Door cue, not Door motion;
+  Door naming remains blocked until visible door cues pass a later gate.
 
 Status details are documented in:
 
@@ -103,6 +110,7 @@ Status details are documented in:
 - [`docs/LIDDED_BOX_MAKE_BASELINE_GATE.md`](docs/LIDDED_BOX_MAKE_BASELINE_GATE.md)
 - [`docs/TRIM_BAND_FEATURE_MODULE_V0.md`](docs/TRIM_BAND_FEATURE_MODULE_V0.md)
 - [`docs/FLAT_PANEL_PRIMITIVE_BASELINE.md`](docs/FLAT_PANEL_PRIMITIVE_BASELINE.md)
+- [`docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md`](docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md)
 - [`docs/HINGED_PANEL_MAKE_BASELINE_GATE.md`](docs/HINGED_PANEL_MAKE_BASELINE_GATE.md)
 - [`docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md`](docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)

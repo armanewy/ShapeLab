@@ -9,9 +9,9 @@ box ladder is:
 Box Primitive -> Lidded Box -> Trimmed Box
 ```
 
-Only Box Primitive, Lidded Box, Flat Panel Primitive, and Hinged Panel are
-app-visible product baselines today. Trimmed Box is internal feature-module
-evidence until a later Make gate chooses to expose it.
+Only Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, and Handled
+Panel are app-visible product baselines today. Trimmed Box is internal
+feature-module evidence until a later Make gate chooses to expose it.
 
 ## Gate Results
 
@@ -73,12 +73,30 @@ docs/SECOND_KERNEL_FLAT_PANEL_INTEGRATION_REPORT.md
 target/second-kernel-flat-panel-integration/
 ```
 
-## Preferred Next Step
-
-Stop the box ladder. The next single visible feature may be:
+The Door Handle / Knob feature-module gate passed catalog and visual evidence
+tests on 2026-06-30. Evidence is recorded in:
 
 ```text
-Door Handle / Knob
+docs/DOOR_HANDLE_KNOB_FEATURE_MODULE_V0.md
+target/door-handle-knob-feature-module-v0/
+```
+
+The Handled Panel Make baseline gate passed release-app Computer Use validation
+on 2026-06-30. Evidence is recorded in:
+
+```text
+docs/HANDLED_PANEL_MAKE_BASELINE_GATE.md
+target/handled-panel-make-baseline-gate/
+```
+
+## Preferred Next Step
+
+Stop the box ladder. Door Handle / Knob has now passed as one visible feature.
+The next single visible feature must be another honest Door cue or a deliberate
+Family Studio draft-flow step using the proven Box and Flat Panel kernels.
+
+```text
+Handled Panel -> next single visible Door cue
 ```
 
 The integration gate verified the whole visible set:
@@ -87,17 +105,17 @@ The integration gate verified the whole visible set:
 - Lidded Box
 - Flat Panel Primitive
 - Hinged Panel
+- Handled Panel
 
-Door Handle / Knob must still be only one visible concept in one branch:
+The next visible cue must still be only one concept in one branch:
 
-- visible handle or knob clay geometry
 - no inset panel
 - no open/close motion
-- no Door naming
+- no Door naming unless a human visual gate explicitly approves it
 
 Do not add Feet / Skids, crate language, material looks, Family Studio public
-UI, open/close motion, or broad archetype work before Door Handle / Knob passes
-its own visual gate.
+UI, open/close motion, or broad archetype work before the next cue passes its
+own visual gate.
 
 ## Continuing Criteria
 
