@@ -5,6 +5,7 @@ use std::{collections::BTreeSet, fs};
 use serde::de::DeserializeOwned;
 use shape_asset::PartInstanceId;
 use shape_compile::{
+    CompiledPart,
     export::{verify_model_package, write_model_package},
     validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
 };
@@ -28,15 +29,25 @@ fn profile(fixture: &FoundryFixtureCatalog) -> CustomizerProfile {
     payload(fixture, &format!("{}-profile", fixture.slug))
 }
 
-fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
-    let fixture = flat_panel::fixture_catalog();
+fn compile_fixture_with(
+    fixture: &FoundryFixtureCatalog,
+    overrides: &[(&str, ControlValue)],
+) -> FoundryCompilationOutput {
     let mut document = fixture.document.clone();
     for (control, value) in overrides {
         document
             .control_state
             .insert((*control).to_owned(), value.clone());
     }
-    compile_foundry_document(&document, &fixture).expect("fixture variant compiles")
+    compile_foundry_document(&document, fixture).expect("fixture variant compiles")
+}
+
+fn compile_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    compile_fixture_with(&flat_panel::fixture_catalog(), overrides)
+}
+
+fn compile_hinged_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    compile_fixture_with(&flat_panel::hinged_panel_fixture_catalog(), overrides)
 }
 
 fn assert_valid_model(output: &FoundryCompilationOutput) {
@@ -66,6 +77,28 @@ fn role_instances(output: &FoundryCompilationOutput, role: &str) -> Vec<PartInst
         .collect()
 }
 
+fn compiled_part_for_role<'a>(
+    output: &'a FoundryCompilationOutput,
+    role: &str,
+) -> &'a CompiledPart {
+    let instances = role_instances(output, role);
+    assert_eq!(
+        instances.len(),
+        1,
+        "{role} should have exactly one instance"
+    );
+    output
+        .artifact
+        .compiled_parts
+        .iter()
+        .find(|part| part.instance_id == instances[0])
+        .expect("compiled role part exists")
+}
+
+fn ranges_overlap(a_min: f32, a_max: f32, b_min: f32, b_max: f32) -> bool {
+    a_min <= b_max && b_min <= a_max
+}
+
 #[test]
 fn flat_panel_validates_exports_and_has_only_panel_body_role() {
     let output = compile_with(&[]);
@@ -88,6 +121,69 @@ fn flat_panel_validates_exports_and_has_only_panel_body_role() {
 
     let package_dir = std::env::temp_dir().join(format!(
         "shape-lab-flat-panel-export-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&package_dir);
+    write_model_package(&output.recipe, &output.artifact, &package_dir).expect("write package");
+    let verification = verify_model_package(&package_dir).expect("verify package");
+    assert!(
+        verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads,
+        "package verification should pass: {verification:#?}"
+    );
+    fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn hinged_panel_validates_exports_and_adds_only_hinge_edge() {
+    let output = compile_hinged_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "panel_body").len(), 1);
+    assert_eq!(role_instances(&output, "hinge_edge").len(), 1);
+    for forbidden_role in [
+        "door",
+        "handle",
+        "knob",
+        "inset_panel",
+        "motion",
+        "surface_detail",
+    ] {
+        assert!(
+            role_instances(&output, forbidden_role).is_empty(),
+            "Hinged Panel must not expose {forbidden_role}"
+        );
+    }
+
+    let body = compiled_part_for_role(&output, "panel_body");
+    let hinge = compiled_part_for_role(&output, "hinge_edge");
+    let body_bounds = body.world_mesh.bounds;
+    let hinge_bounds = hinge.world_mesh.bounds;
+    assert!(
+        hinge_bounds.min[0] < body_bounds.min[0],
+        "hinge edge should sit on the side of the panel"
+    );
+    assert!(
+        hinge_bounds.max[0] >= body_bounds.min[0] - 0.001,
+        "hinge edge should overlap the panel edge instead of floating"
+    );
+    assert!(
+        ranges_overlap(
+            hinge_bounds.min[1],
+            hinge_bounds.max[1],
+            body_bounds.min[1],
+            body_bounds.max[1]
+        ) && ranges_overlap(
+            hinge_bounds.min[2],
+            hinge_bounds.max[2],
+            body_bounds.min[2],
+            body_bounds.max[2]
+        ),
+        "hinge edge should share the panel height and thickness ranges"
+    );
+
+    let package_dir = std::env::temp_dir().join(format!(
+        "shape-lab-hinged-panel-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -199,6 +295,95 @@ fn flat_panel_controls_and_copy_are_honest() {
 }
 
 #[test]
+fn hinged_panel_controls_and_copy_are_honest() {
+    let fixture = flat_panel::hinged_panel_fixture_catalog();
+    let family = family(&fixture);
+    let profile = profile(&fixture);
+
+    assert_eq!(fixture.slug, flat_panel::HINGED_PANEL_SLUG);
+    assert_eq!(family.id, flat_panel::HINGED_PANEL_FAMILY_ID);
+    assert_eq!(family.display_name, "Hinged Panel");
+    assert_eq!(profile.family_id, flat_panel::HINGED_PANEL_FAMILY_ID);
+    assert_eq!(
+        profile.style_id.as_deref(),
+        Some(flat_panel::HINGED_PANEL_STYLE_ID)
+    );
+    assert_eq!(
+        family
+            .part_roles
+            .iter()
+            .map(|role| role.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["panel_body", "hinge_edge"]
+    );
+
+    let primary = profile
+        .controls
+        .iter()
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
+    assert_eq!(primary.len(), 3);
+    assert_eq!(
+        primary
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Proportions", "Edge Softness", "Hinge Edge"]
+    );
+    assert!(primary.iter().any(|control| {
+        control.id == "hinge_edge_style"
+            && matches!(control.kind, ControlKind::ContinuousAxis { .. })
+    }));
+
+    let strategy_copy = profile
+        .candidate_strategies
+        .iter()
+        .map(|strategy| strategy.label.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        profile
+            .candidate_strategies
+            .iter()
+            .map(|strategy| strategy.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Clean Hinged Panel",
+            "Wide Hinged Panel",
+            "Tall Hinged Panel",
+            "Heavy Edge Panel",
+            "Minimal Hinged Panel",
+        ]
+    );
+    let visible_copy = [
+        family.display_name.as_str(),
+        family.summary.as_str(),
+        strategy_copy.as_str(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    for forbidden in [
+        "door",
+        "handle",
+        "knob",
+        "open",
+        "close",
+        "uv",
+        "texture",
+        "material",
+        "rigging",
+        "rigged",
+        "animation",
+        "game-ready",
+    ] {
+        assert!(
+            !visible_copy.contains(forbidden),
+            "Hinged Panel copy must not claim {forbidden}: {visible_copy}"
+        );
+    }
+}
+
+#[test]
 fn flat_panel_control_endpoints_are_visible() {
     let fixture = flat_panel::fixture_catalog();
     let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
@@ -217,6 +402,29 @@ fn flat_panel_control_endpoints_are_visible() {
             row.control_id
         );
     }
+}
+
+#[test]
+fn hinged_panel_hinge_edge_endpoint_is_visible() {
+    let fixture = flat_panel::hinged_panel_fixture_catalog();
+    let report = generate_foundry_control_endpoint_visibility_report(&fixture.document, &fixture)
+        .expect("endpoint report should generate");
+
+    assert_eq!(report.controls.len(), 3);
+    let hinge_row = report
+        .controls
+        .iter()
+        .find(|row| row.control_id == "hinge_edge_style")
+        .expect("hinge edge control should be reported");
+    assert!(
+        matches!(
+            hinge_row.legibility_class,
+            CandidateLegibilityClass::Strong
+                | CandidateLegibilityClass::Clear
+                | CandidateLegibilityClass::SubtleButExplainable
+        ),
+        "hinge edge endpoint should produce visible clay geometry: {hinge_row:#?}"
+    );
 }
 
 #[test]
@@ -261,6 +469,45 @@ fn flat_panel_candidate_ideas_compile_to_distinct_shapes() {
         assert!(
             fingerprints.insert(output.build_stamp.artifact_fingerprint.0.to_hex()),
             "{label} should produce a distinct compiled flat panel"
+        );
+    }
+}
+
+#[test]
+fn hinged_panel_candidate_ideas_compile_to_distinct_shapes() {
+    let variants = [
+        (
+            "Clean Hinged Panel",
+            vec![("hinge_edge_style", ControlValue::Scalar(0.40))],
+        ),
+        (
+            "Wide Hinged Panel",
+            vec![("proportions", ControlValue::Choice("wide_panel".to_owned()))],
+        ),
+        (
+            "Tall Hinged Panel",
+            vec![("proportions", ControlValue::Choice("tall_panel".to_owned()))],
+        ),
+        (
+            "Heavy Edge Panel",
+            vec![("hinge_edge_style", ControlValue::Scalar(1.0))],
+        ),
+        (
+            "Minimal Hinged Panel",
+            vec![
+                ("edge_softness", ControlValue::Scalar(0.0)),
+                ("hinge_edge_style", ControlValue::Scalar(0.0)),
+            ],
+        ),
+    ];
+
+    let mut fingerprints = BTreeSet::new();
+    for (label, overrides) in variants {
+        let output = compile_hinged_with(&overrides);
+        assert_valid_model(&output);
+        assert!(
+            fingerprints.insert(output.build_stamp.artifact_fingerprint.0.to_hex()),
+            "{label} should produce a distinct compiled hinged panel"
         );
     }
 }

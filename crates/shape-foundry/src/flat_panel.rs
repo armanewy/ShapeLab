@@ -268,13 +268,13 @@ pub fn panel_body_module() -> FlatPanelFeatureModule {
     }
 }
 
-/// Future hinge-edge module. This is a contract only, not door motion.
+/// Hinge-edge feature module. This is visible clay edge detail, not door motion.
 #[must_use]
 pub fn hinge_edge_module() -> FlatPanelFeatureModule {
     FlatPanelFeatureModule {
         module_id: "hinge-edge".to_owned(),
         display_name: "Hinge Edge".to_owned(),
-        product_safe_summary: "Adds a visible side edge that can later support hinge detail."
+        product_safe_summary: "Adds a visible hinge-side edge without open or close behavior."
             .to_owned(),
         required_zone_kinds: vec![FlatPanelZoneKind::HingeCandidateEdge],
         provides_roles: vec!["hinge_edge".to_owned()],
@@ -282,7 +282,9 @@ pub fn hinge_edge_module() -> FlatPanelFeatureModule {
         candidate_hooks: vec!["hinged-panel-ideas".to_owned()],
         quality_gates: vec![
             "hinge-edge-visible".to_owned(),
-            "not-open-close-motion".to_owned(),
+            "hinge-edge-not-motion".to_owned(),
+            "hinge-edge-attached".to_owned(),
+            "hinge-edge-endpoint-visible".to_owned(),
         ],
     }
 }
@@ -581,10 +583,28 @@ mod tests {
             &hinge_edge_module(),
         );
         assert!(report.is_valid(), "{report:?}");
+        let module = hinge_edge_module();
+        assert_eq!(
+            module.required_zone_kinds,
+            vec![FlatPanelZoneKind::HingeCandidateEdge]
+        );
+        assert_eq!(module.provides_roles, vec!["hinge_edge"]);
+        assert_eq!(module.provides_controls, vec!["hinge_edge_style"]);
+        assert_eq!(module.candidate_hooks, vec!["hinged-panel-ideas"]);
         assert!(
-            hinge_edge_module()
+            module
                 .quality_gates
-                .contains(&"not-open-close-motion".to_owned())
+                .contains(&"hinge-edge-not-motion".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"hinge-edge-attached".to_owned())
+        );
+        assert!(
+            module
+                .quality_gates
+                .contains(&"hinge-edge-endpoint-visible".to_owned())
         );
     }
 

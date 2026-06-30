@@ -15,8 +15,8 @@ A door requires recognizable door cues. A simple upright panel does not.
 1. Flat Panel kernel contracts. Completed.
 2. Flat Panel Primitive clay profile. Completed.
 3. Flat Panel Make baseline. Completed.
-4. Hinge Edge feature module. Next.
-5. Hinged Panel Make baseline.
+4. Hinge Edge feature module. Completed as internal visual evidence.
+5. Hinged Panel Make baseline. Next.
 6. Handle/knob feature module.
 7. Door Panel or Door Primitive only after door cues are visible.
 
@@ -33,6 +33,16 @@ It exposes only:
 
 It does not expose Door, hinge, handle, open/close, material, UV/texturing,
 rigging, animation, or game-ready copy.
+
+## Hinge Edge evidence
+
+Hinge Edge has passed as an internal feature-module proof. It adds one visible
+clay side-edge strip to Flat Panel Primitive and produces Hinged Panel evidence
+under `target/hinge-edge-feature-module-v0/`.
+
+Hinged Panel is not app-visible until the Make baseline gate exposes it. It is
+also not Door, open/close behavior, rigging, animation, or a material/textured
+asset.
 
 ## Still blocked
 

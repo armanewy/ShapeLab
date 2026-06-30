@@ -48,25 +48,33 @@ docs/FLAT_PANEL_PRIMITIVE_BASELINE.md
 target/flat-panel-primitive-baseline/
 ```
 
+The Hinge Edge feature-module gate passed catalog and visual evidence tests on
+2026-06-30. Evidence is recorded in:
+
+```text
+docs/HINGE_EDGE_FEATURE_MODULE_V0.md
+target/hinge-edge-feature-module-v0/
+```
+
 ## Preferred Next Step
 
 Stop the box ladder. The next visible family proof should be:
 
 ```text
-Hinge Edge
+Hinged Panel Make baseline
 ```
 
-Hinge Edge is preferred because Flat Panel Primitive already proves the second
-kernel baseline. The next gate should add exactly one visible feature to that
-panel:
+Hinge Edge is now internal feature-module evidence. The next gate should expose
+that single feature in Make as Hinged Panel:
 
 - visible hinge-side edge geometry
 - no handle/knob
 - no open/close motion
-- no Door naming unless a later human visual gate approves it
+- no Door naming
 
 Do not add Feet / Skids, panels, handles, crate language, material looks,
-Family Studio public UI, or broad archetype work before the Hinge Edge gate.
+Family Studio public UI, or broad archetype work before the Hinged Panel Make
+baseline gate.
 
 ## Continuing Criteria
 
@@ -83,7 +91,7 @@ Family Studio public UI, or broad archetype work before the Hinge Edge gate.
 
 - Crate language before a model visually earns the name.
 - Door naming before visible door cues pass a later gate.
-- Feet / Skids before the Flat Panel and Hinge Edge proof.
+- Feet / Skids before the Hinged Panel Make baseline gate.
 - Material looks, UV/texturing, rigging, animation, or game-ready UI.
 - Runtime LLM integration.
 - Full Family Studio public flow before two different kernels pass visual gates.

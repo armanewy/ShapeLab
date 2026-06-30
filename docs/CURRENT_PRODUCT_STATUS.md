@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Verdict
 
-`FLAT PANEL PRIMITIVE BASELINE PROVEN`
+`HINGE EDGE INTERNAL FEATURE EVIDENCE PROVEN`
 
 Shape Lab has one honest box-like ladder and a second primitive kernel proof.
 The built-in Visual Foundry catalog and catalog curation metadata expose only
@@ -20,6 +20,10 @@ Trim Band. It is not exposed in the app Make loop yet and is not a crate.
 
 Flat Panel Primitive is one upright clay panel with readable width, height, and
 thickness. It is not Door, Hinged Panel, or an open/close motion asset.
+
+Hinge Edge has internal feature-module evidence as Flat Panel Primitive plus one
+visible hinge-side clay edge. It is not exposed in the app Make loop yet and is
+not Door or an open/close motion asset.
 
 ## Current Truth
 
@@ -47,6 +51,8 @@ thickness. It is not Door, Hinged Panel, or an open/close motion asset.
 - The Trim Band feature-module gate passed locally on 2026-06-30.
 - The Flat Panel Primitive baseline gate passed automated app/catalog tests on
   2026-06-30.
+- The Hinge Edge feature-module gate passed catalog/visual evidence tests on
+  2026-06-30.
 - No public catalog publishing is approved.
 - No Door naming, surface/material, UV/texturing, rigging, animation, runtime
   LLM, or game-ready UI is approved.
@@ -62,6 +68,9 @@ thickness. It is not Door, Hinged Panel, or an open/close motion asset.
 - Lidded Box can expose Proportions, Edge Softness, and Lid Seam controls.
 - Flat Panel Primitive can compile as a valid upright clay panel.
 - Flat Panel Primitive can expose Proportions and Edge Softness controls.
+- Hinged Panel may be referenced in internal docs as Flat Panel plus one
+  visible Hinge Edge feature with evidence under
+  `target/hinge-edge-feature-module-v0/`.
 - Box Primitive, Lidded Box, and Flat Panel Primitive are the only current
   built-in product baselines.
 - Box Primitive has release-app screenshot evidence under
@@ -88,7 +97,7 @@ thickness. It is not Door, Hinged Panel, or an open/close motion asset.
 
 ## Allowed Next Work
 
-- Hinge Edge as the next single visible feature after Flat Panel Primitive.
+- Hinged Panel Make baseline as the next app-visible gate after Hinge Edge.
 - Repair-loop polish for weak box or panel variations.
 - Local Personal Kit persistence for Box Primitive, Lidded Box, and Flat Panel
   Primitive.
@@ -100,7 +109,7 @@ thickness. It is not Door, Hinged Panel, or an open/close motion asset.
 - Calling Trimmed Box a crate.
 - Calling Flat Panel Primitive a Door.
 - Adding multiple visible concepts in one branch.
-- Feet / Skids before the Flat Panel and Hinge Edge proof.
+- Feet / Skids before the Hinged Panel Make baseline gate.
 - Door naming before visible door cues pass a later gate.
 - Broad archetype expansion.
 - Surface/material editor work.
