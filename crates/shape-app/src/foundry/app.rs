@@ -8683,7 +8683,9 @@ mod tests {
         }
 
         for forbidden in [
+            "surface",
             "surfaceartifact",
+            "material looks",
             "uv set",
             "material slot id",
             "texture file path",
@@ -8710,6 +8712,9 @@ mod tests {
             "cargo",
             "sci-fi",
             "body",
+            "body chip",
+            "parts",
+            "focus",
             "focused part",
             "focus part",
             "part chip",

@@ -26,15 +26,14 @@ See [`BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md`](BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS
 
 ## Preferred Next Step
 
-The next branch should add exactly one user-visible improvement:
-
-- Box Primitive repair loop for weak variations.
-
-An acceptable alternate next branch is:
+The next visible feature branch should add exactly one user-visible concept:
 
 - Lid Seam module for Box Primitive.
 
 Do not add multiple modules in one branch.
+
+Repair-loop polish may still happen as non-feature stabilization, but it must
+not displace the next visible object step: Box Primitive -> Lidded Box.
 
 ## Continuing Criteria
 

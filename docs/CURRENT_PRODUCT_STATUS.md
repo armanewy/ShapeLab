@@ -58,7 +58,7 @@ family.
 
 - Box Primitive repair loop for weak variations.
 - Local Personal Kit persistence for Box Primitive.
-- One visible feature module after the baseline passes, such as Lid Seam.
+- The next visible feature module is Lid Seam, on its own gate.
 
 ## Still Blocked
 
