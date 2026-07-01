@@ -538,13 +538,6 @@ fn validate_cross_references(
             );
         }
     }
-    if package.customizer_profile.candidate_strategies.is_empty() {
-        report.push(
-            "customizer_profile.candidate_strategies",
-            "missing_author_candidate_strategy",
-            "Author packages must define at least one candidate strategy.",
-        );
-    }
 }
 
 fn validate_author_customizer_basics(

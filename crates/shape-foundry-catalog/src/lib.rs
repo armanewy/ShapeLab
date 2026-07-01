@@ -1244,7 +1244,7 @@ mod tests {
 
     #[test]
     fn effective_family_request_contains_defaulted_slots() {
-        let fixture = box_primitive::fixture_catalog();
+        let fixture = box_primitive::lidded_box_fixture_catalog();
         let mut document = fixture.document.clone();
         document.control_state.remove("proportions");
 

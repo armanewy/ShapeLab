@@ -20,8 +20,19 @@ fn built_in_fixtures_round_trip_through_author_packages() {
             fixture.slug,
             report.issues
         );
-        assert_eq!(report.primary_control_count, 2);
-        assert!(report.candidate_strategy_count > 0);
+        assert_eq!(
+            report.primary_control_count as usize,
+            profile
+                .customizer_profile
+                .controls
+                .iter()
+                .filter(|control| control.primary && control.visible)
+                .count()
+        );
+        assert_eq!(
+            report.candidate_strategy_count as usize,
+            profile.customizer_profile.candidate_strategies.len()
+        );
         assert_eq!(report.preview_camera_count, 1);
         assert_eq!(report.pack_policy_count, 1);
         assert_eq!(report.catalog_entry_count, 5);

@@ -3,7 +3,7 @@
 use std::{collections::BTreeSet, fs};
 
 use serde::de::DeserializeOwned;
-use shape_asset::PartInstanceId;
+use shape_asset::{GeometrySource, PartInstanceId};
 use shape_compile::{
     export::{verify_model_package, write_model_package},
     validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
@@ -315,6 +315,32 @@ fn trimmed_box_includes_trim_band_module_contract() {
             .quality_gates
             .iter()
             .any(|gate| gate.id == "trim-not-material-stripe")
+    );
+}
+
+#[test]
+fn lidded_box_lid_seam_reads_as_top_lid_cap() {
+    let output = compile_lidded_with(&[]);
+    assert_valid_model(&output);
+
+    let body = rounded_box_bounds_for_role(&output, "body");
+    let lid = rounded_box_bounds_for_role(&output, "lid_seam");
+
+    assert!(
+        lid.half_extents[0] > body.half_extents[0],
+        "lid cap should overhang body width: body={body:?}, lid={lid:?}"
+    );
+    assert!(
+        lid.half_extents[2] > body.half_extents[2],
+        "lid cap should overhang body depth: body={body:?}, lid={lid:?}"
+    );
+    assert!(
+        lid.translation[1] > body.translation[1] + body.half_extents[1],
+        "lid cap should sit on top of body: body={body:?}, lid={lid:?}"
+    );
+    assert!(
+        lid.translation[2].abs() < 0.001,
+        "lid cap should be centered over the box, not stuck to the front: lid={lid:?}"
     );
 }
 
@@ -827,4 +853,36 @@ fn role_instances(output: &FoundryCompilationOutput, role: &str) -> Vec<PartInst
         .filter(|(_, instance)| instance.tags.contains(&tag))
         .map(|(id, _)| *id)
         .collect()
+}
+
+#[derive(Debug)]
+struct RoundedBoxBounds {
+    half_extents: [f32; 3],
+    translation: [f32; 3],
+}
+
+fn rounded_box_bounds_for_role(output: &FoundryCompilationOutput, role: &str) -> RoundedBoxBounds {
+    let instances = role_instances(output, role);
+    let [instance_id] = instances.as_slice() else {
+        panic!("expected exactly one {role} instance");
+    };
+    let instance = output
+        .recipe
+        .instances
+        .get(instance_id)
+        .expect("role instance exists");
+    let definition = output
+        .recipe
+        .definitions
+        .get(&instance.definition)
+        .expect("role definition exists");
+    let half_extents = match &definition.geometry.source {
+        GeometrySource::RoundedBox { half_extents, .. } => *half_extents,
+        _ => panic!("expected {role} to use rounded box geometry"),
+    };
+
+    RoundedBoxBounds {
+        half_extents,
+        translation: instance.local_transform.translation,
+    }
 }
