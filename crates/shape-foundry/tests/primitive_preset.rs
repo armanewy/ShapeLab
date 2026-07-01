@@ -1,8 +1,10 @@
 use shape_foundry::{
-    ObjectPlanReviewTier, PresetSource, PrimitiveKind, PrimitivePreset,
+    OBJECT_PLAN_SCHEMA_VERSION, ObjectPlan, ObjectPlanCreatedBy, ObjectPlanProvenance,
+    ObjectPlanReviewTier, ObjectPlanValidationPolicy, PresetSource, PrimitiveKind, PrimitivePreset,
     PrimitivePresetObjectPlanNodeError, PrimitivePropertyValue, built_in_primitive_preset,
     built_in_primitive_presets, object_plan_node_from_reviewed_preset,
-    primitive_preset_public_catalog_publish_allowed, validate_primitive_preset,
+    primitive_preset_public_catalog_publish_allowed, primitive_preset_public_catalog_visible,
+    validate_primitive_preset,
 };
 
 #[test]
@@ -114,7 +116,62 @@ fn primitive_preset_raw_mesh_payload_rejected() {
 fn primitive_preset_public_catalog_publish_never_allowed() {
     for preset in built_in_primitive_presets() {
         assert!(!primitive_preset_public_catalog_publish_allowed(&preset));
+        assert!(!primitive_preset_public_catalog_visible(&preset));
     }
+}
+
+#[test]
+fn primitive_preset_user_saved_is_personal_local_only() {
+    let mut preset = built_in_primitive_preset("compact_box").expect("preset exists");
+    preset.preset_id = "my_compact_box".to_owned();
+    preset.source = PresetSource::UserSaved;
+    preset.review_tier = ObjectPlanReviewTier::Personal;
+
+    let report = validate_primitive_preset(&preset);
+
+    assert!(
+        report.is_valid(),
+        "user saved preset should validate: {report:?}"
+    );
+    assert!(!primitive_preset_public_catalog_publish_allowed(&preset));
+    assert!(!primitive_preset_public_catalog_visible(&preset));
+
+    preset.review_tier = ObjectPlanReviewTier::Reviewed;
+    let report = validate_primitive_preset(&preset);
+
+    assert_issue(&report, "user_saved_preset_requires_personal_tier");
+}
+
+#[test]
+fn primitive_preset_object_plan_draft_stays_draft_and_local() {
+    let mut preset = built_in_primitive_preset("knob_like_form").expect("preset exists");
+    preset.preset_id = "draft_knob_like_form".to_owned();
+    preset.source = PresetSource::ObjectPlanDraft;
+    preset.review_tier = ObjectPlanReviewTier::Draft;
+
+    let report = validate_primitive_preset(&preset);
+
+    assert!(
+        report.is_valid(),
+        "draft preset should validate: {report:?}"
+    );
+    assert!(!primitive_preset_public_catalog_publish_allowed(&preset));
+    assert!(!primitive_preset_public_catalog_visible(&preset));
+
+    preset.review_tier = ObjectPlanReviewTier::Reviewed;
+    let report = validate_primitive_preset(&preset);
+
+    assert_issue(&report, "object_plan_draft_preset_requires_draft_tier");
+}
+
+#[test]
+fn primitive_preset_builtin_requires_reviewed_tier() {
+    let mut preset = built_in_primitive_preset("compact_box").expect("preset exists");
+    preset.review_tier = ObjectPlanReviewTier::Draft;
+
+    let report = validate_primitive_preset(&preset);
+
+    assert_issue(&report, "builtin_preset_requires_reviewed_tier");
 }
 
 #[test]
@@ -144,6 +201,40 @@ fn primitive_preset_object_plan_node_requires_reviewed_preset() {
     assert_eq!(
         err,
         PrimitivePresetObjectPlanNodeError::PresetRequiresReview
+    );
+}
+
+#[test]
+fn primitive_preset_reference_field_is_forbidden_in_object_plan_v1() {
+    let preset = built_in_primitive_preset("compact_box").expect("preset exists");
+    let plan = ObjectPlan {
+        schema_version: OBJECT_PLAN_SCHEMA_VERSION,
+        plan_id: "preset_reference_plan".to_owned(),
+        display_name: "Preset reference plan".to_owned(),
+        intent_summary: "A plan that tries to reference a preset directly.".to_owned(),
+        nodes: vec![
+            object_plan_node_from_reviewed_preset(&preset, "box", "Box body", false)
+                .expect("reviewed preset converts"),
+        ],
+        attachments: Vec::new(),
+        validation_policy: ObjectPlanValidationPolicy::default(),
+        review_tier: ObjectPlanReviewTier::Draft,
+        provenance: ObjectPlanProvenance {
+            created_by: ObjectPlanCreatedBy::Human,
+            source_prompt_hash: Some("presetref".to_owned()),
+            source_seed_refs: vec!["preset_reference_seed".to_owned()],
+            created_at: "2026-07-01T00:00:00Z".to_owned(),
+        },
+    };
+    let mut value = serde_json::to_value(plan).expect("plan serializes");
+    value["nodes"][0]
+        .as_object_mut()
+        .expect("node object")
+        .insert("preset_id".to_owned(), serde_json::json!("compact_box"));
+
+    assert!(
+        serde_json::from_value::<ObjectPlan>(value).is_err(),
+        "ObjectPlan v1 stores expanded property values, not direct preset references"
     );
 }
 

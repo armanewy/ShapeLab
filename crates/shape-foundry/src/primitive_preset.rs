@@ -271,6 +271,7 @@ pub fn validate_primitive_preset(preset: &PrimitivePreset) -> PrimitivePresetVal
         "property_values",
         validate_primitive_property_values(&schema, &preset.property_values),
     );
+    validate_preset_review_rules(&mut report, preset);
 
     report
 }
@@ -278,6 +279,12 @@ pub fn validate_primitive_preset(preset: &PrimitivePreset) -> PrimitivePresetVal
 /// Return false for every preset; presets never publish to a public catalog.
 #[must_use]
 pub const fn primitive_preset_public_catalog_publish_allowed(_preset: &PrimitivePreset) -> bool {
+    false
+}
+
+/// Return false for every preset; presets are not public catalog-visible by default.
+#[must_use]
+pub const fn primitive_preset_public_catalog_visible(_preset: &PrimitivePreset) -> bool {
     false
 }
 
@@ -417,6 +424,42 @@ fn primitive_property_schema_for_kind(
         PrimitiveKind::FlatPanelPrimitive => Some(flat_panel_primitive_property_schema()),
         PrimitiveKind::SpherePrimitive => Some(sphere_primitive_property_schema()),
         PrimitiveKind::CylinderPrimitive => None,
+    }
+}
+
+fn validate_preset_review_rules(
+    report: &mut PrimitivePresetValidationReport,
+    preset: &PrimitivePreset,
+) {
+    match preset.source {
+        PresetSource::BuiltIn => {
+            if preset.review_tier != ObjectPlanReviewTier::Reviewed {
+                report.push(
+                    "review_tier",
+                    "builtin_preset_requires_reviewed_tier",
+                    "Built-in primitive presets must be reviewed.",
+                );
+            }
+        }
+        PresetSource::UserSaved => {
+            if preset.review_tier != ObjectPlanReviewTier::Personal {
+                report.push(
+                    "review_tier",
+                    "user_saved_preset_requires_personal_tier",
+                    "User-saved primitive presets are personal local presets.",
+                );
+            }
+        }
+        PresetSource::ObjectPlanDraft => {
+            if preset.review_tier != ObjectPlanReviewTier::Draft {
+                report.push(
+                    "review_tier",
+                    "object_plan_draft_preset_requires_draft_tier",
+                    "ObjectPlan draft primitive presets must remain Draft.",
+                );
+            }
+        }
+        PresetSource::InternalTool => {}
     }
 }
 

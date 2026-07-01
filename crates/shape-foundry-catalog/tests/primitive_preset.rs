@@ -1,6 +1,6 @@
 use shape_foundry::{
     ObjectPlanReviewTier, PresetSource, primitive_preset_public_catalog_publish_allowed,
-    validate_primitive_preset,
+    primitive_preset_public_catalog_visible, validate_primitive_preset,
 };
 use shape_foundry_catalog::{
     built_in_catalog_primitive_presets, built_in_catalog_primitive_presets_validate,
@@ -25,6 +25,11 @@ fn primitive_preset_catalog_does_not_publish() {
         assert!(
             !primitive_preset_public_catalog_publish_allowed(&preset),
             "{} must not publish automatically",
+            preset.preset_id
+        );
+        assert!(
+            !primitive_preset_public_catalog_visible(&preset),
+            "{} must not be public catalog visible by default",
             preset.preset_id
         );
     }
