@@ -226,6 +226,103 @@ fn object_plan_cli_invalid_run_does_not_fake_contact_sheet() {
 }
 
 #[test]
+fn object_plan_cli_batch_run_directory_reports_mixed_results() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plans_dir = temp_dir.path().join("plans");
+    fs::create_dir_all(&plans_dir).expect("create plans dir");
+    write_plan(&plans_dir.join("a-valid.json"), &one_sphere_plan());
+    write_plan(&plans_dir.join("b-invalid.json"), &invalid_width_plan());
+    let out_dir = temp_dir.path().join("batch-out");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "batch-run", "--input"])
+        .arg(&plans_dir)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan batch");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    for name in [
+        "batch-validation-report.json",
+        "keep-regenerate-simplify.md",
+        "batch-user-summary.md",
+    ] {
+        assert!(out_dir.join(name).is_file(), "{name} should exist");
+    }
+    assert!(
+        !out_dir.join("batch-contact-sheet.png").exists(),
+        "batch contact sheet must not be faked"
+    );
+
+    let report = read_json(out_dir.join("batch-validation-report.json"));
+    assert_eq!(report["total_plans"], 2);
+    assert_eq!(report["passed_validation"], 1);
+    assert_eq!(report["failed_validation"], 1);
+    assert_eq!(report["human_review_required"], true);
+    assert_eq!(report["approved"], false);
+    assert_eq!(report["rendered"], 0);
+    assert_eq!(report["plans"].as_array().expect("plans").len(), 2);
+}
+
+#[test]
+fn object_plan_cli_batch_run_json_uses_relative_plan_refs() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plans_dir = temp_dir.path().join("plans");
+    fs::create_dir_all(&plans_dir).expect("create plans dir");
+    write_plan(&plans_dir.join("sphere.json"), &one_sphere_plan());
+    write_plan(&plans_dir.join("panel.json"), &panel_with_sphere_plan());
+    let batch_path = temp_dir.path().join("batch.json");
+    fs::write(
+        &batch_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "batch_id": "basic_batch",
+            "display_name": "Basic Batch",
+            "plans": ["plans/sphere.json", "plans/panel.json"],
+            "review_policy": {"human_review_required": false},
+            "output_policy": {"contact_sheet": true}
+        }))
+        .expect("batch json"),
+    )
+    .expect("write batch json");
+    let out_a = temp_dir.path().join("batch-a");
+    let out_b = temp_dir.path().join("batch-b");
+
+    for out_dir in [&out_a, &out_b] {
+        assert!(
+            Command::new(exe)
+                .args(["object-plan", "batch-run", "--input"])
+                .arg(&batch_path)
+                .args(["--out-dir"])
+                .arg(out_dir)
+                .status()
+                .expect("run object-plan batch json")
+                .success()
+        );
+    }
+
+    let report = read_json(out_a.join("batch-validation-report.json"));
+    assert_eq!(report["batch_id"], "basic_batch");
+    assert_eq!(report["display_name"], "Basic Batch");
+    assert_eq!(report["total_plans"], 2);
+    assert_eq!(report["human_review_required"], true);
+    assert_eq!(report["approved"], false);
+    assert_no_absolute_output_paths(&out_a, temp_dir.path());
+
+    for name in [
+        "batch-validation-report.json",
+        "keep-regenerate-simplify.md",
+        "batch-user-summary.md",
+    ] {
+        let first = fs::read(out_a.join(name)).expect("read first batch output");
+        let second = fs::read(out_b.join(name)).expect("read second batch output");
+        assert_eq!(first, second, "{name} should be deterministic");
+    }
+}
+
+#[test]
 fn object_plan_cli_has_no_llm_runtime_dependency() {
     let manifest = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
     let forbidden = ["openai", "reqwest", "ureq", "llm", "async-openai"];
@@ -290,6 +387,14 @@ fn one_sphere_plan() -> ObjectPlan {
     }
 }
 
+fn invalid_width_plan() -> ObjectPlan {
+    let mut plan = one_sphere_plan();
+    plan.nodes[0]
+        .property_values
+        .insert("width".to_owned(), PrimitivePropertyValue::Length(99.0));
+    plan
+}
+
 fn panel_with_sphere_plan() -> ObjectPlan {
     ObjectPlan {
         schema_version: OBJECT_PLAN_SCHEMA_VERSION,
@@ -351,4 +456,33 @@ fn sphere_node() -> ObjectPlanNode {
 
 fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn read_json(path: impl AsRef<std::path::Path>) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(path).expect("read json")).expect("parse json")
+}
+
+fn assert_no_absolute_output_paths(out_dir: &std::path::Path, temp_dir: &std::path::Path) {
+    let needle = temp_dir.to_string_lossy();
+    let mut stack = vec![out_dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(path).expect("read output dir") {
+                stack.push(entry.expect("dir entry").path());
+            }
+            continue;
+        }
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "json" | "md"))
+        {
+            let text = fs::read_to_string(&path).expect("read output text");
+            assert!(
+                !text.contains(needle.as_ref()),
+                "{} should not persist absolute temp paths",
+                path.display()
+            );
+        }
+    }
 }

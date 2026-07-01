@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::Subcommand;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shape_foundry::{
     ObjectPlan, ObjectPlanReviewTier, ObjectPlanValidationReport, PrimitiveKind,
     object_plan_user_summary, validate_object_plan,
@@ -48,6 +48,15 @@ pub enum ObjectPlanCommand {
         #[arg(long)]
         contact_sheet: bool,
     },
+    /// Run a directory or batch JSON of ObjectPlans for offline review.
+    BatchRun {
+        /// Directory of ObjectPlan JSON files or an ObjectPlanBatch JSON file.
+        #[arg(long)]
+        input: PathBuf,
+        /// Output directory.
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
 }
 
 /// Run an ObjectPlan CLI command.
@@ -60,6 +69,7 @@ pub fn run_object_plan(args: ObjectPlanArgs) -> anyhow::Result<()> {
             out_dir,
             contact_sheet,
         } => run_prepare(&plan, &out_dir, contact_sheet),
+        ObjectPlanCommand::BatchRun { input, out_dir } => run_batch(&input, &out_dir),
     }
 }
 
@@ -86,6 +96,27 @@ fn run_prepare(
     out_dir: &Path,
     contact_sheet_requested: bool,
 ) -> anyhow::Result<()> {
+    let outcome = write_plan_outputs(plan_path, out_dir, contact_sheet_requested)?;
+    if outcome.validation_passed {
+        println!(
+            "Validated ObjectPlan {} into {}",
+            outcome.plan_id.as_deref().unwrap_or("unknown-plan"),
+            out_dir.display()
+        );
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "ObjectPlan validation failed with {} issue(s)",
+            outcome.validation_issue_count
+        )
+    }
+}
+
+fn write_plan_outputs(
+    plan_path: &Path,
+    out_dir: &Path,
+    contact_sheet_requested: bool,
+) -> anyhow::Result<ObjectPlanRunOutcome> {
     let plan = read_object_plan(plan_path)?;
     let report = validate_object_plan(&plan);
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
@@ -123,19 +154,14 @@ fn run_prepare(
     )
     .with_context(|| format!("writing {}", out_dir.join("plan-user-summary.md").display()))?;
 
-    if report.is_valid() {
-        println!(
-            "Validated ObjectPlan {} into {}",
-            plan.plan_id,
-            out_dir.display()
-        );
-        Ok(())
-    } else {
-        anyhow::bail!(
-            "ObjectPlan validation failed with {} issue(s)",
-            report.issues.len()
-        )
-    }
+    Ok(ObjectPlanRunOutcome {
+        plan_id: Some(plan.plan_id),
+        display_name: Some(plan.display_name),
+        validation_passed: report.is_valid(),
+        validation_issue_count: report.issues.len(),
+        rendered: visual_evidence_report.rendered,
+        renderable: renderability_report.renderable,
+    })
 }
 
 fn object_plan_renderability_report(
@@ -177,6 +203,271 @@ fn object_plan_renderability_report(
         reason: "ObjectPlan rendering is blocked until plan materialization is implemented."
             .to_owned(),
     }
+}
+
+fn run_batch(input_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
+    let batch = resolve_batch_input(input_path)?;
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+    let plans_dir = out_dir.join("plans");
+    fs::create_dir_all(&plans_dir).with_context(|| format!("creating {}", plans_dir.display()))?;
+
+    let mut plan_reports = Vec::new();
+    for (index, plan_input) in batch.plans.iter().enumerate() {
+        let slug = unique_plan_slug(index, &plan_input.source_ref);
+        let relative_out_dir = format!("plans/{slug}");
+        let plan_out_dir = out_dir.join(&relative_out_dir);
+        let outcome = write_plan_outputs(
+            &plan_input.path,
+            &plan_out_dir,
+            batch.output_policy.contact_sheet,
+        );
+        plan_reports.push(plan_report_from_outcome(
+            plan_input,
+            &relative_out_dir,
+            outcome,
+        ));
+    }
+
+    let passed_validation = plan_reports
+        .iter()
+        .filter(|plan| plan.validation_status == "Passed")
+        .count();
+    let failed_validation = plan_reports
+        .iter()
+        .filter(|plan| plan.validation_status == "Failed")
+        .count();
+    let rendered = plan_reports.iter().filter(|plan| plan.rendered).count();
+    let unsupported = plan_reports.iter().filter(|plan| plan.unsupported).count();
+    let _ = batch.review_policy.human_review_required;
+    let report = ObjectPlanBatchValidationReport {
+        batch_id: batch.batch_id,
+        display_name: batch.display_name,
+        total_plans: plan_reports.len(),
+        passed_validation,
+        failed_validation,
+        rendered,
+        unsupported,
+        human_review_required: true,
+        approved: false,
+        plans: plan_reports,
+    };
+
+    write_json(out_dir.join("batch-validation-report.json"), &report)?;
+    fs::write(
+        out_dir.join("keep-regenerate-simplify.md"),
+        keep_regenerate_simplify_markdown(&report),
+    )
+    .with_context(|| {
+        format!(
+            "writing {}",
+            out_dir.join("keep-regenerate-simplify.md").display()
+        )
+    })?;
+    fs::write(
+        out_dir.join("batch-user-summary.md"),
+        batch_user_summary_markdown(&report),
+    )
+    .with_context(|| {
+        format!(
+            "writing {}",
+            out_dir.join("batch-user-summary.md").display()
+        )
+    })?;
+
+    println!(
+        "Ran ObjectPlan batch {} with {} plan(s) into {}",
+        report.batch_id,
+        report.total_plans,
+        out_dir.display()
+    );
+    Ok(())
+}
+
+fn resolve_batch_input(input_path: &Path) -> anyhow::Result<ObjectPlanBatchInput> {
+    if input_path.is_dir() {
+        let mut paths = fs::read_dir(input_path)
+            .with_context(|| format!("reading {}", input_path.display()))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .with_context(|| format!("reading {}", input_path.display()))?;
+        paths.retain(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        });
+        paths.sort();
+        let plans = paths
+            .into_iter()
+            .map(|path| {
+                let source_ref = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("object-plan.json")
+                    .to_owned();
+                ObjectPlanBatchPlanInput { source_ref, path }
+            })
+            .collect::<Vec<_>>();
+        return Ok(ObjectPlanBatchInput {
+            batch_id: input_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(safe_identifier)
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| "object_plan_batch".to_owned()),
+            display_name: "ObjectPlan Batch".to_owned(),
+            review_policy: ObjectPlanBatchReviewPolicy::default(),
+            output_policy: ObjectPlanBatchOutputPolicy::default(),
+            plans,
+        });
+    }
+
+    let bytes =
+        fs::read(input_path).with_context(|| format!("reading {}", input_path.display()))?;
+    let batch: ObjectPlanBatch =
+        serde_json::from_slice(&bytes).with_context(|| "parsing ObjectPlanBatch JSON")?;
+    let base_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
+    let plans = batch
+        .plans
+        .iter()
+        .map(|plan_ref| {
+            let raw_path = PathBuf::from(plan_ref);
+            let path = if raw_path.is_absolute() {
+                raw_path.clone()
+            } else {
+                base_dir.join(&raw_path)
+            };
+            ObjectPlanBatchPlanInput {
+                source_ref: persisted_source_ref(plan_ref, &raw_path),
+                path,
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(ObjectPlanBatchInput {
+        batch_id: safe_identifier(&batch.batch_id),
+        display_name: batch.display_name,
+        review_policy: batch.review_policy,
+        output_policy: batch.output_policy,
+        plans,
+    })
+}
+
+fn plan_report_from_outcome(
+    plan_input: &ObjectPlanBatchPlanInput,
+    relative_out_dir: &str,
+    outcome: anyhow::Result<ObjectPlanRunOutcome>,
+) -> ObjectPlanBatchPlanReport {
+    match outcome {
+        Ok(outcome) => {
+            let recommendation = if outcome.validation_passed && outcome.rendered {
+                BatchReviewRecommendation::Keep
+            } else if outcome.validation_passed {
+                BatchReviewRecommendation::Simplify
+            } else {
+                BatchReviewRecommendation::Regenerate
+            };
+            ObjectPlanBatchPlanReport {
+                source_ref: plan_input.source_ref.clone(),
+                output_dir: relative_out_dir.to_owned(),
+                plan_id: outcome.plan_id,
+                display_name: outcome.display_name,
+                validation_status: if outcome.validation_passed {
+                    "Passed".to_owned()
+                } else {
+                    "Failed".to_owned()
+                },
+                validation_issue_count: outcome.validation_issue_count,
+                rendered: outcome.rendered,
+                unsupported: !outcome.renderable,
+                recommendation,
+                errors: Vec::new(),
+            }
+        }
+        Err(_error) => ObjectPlanBatchPlanReport {
+            source_ref: plan_input.source_ref.clone(),
+            output_dir: relative_out_dir.to_owned(),
+            plan_id: None,
+            display_name: None,
+            validation_status: "Failed".to_owned(),
+            validation_issue_count: 1,
+            rendered: false,
+            unsupported: true,
+            recommendation: BatchReviewRecommendation::Blocked,
+            errors: vec!["Plan could not be read or parsed.".to_owned()],
+        },
+    }
+}
+
+fn keep_regenerate_simplify_markdown(report: &ObjectPlanBatchValidationReport) -> String {
+    let mut markdown = "# Keep / Regenerate / Simplify\n\n".to_owned();
+    markdown.push_str("Recommendations are review labels only. They do not publish plans.\n\n");
+    for plan in &report.plans {
+        markdown.push_str("- ");
+        markdown.push_str(&plan.source_ref);
+        markdown.push_str(": ");
+        markdown.push_str(plan.recommendation.label());
+        markdown.push_str(" - ");
+        markdown.push_str(recommendation_reason(plan));
+        markdown.push('\n');
+    }
+    markdown
+}
+
+fn batch_user_summary_markdown(report: &ObjectPlanBatchValidationReport) -> String {
+    format!(
+        "# {}\n\nTotal plans: {}\n\nPassed validation: {}\n\nFailed validation: {}\n\nRendered: {}\n\nHuman review required: true\n\nApproved: false\n",
+        report.display_name,
+        report.total_plans,
+        report.passed_validation,
+        report.failed_validation,
+        report.rendered
+    )
+}
+
+fn recommendation_reason(plan: &ObjectPlanBatchPlanReport) -> &'static str {
+    match plan.recommendation {
+        BatchReviewRecommendation::Keep => "rendered evidence is available for review",
+        BatchReviewRecommendation::Regenerate => "validation failed",
+        BatchReviewRecommendation::Simplify => "validation passed but preview output is blocked",
+        BatchReviewRecommendation::Blocked => "the plan could not be read",
+    }
+}
+
+fn unique_plan_slug(index: usize, source_ref: &str) -> String {
+    let stem = Path::new(source_ref)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(safe_identifier)
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "object_plan".to_owned());
+    format!("{index:03}-{stem}")
+}
+
+fn persisted_source_ref(plan_ref: &str, path: &Path) -> String {
+    if path.is_absolute() {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("object-plan.json")
+            .to_owned()
+    } else {
+        plan_ref.replace('\\', "/")
+    }
+}
+
+fn safe_identifier(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else if ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_owned()
 }
 
 fn read_object_plan(path: &Path) -> anyhow::Result<ObjectPlan> {
@@ -261,6 +552,121 @@ fn user_summary_markdown(
     markdown.push_str(&rendering_report.reason);
     markdown.push('\n');
     markdown
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectPlanBatch {
+    batch_id: String,
+    display_name: String,
+    plans: Vec<String>,
+    #[serde(default)]
+    review_policy: ObjectPlanBatchReviewPolicy,
+    #[serde(default)]
+    output_policy: ObjectPlanBatchOutputPolicy,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectPlanBatchReviewPolicy {
+    #[serde(default = "default_true")]
+    human_review_required: bool,
+}
+
+impl Default for ObjectPlanBatchReviewPolicy {
+    fn default() -> Self {
+        Self {
+            human_review_required: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectPlanBatchOutputPolicy {
+    #[serde(default = "default_true")]
+    contact_sheet: bool,
+}
+
+impl Default for ObjectPlanBatchOutputPolicy {
+    fn default() -> Self {
+        Self {
+            contact_sheet: true,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ObjectPlanBatchInput {
+    batch_id: String,
+    display_name: String,
+    review_policy: ObjectPlanBatchReviewPolicy,
+    output_policy: ObjectPlanBatchOutputPolicy,
+    plans: Vec<ObjectPlanBatchPlanInput>,
+}
+
+#[derive(Debug)]
+struct ObjectPlanBatchPlanInput {
+    source_ref: String,
+    path: PathBuf,
+}
+
+#[derive(Debug)]
+struct ObjectPlanRunOutcome {
+    plan_id: Option<String>,
+    display_name: Option<String>,
+    validation_passed: bool,
+    validation_issue_count: usize,
+    rendered: bool,
+    renderable: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchValidationReport {
+    batch_id: String,
+    display_name: String,
+    total_plans: usize,
+    passed_validation: usize,
+    failed_validation: usize,
+    rendered: usize,
+    unsupported: usize,
+    human_review_required: bool,
+    approved: bool,
+    plans: Vec<ObjectPlanBatchPlanReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchPlanReport {
+    source_ref: String,
+    output_dir: String,
+    plan_id: Option<String>,
+    display_name: Option<String>,
+    validation_status: String,
+    validation_issue_count: usize,
+    rendered: bool,
+    unsupported: bool,
+    recommendation: BatchReviewRecommendation,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, Serialize)]
+enum BatchReviewRecommendation {
+    Keep,
+    Regenerate,
+    Simplify,
+    Blocked,
+}
+
+impl BatchReviewRecommendation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep",
+            Self::Regenerate => "Regenerate",
+            Self::Simplify => "Simplify",
+            Self::Blocked => "Blocked",
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]
