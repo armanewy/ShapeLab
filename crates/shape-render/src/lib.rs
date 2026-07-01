@@ -616,17 +616,26 @@ pub fn fit_camera_to_bounds(bounds: Aabb) -> OrbitCamera {
 /// Fit an orbit camera to bounds for a known viewport aspect ratio.
 #[must_use]
 pub fn fit_camera_to_bounds_with_aspect(bounds: Aabb, aspect_ratio: f32) -> OrbitCamera {
+    fit_camera_to_bounds_with_target(bounds, bounds.center(), aspect_ratio)
+}
+
+/// Fit an orbit camera to bounds while keeping a fixed world-space target.
+#[must_use]
+pub fn fit_camera_to_bounds_with_target(
+    bounds: Aabb,
+    target: Vec3,
+    aspect_ratio: f32,
+) -> OrbitCamera {
     let mut camera = OrbitCamera::default();
     if bounds.is_empty() || !is_finite_vec3(bounds.min) || !is_finite_vec3(bounds.max) {
         return camera;
     }
 
-    let center = bounds.center();
-    if !is_finite_vec3(center) {
+    if !is_finite_vec3(target) {
         return camera;
     }
 
-    camera.target = center;
+    camera.target = target;
     camera.distance = fit_distance_for_bounds(bounds, &camera, aspect_ratio);
     camera.clamped()
 }
@@ -639,7 +648,23 @@ pub fn fit_camera_to_bounds_from_angles(
     pitch_degrees: f32,
     aspect_ratio: f32,
 ) -> OrbitCamera {
-    let mut camera = fit_camera_to_bounds_with_aspect(bounds, aspect_ratio);
+    let mut camera = fit_camera_to_bounds_with_target(bounds, bounds.center(), aspect_ratio);
+    camera.yaw_degrees = yaw_degrees;
+    camera.pitch_degrees = pitch_degrees;
+    camera = camera.clamped();
+    camera.distance = fit_distance_for_bounds(bounds, &camera, aspect_ratio);
+    camera.clamped()
+}
+
+/// Fit an explicit-angle orbit camera while keeping world origin at the viewport center.
+#[must_use]
+pub fn fit_camera_to_bounds_from_angles_around_origin(
+    bounds: Aabb,
+    yaw_degrees: f32,
+    pitch_degrees: f32,
+    aspect_ratio: f32,
+) -> OrbitCamera {
+    let mut camera = fit_camera_to_bounds_with_target(bounds, Vec3::ZERO, aspect_ratio);
     camera.yaw_degrees = yaw_degrees;
     camera.pitch_degrees = pitch_degrees;
     camera = camera.clamped();
@@ -1673,6 +1698,29 @@ mod tests {
         for x in [-1.0, 1.0] {
             for y in [-1.0, 1.0] {
                 for z in [-1.0, 1.0] {
+                    let clip = view_projection * Vec4::new(x, y, z, 1.0);
+                    let ndc = clip.truncate() / clip.w;
+                    assert!(ndc.x.abs() <= 1.0, "x outside view: {ndc:?}");
+                    assert!(ndc.y.abs() <= 1.0, "y outside view: {ndc:?}");
+                    assert!(ndc.z >= -1.0 && ndc.z <= 1.0, "z outside view: {ndc:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn origin_centered_camera_fit_sees_offset_bounds() {
+        let bounds = Aabb {
+            min: Vec3::new(1.0, -1.0, -0.5),
+            max: Vec3::new(3.0, 1.0, 0.5),
+        };
+        let camera = fit_camera_to_bounds_from_angles_around_origin(bounds, 35.0, 20.0, 1.0);
+        let view_projection = camera.view_projection_matrix(1.0);
+
+        assert_eq!(camera.target, Vec3::ZERO);
+        for x in [bounds.min.x, bounds.max.x] {
+            for y in [bounds.min.y, bounds.max.y] {
+                for z in [bounds.min.z, bounds.max.z] {
                     let clip = view_projection * Vec4::new(x, y, z, 1.0);
                     let ndc = clip.truncate() / clip.w;
                     assert!(ndc.x.abs() <= 1.0, "x outside view: {ndc:?}");

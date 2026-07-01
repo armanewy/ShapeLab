@@ -1267,15 +1267,7 @@ fn family_control_domain(
 
 fn kind_domain(control: &CustomizerControl) -> FeasibleControlDomain {
     match &control.kind {
-        ControlKind::ContinuousAxis { .. } => FeasibleControlDomain {
-            continuous_intervals: vec![ClosedInterval {
-                minimum: -1.0,
-                maximum: 1.0,
-            }],
-            discrete_values: Vec::new(),
-            unavailable_options: BTreeMap::new(),
-            certification: DomainCertification::CertifiedContinuous,
-        },
+        ControlKind::ContinuousAxis { .. } => control.domain.clone(),
         ControlKind::IntegerStepper { .. } => control.domain.clone(),
         ControlKind::Toggle { .. } => FeasibleControlDomain {
             continuous_intervals: Vec::new(),

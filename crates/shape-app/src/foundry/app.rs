@@ -3599,7 +3599,7 @@ impl FoundryDesktopApp {
                     egui::Sense::drag(),
                 );
                 if !rendering_preview
-                    && drag_response.dragged_by(egui::PointerButton::Primary)
+                    && drag_response.dragged_by(current_preview_orbit_button())
                     && let Some(camera) =
                         current_preview_orbit_camera(preview, drag_response.drag_motion())
                 {
@@ -4486,6 +4486,10 @@ fn current_preview_orbit_camera(
         -delta.y * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT,
     );
     Some(camera)
+}
+
+fn current_preview_orbit_button() -> egui::PointerButton {
+    egui::PointerButton::Secondary
 }
 
 fn home_turntable_yaw(yaw_degrees: f32) -> f32 {
@@ -8831,74 +8835,117 @@ fn draw_coordinate_reference_overlay(ui: &egui::Ui, rect: egui::Rect) {
         return;
     }
 
-    let painter = ui.painter();
-    let center = rect.center();
-    let margin = 8.0;
-    let x_color = egui::Color32::from_rgba_unmultiplied(78, 160, 244, 128);
-    let y_color = egui::Color32::from_rgba_unmultiplied(78, 198, 124, 128);
-    let z_color = egui::Color32::from_rgba_unmultiplied(238, 156, 74, 118);
-    let grid_color = egui::Color32::from_rgba_unmultiplied(112, 130, 148, 42);
-    let label_font = egui::FontId::proportional(11.0);
+    let painter = ui.painter().with_clip_rect(rect);
+    let viewport_bg = egui::Color32::from_rgb(45, 48, 50);
+    let grid_minor = egui::Color32::from_rgba_unmultiplied(134, 140, 146, 52);
+    let grid_major = egui::Color32::from_rgba_unmultiplied(154, 160, 166, 86);
+    let x_axis = egui::Color32::from_rgba_unmultiplied(222, 75, 87, 178);
+    let y_axis = egui::Color32::from_rgba_unmultiplied(116, 190, 72, 178);
 
-    for fraction in [0.125, 0.25, 0.375, 0.625, 0.75, 0.875] {
-        let x = egui::lerp(rect.left()..=rect.right(), fraction);
-        let y = egui::lerp(rect.top()..=rect.bottom(), fraction);
+    painter.rect_filled(rect, 4.0, viewport_bg);
+
+    let origin = rect.center();
+    let x_vector = egui::vec2(rect.width() * 0.50, rect.height() * 0.42);
+    let y_vector = egui::vec2(rect.width() * 0.68, -rect.height() * 0.14);
+    let grid_steps = 12;
+    let grid_extent = 1.26;
+
+    for index in -grid_steps..=grid_steps {
+        let offset = index as f32 / grid_steps as f32;
+        let stroke = if index == 0 {
+            egui::Stroke::new(1.0, grid_major)
+        } else if index % 4 == 0 {
+            egui::Stroke::new(0.85, grid_major)
+        } else {
+            egui::Stroke::new(0.65, grid_minor)
+        };
         painter.line_segment(
             [
-                egui::pos2(x, rect.top() + margin),
-                egui::pos2(x, rect.bottom() - margin),
+                origin + x_vector * offset - y_vector * grid_extent,
+                origin + x_vector * offset + y_vector * grid_extent,
             ],
-            egui::Stroke::new(1.0, grid_color),
+            stroke,
         );
         painter.line_segment(
             [
-                egui::pos2(rect.left() + margin, y),
-                egui::pos2(rect.right() - margin, y),
+                origin + y_vector * offset - x_vector * grid_extent,
+                origin + y_vector * offset + x_vector * grid_extent,
             ],
-            egui::Stroke::new(1.0, grid_color),
+            stroke,
         );
     }
 
     painter.line_segment(
+        [origin - x_vector * 1.18, origin + x_vector * 1.18],
+        egui::Stroke::new(1.5, x_axis),
+    );
+    painter.line_segment(
+        [origin - y_vector * 1.18, origin + y_vector * 1.18],
+        egui::Stroke::new(1.5, y_axis),
+    );
+}
+
+fn draw_viewport_foreground_overlay(ui: &egui::Ui, rect: egui::Rect) {
+    if rect.width() <= 1.0 || rect.height() <= 1.0 {
+        return;
+    }
+
+    let painter = ui.painter().with_clip_rect(rect);
+    let origin = rect.center();
+    let origin_color = egui::Color32::from_rgba_unmultiplied(238, 144, 54, 210);
+
+    painter.circle_stroke(origin, 6.0, egui::Stroke::new(1.2, origin_color));
+    painter.line_segment(
         [
-            egui::pos2(rect.left() + margin, center.y),
-            egui::pos2(rect.right() - margin, center.y),
+            origin - egui::vec2(10.0, 0.0),
+            origin + egui::vec2(10.0, 0.0),
         ],
-        egui::Stroke::new(1.35, x_color),
+        egui::Stroke::new(1.0, origin_color),
     );
     painter.line_segment(
         [
-            egui::pos2(center.x, rect.top() + margin),
-            egui::pos2(center.x, rect.bottom() - margin),
+            origin - egui::vec2(0.0, 10.0),
+            origin + egui::vec2(0.0, 10.0),
         ],
-        egui::Stroke::new(1.35, y_color),
+        egui::Stroke::new(1.0, origin_color),
     );
-    let z_vector = egui::vec2(rect.width() * 0.42, -rect.height() * 0.42);
-    painter.line_segment(
-        [center - z_vector, center + z_vector],
-        egui::Stroke::new(1.35, z_color),
-    );
-    painter.text(
-        egui::pos2(rect.right() - margin - 4.0, center.y - 6.0),
-        egui::Align2::RIGHT_CENTER,
-        "X",
-        label_font.clone(),
-        x_color,
-    );
-    painter.text(
-        egui::pos2(center.x + 6.0, rect.top() + margin + 6.0),
-        egui::Align2::LEFT_CENTER,
-        "Y",
-        label_font.clone(),
-        y_color,
-    );
-    painter.text(
-        center + z_vector + egui::vec2(4.0, -4.0),
-        egui::Align2::LEFT_BOTTOM,
-        "Z",
-        label_font,
-        z_color,
-    );
+
+    draw_viewport_axis_gizmo(&painter, rect);
+}
+
+fn draw_viewport_axis_gizmo(painter: &egui::Painter, rect: egui::Rect) {
+    let center = egui::pos2(rect.right() - 38.0, rect.top() + 38.0);
+    let axis_specs = [
+        (
+            egui::vec2(22.0, 8.0),
+            "X",
+            egui::Color32::from_rgb(222, 75, 87),
+        ),
+        (
+            egui::vec2(10.0, -22.0),
+            "Y",
+            egui::Color32::from_rgb(116, 190, 72),
+        ),
+        (
+            egui::vec2(0.0, -30.0),
+            "Z",
+            egui::Color32::from_rgb(82, 144, 238),
+        ),
+    ];
+
+    painter.circle_filled(center, 3.0, egui::Color32::from_rgb(188, 194, 200));
+    for (vector, label, color) in axis_specs {
+        let end = center + vector;
+        painter.line_segment([center, end], egui::Stroke::new(1.6, color));
+        painter.circle_filled(end, 5.0, color);
+        painter.text(
+            end,
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(9.0),
+            egui::Color32::WHITE,
+        );
+    }
 }
 
 fn show_current_rgba_preview(
@@ -8930,6 +8977,7 @@ fn show_current_rgba_preview(
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
+        draw_viewport_foreground_overlay(ui, rect);
         return response;
     }
     let size = egui::vec2(preview.max_edge.max(1.0), preview.max_edge.max(1.0));
@@ -9339,6 +9387,14 @@ mod tests {
         assert_eq!(rotated.target, OrbitCamera::default().target);
         assert_eq!(rotated.distance, preview.camera.distance);
         assert!(current_preview_orbit_camera(&preview, egui::Vec2::ZERO).is_none());
+    }
+
+    #[test]
+    fn current_preview_orbit_drag_uses_secondary_button() {
+        assert_eq!(
+            current_preview_orbit_button(),
+            egui::PointerButton::Secondary
+        );
     }
 
     #[test]

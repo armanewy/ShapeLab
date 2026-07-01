@@ -25,7 +25,7 @@ use shape_render::foundry::{
 };
 use shape_render::{
     OrbitCamera, RenderSettings, RenderedImage, clay_readability_render_settings,
-    fit_camera_to_bounds, fit_camera_to_bounds_from_angles, render_mesh,
+    fit_camera_to_bounds, fit_camera_to_bounds_from_angles_around_origin, render_mesh,
 };
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRejectionReason,
@@ -513,7 +513,7 @@ fn readable_preview_camera_for_output(
         || family_id.contains("handled_panel")
         || family_id.contains("panel_with_knob");
     (box_like || panel_like)
-        .then(|| fit_camera_to_bounds_from_angles(bounds, 35.0, 20.0, aspect_ratio))
+        .then(|| fit_camera_to_bounds_from_angles_around_origin(bounds, 35.0, 20.0, aspect_ratio))
 }
 
 fn export_foundry_pack(

@@ -647,7 +647,7 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
         &fixture,
         FoundryCommand::SetControl {
             control_id: "edge_softness".to_owned(),
-            value: ControlValue::Scalar(0.4),
+            value: ControlValue::Scalar(0.18),
         },
     );
     apply_fixture_command(
@@ -655,7 +655,7 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
         &fixture,
         FoundryCommand::SetLock {
             lock: FoundryLock {
-                target: FoundryLockTarget::Control("proportions".to_owned()),
+                target: FoundryLockTarget::Control("width".to_owned()),
                 mode: FoundryLockMode::SearchProtected,
                 reason: Some("test".to_owned()),
             },
@@ -673,7 +673,7 @@ fn local_preferences_record_visible_lock_and_reset_actions() {
         matches!(
             event,
             FoundryPreferenceEvent::ControlLocked { control_id, .. }
-                if control_id == "proportions"
+                if control_id == "width"
         )
     }));
     assert!(state.local_preferences.events.iter().any(|event| {
@@ -980,30 +980,45 @@ fn candidate_preview_failures_are_isolated_to_their_cards() {
 }
 
 #[test]
-fn option_cards_render_distinct_whole_model_thumbnails() {
+fn direct_box_controls_expose_bounded_numeric_ranges() {
     let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
     let state = compiled_fixture_state(&fixture);
-    let proportions = state
+    let controls = state
         .controls
         .iter()
-        .find(|control| control.id == "proportions")
-        .expect("proportions control");
+        .filter(|control| control.primary && control.visible)
+        .collect::<Vec<_>>();
 
-    assert!(proportions.options.len() >= 3);
-    assert!(proportions.options.iter().all(|option| {
-        option.preview_id.is_some()
-            && option.width == 64
-            && option.height == 64
-            && option.rgba8.len() == (option.width * option.height * 4) as usize
-            && option.camera.is_some()
-    }));
-    assert!(
-        proportions
-            .options
-            .windows(2)
-            .any(|pair| pair[0].rgba8 != pair[1].rgba8),
-        "whole-model option thumbnails should reflect option-applied geometry"
+    assert_eq!(
+        controls
+            .iter()
+            .map(|control| control.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["width", "depth", "height", "edge_softness"]
     );
+    assert!(controls.iter().all(|control| {
+        control.options.is_empty()
+            && control.numeric_range.is_some()
+            && control.value.as_ref().is_some_and(
+                |value| matches!(value, ControlValue::Scalar(value) if value.is_finite()),
+            )
+    }));
+
+    let width = controls
+        .iter()
+        .find(|control| control.id == "width")
+        .and_then(|control| control.numeric_range)
+        .expect("width range");
+    assert_eq!((width.minimum, width.maximum), (0.4, 4.0));
+    assert!(width.step > 0.0);
+
+    let edge_softness = controls
+        .iter()
+        .find(|control| control.id == "edge_softness")
+        .and_then(|control| control.numeric_range)
+        .expect("edge softness range");
+    assert_eq!((edge_softness.minimum, edge_softness.maximum), (0.0, 0.35));
+    assert!(edge_softness.step > 0.0);
 }
 
 #[test]
@@ -1097,27 +1112,27 @@ fn novice_can_create_reinforced_box_without_advanced_recipe() {
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "proportions".to_owned(),
-            value: ControlValue::Choice("wide_box".to_owned()),
-        },
-    );
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "edge_softness".to_owned(),
-            value: ControlValue::Scalar(0.92),
-        },
-    );
+    apply_fixture_scalar(&mut state, &fixture, "width", 3.2);
+    apply_fixture_scalar(&mut state, &fixture, "depth", 1.8);
+    apply_fixture_scalar(&mut state, &fixture, "height", 1.2);
+    apply_fixture_scalar(&mut state, &fixture, "edge_softness", 0.18);
 
     let document = state.document.as_ref().expect("current box document");
     assert_eq!(
+        document.control_state.get("width"),
+        Some(&ControlValue::Scalar(3.2))
+    );
+    assert_eq!(
+        document.control_state.get("depth"),
+        Some(&ControlValue::Scalar(1.8))
+    );
+    assert_eq!(
+        document.control_state.get("height"),
+        Some(&ControlValue::Scalar(1.2))
+    );
+    assert_eq!(
         document.control_state.get("edge_softness"),
-        Some(&ControlValue::Scalar(0.92))
+        Some(&ControlValue::Scalar(0.18))
     );
     assert_current_mesh_valid(&state);
 }
@@ -1128,31 +1143,27 @@ fn novice_can_create_compact_box_without_advanced_recipe() {
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "proportions".to_owned(),
-            value: ControlValue::Choice("compact_box".to_owned()),
-        },
-    );
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "edge_softness".to_owned(),
-            value: ControlValue::Scalar(0.18),
-        },
-    );
+    apply_fixture_scalar(&mut state, &fixture, "width", 1.2);
+    apply_fixture_scalar(&mut state, &fixture, "depth", 0.8);
+    apply_fixture_scalar(&mut state, &fixture, "height", 0.75);
+    apply_fixture_scalar(&mut state, &fixture, "edge_softness", 0.04);
 
     let document = state.document.as_ref().expect("current box document");
     assert_eq!(
-        document.control_state.get("proportions"),
-        Some(&ControlValue::Choice("compact_box".to_owned()))
+        document.control_state.get("width"),
+        Some(&ControlValue::Scalar(1.2))
+    );
+    assert_eq!(
+        document.control_state.get("depth"),
+        Some(&ControlValue::Scalar(0.8))
+    );
+    assert_eq!(
+        document.control_state.get("height"),
+        Some(&ControlValue::Scalar(0.75))
     );
     assert_eq!(
         document.control_state.get("edge_softness"),
-        Some(&ControlValue::Scalar(0.18))
+        Some(&ControlValue::Scalar(0.04))
     );
     assert_current_mesh_valid(&state);
 }
@@ -1163,31 +1174,27 @@ fn novice_can_create_tall_box_with_soft_edges_without_advanced_recipe() {
     let mut state = compiled_fixture_state(&fixture);
     assert_default_foundry_surface(&state);
 
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "proportions".to_owned(),
-            value: ControlValue::Choice("tall_box".to_owned()),
-        },
-    );
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "edge_softness".to_owned(),
-            value: ControlValue::Scalar(0.72),
-        },
-    );
+    apply_fixture_scalar(&mut state, &fixture, "width", 1.0);
+    apply_fixture_scalar(&mut state, &fixture, "depth", 0.8);
+    apply_fixture_scalar(&mut state, &fixture, "height", 2.4);
+    apply_fixture_scalar(&mut state, &fixture, "edge_softness", 0.28);
 
     let document = state.document.as_ref().expect("current box document");
     assert_eq!(
-        document.control_state.get("proportions"),
-        Some(&ControlValue::Choice("tall_box".to_owned()))
+        document.control_state.get("width"),
+        Some(&ControlValue::Scalar(1.0))
+    );
+    assert_eq!(
+        document.control_state.get("depth"),
+        Some(&ControlValue::Scalar(0.8))
+    );
+    assert_eq!(
+        document.control_state.get("height"),
+        Some(&ControlValue::Scalar(2.4))
     );
     assert_eq!(
         document.control_state.get("edge_softness"),
-        Some(&ControlValue::Scalar(0.72))
+        Some(&ControlValue::Scalar(0.28))
     );
     assert_current_mesh_valid(&state);
 }
@@ -1198,24 +1205,14 @@ fn novice_can_export_three_member_pack_without_advanced_recipe() {
     let mut state = compiled_fixture_state(&fixture);
     add_current_to_fixture_pack(&mut state, &fixture, "balanced");
 
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "proportions".to_owned(),
-            value: ControlValue::Choice("flat_box".to_owned()),
-        },
-    );
+    apply_fixture_scalar(&mut state, &fixture, "width", 3.0);
+    apply_fixture_scalar(&mut state, &fixture, "depth", 1.8);
+    apply_fixture_scalar(&mut state, &fixture, "height", 0.5);
     add_current_to_fixture_pack(&mut state, &fixture, "light");
 
-    apply_fixture_command(
-        &mut state,
-        &fixture,
-        FoundryCommand::SetControl {
-            control_id: "proportions".to_owned(),
-            value: ControlValue::Choice("tall_box".to_owned()),
-        },
-    );
+    apply_fixture_scalar(&mut state, &fixture, "width", 1.0);
+    apply_fixture_scalar(&mut state, &fixture, "depth", 0.8);
+    apply_fixture_scalar(&mut state, &fixture, "height", 2.2);
     add_current_to_fixture_pack(&mut state, &fixture, "reinforced");
 
     assert_eq!(state.pack.members.len(), 3);
@@ -1709,6 +1706,22 @@ fn apply_fixture_command(
     let event = run_fixture_job(start_job(effects), fixture);
     assert!(matches!(event, FoundryJobEvent::EditApplied { .. }));
     assert!(state.handle_job_event(event));
+}
+
+fn apply_fixture_scalar(
+    state: &mut FoundryAppState,
+    fixture: &shape_foundry_catalog::FoundryFixtureCatalog,
+    control_id: &str,
+    value: f32,
+) {
+    apply_fixture_command(
+        state,
+        fixture,
+        FoundryCommand::SetControl {
+            control_id: control_id.to_owned(),
+            value: ControlValue::Scalar(value),
+        },
+    );
 }
 
 fn add_current_to_fixture_pack(
