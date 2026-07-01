@@ -1,6 +1,20 @@
 #![forbid(unsafe_code)]
 
-//! Core semantic document types for Shape Lab.
+//! Low-level legacy document and modeling conventions for Shape Lab.
+//!
+//! Boundary contract:
+//! - `shape-core` owns useful low-level geometry conventions and legacy
+//!   implicit/SDF `ShapeDocument` compatibility.
+//! - `shape-core::ShapeDocument` is not the canonical A-J product IR for
+//!   Object Orchard.
+//! - New product semantics for `AssetRecipe`, ObjectPlan approval, authoring
+//!   operation logs, relationship contracts, pattern contracts, surface
+//!   workflow, terrain readiness, collision, motion, export readiness, public
+//!   catalog publishing, Godot-ready status, or game-ready status belong in
+//!   `shape-asset` / future `shape-orchard-ir` contracts, not in this crate.
+//! - Product-visible controls should eventually route through typed authoring
+//!   operations over the semantic asset lane rather than raw `ShapeDocument`
+//!   mutation.
 //!
 //! Coordinate contract:
 //! - Geometry uses `f32`.

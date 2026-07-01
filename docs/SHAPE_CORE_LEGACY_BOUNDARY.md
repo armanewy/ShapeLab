@@ -43,7 +43,8 @@ canonical product semantics here for:
 
 New product semantics should route through explicit contracts:
 
-- `shape-asset::AssetRecipe` / Orchard IR for semantic asset state;
+- `shape-asset::AssetRecipe` / future `shape-orchard-ir` for semantic asset
+  state;
 - authoring-op contracts for replayable product-visible edits;
 - relationship contracts for attachments and composition;
 - pattern contracts for repetition;
@@ -55,7 +56,7 @@ meaning.
 
 ## Testable Boundary
 
-Docs and tests should fail if they imply that `ShapeDocument` is the new
-canonical product IR, that terrain is just a generic mesh primitive, that
-runtime LLM behavior is approved, that public catalog publishing is approved,
-or that game-ready output is approved.
+Docs and tests should fail on any positive claim that `ShapeDocument` is the
+new canonical product IR, that terrain is just a generic mesh primitive, that
+runtime LLM behavior is supported, that public catalog publishing is available,
+or that game-ready output is available.
