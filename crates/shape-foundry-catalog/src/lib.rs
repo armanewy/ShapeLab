@@ -41,10 +41,12 @@ pub mod box_primitive;
 pub mod flat_panel;
 pub mod kits;
 pub mod panel_knob;
+pub mod primitive_preset;
 pub mod sphere_primitive;
 
 pub use authoring::*;
 pub use kits::*;
+pub use primitive_preset::*;
 
 const LOCAL_DEFINITION: PartDefinitionId = PartDefinitionId(90);
 const LOCAL_INSTANCE: PartInstanceId = PartInstanceId(91);
