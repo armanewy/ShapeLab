@@ -4,17 +4,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use shape_core::Aabb;
 use shape_foundry::{
+    GeometryExportFormat, GeometryExportPolicy, GeometryExportReport, GeometryExportRequest,
+    GeometryExportSourceKind, GeometryExportStatus, GeometryExportUserSummary,
     MaterializationPolicy, MaterializationStatus, MaterializedObjectDraft,
     MaterializedObjectNextAction, MaterializedPrimitiveInstance, ObjectPlan,
     ObjectPlanMaterializationOutputMode, ObjectPlanMaterializationRequest, ObjectPlanReviewTier,
     ObjectPlanValidationReport, PrimitiveAttachmentOffsetPolicy, PrimitiveKind,
-    PrimitivePropertyValue, materialize_object_plan, materialized_object_summary,
-    object_plan_user_summary, validate_object_plan,
+    PrimitivePropertyValue, geometry_export_blockers_for_materialized_draft,
+    geometry_export_user_summary, materialize_object_plan, materialized_object_summary,
+    object_plan_user_summary, validate_geometry_export_report, validate_geometry_export_request,
+    validate_object_plan,
 };
 use shape_mesh::TriangleMesh;
 use shape_render::{
@@ -72,6 +76,18 @@ pub enum ObjectPlanCommand {
         #[arg(long)]
         render_evidence: bool,
     },
+    /// Export a supported ObjectPlan as a geometry-only GLB draft.
+    ExportGeometry {
+        /// ObjectPlan JSON file.
+        #[arg(long)]
+        plan: PathBuf,
+        /// Output directory.
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Export format.
+        #[arg(long, value_enum, default_value = "glb")]
+        format: ObjectPlanGeometryExportFormatArg,
+    },
     /// Run a directory or batch JSON of ObjectPlans for offline review.
     BatchRun {
         /// Directory of ObjectPlan JSON files or an ObjectPlanBatch JSON file.
@@ -81,6 +97,13 @@ pub enum ObjectPlanCommand {
         #[arg(long)]
         out_dir: PathBuf,
     },
+}
+
+/// Supported ObjectPlan geometry export formats.
+#[derive(Debug, Copy, Clone, ValueEnum)]
+pub enum ObjectPlanGeometryExportFormatArg {
+    /// Binary glTF 2.0 package.
+    Glb,
 }
 
 /// Run an ObjectPlan CLI command.
@@ -98,6 +121,11 @@ pub fn run_object_plan(args: ObjectPlanArgs) -> anyhow::Result<()> {
             out_dir,
             render_evidence,
         } => run_materialize(&plan, &out_dir, render_evidence),
+        ObjectPlanCommand::ExportGeometry {
+            plan,
+            out_dir,
+            format,
+        } => run_export_geometry(&plan, &out_dir, format),
         ObjectPlanCommand::BatchRun { input, out_dir } => run_batch(&input, &out_dir),
     }
 }
@@ -152,6 +180,24 @@ fn run_materialize(plan_path: &Path, out_dir: &Path, render_evidence: bool) -> a
         anyhow::bail!("ObjectPlan materialization failed");
     }
     Ok(())
+}
+
+fn run_export_geometry(
+    plan_path: &Path,
+    out_dir: &Path,
+    format: ObjectPlanGeometryExportFormatArg,
+) -> anyhow::Result<()> {
+    let outcome = write_geometry_export_outputs(plan_path, out_dir, format)?;
+    if outcome.status == GeometryExportStatus::Passed {
+        println!(
+            "Exported ObjectPlan {} geometry into {}",
+            outcome.plan_id,
+            out_dir.display()
+        );
+        Ok(())
+    } else {
+        anyhow::bail!("ObjectPlan geometry export did not pass")
+    }
 }
 
 fn write_plan_outputs(
@@ -209,6 +255,14 @@ fn write_materialization_outputs(
     render_evidence: bool,
 ) -> anyhow::Result<ObjectPlanMaterializationOutcome> {
     let plan = read_object_plan(plan_path)?;
+    write_materialization_outputs_for_plan(plan, out_dir, render_evidence)
+}
+
+fn write_materialization_outputs_for_plan(
+    plan: ObjectPlan,
+    out_dir: &Path,
+    render_evidence: bool,
+) -> anyhow::Result<ObjectPlanMaterializationOutcome> {
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
     let request = ObjectPlanMaterializationRequest {
         plan: plan.clone(),
@@ -266,7 +320,288 @@ fn write_materialization_outputs(
         validation_issue_count: draft.validation_report.issues.len(),
         materialization_report: report,
         render_evidence_report,
+        draft,
     })
+}
+
+fn write_geometry_export_outputs(
+    plan_path: &Path,
+    out_dir: &Path,
+    format: ObjectPlanGeometryExportFormatArg,
+) -> anyhow::Result<ObjectPlanGeometryExportOutcome> {
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+
+    let plan_bytes = match fs::read(plan_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let report = blocked_geometry_export_report(
+                None,
+                0,
+                vec![format!("ObjectPlan could not be read: {error}")],
+                GeometryExportStatus::Failed,
+            );
+            write_geometry_export_report_outputs(out_dir, &report)?;
+            return Ok(ObjectPlanGeometryExportOutcome {
+                plan_id: "unknown-plan".to_owned(),
+                status: report.status,
+            });
+        }
+    };
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&plan_bytes) {
+        let blocked_capabilities = geometry_export_blocked_capability_fields(&value);
+        if !blocked_capabilities.is_empty() {
+            let source_plan_id = json_plan_id(&value);
+            let report = blocked_geometry_export_report(
+                source_plan_id.clone(),
+                json_node_count(&value),
+                blocked_capabilities,
+                GeometryExportStatus::Blocked,
+            );
+            write_geometry_export_report_outputs(out_dir, &report)?;
+            return Ok(ObjectPlanGeometryExportOutcome {
+                plan_id: source_plan_id.unwrap_or_else(|| "unknown-plan".to_owned()),
+                status: report.status,
+            });
+        }
+    }
+
+    let plan = match serde_json::from_slice::<ObjectPlan>(&plan_bytes) {
+        Ok(plan) => plan,
+        Err(error) => {
+            let report = blocked_geometry_export_report(
+                None,
+                0,
+                vec![format!("ObjectPlan could not be parsed: {error}")],
+                GeometryExportStatus::Failed,
+            );
+            write_geometry_export_report_outputs(out_dir, &report)?;
+            return Ok(ObjectPlanGeometryExportOutcome {
+                plan_id: "unknown-plan".to_owned(),
+                status: report.status,
+            });
+        }
+    };
+
+    let request = GeometryExportRequest {
+        source_kind: GeometryExportSourceKind::ObjectPlan,
+        source_ref: persisted_source_ref(
+            plan_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("object-plan.json"),
+            plan_path,
+        ),
+        export_format: geometry_export_format(format),
+        export_policy: GeometryExportPolicy::default(),
+        output_name: "asset".to_owned(),
+        output_dir: ".".to_owned(),
+    };
+    let request_report = validate_geometry_export_request(&request);
+    if !request_report.is_valid() {
+        let report = blocked_geometry_export_report(
+            Some(plan.plan_id.clone()),
+            plan.nodes.len(),
+            request_report
+                .issues
+                .into_iter()
+                .map(|issue| issue.message)
+                .collect(),
+            GeometryExportStatus::Blocked,
+        );
+        write_json(out_dir.join("normalized-object-plan.json"), &plan)?;
+        write_geometry_export_report_outputs(out_dir, &report)?;
+        return Ok(ObjectPlanGeometryExportOutcome {
+            plan_id: plan.plan_id,
+            status: report.status,
+        });
+    }
+
+    let outcome = write_materialization_outputs_for_plan(plan.clone(), out_dir, true)?;
+    let mut blockers = geometry_export_blockers_for_materialized_draft(&outcome.draft);
+    let Some(mesh) = materialized_draft_mesh(&outcome.draft)? else {
+        blockers.push("Source draft did not produce exportable geometry.".to_owned());
+        let report = blocked_geometry_export_report(
+            Some(plan.plan_id.clone()),
+            outcome.draft.primitive_instances.len(),
+            blockers,
+            GeometryExportStatus::Blocked,
+        );
+        write_geometry_export_report_outputs(out_dir, &report)?;
+        return Ok(ObjectPlanGeometryExportOutcome {
+            plan_id: plan.plan_id,
+            status: report.status,
+        });
+    };
+
+    if !blockers.is_empty() {
+        let report = blocked_geometry_export_report(
+            Some(plan.plan_id.clone()),
+            outcome.draft.primitive_instances.len(),
+            blockers,
+            GeometryExportStatus::Blocked,
+        );
+        write_geometry_export_report_outputs(out_dir, &report)?;
+        return Ok(ObjectPlanGeometryExportOutcome {
+            plan_id: plan.plan_id,
+            status: report.status,
+        });
+    }
+
+    let asset_path = out_dir.join("asset.glb");
+    write_geometry_only_glb(&mesh, &asset_path)?;
+    let report = GeometryExportReport {
+        status: GeometryExportStatus::Passed,
+        output_files: vec!["asset.glb".to_owned()],
+        source_plan_id: Some(plan.plan_id.clone()),
+        primitive_count: outcome.draft.primitive_instances.len(),
+        mesh_count: 1,
+        triangle_count: mesh.indices.len() / 3,
+        warning_count: 0,
+        blockers: Vec::new(),
+        includes_uvs: false,
+        includes_textures: false,
+        includes_material_looks: false,
+        includes_collision: false,
+        includes_rig: false,
+        includes_animation: false,
+        game_ready: false,
+        human_review_required: true,
+    };
+    let validation_report = validate_geometry_export_report(&report);
+    if !validation_report.is_valid() {
+        anyhow::bail!(
+            "geometry export report failed validation: {:?}",
+            validation_report.issues
+        );
+    }
+    write_geometry_export_report_outputs(out_dir, &report)?;
+
+    Ok(ObjectPlanGeometryExportOutcome {
+        plan_id: plan.plan_id,
+        status: report.status,
+    })
+}
+
+fn write_geometry_export_report_outputs(
+    out_dir: &Path,
+    report: &GeometryExportReport,
+) -> anyhow::Result<()> {
+    write_json(out_dir.join("geometry-export-report.json"), report)?;
+    fs::write(
+        out_dir.join("geometry-export-user-summary.md"),
+        geometry_export_user_summary_markdown(&geometry_export_user_summary(report), report),
+    )
+    .with_context(|| {
+        format!(
+            "writing {}",
+            out_dir.join("geometry-export-user-summary.md").display()
+        )
+    })?;
+    Ok(())
+}
+
+fn blocked_geometry_export_report(
+    source_plan_id: Option<String>,
+    primitive_count: usize,
+    blockers: Vec<String>,
+    status: GeometryExportStatus,
+) -> GeometryExportReport {
+    GeometryExportReport {
+        status,
+        output_files: Vec::new(),
+        source_plan_id,
+        primitive_count,
+        mesh_count: 0,
+        triangle_count: 0,
+        warning_count: 0,
+        blockers,
+        includes_uvs: false,
+        includes_textures: false,
+        includes_material_looks: false,
+        includes_collision: false,
+        includes_rig: false,
+        includes_animation: false,
+        game_ready: false,
+        human_review_required: true,
+    }
+}
+
+fn geometry_export_format(format: ObjectPlanGeometryExportFormatArg) -> GeometryExportFormat {
+    match format {
+        ObjectPlanGeometryExportFormatArg::Glb => GeometryExportFormat::Glb,
+    }
+}
+
+fn geometry_export_blocked_capability_fields(value: &serde_json::Value) -> Vec<String> {
+    let mut blockers = Vec::new();
+    collect_geometry_export_blocked_capability_fields(value, &mut blockers);
+    blockers.sort();
+    blockers.dedup();
+    blockers
+}
+
+fn collect_geometry_export_blocked_capability_fields(
+    value: &serde_json::Value,
+    blockers: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if let Some(blocker) = geometry_export_capability_blocker(key) {
+                    blockers.push(blocker.to_owned());
+                }
+                collect_geometry_export_blocked_capability_fields(child, blockers);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                collect_geometry_export_blocked_capability_fields(child, blockers);
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {}
+    }
+}
+
+fn geometry_export_capability_blocker(key: &str) -> Option<&'static str> {
+    match key {
+        "raw_mesh_payload" => Some("Raw mesh payloads are outside geometry export V0."),
+        "texture_request" | "textures" | "texture_files" => {
+            Some("Texture requests are outside geometry export V0.")
+        }
+        "material_request" | "material_looks" | "surface_request" => {
+            Some("Material look requests are outside geometry export V0.")
+        }
+        "collision_request" | "collision" | "gameplay_metadata" => {
+            Some("Collision or gameplay metadata is outside geometry export V0.")
+        }
+        "rigging_request" | "rig" | "skeleton" => {
+            Some("Rigging requests are outside geometry export V0.")
+        }
+        "animation_request" | "animations" => {
+            Some("Animation requests are outside geometry export V0.")
+        }
+        "game_ready" | "game_ready_request" => {
+            Some("Game-ready requests are outside geometry export V0.")
+        }
+        _ => None,
+    }
+}
+
+fn json_plan_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("plan_id")
+        .and_then(|plan_id| plan_id.as_str())
+        .map(str::to_owned)
+}
+
+fn json_node_count(value: &serde_json::Value) -> usize {
+    value
+        .get("nodes")
+        .and_then(|nodes| nodes.as_array())
+        .map_or(0, Vec::len)
 }
 
 fn object_plan_renderability_report(
@@ -883,6 +1218,38 @@ fn materialized_user_summary_markdown(
     )
 }
 
+fn geometry_export_user_summary_markdown(
+    summary: &GeometryExportUserSummary,
+    report: &GeometryExportReport,
+) -> String {
+    let mut markdown = String::new();
+    markdown.push_str("# ");
+    markdown.push_str(&summary.title);
+    markdown.push_str("\n\n");
+    markdown.push_str("Status: ");
+    markdown.push_str(match report.status {
+        GeometryExportStatus::Passed => "Passed",
+        GeometryExportStatus::Blocked => "Blocked",
+        GeometryExportStatus::Failed => "Failed",
+    });
+    markdown.push_str("\n\n");
+    for line in &summary.lines {
+        markdown.push_str("- ");
+        markdown.push_str(line);
+        markdown.push('\n');
+    }
+    if !report.blockers.is_empty() {
+        markdown.push_str("\n## Blockers\n\n");
+        for blocker in &report.blockers {
+            markdown.push_str("- ");
+            markdown.push_str(blocker);
+            markdown.push('\n');
+        }
+    }
+    markdown.push_str("\nHuman review required: true\n");
+    markdown
+}
+
 fn write_render_evidence_outputs(
     out_dir: &Path,
     draft: &MaterializedObjectDraft,
@@ -1007,6 +1374,30 @@ fn render_materialized_preview_set(
         plan_preview,
         node_previews,
     }))
+}
+
+fn materialized_draft_mesh(
+    draft: &MaterializedObjectDraft,
+) -> anyhow::Result<Option<TriangleMesh>> {
+    if draft.primitive_instances.is_empty()
+        || !draft.unresolved_nodes.is_empty()
+        || !draft.unresolved_attachments.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let placements = materialized_node_placements(draft);
+    let mut placed_meshes = Vec::new();
+    for instance in &draft.primitive_instances {
+        let centered_mesh = primitive_instance_mesh(instance, Vec3::ZERO)?;
+        let placement = placements
+            .get(instance.node_id.as_str())
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+        placed_meshes.push(translate_mesh(&centered_mesh, placement));
+    }
+
+    Ok(merge_meshes(&placed_meshes))
 }
 
 fn materialized_node_placements(draft: &MaterializedObjectDraft) -> BTreeMap<String, Vec3> {
@@ -1322,6 +1713,224 @@ fn merge_meshes(meshes: &[TriangleMesh]) -> Option<TriangleMesh> {
     })
 }
 
+fn write_geometry_only_glb(mesh: &TriangleMesh, path: &Path) -> anyhow::Result<()> {
+    validate_export_mesh(mesh)?;
+    let normals = export_normals(mesh)?;
+    let (min_position, max_position) = position_min_max(&mesh.positions);
+
+    let mut bin = Vec::new();
+    let positions_offset = bin.len();
+    push_f32_triplets(&mut bin, &mesh.positions);
+    pad_to_4(&mut bin, 0);
+    let positions_length = bin.len() - positions_offset;
+
+    let normals_offset = bin.len();
+    push_f32_triplets(&mut bin, &normals);
+    pad_to_4(&mut bin, 0);
+    let normals_length = bin.len() - normals_offset;
+
+    let indices_offset = bin.len();
+    push_u32_values(&mut bin, &mesh.indices);
+    pad_to_4(&mut bin, 0);
+    let indices_length = bin.len() - indices_offset;
+
+    let json = serde_json::json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "Shape Lab ObjectPlan geometry export v0"
+        },
+        "scene": 0,
+        "scenes": [
+            {"nodes": [0]}
+        ],
+        "nodes": [
+            {"mesh": 0, "name": "GeometryOnlyAsset"}
+        ],
+        "meshes": [
+            {
+                "name": "ObjectPlanGeometry",
+                "primitives": [
+                    {
+                        "attributes": {
+                            "POSITION": 0,
+                            "NORMAL": 1
+                        },
+                        "indices": 2,
+                        "material": 0,
+                        "mode": 4
+                    }
+                ]
+            }
+        ],
+        "materials": [
+            {
+                "name": "Neutral visibility placeholder",
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.72, 0.72, 0.70, 1.0],
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 1.0
+                }
+            }
+        ],
+        "buffers": [
+            {"byteLength": bin.len()}
+        ],
+        "bufferViews": [
+            {
+                "buffer": 0,
+                "byteOffset": positions_offset,
+                "byteLength": positions_length,
+                "target": 34962
+            },
+            {
+                "buffer": 0,
+                "byteOffset": normals_offset,
+                "byteLength": normals_length,
+                "target": 34962
+            },
+            {
+                "buffer": 0,
+                "byteOffset": indices_offset,
+                "byteLength": indices_length,
+                "target": 34963
+            }
+        ],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "byteOffset": 0,
+                "componentType": 5126,
+                "count": mesh.positions.len(),
+                "type": "VEC3",
+                "min": min_position,
+                "max": max_position
+            },
+            {
+                "bufferView": 1,
+                "byteOffset": 0,
+                "componentType": 5126,
+                "count": normals.len(),
+                "type": "VEC3"
+            },
+            {
+                "bufferView": 2,
+                "byteOffset": 0,
+                "componentType": 5125,
+                "count": mesh.indices.len(),
+                "type": "SCALAR"
+            }
+        ]
+    });
+    let mut json_bytes = serde_json::to_vec(&json)?;
+    pad_to_4(&mut json_bytes, b' ');
+
+    let total_length = 12 + 8 + json_bytes.len() + 8 + bin.len();
+    let total_length = u32::try_from(total_length).context("GLB is too large")?;
+    let json_length = u32::try_from(json_bytes.len()).context("GLB JSON chunk is too large")?;
+    let bin_length = u32::try_from(bin.len()).context("GLB BIN chunk is too large")?;
+
+    let mut glb = Vec::with_capacity(total_length as usize);
+    glb.extend_from_slice(b"glTF");
+    glb.extend_from_slice(&2_u32.to_le_bytes());
+    glb.extend_from_slice(&total_length.to_le_bytes());
+    glb.extend_from_slice(&json_length.to_le_bytes());
+    glb.extend_from_slice(b"JSON");
+    glb.extend_from_slice(&json_bytes);
+    glb.extend_from_slice(&bin_length.to_le_bytes());
+    glb.extend_from_slice(b"BIN\0");
+    glb.extend_from_slice(&bin);
+
+    fs::write(path, glb).with_context(|| format!("writing GLB {}", path.display()))?;
+    Ok(())
+}
+
+fn validate_export_mesh(mesh: &TriangleMesh) -> anyhow::Result<()> {
+    if mesh.positions.is_empty() {
+        anyhow::bail!("geometry export mesh has no positions");
+    }
+    if mesh.indices.is_empty() {
+        anyhow::bail!("geometry export mesh has no indices");
+    }
+    if !mesh.indices.len().is_multiple_of(3) {
+        anyhow::bail!("geometry export mesh indices are not triangles");
+    }
+    if mesh
+        .positions
+        .iter()
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        anyhow::bail!("geometry export mesh positions must be finite");
+    }
+    if mesh
+        .indices
+        .iter()
+        .any(|index| *index as usize >= mesh.positions.len())
+    {
+        anyhow::bail!("geometry export mesh indices reference missing positions");
+    }
+    Ok(())
+}
+
+fn export_normals(mesh: &TriangleMesh) -> anyhow::Result<Vec<[f32; 3]>> {
+    if mesh.normals.len() == mesh.positions.len()
+        && mesh.normals.iter().flatten().all(|value| value.is_finite())
+    {
+        return Ok(mesh.normals.clone());
+    }
+
+    let mut normals = vec![Vec3::ZERO; mesh.positions.len()];
+    for triangle in mesh.indices.chunks_exact(3) {
+        let a = Vec3::from_array(mesh.positions[triangle[0] as usize]);
+        let b = Vec3::from_array(mesh.positions[triangle[1] as usize]);
+        let c = Vec3::from_array(mesh.positions[triangle[2] as usize]);
+        let face_normal = (b - a).cross(c - a);
+        if face_normal.length_squared() <= f32::EPSILON || !face_normal.is_finite() {
+            continue;
+        }
+        for index in triangle {
+            normals[*index as usize] += face_normal;
+        }
+    }
+
+    Ok(normals
+        .into_iter()
+        .map(|normal| normal.normalize_or(Vec3::Y).to_array())
+        .collect())
+}
+
+fn position_min_max(positions: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for position in positions {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(position[axis]);
+            max[axis] = max[axis].max(position[axis]);
+        }
+    }
+    (min, max)
+}
+
+fn push_f32_triplets(buffer: &mut Vec<u8>, values: &[[f32; 3]]) {
+    for value in values {
+        for component in value {
+            buffer.extend_from_slice(&component.to_le_bytes());
+        }
+    }
+}
+
+fn push_u32_values(buffer: &mut Vec<u8>, values: &[u32]) {
+    for value in values {
+        buffer.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+fn pad_to_4(buffer: &mut Vec<u8>, byte: u8) {
+    while !buffer.len().is_multiple_of(4) {
+        buffer.push(byte);
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ObjectPlanBatch {
     batch_id: String,
@@ -1392,6 +2001,13 @@ struct ObjectPlanMaterializationOutcome {
     validation_issue_count: usize,
     materialization_report: ObjectPlanMaterializationReport,
     render_evidence_report: Option<ObjectPlanRenderEvidenceReport>,
+    draft: MaterializedObjectDraft,
+}
+
+#[derive(Debug)]
+struct ObjectPlanGeometryExportOutcome {
+    plan_id: String,
+    status: GeometryExportStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]

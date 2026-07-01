@@ -418,6 +418,243 @@ fn object_plan_cli_materialize_valid_panel_knob_plan() {
 }
 
 #[test]
+fn object_plan_cli_export_geometry_valid_box_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("box-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("valid_box_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    for name in [
+        "asset.glb",
+        "geometry-export-report.json",
+        "geometry-export-user-summary.md",
+        "normalized-object-plan.json",
+        "materialization-report.json",
+        "render-evidence-report.json",
+    ] {
+        assert!(out_dir.join(name).is_file(), "{name} should exist");
+    }
+    assert_glb(out_dir.join("asset.glb"));
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["output_files"][0], "asset.glb");
+    assert_eq!(report["source_plan_id"], "box_plan");
+    assert_eq!(report["primitive_count"], 1);
+    assert_eq!(report["mesh_count"], 1);
+    assert!(
+        report["triangle_count"].as_u64().expect("triangle count") > 0,
+        "triangle count should be positive"
+    );
+    assert_geometry_export_report_excludes_non_geometry_features(&report);
+    let summary = fs::read_to_string(out_dir.join("geometry-export-user-summary.md"))
+        .expect("read geometry summary");
+    assert!(summary.contains("Geometry-only GLB exported."));
+    assert!(summary.contains("No textures, collision, rigging, or animation are included."));
+    assert!(summary.contains("Godot import proof is required before calling this Godot-ready."));
+    assert!(
+        !summary.to_ascii_lowercase().contains("game-ready"),
+        "summary must not claim game-ready status"
+    );
+}
+
+#[test]
+fn object_plan_cli_export_geometry_valid_flat_panel_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("panel-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("valid_flat_panel_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_glb(out_dir.join("asset.glb"));
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["source_plan_id"], "flat_panel_plan");
+    assert_geometry_export_report_excludes_non_geometry_features(&report);
+}
+
+#[test]
+fn object_plan_cli_export_geometry_valid_sphere_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("sphere-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("valid_sphere_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_glb(out_dir.join("asset.glb"));
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["source_plan_id"], "round_knob_plan");
+    assert_geometry_export_report_excludes_non_geometry_features(&report);
+}
+
+#[test]
+fn object_plan_cli_export_geometry_valid_panel_knob_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("panel-knob-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("valid_panel_knob_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_glb(out_dir.join("asset.glb"));
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["source_plan_id"], "panel_with_knob_plan");
+    assert_eq!(report["primitive_count"], 2);
+    assert_geometry_export_report_excludes_non_geometry_features(&report);
+}
+
+#[test]
+fn object_plan_cli_export_geometry_texture_request_blocked() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("texture-request-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("invalid_texture_request_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(!output.status.success());
+    assert!(!out_dir.join("asset.glb").exists());
+    assert!(!out_dir.join("materialization-report.json").exists());
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Blocked");
+    assert_eq!(report["game_ready"], false);
+    assert!(
+        report["blockers"]
+            .as_array()
+            .expect("blockers")
+            .iter()
+            .any(|blocker| blocker.as_str().unwrap_or_default().contains("Texture"))
+    );
+}
+
+#[test]
+fn object_plan_cli_export_geometry_game_ready_request_blocked() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("game-ready-request-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("invalid_game_ready_request_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(!output.status.success());
+    assert!(!out_dir.join("asset.glb").exists());
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Blocked");
+    assert_eq!(report["game_ready"], false);
+    assert!(
+        report["blockers"]
+            .as_array()
+            .expect("blockers")
+            .iter()
+            .any(|blocker| blocker.as_str().unwrap_or_default().contains("Game-ready"))
+    );
+}
+
+#[test]
+fn object_plan_cli_export_geometry_unsupported_unresolved_plan_blocked() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let out_dir = temp_dir.path().join("unsupported-geometry-export");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "export-geometry", "--plan"])
+        .arg(fixture_path("invalid_unknown_primitive_plan.json"))
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["--format", "glb"])
+        .output()
+        .expect("run object-plan export geometry");
+
+    assert!(!output.status.success());
+    assert!(!out_dir.join("asset.glb").exists());
+    assert!(out_dir.join("materialization-report.json").is_file());
+    let report = read_json(out_dir.join("geometry-export-report.json"));
+    assert_eq!(report["status"], "Blocked");
+    assert_geometry_export_report_excludes_non_geometry_features(&report);
+    assert!(!report["blockers"].as_array().expect("blockers").is_empty());
+}
+
+#[test]
+fn object_plan_cli_export_geometry_outputs_are_deterministic() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let first_dir = temp_dir.path().join("geometry-export-a");
+    let second_dir = temp_dir.path().join("geometry-export-b");
+
+    for out_dir in [&first_dir, &second_dir] {
+        assert!(
+            Command::new(exe)
+                .args(["object-plan", "export-geometry", "--plan"])
+                .arg(fixture_path("valid_box_plan.json"))
+                .args(["--out-dir"])
+                .arg(out_dir)
+                .args(["--format", "glb"])
+                .status()
+                .expect("run object-plan export geometry")
+                .success()
+        );
+    }
+
+    for name in [
+        "asset.glb",
+        "geometry-export-report.json",
+        "geometry-export-user-summary.md",
+        "normalized-object-plan.json",
+        "materialization-report.json",
+        "render-evidence-report.json",
+    ] {
+        let first = fs::read(first_dir.join(name)).expect("read first output");
+        let second = fs::read(second_dir.join(name)).expect("read second output");
+        assert_eq!(first, second, "{name} should be deterministic");
+    }
+}
+
+#[test]
 fn object_plan_cli_materialize_raw_mesh_payload_fails() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -950,6 +1187,71 @@ fn assert_png(path: impl AsRef<std::path::Path>) {
         "{} should not be empty",
         path.as_ref().display()
     );
+}
+
+fn assert_glb(path: impl AsRef<std::path::Path>) {
+    let bytes = fs::read(path.as_ref()).expect("read glb");
+    assert!(
+        bytes.len() > 64,
+        "{} should not be empty",
+        path.as_ref().display()
+    );
+    assert_eq!(&bytes[0..4], b"glTF", "GLB magic should be present");
+    assert_eq!(read_le_u32(&bytes, 4), 2, "GLB version should be 2");
+    assert_eq!(
+        read_le_u32(&bytes, 8) as usize,
+        bytes.len(),
+        "GLB length should match file length"
+    );
+    let json_length = read_le_u32(&bytes, 12) as usize;
+    assert_eq!(&bytes[16..20], b"JSON", "first chunk should be JSON");
+    let json_start = 20;
+    let json_end = json_start + json_length;
+    let json_text = std::str::from_utf8(&bytes[json_start..json_end])
+        .expect("GLB JSON is UTF-8")
+        .trim_end();
+    let json: serde_json::Value = serde_json::from_str(json_text).expect("parse GLB JSON");
+    assert_eq!(json["asset"]["version"], "2.0");
+    assert!(json.get("images").is_none(), "GLB must not include images");
+    assert!(
+        json.get("textures").is_none(),
+        "GLB must not include textures"
+    );
+    assert!(json.get("skins").is_none(), "GLB must not include skins");
+    assert!(
+        json.get("animations").is_none(),
+        "GLB must not include animations"
+    );
+    let accessors = json["accessors"].as_array().expect("accessors");
+    assert_eq!(accessors.len(), 3);
+    let attributes = &json["meshes"][0]["primitives"][0]["attributes"];
+    assert!(attributes.get("POSITION").is_some());
+    assert!(attributes.get("NORMAL").is_some());
+    assert!(
+        attributes.get("TEXCOORD_0").is_none(),
+        "geometry-only GLB must not include UV claims"
+    );
+    let bin_header = json_end;
+    assert_eq!(&bytes[bin_header + 4..bin_header + 8], b"BIN\0");
+}
+
+fn read_le_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("read u32 bytes"),
+    )
+}
+
+fn assert_geometry_export_report_excludes_non_geometry_features(report: &serde_json::Value) {
+    assert_eq!(report["includes_uvs"], false);
+    assert_eq!(report["includes_textures"], false);
+    assert_eq!(report["includes_material_looks"], false);
+    assert_eq!(report["includes_collision"], false);
+    assert_eq!(report["includes_rig"], false);
+    assert_eq!(report["includes_animation"], false);
+    assert_eq!(report["game_ready"], false);
+    assert_eq!(report["human_review_required"], true);
 }
 
 fn assert_no_absolute_output_paths(out_dir: &std::path::Path, temp_dir: &std::path::Path) {
