@@ -71,6 +71,7 @@ pub(crate) struct FoundryDesktopApp {
     make_preparation_started_at: Option<Instant>,
     make_generation_started_at: Option<Instant>,
     material_looks: MakeMaterialLookState,
+    object_plan_review_enabled: bool,
     screenshot_scenario: Option<ScreenshotScenario>,
     screenshot_scenario_step: u8,
 }
@@ -86,6 +87,7 @@ enum FoundryTab {
 enum FoundryDrawer {
     Pack,
     Export,
+    ObjectPlanReview,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -100,6 +102,7 @@ enum ScreenshotScenario {
     SphereExportDrawer,
     PackDrawer,
     ExportDrawer,
+    ObjectPlanReviewDrawer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +196,7 @@ struct MakeCanvasViewState {
     selected_comparison_visible: bool,
     pack_drawer_visible: bool,
     export_drawer_visible: bool,
+    object_plan_review_drawer_visible: bool,
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
@@ -217,6 +221,19 @@ struct MakeMaterialLookState {
     selected_candidate_id: Option<String>,
     load_error: Option<String>,
     evidence_report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObjectPlanReviewUiState {
+    entry_visible: bool,
+    drawer_visible: bool,
+    batch_report_visible: bool,
+    contact_sheet_visible: bool,
+    review_labels: Vec<&'static str>,
+    safety_labels: Vec<&'static str>,
+    publish_action_visible: bool,
+    catalog_mutation_allowed: bool,
+    runtime_llm_action_visible: bool,
 }
 
 impl MakeMaterialLookState {
@@ -417,6 +434,7 @@ const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
 const CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT: f32 = 0.35;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
+const OBJECT_PLAN_REVIEW_ENV_VAR: &str = "SHAPE_LAB_OBJECT_PLAN_REVIEW";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
 const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
@@ -502,6 +520,7 @@ const ACTION_EXPORT_CURRENT_PRIMITIVE: &str = "Export current primitive";
 const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_CLOSE_DRAWER: &str = "Close drawer";
+const ACTION_REVIEW_OBJECT_PLANS: &str = "Review ObjectPlans";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
 const ACTION_USE_THIS_BOX: &str = "Use this box";
@@ -605,6 +624,7 @@ impl Default for FoundryDesktopApp {
             make_preparation_started_at: None,
             make_generation_started_at: None,
             material_looks: MakeMaterialLookState::default(),
+            object_plan_review_enabled: object_plan_review_enabled(),
             screenshot_scenario: read_screenshot_scenario(),
             screenshot_scenario_step: 0,
         }
@@ -659,7 +679,10 @@ impl FoundryDesktopApp {
                     .inner_margin(egui::Margin::symmetric(16, 6))
                     .show(ui, |ui| self.show_status_strip(ui));
             });
-        if let Some(drawer) = self.drawer {
+        let visible_drawer = self.drawer.filter(|drawer| {
+            *drawer != FoundryDrawer::ObjectPlanReview || self.object_plan_review_enabled
+        });
+        if let Some(drawer) = visible_drawer {
             egui::Panel::right("foundry_action_drawer")
                 .resizable(false)
                 .default_size(430.0)
@@ -672,6 +695,7 @@ impl FoundryDesktopApp {
                                 let title = match drawer {
                                     FoundryDrawer::Pack => "Pack",
                                     FoundryDrawer::Export => "Export",
+                                    FoundryDrawer::ObjectPlanReview => "ObjectPlan Review",
                                 };
                                 ui.label(RichText::new(title).size(18.0).strong());
                                 ui.with_layout(
@@ -696,6 +720,9 @@ impl FoundryDesktopApp {
                                 FoundryDrawer::Pack => commands.extend(self.show_pack_drawer(ui)),
                                 FoundryDrawer::Export => {
                                     commands.extend(self.show_export_drawer(ui));
+                                }
+                                FoundryDrawer::ObjectPlanReview => {
+                                    self.show_object_plan_review_drawer(ui);
                                 }
                             }
                         });
@@ -765,6 +792,15 @@ impl FoundryDesktopApp {
                 .clicked()
                 {
                     self.drawer = Some(FoundryDrawer::Export);
+                }
+                if self.object_plan_review_enabled
+                    && action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_REVIEW_OBJECT_PLANS, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::ObjectPlanReview);
                 }
                 if action_button(
                     ui,
@@ -923,6 +959,34 @@ impl FoundryDesktopApp {
                 ui.label(RichText::new(product_safe_status(status)).color(colors.text_subtle));
             }
         });
+    }
+
+    fn object_plan_review_ui_state(&self) -> ObjectPlanReviewUiState {
+        let drawer_visible =
+            self.object_plan_review_enabled && self.drawer == Some(FoundryDrawer::ObjectPlanReview);
+        ObjectPlanReviewUiState {
+            entry_visible: self.object_plan_review_enabled,
+            drawer_visible,
+            batch_report_visible: drawer_visible,
+            contact_sheet_visible: drawer_visible,
+            review_labels: if drawer_visible {
+                vec!["Keep", "Regenerate", "Simplify", "Blocked"]
+            } else {
+                Vec::new()
+            },
+            safety_labels: if drawer_visible {
+                vec![
+                    "Draft only",
+                    "Not catalog published",
+                    "Human review required",
+                ]
+            } else {
+                Vec::new()
+            },
+            publish_action_visible: false,
+            catalog_mutation_allowed: false,
+            runtime_llm_action_visible: false,
+        }
     }
 
     fn current_project_title(&self) -> String {
@@ -1274,6 +1338,7 @@ impl FoundryDesktopApp {
             selected_comparison_visible,
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
+            object_plan_review_drawer_visible: self.object_plan_review_ui_state().drawer_visible,
             local_warning_message,
             local_error_message,
             next_action_hint,
@@ -3452,6 +3517,49 @@ impl FoundryDesktopApp {
         self.show_export(ui)
     }
 
+    fn show_object_plan_review_drawer(&self, ui: &mut egui::Ui) {
+        let colors = VisualFoundryTokens::dark().colors;
+        let state = self.object_plan_review_ui_state();
+        product_card(ui, true, |ui| {
+            ui.label(RichText::new("Draft only").color(colors.warning).strong());
+            ui.label(RichText::new("Not catalog published").color(colors.text));
+            ui.label(RichText::new("Human review required").color(colors.text));
+        });
+        ui.add_space(12.0);
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Internal review",
+                title: "Batch report",
+                subtitle: Some("Fixed internal review target."),
+            },
+        );
+        product_card(ui, true, |ui| {
+            ui.label(RichText::new("target/object-plan-batches/basic-batch").monospace());
+            ui.label(RichText::new("Batch report loaded").color(colors.success));
+            ui.label(RichText::new("Contact sheet").strong());
+            ui.label(RichText::new(
+                "Rendered evidence appears here when available.",
+            ));
+        });
+        ui.add_space(12.0);
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Review",
+                title: "Review labels",
+                subtitle: Some("Labels do not publish."),
+            },
+        );
+        ui.horizontal_wrapped(|ui| {
+            for label in &state.review_labels {
+                let _ = status_pill(ui, StatusPillSpec::new(label, StatusTone::Neutral));
+            }
+        });
+        ui.add_space(10.0);
+        ui.label(RichText::new("No catalog action in this gate.").color(colors.text_muted));
+    }
+
     fn show_current_preview_sized(
         &mut self,
         ui: &mut egui::Ui,
@@ -3793,6 +3901,16 @@ impl FoundryDesktopApp {
             ScreenshotScenario::ExportDrawer => {
                 self.drawer = Some(FoundryDrawer::Export);
                 if self.make_canvas_view_state().export_drawer_visible {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::ObjectPlanReviewDrawer => {
+                self.object_plan_review_enabled = true;
+                self.drawer = Some(FoundryDrawer::ObjectPlanReview);
+                if self
+                    .make_canvas_view_state()
+                    .object_plan_review_drawer_visible
+                {
                     self.complete_screenshot_scenario(scenario);
                 }
             }
@@ -4652,6 +4770,7 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "sphere_export_drawer" => Some(ScreenshotScenario::SphereExportDrawer),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
+        "object_plan_review_drawer" => Some(ScreenshotScenario::ObjectPlanReviewDrawer),
         _ => None,
     }
 }
@@ -4673,7 +4792,8 @@ fn read_screenshot_fixture_catalog(
         ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
         | ScreenshotScenario::PackDrawer
-        | ScreenshotScenario::ExportDrawer => {
+        | ScreenshotScenario::ExportDrawer
+        | ScreenshotScenario::ObjectPlanReviewDrawer => {
             shape_foundry_catalog::box_primitive::fixture_catalog()
         }
     }
@@ -4719,6 +4839,11 @@ fn screenshot_scenario_assertion(
             view_state.export_drawer_visible && view_state.direct_primitive_workflow,
             scenario,
             "sphere_export_drawer_visible",
+        ),
+        ScreenshotScenario::ObjectPlanReviewDrawer => require_screenshot_state(
+            view_state.object_plan_review_drawer_visible,
+            scenario,
+            "object_plan_review_drawer_visible",
         ),
     }
 }
@@ -5004,6 +5129,15 @@ pub(crate) fn installed_product_kit_count() -> usize {
 
 fn developer_preview_catalog_enabled() -> bool {
     env::var(PREVIEW_CATALOG_ENV_VAR).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn object_plan_review_enabled() -> bool {
+    env::var(OBJECT_PLAN_REVIEW_ENV_VAR).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "on"
@@ -10113,6 +10247,77 @@ mod tests {
     }
 
     #[test]
+    fn object_plan_review_ui_hidden_by_default() {
+        let strings = product_visible_strings_for_default_shell();
+        assert!(!strings.contains(&ACTION_REVIEW_OBJECT_PLANS));
+        assert!(!strings.contains(&"ObjectPlan Review"));
+        assert!(!strings.contains(&"Draft only"));
+        assert!(!strings.contains(&"Human review required"));
+
+        let mut app = FoundryDesktopApp::default();
+        let hidden = app.object_plan_review_ui_state();
+        assert!(!hidden.entry_visible);
+        assert!(!hidden.drawer_visible);
+
+        app.drawer = Some(FoundryDrawer::ObjectPlanReview);
+        let forced = app.object_plan_review_ui_state();
+        assert!(!forced.drawer_visible);
+    }
+
+    #[test]
+    fn object_plan_review_ui_visible_only_under_dev_flag() {
+        let mut app = FoundryDesktopApp {
+            object_plan_review_enabled: true,
+            ..FoundryDesktopApp::default()
+        };
+
+        let entry = app.object_plan_review_ui_state();
+        assert!(entry.entry_visible);
+        assert!(!entry.drawer_visible);
+
+        app.drawer = Some(FoundryDrawer::ObjectPlanReview);
+        let drawer = app.object_plan_review_ui_state();
+        assert!(drawer.drawer_visible);
+        assert!(drawer.batch_report_visible);
+        assert!(drawer.contact_sheet_visible);
+        assert_eq!(
+            drawer.review_labels,
+            vec!["Keep", "Regenerate", "Simplify", "Blocked"]
+        );
+        assert_eq!(
+            drawer.safety_labels,
+            vec![
+                "Draft only",
+                "Not catalog published",
+                "Human review required"
+            ]
+        );
+        assert!(!drawer.publish_action_visible);
+        assert!(!drawer.catalog_mutation_allowed);
+        assert!(!drawer.runtime_llm_action_visible);
+    }
+
+    #[test]
+    fn object_plan_review_ui_has_no_noob_facing_runtime_or_publish_copy() {
+        let strings = product_visible_strings_for_default_shell()
+            .join("\n")
+            .to_ascii_lowercase();
+
+        for hidden in [
+            "review objectplans",
+            "objectplan review",
+            "runtime llm",
+            "publish plan",
+            "publish kit",
+        ] {
+            assert!(
+                !strings.contains(hidden),
+                "default UI must not expose internal ObjectPlan review copy: {hidden}"
+            );
+        }
+    }
+
+    #[test]
     fn screenshot_focus_scenario_helper_does_not_focus_box_body() {
         let mut app = visible_state_test_app();
 
@@ -10206,6 +10411,16 @@ mod tests {
             screenshot_scenario_assertion(
                 ScreenshotScenario::SphereExportDrawer,
                 &sphere_export_app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        let mut object_plan_app = ready_visible_state_test_app();
+        object_plan_app.object_plan_review_enabled = true;
+        object_plan_app.drawer = Some(FoundryDrawer::ObjectPlanReview);
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::ObjectPlanReviewDrawer,
+                &object_plan_app.make_canvas_view_state(),
             )
             .is_ok()
         );
