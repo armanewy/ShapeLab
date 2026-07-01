@@ -1,0 +1,127 @@
+{
+  "schema_version": 8,
+  "id": 4,
+  "title": "Panel with Knob-like Asset",
+  "definitions": {
+    "1": {
+      "id": 1,
+      "name": "Panel",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Plate": {
+            "size": [2.0, 1.0],
+            "thickness": 0.1
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [0.0, 0.0, 0.0],
+        "x_axis": [1.0, 0.0, 0.0],
+        "y_axis": [0.0, 1.0, 0.0],
+        "z_axis": [0.0, 0.0, 1.0]
+      },
+      "variant_group": null,
+      "production_hints": null
+    },
+    "2": {
+      "id": 2,
+      "name": "Knob-like Sphere",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "Lathe": {
+            "profile": [[0.0, -0.25], [0.25, 0.0], [0.0, 0.25]],
+            "segments": 24
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [0.0, 0.0, 0.0],
+        "x_axis": [1.0, 0.0, 0.0],
+        "y_axis": [0.0, 1.0, 0.0],
+        "z_axis": [0.0, 0.0, 1.0]
+      },
+      "variant_group": null,
+      "production_hints": null
+    }
+  },
+  "instances": {
+    "1": {
+      "id": 1,
+      "definition": 1,
+      "name": "Panel",
+      "parent": null,
+      "local_transform": {
+        "translation": [0.0, 0.0, 0.0],
+        "rotation_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    },
+    "2": {
+      "id": 2,
+      "definition": 2,
+      "name": "Knob-like Sphere",
+      "parent": 1,
+      "local_transform": {
+        "translation": [0.0, 0.0, 0.15],
+        "rotation_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    }
+  },
+  "root_instances": [1],
+  "parameters": {},
+  "locks": [],
+  "instance_locks": [],
+  "subtree_locks": [],
+  "topology_locks": [],
+  "constraints": [],
+  "relationships": [],
+  "semantic": {
+    "relationships": {
+      "1": {
+        "id": 1,
+        "relationship_type": "SurfaceMounted",
+        "parent": 1,
+        "child": 2,
+        "label": "Knob-like form mounted on panel",
+        "export_profile": null
+      }
+    }
+  },
+  "next_ids": {
+    "part_definition": 3,
+    "part_instance": 3,
+    "operation": 1,
+    "region": 1,
+    "boundary_loop": 1,
+    "socket": 1,
+    "parameter": 1,
+    "revision": 1,
+    "relationship": 2,
+    "pattern": 1,
+    "surface_slot": 1,
+    "material_slot": 1,
+    "collision_body": 1,
+    "motion_channel": 1,
+    "terrain_patch": 1,
+    "export_profile": 1,
+    "authoring_op": 1,
+    "validation_report": 1
+  }
+}
