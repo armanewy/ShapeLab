@@ -15,8 +15,8 @@ and rendered into contact-sheet evidence for human review.
 Geometry Export v0 now exports geometry-only GLB packages for supported
 ObjectPlan drafts. Godot import proof exists as a harness, but local proof is
 blocked when no Godot binary is available.
-The next phase is Family Studio Lite v0 for local reusable Direct Kits. That
-phase remains internal/preview-scoped and must produce Draft / Personal Kits
+Family Studio Lite v0 now has an internal preview UI for local reusable Direct
+Kits. That flow remains developer-gated and produces Draft / Personal Kits
 only.
 
 ## Current Truth
@@ -76,7 +76,10 @@ only.
 - Family Studio Lite v0 is scoped to local Direct Kits made from supported
   primitives, supported safe-anchor compositions, and supported ObjectPlan Draft
   evidence.
-- Family Studio Lite v0 will use deterministic property endpoint tests, preset
+- Family Studio Lite v0 has a developer-gated internal preview UI for starting
+  from the current supported shape, choosing what stays the same, choosing what
+  can change, testing the kit, and saving Draft / Personal Kits.
+- Family Studio Lite v0 uses deterministic property endpoint tests, preset
   contact sheets, ObjectPlan evidence, composition validation, and export-report
   truth checks. It will not restore generated candidate trays.
 - Internal candidate-like machinery may remain for legacy tests, quality
@@ -162,5 +165,5 @@ Use one visible operation per milestone:
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
-- Family Studio Lite public authoring, broad family generation, generated
-  candidate trays, reviewed/showcase promotion, and public kit publishing.
+- Family Studio Lite public authoring, broad family generation, generated candidate trays,
+  reviewed/showcase promotion, and public kit publishing.

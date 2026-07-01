@@ -15,9 +15,14 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use shape_core::Aabb;
 use shape_foundry::{
-    CatalogContentRef, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogError,
-    FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput, VariationIntent,
-    built_in_surface_capability_for_profile, compile_foundry_document,
+    CatalogContentRef, DirectKitCreatedFrom, DirectKitDraft, DirectKitPresetRef,
+    DirectKitSourceKind, DirectKitVisibility, FoundryAssetDocument, FoundryBuildStamp,
+    FoundryCatalogError, FoundryCatalogResolver, FoundryCommand, FoundryCompilationOutput,
+    KitCapabilityAvailability, KitCapabilityCard, KitCapabilitySourceKind, ObjectPlanReviewTier,
+    PresetSource, PrimitiveKind, VariationIntent, built_in_surface_capability_for_profile,
+    compile_foundry_document, direct_kit_property_exposures_for_primitive, direct_kit_user_summary,
+    kit_capability_cards_for_panel_with_knob, kit_capability_cards_for_primitive, save_direct_kit,
+    validate_direct_kit_draft,
 };
 use shape_foundry_catalog::{
     FoundryFixtureCatalog, curated_fixture_catalogs_with_labels, headless_fixture_catalogs,
@@ -73,6 +78,8 @@ pub(crate) struct FoundryDesktopApp {
     make_generation_started_at: Option<Instant>,
     material_looks: MakeMaterialLookState,
     object_plan_review_enabled: bool,
+    family_studio_lite_enabled: bool,
+    family_studio_lite: FamilyStudioLiteState,
     screenshot_scenario: Option<ScreenshotScenario>,
     screenshot_scenario_step: u8,
 }
@@ -89,6 +96,7 @@ enum FoundryDrawer {
     Pack,
     Export,
     ObjectPlanReview,
+    FamilyStudioLite,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -104,6 +112,11 @@ enum ScreenshotScenario {
     PackDrawer,
     ExportDrawer,
     ObjectPlanReviewDrawer,
+    FamilyStudioLiteHiddenDefault,
+    FamilyStudioLiteDrawer,
+    FamilyStudioLiteTestResult,
+    FamilyStudioLiteSaveDraft,
+    FamilyStudioLitePersonalSaved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,6 +230,7 @@ struct MakeCanvasViewState {
     pack_drawer_visible: bool,
     export_drawer_visible: bool,
     object_plan_review_drawer_visible: bool,
+    family_studio_lite_drawer_visible: bool,
     local_warning_message: Option<String>,
     local_error_message: Option<String>,
     next_action_hint: String,
@@ -254,6 +268,177 @@ struct ObjectPlanReviewUiState {
     publish_action_visible: bool,
     catalog_mutation_allowed: bool,
     runtime_llm_action_visible: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FamilyStudioLiteState {
+    selected_capability_ids: BTreeSet<String>,
+    test_result: Option<FamilyStudioLiteTestResult>,
+    saved_visibility: Option<DirectKitVisibility>,
+    save_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FamilyStudioLiteUiState {
+    entry_visible: bool,
+    drawer_visible: bool,
+    starting_point_title: String,
+    starting_point_summary: String,
+    source_label: &'static str,
+    supported: bool,
+    disabled_reason: Option<String>,
+    stays_same: Vec<String>,
+    capability_cards: Vec<FamilyStudioLiteCapabilityCardView>,
+    test_result: Option<FamilyStudioLiteTestResult>,
+    saved_visibility: Option<DirectKitVisibility>,
+    save_error: Option<String>,
+    draft_save_enabled: bool,
+    personal_save_enabled: bool,
+    approved: bool,
+    publish_allowed: bool,
+    runtime_llm_action_visible: bool,
+    generated_variation_copy_visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FamilyStudioLiteCapabilityCardView {
+    capability_id: String,
+    display_name: String,
+    description: String,
+    selected: bool,
+    status_label: &'static str,
+    visible_test_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FamilyStudioLiteTestResult {
+    status: FamilyStudioLiteTestStatus,
+    message: String,
+    tested_capabilities: usize,
+    human_review_required: bool,
+    approved: bool,
+    publish_allowed: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FamilyStudioLiteTestStatus {
+    Passed,
+    Warnings,
+    Failed,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FamilyStudioLiteSource {
+    Primitive(PrimitiveKind),
+    PanelWithKnob,
+    Unsupported,
+}
+
+impl FamilyStudioLiteSource {
+    const fn supported(self) -> bool {
+        matches!(self, Self::Primitive(_) | Self::PanelWithKnob)
+    }
+
+    const fn source_label(self) -> &'static str {
+        match self {
+            Self::Primitive(_) => "Current shape",
+            Self::PanelWithKnob => "Current shape group",
+            Self::Unsupported => "Not available",
+        }
+    }
+
+    const fn source_ref(self) -> &'static str {
+        match self {
+            Self::Primitive(PrimitiveKind::BoxPrimitive) => "box_primitive",
+            Self::Primitive(PrimitiveKind::FlatPanelPrimitive) => "flat_panel_primitive",
+            Self::Primitive(PrimitiveKind::SpherePrimitive) => "sphere_primitive",
+            Self::Primitive(PrimitiveKind::CylinderPrimitive) | Self::Unsupported => "unsupported",
+            Self::PanelWithKnob => "panel_with_knob",
+        }
+    }
+
+    const fn identity_summary(self) -> &'static str {
+        match self {
+            Self::Primitive(PrimitiveKind::BoxPrimitive) => "This stays a box-like primitive.",
+            Self::Primitive(PrimitiveKind::FlatPanelPrimitive) => "This stays a flat panel.",
+            Self::Primitive(PrimitiveKind::SpherePrimitive) => "This stays a round primitive.",
+            Self::Primitive(PrimitiveKind::CylinderPrimitive) | Self::Unsupported => {
+                "This starting point is not ready for reusable kits yet."
+            }
+            Self::PanelWithKnob => "This stays a panel with a bounded knob-like form.",
+        }
+    }
+
+    const fn direct_kit_source_kind(self) -> DirectKitSourceKind {
+        match self {
+            Self::Primitive(_) => DirectKitSourceKind::Primitive,
+            Self::PanelWithKnob => DirectKitSourceKind::Composition,
+            Self::Unsupported => DirectKitSourceKind::Unsupported,
+        }
+    }
+
+    const fn created_from(self) -> DirectKitCreatedFrom {
+        match self {
+            Self::Primitive(_) => DirectKitCreatedFrom::CurrentPrimitive,
+            Self::PanelWithKnob => DirectKitCreatedFrom::CompositionDraft,
+            Self::Unsupported => DirectKitCreatedFrom::InternalTool,
+        }
+    }
+
+    fn capability_cards(self) -> Vec<KitCapabilityCard> {
+        match self {
+            Self::Primitive(primitive_kind) => {
+                kit_capability_cards_for_primitive(primitive_kind, false)
+            }
+            Self::PanelWithKnob => kit_capability_cards_for_panel_with_knob(false),
+            Self::Unsupported => Vec::new(),
+        }
+    }
+
+    fn property_exposures(self) -> Vec<shape_foundry::DirectKitPropertyExposure> {
+        match self {
+            Self::Primitive(primitive_kind) => {
+                direct_kit_property_exposures_for_primitive(primitive_kind)
+            }
+            Self::PanelWithKnob => {
+                direct_kit_property_exposures_for_primitive(PrimitiveKind::FlatPanelPrimitive)
+            }
+            Self::Unsupported => Vec::new(),
+        }
+    }
+
+    fn preset_refs(self) -> Vec<DirectKitPresetRef> {
+        match self {
+            Self::Primitive(PrimitiveKind::BoxPrimitive) => vec![DirectKitPresetRef {
+                preset_id: "compact_box".to_owned(),
+                display_name: "Compact Box".to_owned(),
+                source: PresetSource::BuiltIn,
+            }],
+            Self::Primitive(PrimitiveKind::FlatPanelPrimitive) => vec![DirectKitPresetRef {
+                preset_id: "wide_panel".to_owned(),
+                display_name: "Wide Panel".to_owned(),
+                source: PresetSource::BuiltIn,
+            }],
+            Self::Primitive(PrimitiveKind::SpherePrimitive) => vec![DirectKitPresetRef {
+                preset_id: "round_sphere".to_owned(),
+                display_name: "Round Sphere".to_owned(),
+                source: PresetSource::BuiltIn,
+            }],
+            Self::PanelWithKnob => vec![
+                DirectKitPresetRef {
+                    preset_id: "wide_panel".to_owned(),
+                    display_name: "Wide Panel".to_owned(),
+                    source: PresetSource::BuiltIn,
+                },
+                DirectKitPresetRef {
+                    preset_id: "knob_like_form".to_owned(),
+                    display_name: "Knob-Like Form".to_owned(),
+                    source: PresetSource::BuiltIn,
+                },
+            ],
+            Self::Primitive(PrimitiveKind::CylinderPrimitive) | Self::Unsupported => Vec::new(),
+        }
+    }
 }
 
 impl MakeMaterialLookState {
@@ -459,6 +644,7 @@ const COORDINATE_REFERENCE_GRID_STEPS: i32 = 8;
 const COORDINATE_REFERENCE_GRID_EXTENT: f32 = 1.18;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const OBJECT_PLAN_REVIEW_ENV_VAR: &str = "SHAPE_LAB_OBJECT_PLAN_REVIEW";
+const FAMILY_STUDIO_LITE_ENV_VAR: &str = "SHAPE_LAB_FAMILY_STUDIO_LITE";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
 const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
@@ -545,6 +731,10 @@ const ACTION_ADD_CURRENT_ASSET: &str = "Add Current Asset";
 const ACTION_EXPORT_PACK: &str = "Export Pack";
 const ACTION_CLOSE_DRAWER: &str = "Close drawer";
 const ACTION_REVIEW_OBJECT_PLANS: &str = "Review ObjectPlans";
+const ACTION_CREATE_REUSABLE_KIT: &str = "Create reusable kit";
+const ACTION_TEST_KIT: &str = "Test kit";
+const ACTION_SAVE_DRAFT_KIT: &str = "Save Draft";
+const ACTION_USE_PERSONALLY: &str = "Use Personally";
 const ACTION_SELECT: &str = "Compare";
 const ACTION_CHOOSE_DIRECTION: &str = "Use this idea";
 const ACTION_USE_THIS_BOX: &str = "Use this box";
@@ -577,7 +767,7 @@ const ACTION_EDIT_PANEL_KNOB: &str = "Edit Panel with Knob";
 const VIEW_ORBIT_LABEL: &str = "Orbit view";
 const VIEW_RESET_LABEL: &str = "Reset view";
 const VIEW_AXIS_LABEL: &str = "Axis view";
-const RENDERED_ACTION_LABELS: [&str; 46] = [
+const RENDERED_ACTION_LABELS: [&str; 50] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -607,6 +797,10 @@ const RENDERED_ACTION_LABELS: [&str; 46] = [
     ACTION_ADD_CURRENT_ASSET,
     ACTION_EXPORT_PACK,
     ACTION_CLOSE_DRAWER,
+    ACTION_CREATE_REUSABLE_KIT,
+    ACTION_TEST_KIT,
+    ACTION_SAVE_DRAFT_KIT,
+    ACTION_USE_PERSONALLY,
     ACTION_RESET,
     ACTION_UNLOCK,
     ACTION_UNLOCK_CONTROLS,
@@ -650,6 +844,8 @@ impl Default for FoundryDesktopApp {
             make_generation_started_at: None,
             material_looks: MakeMaterialLookState::default(),
             object_plan_review_enabled: object_plan_review_enabled(),
+            family_studio_lite_enabled: family_studio_lite_enabled(),
+            family_studio_lite: FamilyStudioLiteState::default(),
             screenshot_scenario: read_screenshot_scenario(),
             screenshot_scenario_step: 0,
         }
@@ -705,7 +901,8 @@ impl FoundryDesktopApp {
                     .show(ui, |ui| self.show_status_strip(ui));
             });
         let visible_drawer = self.drawer.filter(|drawer| {
-            *drawer != FoundryDrawer::ObjectPlanReview || self.object_plan_review_enabled
+            (*drawer != FoundryDrawer::ObjectPlanReview || self.object_plan_review_enabled)
+                && (*drawer != FoundryDrawer::FamilyStudioLite || self.family_studio_lite_enabled)
         });
         if let Some(drawer) = visible_drawer {
             egui::Panel::right("foundry_action_drawer")
@@ -721,6 +918,7 @@ impl FoundryDesktopApp {
                                     FoundryDrawer::Pack => "Pack",
                                     FoundryDrawer::Export => "Export",
                                     FoundryDrawer::ObjectPlanReview => "ObjectPlan Review",
+                                    FoundryDrawer::FamilyStudioLite => "Reusable Kit",
                                 };
                                 ui.label(RichText::new(title).size(18.0).strong());
                                 ui.with_layout(
@@ -741,15 +939,22 @@ impl FoundryDesktopApp {
                                 );
                             });
                             ui.add_space(10.0);
-                            match drawer {
-                                FoundryDrawer::Pack => commands.extend(self.show_pack_drawer(ui)),
-                                FoundryDrawer::Export => {
-                                    commands.extend(self.show_export_drawer(ui));
-                                }
-                                FoundryDrawer::ObjectPlanReview => {
-                                    self.show_object_plan_review_drawer(ui);
-                                }
-                            }
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| match drawer {
+                                    FoundryDrawer::Pack => {
+                                        commands.extend(self.show_pack_drawer(ui));
+                                    }
+                                    FoundryDrawer::Export => {
+                                        commands.extend(self.show_export_drawer(ui));
+                                    }
+                                    FoundryDrawer::ObjectPlanReview => {
+                                        self.show_object_plan_review_drawer(ui);
+                                    }
+                                    FoundryDrawer::FamilyStudioLite => {
+                                        self.show_family_studio_lite_drawer(ui);
+                                    }
+                                });
                         });
                 });
         }
@@ -826,6 +1031,15 @@ impl FoundryDesktopApp {
                     .clicked()
                 {
                     self.drawer = Some(FoundryDrawer::ObjectPlanReview);
+                }
+                if self.family_studio_lite_enabled
+                    && action_button(
+                        ui,
+                        &ActionSpec::enabled(ACTION_CREATE_REUSABLE_KIT, ButtonTone::Secondary),
+                    )
+                    .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::FamilyStudioLite);
                 }
                 if action_button(
                     ui,
@@ -979,7 +1193,9 @@ impl FoundryDesktopApp {
                 ui.separator();
                 ui.label(RichText::new("Read-only recovery").color(colors.warning));
             }
-            if let Some(status) = &self.state.status {
+            if let Some(status) = &self.state.status
+                && !self.family_studio_lite_suppresses_stale_status(status)
+            {
                 ui.separator();
                 ui.label(RichText::new(product_safe_status(status)).color(colors.text_subtle));
             }
@@ -1011,6 +1227,210 @@ impl FoundryDesktopApp {
             publish_action_visible: false,
             catalog_mutation_allowed: false,
             runtime_llm_action_visible: false,
+        }
+    }
+
+    fn family_studio_lite_ui_state(&self) -> FamilyStudioLiteUiState {
+        let source = self.family_studio_lite_source();
+        let supported = source.supported();
+        let drawer_visible =
+            self.family_studio_lite_enabled && self.drawer == Some(FoundryDrawer::FamilyStudioLite);
+        let draft = supported.then(|| self.family_studio_lite_draft(DirectKitVisibility::Draft));
+        let summary = draft.as_ref().map(direct_kit_user_summary);
+        FamilyStudioLiteUiState {
+            entry_visible: self.family_studio_lite_enabled,
+            drawer_visible,
+            starting_point_title: self.current_project_title(),
+            starting_point_summary: source.identity_summary().to_owned(),
+            source_label: source.source_label(),
+            supported,
+            disabled_reason: (!supported)
+                .then(|| "This starting point cannot be saved as a reusable kit yet.".to_owned()),
+            stays_same: summary
+                .as_ref()
+                .map(|summary| summary.stays_fixed.clone())
+                .unwrap_or_else(|| vec![source.identity_summary().to_owned()]),
+            capability_cards: self.family_studio_lite_capability_card_views(source),
+            test_result: self.family_studio_lite.test_result.clone(),
+            saved_visibility: self.family_studio_lite.saved_visibility,
+            save_error: self.family_studio_lite.save_error.clone(),
+            draft_save_enabled: supported,
+            personal_save_enabled: supported,
+            approved: false,
+            publish_allowed: false,
+            runtime_llm_action_visible: false,
+            generated_variation_copy_visible: false,
+        }
+    }
+
+    fn family_studio_lite_source(&self) -> FamilyStudioLiteSource {
+        match self.active_make_profile_kind() {
+            MakeProfileKind::BoxPrimitive => {
+                FamilyStudioLiteSource::Primitive(PrimitiveKind::BoxPrimitive)
+            }
+            MakeProfileKind::FlatPanelPrimitive => {
+                FamilyStudioLiteSource::Primitive(PrimitiveKind::FlatPanelPrimitive)
+            }
+            MakeProfileKind::SpherePrimitive => {
+                FamilyStudioLiteSource::Primitive(PrimitiveKind::SpherePrimitive)
+            }
+            MakeProfileKind::PanelWithKnob => FamilyStudioLiteSource::PanelWithKnob,
+            MakeProfileKind::LiddedBox
+            | MakeProfileKind::HingedPanel
+            | MakeProfileKind::HandledPanel
+            | MakeProfileKind::Other => FamilyStudioLiteSource::Unsupported,
+        }
+    }
+
+    fn family_studio_lite_capability_card_views(
+        &self,
+        source: FamilyStudioLiteSource,
+    ) -> Vec<FamilyStudioLiteCapabilityCardView> {
+        let cards = source.capability_cards();
+        let selected = self.family_studio_lite_selected_capability_ids(source);
+        cards
+            .into_iter()
+            .filter(|card| card.source_kind != KitCapabilitySourceKind::SurfaceLook)
+            .map(|card| FamilyStudioLiteCapabilityCardView {
+                selected: selected.contains(&card.capability_id),
+                status_label: match card.availability {
+                    KitCapabilityAvailability::Included => "Included",
+                    KitCapabilityAvailability::Available => "Available",
+                    KitCapabilityAvailability::Recommended => "Recommended",
+                    KitCapabilityAvailability::Later => "Later",
+                    KitCapabilityAvailability::Blocked => "Blocked",
+                },
+                capability_id: card.capability_id,
+                display_name: card.display_name,
+                description: card.description,
+                visible_test_required: card.visible_test_required,
+            })
+            .collect()
+    }
+
+    fn family_studio_lite_selected_capability_ids(
+        &self,
+        source: FamilyStudioLiteSource,
+    ) -> BTreeSet<String> {
+        let visible_ids = source
+            .capability_cards()
+            .into_iter()
+            .filter(|card| card.source_kind != KitCapabilitySourceKind::SurfaceLook)
+            .map(|card| card.capability_id)
+            .collect::<BTreeSet<_>>();
+        let selected = self
+            .family_studio_lite
+            .selected_capability_ids
+            .intersection(&visible_ids)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if !selected.is_empty() {
+            return selected;
+        }
+
+        source
+            .capability_cards()
+            .into_iter()
+            .filter(|card| {
+                card.source_kind == KitCapabilitySourceKind::PrimitiveProperty
+                    && matches!(
+                        card.availability,
+                        KitCapabilityAvailability::Available
+                            | KitCapabilityAvailability::Included
+                            | KitCapabilityAvailability::Recommended
+                    )
+            })
+            .take(1)
+            .map(|card| card.capability_id)
+            .collect()
+    }
+
+    fn family_studio_lite_draft(&self, visibility: DirectKitVisibility) -> DirectKitDraft {
+        let source = self.family_studio_lite_source();
+        let selected = self.family_studio_lite_selected_capability_ids(source);
+        let mut exposures = source.property_exposures();
+        let mut changeable_properties = Vec::new();
+        let mut locked_properties = Vec::new();
+        for exposure in exposures.drain(..) {
+            if selected
+                .iter()
+                .any(|id| id.ends_with(&exposure.property_id))
+            {
+                changeable_properties.push(exposure);
+            } else {
+                locked_properties.push(exposure);
+            }
+        }
+        if changeable_properties.is_empty()
+            && let Some(first) = locked_properties.first().cloned()
+        {
+            changeable_properties.push(first.clone());
+            locked_properties.retain(|property| property.property_id != first.property_id);
+        }
+
+        DirectKitDraft {
+            kit_id: format!("{}_reusable_kit", source.source_ref()),
+            display_name: format!("{} Reusable Kit", self.current_project_title()),
+            source_kind: source.direct_kit_source_kind(),
+            source_ref: source.source_ref().to_owned(),
+            identity_summary: source.identity_summary().to_owned(),
+            changeable_properties,
+            locked_properties,
+            included_presets: source.preset_refs(),
+            evidence_refs: Vec::new(),
+            review_tier: if visibility == DirectKitVisibility::PersonalOnly {
+                ObjectPlanReviewTier::Personal
+            } else {
+                ObjectPlanReviewTier::Draft
+            },
+            visibility,
+            created_from: source.created_from(),
+        }
+    }
+
+    fn run_family_studio_lite_test(&mut self) {
+        let draft = self.family_studio_lite_draft(DirectKitVisibility::Draft);
+        let validation = validate_direct_kit_draft(&draft);
+        let status = if !validation.errors.is_empty() {
+            FamilyStudioLiteTestStatus::Failed
+        } else if !validation.warnings.is_empty() {
+            FamilyStudioLiteTestStatus::Warnings
+        } else {
+            FamilyStudioLiteTestStatus::Passed
+        };
+        let message = match status {
+            FamilyStudioLiteTestStatus::Passed => "Value controls checked.".to_owned(),
+            FamilyStudioLiteTestStatus::Warnings => {
+                "Value controls checked. Add review images before sharing.".to_owned()
+            }
+            FamilyStudioLiteTestStatus::Failed => {
+                "Fix the highlighted choices before saving.".to_owned()
+            }
+        };
+        self.family_studio_lite.test_result = Some(FamilyStudioLiteTestResult {
+            status,
+            message,
+            tested_capabilities: draft.changeable_properties.len(),
+            human_review_required: true,
+            approved: false,
+            publish_allowed: false,
+        });
+    }
+
+    fn save_family_studio_lite_kit(&mut self, visibility: DirectKitVisibility) {
+        self.save_family_studio_lite_kit_to(visibility, &family_studio_lite_store_base_dir());
+    }
+
+    fn save_family_studio_lite_kit_to(&mut self, visibility: DirectKitVisibility, base_dir: &Path) {
+        let draft = self.family_studio_lite_draft(visibility);
+        match save_direct_kit(base_dir, &draft) {
+            Ok(_) => {
+                self.family_studio_lite.saved_visibility = Some(visibility);
+                self.family_studio_lite.save_error = None;
+            }
+            Err(error) => {
+                self.family_studio_lite.save_error = Some(format!("Could not save kit: {error}"));
+            }
         }
     }
 
@@ -1367,6 +1787,7 @@ impl FoundryDesktopApp {
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
             object_plan_review_drawer_visible: self.object_plan_review_ui_state().drawer_visible,
+            family_studio_lite_drawer_visible: self.family_studio_lite_ui_state().drawer_visible,
             local_warning_message,
             local_error_message,
             next_action_hint,
@@ -1387,6 +1808,9 @@ impl FoundryDesktopApp {
 
     fn make_canvas_local_warning(&self) -> Option<String> {
         let status = self.state.status.as_deref()?;
+        if self.family_studio_lite_suppresses_stale_status(status) {
+            return None;
+        }
         if status.starts_with("Ignored a background result") {
             Some(STALE_RESULT_WARNING.to_owned())
         } else if status == CANCELED_IDEA_SEARCH_WARNING {
@@ -1394,6 +1818,12 @@ impl FoundryDesktopApp {
         } else {
             None
         }
+    }
+
+    fn family_studio_lite_suppresses_stale_status(&self, status: &str) -> bool {
+        self.drawer == Some(FoundryDrawer::FamilyStudioLite)
+            && self.family_studio_lite_enabled
+            && status.starts_with("Ignored a background result")
     }
 
     fn make_canvas_rejected_candidate_summary(&self) -> Option<String> {
@@ -1503,7 +1933,13 @@ impl FoundryDesktopApp {
     }
 
     fn status_summary(&self) -> &'static str {
-        if !self.state.active_jobs.is_empty() {
+        if self.drawer == Some(FoundryDrawer::FamilyStudioLite)
+            && self.family_studio_lite_enabled
+            && self.state.current_output.is_some()
+            && self.state.current_preview.is_some()
+        {
+            "Ready"
+        } else if !self.state.active_jobs.is_empty() {
             "Working"
         } else if self.state.dirty {
             "Unsaved changes"
@@ -3595,6 +4031,168 @@ impl FoundryDesktopApp {
         ui.label(RichText::new("No catalog action in this gate.").color(colors.text_muted));
     }
 
+    fn show_family_studio_lite_drawer(&mut self, ui: &mut egui::Ui) {
+        let colors = VisualFoundryTokens::dark().colors;
+        let state = self.family_studio_lite_ui_state();
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Reusable kit",
+                title: "Create reusable kit",
+                subtitle: Some("Choose what stays adjustable for your own reuse."),
+            },
+        );
+        product_card(ui, true, |ui| {
+            ui.label(RichText::new(&state.starting_point_title).strong());
+            ui.label(RichText::new("Start from current primitive").color(colors.text));
+            ui.label(RichText::new(state.source_label).color(colors.text_muted));
+            ui.label(RichText::new(&state.starting_point_summary).color(colors.text));
+            if let Some(reason) = &state.disabled_reason {
+                ui.label(RichText::new(reason).color(colors.warning));
+            }
+        });
+
+        ui.add_space(12.0);
+        if let Some(result) = &state.test_result {
+            product_card(ui, true, |ui| {
+                let tone = match result.status {
+                    FamilyStudioLiteTestStatus::Passed => colors.success,
+                    FamilyStudioLiteTestStatus::Warnings => colors.warning,
+                    FamilyStudioLiteTestStatus::Failed => colors.danger,
+                };
+                ui.label(RichText::new("Test result").strong().color(tone));
+                ui.label(RichText::new(&result.message).color(colors.text));
+                ui.label(
+                    RichText::new(format!(
+                        "{} control(s) checked.",
+                        result.tested_capabilities
+                    ))
+                    .color(colors.text_muted),
+                );
+                ui.label(RichText::new("Review required.").color(colors.text_muted));
+            });
+            ui.add_space(12.0);
+        }
+        if let Some(visibility) = state.saved_visibility {
+            product_card(ui, true, |ui| {
+                let label = match visibility {
+                    DirectKitVisibility::Draft => "Draft saved.",
+                    DirectKitVisibility::PersonalOnly => "Saved for personal use.",
+                    DirectKitVisibility::Reviewed
+                    | DirectKitVisibility::Showcase
+                    | DirectKitVisibility::PublicCatalog => "Save needs review.",
+                };
+                ui.label(RichText::new(label).strong().color(colors.success));
+                ui.label(RichText::new("Only visible to you.").color(colors.text));
+                ui.label(RichText::new("Needs review before sharing.").color(colors.text_muted));
+            });
+            ui.add_space(12.0);
+        } else if let Some(error) = &state.save_error {
+            ui.label(RichText::new(error).color(colors.warning));
+            ui.add_space(12.0);
+        }
+
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Shape identity",
+                title: "What stays the same",
+                subtitle: None,
+            },
+        );
+        product_card(ui, true, |ui| {
+            for line in &state.stays_same {
+                ui.label(RichText::new(line).color(colors.text));
+            }
+            ui.label(RichText::new("Needs review before sharing.").color(colors.text_muted));
+        });
+
+        ui.add_space(12.0);
+        section_header(
+            ui,
+            SectionHeaderSpec {
+                eyebrow: "Controls",
+                title: "What can change",
+                subtitle: Some("Toggle the controls this kit should keep adjustable."),
+            },
+        );
+        product_card(ui, true, |ui| {
+            for card in &state.capability_cards {
+                let mut selected = card.selected;
+                ui.horizontal_wrapped(|ui| {
+                    if ui.checkbox(&mut selected, "").changed() {
+                        if selected {
+                            self.family_studio_lite
+                                .selected_capability_ids
+                                .insert(card.capability_id.clone());
+                        } else {
+                            self.family_studio_lite
+                                .selected_capability_ids
+                                .remove(&card.capability_id);
+                        }
+                        self.family_studio_lite.test_result = None;
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&card.display_name).strong());
+                        ui.label(RichText::new(&card.description).color(colors.text_muted));
+                        ui.label(RichText::new(card.status_label).color(colors.text_subtle));
+                        if card.visible_test_required {
+                            ui.label(RichText::new("Test required").color(colors.text_subtle));
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+            }
+        });
+
+        ui.add_space(12.0);
+        let disabled_reason = state
+            .disabled_reason
+            .as_deref()
+            .unwrap_or("Choose a supported shape first.");
+        ui.horizontal_wrapped(|ui| {
+            if action_button(
+                ui,
+                &action_spec(
+                    state.supported,
+                    ACTION_TEST_KIT,
+                    ButtonTone::Secondary,
+                    disabled_reason,
+                ),
+            )
+            .clicked()
+            {
+                self.run_family_studio_lite_test();
+            }
+            if action_button(
+                ui,
+                &action_spec(
+                    state.draft_save_enabled,
+                    ACTION_SAVE_DRAFT_KIT,
+                    ButtonTone::Secondary,
+                    disabled_reason,
+                ),
+            )
+            .clicked()
+            {
+                self.save_family_studio_lite_kit(DirectKitVisibility::Draft);
+            }
+            if action_button(
+                ui,
+                &action_spec(
+                    state.personal_save_enabled,
+                    ACTION_USE_PERSONALLY,
+                    ButtonTone::Primary,
+                    disabled_reason,
+                ),
+            )
+            .clicked()
+            {
+                self.save_family_studio_lite_kit(DirectKitVisibility::PersonalOnly);
+            }
+        });
+    }
+
     fn show_current_preview_sized(
         &mut self,
         ui: &mut egui::Ui,
@@ -3953,6 +4551,54 @@ impl FoundryDesktopApp {
                 if self
                     .make_canvas_view_state()
                     .object_plan_review_drawer_visible
+                {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::FamilyStudioLiteHiddenDefault => {
+                self.family_studio_lite_enabled = false;
+                self.drawer = None;
+                self.complete_screenshot_scenario(scenario);
+            }
+            ScreenshotScenario::FamilyStudioLiteDrawer => {
+                self.family_studio_lite_enabled = true;
+                self.drawer = Some(FoundryDrawer::FamilyStudioLite);
+                if self
+                    .make_canvas_view_state()
+                    .family_studio_lite_drawer_visible
+                {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::FamilyStudioLiteTestResult => {
+                self.family_studio_lite_enabled = true;
+                self.drawer = Some(FoundryDrawer::FamilyStudioLite);
+                self.run_family_studio_lite_test();
+                if self
+                    .make_canvas_view_state()
+                    .family_studio_lite_drawer_visible
+                {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::FamilyStudioLiteSaveDraft => {
+                self.family_studio_lite_enabled = true;
+                self.drawer = Some(FoundryDrawer::FamilyStudioLite);
+                self.family_studio_lite.saved_visibility = Some(DirectKitVisibility::Draft);
+                if self
+                    .make_canvas_view_state()
+                    .family_studio_lite_drawer_visible
+                {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::FamilyStudioLitePersonalSaved => {
+                self.family_studio_lite_enabled = true;
+                self.drawer = Some(FoundryDrawer::FamilyStudioLite);
+                self.family_studio_lite.saved_visibility = Some(DirectKitVisibility::PersonalOnly);
+                if self
+                    .make_canvas_view_state()
+                    .family_studio_lite_drawer_visible
                 {
                     self.complete_screenshot_scenario(scenario);
                 }
@@ -4828,6 +5474,18 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
         "object_plan_review_drawer" => Some(ScreenshotScenario::ObjectPlanReviewDrawer),
+        "family_studio_lite_hidden_default" => {
+            Some(ScreenshotScenario::FamilyStudioLiteHiddenDefault)
+        }
+        "family_studio_lite_drawer"
+        | "family_studio_lite_starting_point"
+        | "family_studio_lite_stays_same"
+        | "family_studio_lite_can_change" => Some(ScreenshotScenario::FamilyStudioLiteDrawer),
+        "family_studio_lite_test_result" => Some(ScreenshotScenario::FamilyStudioLiteTestResult),
+        "family_studio_lite_save_draft" => Some(ScreenshotScenario::FamilyStudioLiteSaveDraft),
+        "family_studio_lite_personal_saved" => {
+            Some(ScreenshotScenario::FamilyStudioLitePersonalSaved)
+        }
         _ => None,
     }
 }
@@ -4850,7 +5508,12 @@ fn read_screenshot_fixture_catalog(
         | ScreenshotScenario::BoxPropertyEdit
         | ScreenshotScenario::PackDrawer
         | ScreenshotScenario::ExportDrawer
-        | ScreenshotScenario::ObjectPlanReviewDrawer => {
+        | ScreenshotScenario::ObjectPlanReviewDrawer
+        | ScreenshotScenario::FamilyStudioLiteHiddenDefault
+        | ScreenshotScenario::FamilyStudioLiteDrawer
+        | ScreenshotScenario::FamilyStudioLiteTestResult
+        | ScreenshotScenario::FamilyStudioLiteSaveDraft
+        | ScreenshotScenario::FamilyStudioLitePersonalSaved => {
             shape_foundry_catalog::box_primitive::fixture_catalog()
         }
     }
@@ -4901,6 +5564,19 @@ fn screenshot_scenario_assertion(
             view_state.object_plan_review_drawer_visible,
             scenario,
             "object_plan_review_drawer_visible",
+        ),
+        ScreenshotScenario::FamilyStudioLiteHiddenDefault => require_screenshot_state(
+            !view_state.family_studio_lite_drawer_visible,
+            scenario,
+            "family studio entry hidden",
+        ),
+        ScreenshotScenario::FamilyStudioLiteDrawer
+        | ScreenshotScenario::FamilyStudioLiteTestResult
+        | ScreenshotScenario::FamilyStudioLiteSaveDraft
+        | ScreenshotScenario::FamilyStudioLitePersonalSaved => require_screenshot_state(
+            view_state.family_studio_lite_drawer_visible,
+            scenario,
+            "family_studio_lite_drawer_visible",
         ),
     }
 }
@@ -5200,6 +5876,19 @@ fn object_plan_review_enabled() -> bool {
             "1" | "true" | "yes" | "on"
         )
     })
+}
+
+fn family_studio_lite_enabled() -> bool {
+    env::var(FAMILY_STUDIO_LITE_ENV_VAR).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn family_studio_lite_store_base_dir() -> PathBuf {
+    env::temp_dir().join("shape-lab-family-studio-lite")
 }
 
 pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
@@ -10535,6 +11224,254 @@ mod tests {
     }
 
     #[test]
+    fn family_studio_lite_entry_hidden_by_default() {
+        let strings = product_visible_strings_for_default_shell();
+        assert!(!strings.contains(&"Reusable Kit"));
+
+        let mut app = ready_visible_state_test_app();
+        let hidden = app.family_studio_lite_ui_state();
+        assert!(!hidden.entry_visible);
+        assert!(!hidden.drawer_visible);
+
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+        let forced = app.family_studio_lite_ui_state();
+        assert!(!forced.drawer_visible);
+    }
+
+    #[test]
+    fn family_studio_lite_visible_under_preview_flag() {
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+
+        let entry = app.family_studio_lite_ui_state();
+        assert!(entry.entry_visible);
+        assert!(!entry.drawer_visible);
+
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+        let drawer = app.family_studio_lite_ui_state();
+        assert!(drawer.drawer_visible);
+        assert_eq!(drawer.starting_point_title, "Box Primitive");
+        assert_eq!(drawer.source_label, "Current shape");
+        assert!(drawer.supported);
+        assert!(!drawer.approved);
+        assert!(!drawer.publish_allowed);
+        assert!(!drawer.runtime_llm_action_visible);
+        assert!(!drawer.generated_variation_copy_visible);
+    }
+
+    #[test]
+    fn family_studio_lite_capability_cards_come_from_adapter() {
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+
+        let drawer = app.family_studio_lite_ui_state();
+        let expected = kit_capability_cards_for_primitive(PrimitiveKind::BoxPrimitive, false)
+            .into_iter()
+            .filter(|card| card.source_kind != KitCapabilitySourceKind::SurfaceLook)
+            .map(|card| card.capability_id)
+            .collect::<Vec<_>>();
+        let actual = drawer
+            .capability_cards
+            .iter()
+            .map(|card| card.capability_id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, expected);
+        assert!(
+            drawer
+                .capability_cards
+                .iter()
+                .any(|card| card.display_name == "Width")
+        );
+        assert!(
+            drawer
+                .capability_cards
+                .iter()
+                .any(|card| card.display_name == "Saved Shapes")
+        );
+        assert!(
+            shape_foundry::validate_kit_capability_cards(&kit_capability_cards_for_primitive(
+                PrimitiveKind::BoxPrimitive,
+                false
+            ))
+            .is_valid()
+        );
+    }
+
+    #[test]
+    fn family_studio_lite_user_copy_hides_technical_terms() {
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+        app.run_family_studio_lite_test();
+        app.family_studio_lite.saved_visibility = Some(DirectKitVisibility::PersonalOnly);
+
+        let strings = family_studio_lite_strings(&app.family_studio_lite_ui_state())
+            .join("\n")
+            .to_ascii_lowercase();
+
+        for forbidden in [
+            "kernel",
+            "module",
+            "provider",
+            "slot",
+            "topology",
+            "fingerprint",
+            "conformance",
+            "artifact",
+            "raw transform",
+            "mesh payload",
+            "generated variation",
+            "candidate",
+            "runtime llm",
+            "public catalog",
+            "publish",
+            "uv",
+            "texturing",
+            "rigging",
+            "animation",
+            "game-ready",
+        ] {
+            assert!(
+                !strings.contains(forbidden),
+                "Family Studio Lite copy leaked {forbidden}: {strings}"
+            );
+        }
+    }
+
+    #[test]
+    fn family_studio_lite_test_result_appears_without_approval() {
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+
+        app.run_family_studio_lite_test();
+        let drawer = app.family_studio_lite_ui_state();
+        let result = drawer.test_result.expect("test result");
+        assert_eq!(result.status, FamilyStudioLiteTestStatus::Warnings);
+        assert_eq!(result.tested_capabilities, 1);
+        assert!(result.human_review_required);
+        assert!(!result.approved);
+        assert!(!result.publish_allowed);
+    }
+
+    #[test]
+    fn family_studio_lite_hides_irrelevant_stale_background_warning() {
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+        app.drawer = Some(FoundryDrawer::FamilyStudioLite);
+        app.state.status =
+            Some("Ignored a background result because newer work is active.".to_owned());
+
+        let drawer = app.family_studio_lite_ui_state();
+        let visible = app.make_canvas_view_state();
+
+        assert!(drawer.drawer_visible);
+        assert!(app.family_studio_lite_suppresses_stale_status(
+            app.state.status.as_deref().expect("status")
+        ));
+        assert!(visible.local_warning_message.is_none());
+        assert_eq!(visible.local_banner_title, "Ready");
+        assert_eq!(app.status_summary(), "Ready");
+        assert!(
+            !visible
+                .local_banner_message
+                .contains("An older result was ignored")
+        );
+    }
+
+    #[test]
+    fn family_studio_lite_save_draft_creates_draft_kit() {
+        let store = isolated_family_studio_lite_store("draft");
+        let _ = std::fs::remove_dir_all(&store);
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+
+        app.save_family_studio_lite_kit_to(DirectKitVisibility::Draft, &store);
+        let drawer = app.family_studio_lite_ui_state();
+        assert_eq!(drawer.saved_visibility, Some(DirectKitVisibility::Draft));
+
+        let stored = shape_foundry::load_direct_kit(&store, "box_primitive_reusable_kit")
+            .expect("load saved draft");
+        assert_eq!(stored.visibility, DirectKitVisibility::Draft);
+        assert!(!stored.public_catalog_visible);
+        assert!(!stored.novice_visible);
+        let _ = std::fs::remove_dir_all(&store);
+    }
+
+    #[test]
+    fn family_studio_lite_use_personally_creates_personal_only_kit() {
+        let store = isolated_family_studio_lite_store("personal");
+        let _ = std::fs::remove_dir_all(&store);
+        let mut app = ready_visible_state_test_app();
+        app.family_studio_lite_enabled = true;
+
+        app.save_family_studio_lite_kit_to(DirectKitVisibility::PersonalOnly, &store);
+        let drawer = app.family_studio_lite_ui_state();
+        assert_eq!(
+            drawer.saved_visibility,
+            Some(DirectKitVisibility::PersonalOnly)
+        );
+
+        let stored = shape_foundry::load_direct_kit(&store, "box_primitive_reusable_kit")
+            .expect("load saved personal kit");
+        assert_eq!(stored.visibility, DirectKitVisibility::PersonalOnly);
+        assert_eq!(
+            stored.direct_kit.review_tier,
+            ObjectPlanReviewTier::Personal
+        );
+        assert!(!stored.public_catalog_visible);
+        assert!(!stored.novice_visible);
+        let _ = std::fs::remove_dir_all(&store);
+    }
+
+    #[test]
+    fn family_studio_lite_screenshot_state_assertions_cover_required_states() {
+        let mut hidden = ready_visible_state_test_app();
+        hidden.family_studio_lite_enabled = false;
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FamilyStudioLiteHiddenDefault,
+                &hidden.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+
+        let mut drawer = ready_visible_state_test_app();
+        drawer.family_studio_lite_enabled = true;
+        drawer.drawer = Some(FoundryDrawer::FamilyStudioLite);
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FamilyStudioLiteDrawer,
+                &drawer.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FamilyStudioLiteTestResult,
+                &drawer.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FamilyStudioLiteSaveDraft,
+                &drawer.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::FamilyStudioLitePersonalSaved,
+                &drawer.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn screenshot_focus_scenario_helper_does_not_focus_box_body() {
         let mut app = visible_state_test_app();
 
@@ -12603,6 +13540,39 @@ mod tests {
 
     fn visible_state_test_app() -> FoundryDesktopApp {
         fixture_state_test_app(shape_foundry_catalog::box_primitive::fixture_catalog())
+    }
+
+    fn family_studio_lite_strings(state: &FamilyStudioLiteUiState) -> Vec<String> {
+        let mut strings = vec![
+            state.starting_point_title.clone(),
+            state.starting_point_summary.clone(),
+            state.source_label.to_owned(),
+        ];
+        strings.extend(state.disabled_reason.clone());
+        strings.extend(state.stays_same.clone());
+        for card in &state.capability_cards {
+            strings.push(card.display_name.clone());
+            strings.push(card.description.clone());
+            strings.push(card.status_label.to_owned());
+        }
+        if let Some(result) = &state.test_result {
+            strings.push(result.message.clone());
+            strings.push(format!("{:?}", result.status));
+        }
+        if let Some(error) = &state.save_error {
+            strings.push(error.clone());
+        }
+        if let Some(visibility) = state.saved_visibility {
+            strings.push(format!("{visibility:?}"));
+        }
+        strings
+    }
+
+    fn isolated_family_studio_lite_store(name: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "shape-lab-family-studio-lite-test-{name}-{}",
+            std::process::id()
+        ))
     }
 
     fn fixture_state_test_app(fixture: FoundryFixtureCatalog) -> FoundryDesktopApp {
