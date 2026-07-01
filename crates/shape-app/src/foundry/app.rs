@@ -113,6 +113,9 @@ enum ScreenshotScenario {
     SphereDirectMakeReady,
     SpherePropertyEdit,
     SphereKnobLikePreset,
+    PanelKnobDirectMakeReady,
+    OrbitAfterDragOrTool,
+    ResetView,
     SphereExportDrawer,
     PackDrawer,
     ExportDrawer,
@@ -2415,7 +2418,11 @@ impl FoundryDesktopApp {
             if let Some(group) = active_group {
                 commands.extend(self.show_make_focus_action_tray(ui, view_state, group));
             } else if view_state.direct_primitive_workflow {
-                show_make_view_controls(ui);
+                commands.extend(show_make_view_controls(
+                    ui,
+                    self.state.current_preview.as_ref(),
+                    &mut self.current_preview_orbit,
+                ));
             } else if view_state.mode != MakeCanvasMode::ReviewingIdeas {
                 commands.extend(self.show_make_primary_stage_action(ui, view_state));
             }
@@ -4501,7 +4508,10 @@ impl FoundryDesktopApp {
             | ScreenshotScenario::ChooseSelectedPreview => {}
             ScreenshotScenario::BoxDirectMakeReady
             | ScreenshotScenario::FlatPanelDirectMakeReady
-            | ScreenshotScenario::SphereDirectMakeReady => {
+            | ScreenshotScenario::SphereDirectMakeReady
+            | ScreenshotScenario::PanelKnobDirectMakeReady
+            | ScreenshotScenario::OrbitAfterDragOrTool
+            | ScreenshotScenario::ResetView => {
                 if self.state.active_jobs.is_empty() {
                     self.complete_screenshot_scenario(scenario);
                 }
@@ -5509,15 +5519,22 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "choose_flat_panel_provenance" => Some(ScreenshotScenario::ChooseFlatPanelProvenance),
         "choose_sphere_preset" => Some(ScreenshotScenario::ChooseSpherePreset),
         "choose_selected_preview" => Some(ScreenshotScenario::ChooseSelectedPreview),
-        "box_direct_make_ready" | "make_initial_box" => {
+        "box_direct_make_ready" | "make_initial_box" | "box_stage_no_grid" => {
             Some(ScreenshotScenario::BoxDirectMakeReady)
         }
         "box_property_edit" | "adjusted_box_control" => Some(ScreenshotScenario::BoxPropertyEdit),
-        "flat_panel_direct_make_ready" => Some(ScreenshotScenario::FlatPanelDirectMakeReady),
+        "flat_panel_direct_make_ready" | "flat_panel_stage_no_grid" => {
+            Some(ScreenshotScenario::FlatPanelDirectMakeReady)
+        }
         "flat_panel_property_edit" => Some(ScreenshotScenario::FlatPanelPropertyEdit),
-        "sphere_direct_make_ready" => Some(ScreenshotScenario::SphereDirectMakeReady),
+        "sphere_direct_make_ready" | "sphere_stage_no_grid" => {
+            Some(ScreenshotScenario::SphereDirectMakeReady)
+        }
         "sphere_property_edit" => Some(ScreenshotScenario::SpherePropertyEdit),
         "sphere_knob_like_preset" => Some(ScreenshotScenario::SphereKnobLikePreset),
+        "panel_knob_stage_no_grid" => Some(ScreenshotScenario::PanelKnobDirectMakeReady),
+        "orbit_after_drag_or_tool" => Some(ScreenshotScenario::OrbitAfterDragOrTool),
+        "reset_view" => Some(ScreenshotScenario::ResetView),
         "sphere_export_drawer" => Some(ScreenshotScenario::SphereExportDrawer),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
@@ -5549,6 +5566,8 @@ fn read_screenshot_fixture_catalog(
         | ScreenshotScenario::ChooseSelectedPreview
         | ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
+        | ScreenshotScenario::OrbitAfterDragOrTool
+        | ScreenshotScenario::ResetView
         | ScreenshotScenario::PackDrawer
         | ScreenshotScenario::ExportDrawer
         | ScreenshotScenario::ObjectPlanReviewDrawer
@@ -5568,6 +5587,9 @@ fn read_screenshot_fixture_catalog(
         | ScreenshotScenario::SphereKnobLikePreset
         | ScreenshotScenario::SphereExportDrawer => {
             shape_foundry_catalog::sphere_primitive::fixture_catalog()
+        }
+        ScreenshotScenario::PanelKnobDirectMakeReady => {
+            shape_foundry_catalog::panel_knob::fixture_catalog()
         }
     }
 }
@@ -5590,7 +5612,10 @@ fn screenshot_scenario_assertion(
         | ScreenshotScenario::FlatPanelPropertyEdit
         | ScreenshotScenario::SphereDirectMakeReady
         | ScreenshotScenario::SpherePropertyEdit
-        | ScreenshotScenario::SphereKnobLikePreset => {
+        | ScreenshotScenario::SphereKnobLikePreset
+        | ScreenshotScenario::PanelKnobDirectMakeReady
+        | ScreenshotScenario::OrbitAfterDragOrTool
+        | ScreenshotScenario::ResetView => {
             require_screenshot_state(view_state.mode == MakeCanvasMode::Ready, scenario, "Ready")?;
             require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
             require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")?;
@@ -6843,20 +6868,55 @@ fn draw_busy_overlay(ui: &egui::Ui, rect: egui::Rect, label: &str) {
     );
 }
 
-fn show_make_view_controls(ui: &mut egui::Ui) {
+fn show_make_view_controls(
+    ui: &mut egui::Ui,
+    current_preview: Option<&FoundryPreviewImage>,
+    current_preview_orbit: &mut CurrentPreviewOrbitState,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
     product_card(ui, false, |ui| {
         ui.horizontal_wrapped(|ui| {
             let _ = status_pill(
                 ui,
                 StatusPillSpec::new(VIEW_ORBIT_LABEL, StatusTone::Neutral),
             );
+            if action_button(
+                ui,
+                &action_spec(
+                    current_preview.is_some(),
+                    VIEW_RESET_LABEL,
+                    ButtonTone::Secondary,
+                    PREVIEW_PREPARING_REASON,
+                ),
+            )
+            .clicked()
+                && let Some(command) = reset_current_preview_view_command(current_preview)
+            {
+                *current_preview_orbit = CurrentPreviewOrbitState::default();
+                commands.push(command);
+            }
             let _ = status_pill(
                 ui,
-                StatusPillSpec::new(VIEW_RESET_LABEL, StatusTone::Neutral),
+                StatusPillSpec::new(VIEW_AXIS_LABEL, make_view_axis_default_tone()),
             );
-            let _ = status_pill(ui, StatusPillSpec::new(VIEW_AXIS_LABEL, StatusTone::Ready));
         });
     });
+    commands
+}
+
+fn make_view_axis_default_tone() -> StatusTone {
+    StatusTone::Neutral
+}
+
+fn reset_current_preview_view_command(
+    current_preview: Option<&FoundryPreviewImage>,
+) -> Option<FoundryAppCommand> {
+    let preview = current_preview?;
+    Some(FoundryAppCommand::RequestPreview {
+        width: preview.width,
+        height: preview.height,
+        camera: Some(OrbitCamera::default()),
+    })
 }
 
 fn draw_focus_callout(ui: &egui::Ui, rect: egui::Rect, label: &str) {
@@ -9880,6 +9940,24 @@ struct FoundryPreviewDraw<'a> {
     max_edge: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurrentPreviewStageStyle {
+    Studio,
+    CoordinateReference,
+}
+
+fn current_preview_default_stage_style() -> CurrentPreviewStageStyle {
+    current_preview_stage_style_for_axis_view(false)
+}
+
+fn current_preview_stage_style_for_axis_view(axis_view_active: bool) -> CurrentPreviewStageStyle {
+    if axis_view_active {
+        CurrentPreviewStageStyle::CoordinateReference
+    } else {
+        CurrentPreviewStageStyle::Studio
+    }
+}
+
 #[derive(Default)]
 struct CurrentPreviewOrbitState {
     drag_start_camera: Option<OrbitCamera>,
@@ -9949,6 +10027,38 @@ fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, _asset_name: &s
     }
 }
 
+fn draw_studio_stage_background(ui: &egui::Ui, rect: egui::Rect) {
+    if rect.width() <= 1.0 || rect.height() <= 1.0 {
+        return;
+    }
+
+    let painter = ui.painter().with_clip_rect(rect);
+    let back_wall = egui::Color32::from_rgb(46, 44, 40);
+    let stage_floor = egui::Color32::from_rgb(57, 55, 49);
+    let horizon = egui::Color32::from_rgba_unmultiplied(155, 143, 119, 56);
+    let shadow = egui::Color32::from_rgba_unmultiplied(14, 15, 16, 92);
+
+    painter.rect_filled(rect, 4.0, back_wall);
+
+    let horizon_y = rect.bottom() - rect.height() * 0.28;
+    let floor_rect =
+        egui::Rect::from_min_max(egui::pos2(rect.left(), horizon_y), rect.right_bottom());
+    painter.rect_filled(floor_rect, 0.0, stage_floor);
+    painter.line_segment(
+        [
+            egui::pos2(rect.left(), horizon_y),
+            egui::pos2(rect.right(), horizon_y),
+        ],
+        egui::Stroke::new(1.0, horizon),
+    );
+
+    let plate = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.bottom() - rect.height() * 0.14),
+        egui::vec2(rect.width() * 0.34, rect.height() * 0.045),
+    );
+    painter.rect_filled(plate, egui::CornerRadius::same(12), shadow);
+}
+
 fn draw_coordinate_reference_overlay(ui: &egui::Ui, rect: egui::Rect) {
     if rect.width() <= 1.0 || rect.height() <= 1.0 {
         return;
@@ -10004,31 +10114,12 @@ fn draw_coordinate_reference_overlay(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
-fn draw_viewport_foreground_overlay(ui: &egui::Ui, rect: egui::Rect) {
+fn draw_viewport_orientation_cue(ui: &egui::Ui, rect: egui::Rect) {
     if rect.width() <= 1.0 || rect.height() <= 1.0 {
         return;
     }
 
     let painter = ui.painter().with_clip_rect(rect);
-    let origin = rect.center();
-    let origin_color = egui::Color32::from_rgba_unmultiplied(238, 144, 54, 210);
-
-    painter.circle_stroke(origin, 6.0, egui::Stroke::new(1.2, origin_color));
-    painter.line_segment(
-        [
-            origin - egui::vec2(10.0, 0.0),
-            origin + egui::vec2(10.0, 0.0),
-        ],
-        egui::Stroke::new(1.0, origin_color),
-    );
-    painter.line_segment(
-        [
-            origin - egui::vec2(0.0, 10.0),
-            origin + egui::vec2(0.0, 10.0),
-        ],
-        egui::Stroke::new(1.0, origin_color),
-    );
-
     draw_viewport_axis_gizmo(&painter, rect);
 }
 
@@ -10092,14 +10183,19 @@ fn show_current_rgba_preview(
         let model_size = current_preview_model_image_size(size);
         let (rect, response) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
         let image_rect = egui::Rect::from_center_size(rect.center(), model_size);
-        draw_coordinate_reference_overlay(ui, rect);
+        match current_preview_default_stage_style() {
+            CurrentPreviewStageStyle::Studio => draw_studio_stage_background(ui, rect),
+            CurrentPreviewStageStyle::CoordinateReference => {
+                draw_coordinate_reference_overlay(ui, rect);
+            }
+        }
         ui.painter().image(
             texture.id(),
             image_rect,
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-        draw_viewport_foreground_overlay(ui, rect);
+        draw_viewport_orientation_cue(ui, rect);
         return response;
     }
     let size = egui::vec2(preview.max_edge.max(1.0), preview.max_edge.max(1.0));
@@ -10564,7 +10660,7 @@ mod tests {
     }
 
     #[test]
-    fn current_preview_viewport_keeps_model_smaller_than_grid() {
+    fn current_preview_viewport_keeps_model_smaller_than_studio_stage() {
         assert_eq!(
             current_preview_viewport_size(960.0, 520.0),
             egui::vec2(960.0, 520.0)
@@ -10573,6 +10669,23 @@ mod tests {
             current_preview_model_image_size(egui::vec2(520.0, 520.0)),
             egui::vec2(468.0, 468.0)
         );
+    }
+
+    #[test]
+    fn current_preview_defaults_to_studio_stage_without_axis_view() {
+        assert_eq!(
+            current_preview_default_stage_style(),
+            CurrentPreviewStageStyle::Studio
+        );
+        assert_eq!(
+            current_preview_stage_style_for_axis_view(false),
+            CurrentPreviewStageStyle::Studio
+        );
+        assert_eq!(
+            current_preview_stage_style_for_axis_view(true),
+            CurrentPreviewStageStyle::CoordinateReference
+        );
+        assert_eq!(make_view_axis_default_tone(), StatusTone::Neutral);
     }
 
     #[test]
@@ -10619,6 +10732,31 @@ mod tests {
         assert_eq!(rotated.target, OrbitCamera::default().target);
         assert_eq!(rotated.distance, preview.camera.distance);
         assert!(current_preview_orbit_camera(&preview, egui::Vec2::ZERO).is_none());
+    }
+
+    #[test]
+    fn reset_view_command_restores_authored_preview_camera() {
+        let mut preview = test_preview_image("current");
+        preview.camera.orbit(18.0, -12.0);
+
+        let command =
+            reset_current_preview_view_command(Some(&preview)).expect("reset command available");
+        let FoundryAppCommand::RequestPreview {
+            width,
+            height,
+            camera: Some(camera),
+        } = command
+        else {
+            panic!("reset view should request a preview with the default camera");
+        };
+
+        assert_eq!(width, preview.width);
+        assert_eq!(height, preview.height);
+        assert_eq!(camera.target, OrbitCamera::default().target);
+        assert_eq!(camera.distance, OrbitCamera::default().distance);
+        assert_eq!(camera.yaw_degrees, OrbitCamera::default().yaw_degrees);
+        assert_eq!(camera.pitch_degrees, OrbitCamera::default().pitch_degrees);
+        assert!(reset_current_preview_view_command(None).is_none());
     }
 
     #[test]
@@ -11950,6 +12088,31 @@ mod tests {
         assert!(
             screenshot_scenario_assertion(ScreenshotScenario::SphereKnobLikePreset, &sphere)
                 .is_ok()
+        );
+
+        let panel_knob =
+            ready_fixture_state_test_app(shape_foundry_catalog::panel_knob::fixture_catalog())
+                .make_canvas_view_state();
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::PanelKnobDirectMakeReady,
+                &panel_knob,
+            )
+            .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::OrbitAfterDragOrTool,
+                &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::ResetView,
+                &app.make_canvas_view_state()
+            )
+            .is_ok()
         );
 
         app.drawer = Some(FoundryDrawer::Pack);

@@ -87,7 +87,8 @@ Recommended implementation order:
 1. Apply direct Make stale-warning correctness fix.
 2. Redesign Choose around provenance and grouped starting points. Done in
    Choose Page Provenance Redesign v0.
-3. Clean up the Make stage so it is warm, centered, and not grid-first.
+3. Clean up the Make stage so it is warm, centered, and not grid-first. Done in
+   Make Stage Cleanup v0.
 4. Make the exact-value fallback compact and useful.
 5. Add Orchard stretch handles for Width / Height / Depth / Thickness.
 
@@ -102,6 +103,13 @@ Choose v0 now groups default starting points by source primitive:
 
 Historical proof entries such as Handled Panel stay hidden from default Choose
 and may appear only in preview/internal mode.
+
+## Make stage cleanup result
+
+Make v0 now uses a warm studio stage for direct primitive previews by default.
+The permanent coordinate grid, red/green crossing axes, and center origin cursor
+are removed from the default stage. A small corner orientation cue remains, and
+secondary-button orbit plus Reset view remain available.
 
 ## Explicit non-goals
 
