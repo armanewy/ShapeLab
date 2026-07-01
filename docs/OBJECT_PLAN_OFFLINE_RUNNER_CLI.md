@@ -34,6 +34,10 @@ Contact-sheet evidence can be requested with `--contact-sheet`. Until
 ObjectPlan materialization to renderable geometry exists, the command writes
 an honest blocked report and does not create `contact-sheet.png`.
 
+The runner output is validation and review preparation. It must not be
+described as generated asset geometry until materialization and real render
+evidence are wired for the plan.
+
 The legacy `shape-cli object-plan render --plan ... --out-dir ...` command is
 kept as a compatibility alias for the same validation and preparation flow.
 

@@ -28,6 +28,8 @@ Choose Primitive
 - Candidate generation is inactive in the current primitive product flow.
 - ObjectPlan v0 exists for structured offline validation and review of
   supported primitive and safe-anchor composition plans.
+- ObjectPlan v0 does not yet guarantee renderable asset materialization for
+  every supported plan; render-blocked reports are truthful incomplete output.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but every plan is
   validated by Object Orchard before review.
 - ObjectPlan batch review and the internal review drawer are available as
@@ -97,6 +99,7 @@ python scripts/clean_targets.py --list --root ..
 
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
 - [`docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md)
+- [`docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md`](docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md)
 - [`docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md`](docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md)
 - [`docs/OBJECT_PLAN_DSL_CONTRACTS.md`](docs/OBJECT_PLAN_DSL_CONTRACTS.md)
 - [`docs/OBJECT_PLAN_BATCH_RUNNER_V0.md`](docs/OBJECT_PLAN_BATCH_RUNNER_V0.md)

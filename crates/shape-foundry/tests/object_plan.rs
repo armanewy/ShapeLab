@@ -13,6 +13,33 @@ const DRAFT_PROMPT_PACK: &str =
     include_str!("../../../docs/llm_prompt_packs/object_plan_draft_v0.md");
 const REPAIR_PROMPT_PACK: &str =
     include_str!("../../../docs/llm_prompt_packs/object_plan_repair_v0.md");
+const OBJECT_PLAN_STATUS_DOCS: &[(&str, &str)] = &[
+    ("README.md", include_str!("../../../README.md")),
+    (
+        "docs/CURRENT_PRODUCT_STATUS.md",
+        include_str!("../../../docs/CURRENT_PRODUCT_STATUS.md"),
+    ),
+    (
+        "docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md",
+        include_str!("../../../docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md"),
+    ),
+    (
+        "docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md",
+        include_str!("../../../docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md"),
+    ),
+    (
+        "docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md",
+        include_str!("../../../docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md"),
+    ),
+    (
+        "docs/OBJECT_PLAN_CONTACT_SHEET_EVIDENCE.md",
+        include_str!("../../../docs/OBJECT_PLAN_CONTACT_SHEET_EVIDENCE.md"),
+    ),
+    (
+        "docs/KNOWN_LIMITATIONS.md",
+        include_str!("../../../docs/KNOWN_LIMITATIONS.md"),
+    ),
+];
 
 #[test]
 fn object_plan_one_sphere_validates() {
@@ -263,6 +290,79 @@ fn object_plan_repair_suggestion_requires_human_review() {
     let report = validate_object_plan_repair_suggestion(&suggestion);
 
     assert_issue(&report, "repair_requires_human_review");
+}
+
+#[test]
+fn object_plan_status_docs_do_not_overclaim_asset_generation() {
+    for (path, doc) in OBJECT_PLAN_STATUS_DOCS {
+        let lower = doc.to_ascii_lowercase();
+        for forbidden in [
+            "objectplan generates assets",
+            "objectplan can generate assets",
+            "objectplan v0 generates assets",
+            "objectplan produces reusable prototype geometry",
+            "objectplan produces visible generated assets",
+            "objectplan renders every supported plan",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "{path} must not overclaim ObjectPlan generation/rendering: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn object_plan_status_docs_do_not_claim_auto_approval_or_runtime_llm() {
+    for (path, doc) in OBJECT_PLAN_STATUS_DOCS {
+        let lower = doc.to_ascii_lowercase();
+        for forbidden in [
+            "approved: true",
+            "plans are approved automatically",
+            "objectplans are approved automatically",
+            "runtime llm support",
+            "runtime llm is supported",
+            "the app calls llms at runtime",
+            "public catalog publishing is enabled",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "{path} must not claim approval, runtime LLM, or public publishing: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn object_plan_status_docs_keep_surface_rig_animation_blocked() {
+    let combined = OBJECT_PLAN_STATUS_DOCS
+        .iter()
+        .map(|(_, doc)| *doc)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+    for required in [
+        "material/surface",
+        "uv/texturing",
+        "rigging",
+        "animation",
+        "game-ready",
+    ] {
+        assert!(
+            combined.contains(required),
+            "ObjectPlan status docs must keep {required} blocked or caveated"
+        );
+    }
+}
+
+#[test]
+fn object_plan_render_blocked_state_is_documented_as_valid_but_incomplete() {
+    let truth_doc = include_str!("../../../docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md")
+        .to_ascii_lowercase();
+    assert!(truth_doc.contains("render-blocked"));
+    assert!(truth_doc.contains("valid for objectplan v0"));
+    assert!(truth_doc.contains("incomplete"));
+    assert!(truth_doc.contains("next milestone"));
 }
 
 fn one_sphere_plan() -> ObjectPlan {

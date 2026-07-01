@@ -53,6 +53,9 @@ Observed result: validation passed with zero issues. Rendering is honestly
 blocked because ObjectPlan preview materialization is not wired yet. No
 `contact-sheet.png` was written.
 
+This means ObjectPlan v0 is validation and review infrastructure. It does not
+yet prove reusable prototype geometry for every supported plan.
+
 Batch run:
 
 ```bash
@@ -104,6 +107,8 @@ Passed in this integration branch:
 ## Next Allowed Work
 
 - Wire ObjectPlan materialization into the preview/render evidence path.
+- Treat render-blocked reports as truthful but incomplete until
+  materialization exists.
 - Expand the approved primitive and safe-anchor vocabulary only through schema
   gates.
 - Add more deterministic primitive presets after validator coverage exists.

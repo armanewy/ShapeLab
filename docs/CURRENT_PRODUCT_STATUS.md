@@ -37,6 +37,9 @@ primitive and safe-anchor composition plans.
   primitive plans and safe-anchor composition plans.
 - ObjectPlan CLI runs produce validation reports, user summaries, normalized
   plans, honest renderability reports, and batch review reports.
+- ObjectPlan v0 does not yet guarantee renderable asset materialization for
+  every supported plan. Render-blocked reports are acceptable and truthful, but
+  incomplete.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
   validates every plan and LLM drafts remain Draft until reviewed.
 - ObjectPlan review UI is internal-only and dev-gated; it is not part of the
@@ -90,6 +93,9 @@ primitive and safe-anchor composition plans.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
 - ObjectPlan may be referenced as structured offline validation and review
   infrastructure for supported primitives and safe-anchor compositions.
+- ObjectPlan materialization and render evidence are the next required
+  milestones before ObjectPlan can be described as producing reusable prototype
+  geometry.
 - ObjectPlan batch review may be referenced as offline review infrastructure,
   not Prototype Pack Mode and not automatic approval.
 - Offline LLM drafting may be referenced only as external draft JSON

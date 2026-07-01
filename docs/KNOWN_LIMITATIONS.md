@@ -29,6 +29,8 @@
   app.
 - ObjectPlan rendering currently reports honest render-blocked output when
   preview materialization is unavailable; contact sheets must not be faked.
+- ObjectPlan v0 does not yet guarantee renderable asset materialization for
+  every supported plan.
 - ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
 - Family Studio Lite is paused until direct primitive and composition flows are

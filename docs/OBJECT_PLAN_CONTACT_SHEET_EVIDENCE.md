@@ -32,6 +32,10 @@ If ObjectPlan materialization is not wired for a plan, the command records
 `renderable: false`, lists missing preview bindings, and does not write
 `contact-sheet.png`.
 
+That render-blocked state is valid ObjectPlan v0 output, but it is incomplete.
+It identifies the next materialization/render-evidence work rather than
+pretending the plan produced visible reusable geometry.
+
 Unsupported plans must fail honestly. The CLI must not claim rendered evidence,
 must not write placeholder contact sheets, and must not mark the plan approved.
 
