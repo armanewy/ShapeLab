@@ -70,6 +70,7 @@ use shape_search::foundry::{
 };
 use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candidates};
 
+mod direct_kit_cli;
 mod foundry_cli;
 mod foundry_foundation_cli;
 mod foundry_kit_cli;
@@ -132,6 +133,8 @@ enum Command {
     FoundryKit(foundry_kit_cli::FoundryKitArgs),
     /// Create, validate, materialize, and review internal Foundry foundation drafts.
     FoundryFoundation(foundry_foundation_cli::FoundryFoundationArgs),
+    /// Test Direct Kits deterministically.
+    DirectKit(direct_kit_cli::DirectKitArgs),
     /// Validate and inspect structured offline ObjectPlans.
     ObjectPlan(object_plan_cli::ObjectPlanArgs),
     /// Prove engine import boundaries without claiming game-ready status.
@@ -682,6 +685,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryPackageProfile(args) => run_foundry_package_profile(args),
         Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
+        Command::DirectKit(args) => direct_kit_cli::run_direct_kit(args),
         Command::ObjectPlan(args) => object_plan_cli::run_object_plan(args),
         Command::GodotProof(args) => godot_proof_cli::run_godot_proof(args),
         Command::PersonalKit(args) => personal_kit_cli::run_personal_kit(args),
