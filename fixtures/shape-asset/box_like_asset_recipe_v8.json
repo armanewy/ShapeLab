@@ -1,0 +1,77 @@
+{
+  "schema_version": 8,
+  "id": 3,
+  "title": "Box-like Asset",
+  "definitions": {
+    "1": {
+      "id": 1,
+      "name": "Box Body",
+      "tags": [],
+      "geometry": {
+        "source": {
+          "RoundedBox": {
+            "half_extents": [1.0, 0.5, 0.25],
+            "radius": 0.1
+          }
+        },
+        "operations": []
+      },
+      "regions": {},
+      "sockets": {},
+      "local_pivot": {
+        "origin": [0.0, 0.0, 0.0],
+        "x_axis": [1.0, 0.0, 0.0],
+        "y_axis": [0.0, 1.0, 0.0],
+        "z_axis": [0.0, 0.0, 1.0]
+      },
+      "variant_group": null,
+      "production_hints": null
+    }
+  },
+  "instances": {
+    "1": {
+      "id": 1,
+      "definition": 1,
+      "name": "Box Body",
+      "parent": null,
+      "local_transform": {
+        "translation": [0.0, 0.0, 0.0],
+        "rotation_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "attachment": null,
+      "enabled": true,
+      "tags": [],
+      "generated_by": null
+    }
+  },
+  "root_instances": [1],
+  "parameters": {},
+  "locks": [],
+  "instance_locks": [],
+  "subtree_locks": [],
+  "topology_locks": [],
+  "constraints": [],
+  "relationships": [],
+  "semantic": {},
+  "next_ids": {
+    "part_definition": 2,
+    "part_instance": 2,
+    "operation": 1,
+    "region": 1,
+    "boundary_loop": 1,
+    "socket": 1,
+    "parameter": 1,
+    "revision": 1,
+    "relationship": 1,
+    "pattern": 1,
+    "surface_slot": 1,
+    "material_slot": 1,
+    "collision_body": 1,
+    "motion_channel": 1,
+    "terrain_patch": 1,
+    "export_profile": 1,
+    "authoring_op": 1,
+    "validation_report": 1
+  }
+}

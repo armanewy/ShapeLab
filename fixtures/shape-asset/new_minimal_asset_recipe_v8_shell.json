@@ -1,0 +1,82 @@
+{
+  "schema_version": 8,
+  "id": 2,
+  "title": "New Minimal Recipe",
+  "definitions": {},
+  "instances": {},
+  "root_instances": [],
+  "parameters": {},
+  "locks": [],
+  "instance_locks": [],
+  "subtree_locks": [],
+  "topology_locks": [],
+  "constraints": [],
+  "relationships": [],
+  "variation": {
+    "optional_instances": [],
+    "replacement_groups": {},
+    "count_ranges": {},
+    "parameter_range_overrides": {},
+    "semantic_cut_groups": {}
+  },
+  "semantic": {
+    "relationships": {},
+    "patterns": {},
+    "surface_slots": {},
+    "material_slots": {},
+    "collision_bodies": {},
+    "motion_channels": {},
+    "terrain_patches": {},
+    "export_profiles": {},
+    "authoring_ops": {},
+    "validation_reports": {},
+    "review_state": {
+      "tier": "Draft",
+      "human_review_required": true,
+      "publish_allowed": false,
+      "public_catalog_visible": false
+    },
+    "copy_on_write_lineage": {
+      "source_asset": null,
+      "source_revision": null
+    },
+    "effect_hashes": {
+      "hashes": {}
+    },
+    "export_includes": {
+      "includes_geometry": false,
+      "includes_uvs": false,
+      "includes_textures": false,
+      "includes_material_looks": false,
+      "includes_collision": false,
+      "includes_gameplay_metadata": false,
+      "includes_rig": false,
+      "includes_skinning": false,
+      "includes_animation": false,
+      "includes_terrain_collision": false,
+      "includes_godot_scene": false,
+      "game_ready": false,
+      "human_review_required": true
+    }
+  },
+  "next_ids": {
+    "part_definition": 1,
+    "part_instance": 1,
+    "operation": 1,
+    "region": 1,
+    "boundary_loop": 1,
+    "socket": 1,
+    "parameter": 1,
+    "revision": 1,
+    "relationship": 1,
+    "pattern": 1,
+    "surface_slot": 1,
+    "material_slot": 1,
+    "collision_body": 1,
+    "motion_channel": 1,
+    "terrain_patch": 1,
+    "export_profile": 1,
+    "authoring_op": 1,
+    "validation_report": 1
+  }
+}

@@ -23,7 +23,7 @@ pub use edits::*;
 pub use parameters::*;
 
 /// Current schema version for asset recipes.
-pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 7;
+pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 8;
 /// Package version for asset-recipe contracts.
 pub const SHAPE_ASSET_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BOUNDARY_BEVEL_PROFILE_MIN: f32 = 0.05;
@@ -82,6 +82,46 @@ id_type!(
 id_type!(
     RevisionId,
     "Stable identifier for an asset recipe revision."
+);
+id_type!(
+    RelationshipId,
+    "Stable semantic identifier for an authored relationship contract."
+);
+id_type!(
+    PatternId,
+    "Stable semantic identifier for an authored pattern contract."
+);
+id_type!(
+    SurfaceSlotId,
+    "Stable semantic identifier for a future surface slot."
+);
+id_type!(
+    MaterialSlotId,
+    "Stable semantic identifier for a future material slot."
+);
+id_type!(
+    CollisionBodyId,
+    "Stable semantic identifier for a future collision body."
+);
+id_type!(
+    MotionChannelId,
+    "Stable semantic identifier for a future motion channel."
+);
+id_type!(
+    TerrainPatchId,
+    "Stable semantic identifier for a future terrain patch."
+);
+id_type!(
+    ExportProfileId,
+    "Stable semantic identifier for an export profile shell."
+);
+id_type!(
+    AuthoringOpId,
+    "Stable semantic identifier for an authoring operation shell."
+);
+id_type!(
+    ValidationReportId,
+    "Stable semantic identifier for a validation report shell."
 );
 
 /// Asset-space transform stored as translation, XYZ Euler rotation, and scale.
@@ -212,6 +252,9 @@ pub struct AssetRecipe {
     /// Authored variation hints that do not affect hierarchy or generation semantics.
     #[serde(default)]
     pub variation: AuthoredVariationMetadata,
+    /// v8 semantic shells reserved for the canonical Orchard asset lane.
+    #[serde(default)]
+    pub semantic: AssetRecipeSemanticShells,
     /// Next semantic ID counters.
     pub next_ids: AssetIdCounters,
 }
@@ -237,6 +280,8 @@ struct AssetRecipeWire {
     relationships: Vec<AssetRelationshipPolicy>,
     #[serde(default)]
     variation: AuthoredVariationMetadata,
+    #[serde(default)]
+    semantic: AssetRecipeSemanticShells,
     next_ids: AssetIdCounters,
 }
 
@@ -281,6 +326,7 @@ impl AssetRecipeWire {
             constraints: self.constraints,
             relationships: self.relationships,
             variation: self.variation,
+            semantic: self.semantic,
             next_ids: self.next_ids,
         };
         if schema_version < 4 {
@@ -325,7 +371,7 @@ impl<'de> Deserialize<'de> for AssetRecipe {
 }
 
 fn migrated_asset_recipe_schema_version(schema_version: u32) -> u32 {
-    if matches!(schema_version, 1..=6) {
+    if matches!(schema_version, 1..=7) {
         ASSET_RECIPE_SCHEMA_VERSION
     } else {
         schema_version
@@ -424,6 +470,7 @@ impl AssetRecipe {
             constraints: Vec::new(),
             relationships: Vec::new(),
             variation: AuthoredVariationMetadata::default(),
+            semantic: AssetRecipeSemanticShells::default(),
             next_ids: AssetIdCounters::default(),
         }
     }
@@ -489,6 +536,36 @@ pub struct AssetIdCounters {
     pub parameter: u64,
     /// Next revision ID.
     pub revision: u64,
+    /// Next relationship contract ID.
+    #[serde(default = "default_id_counter")]
+    pub relationship: u64,
+    /// Next pattern contract ID.
+    #[serde(default = "default_id_counter")]
+    pub pattern: u64,
+    /// Next surface slot ID.
+    #[serde(default = "default_id_counter")]
+    pub surface_slot: u64,
+    /// Next material slot ID.
+    #[serde(default = "default_id_counter")]
+    pub material_slot: u64,
+    /// Next collision body ID.
+    #[serde(default = "default_id_counter")]
+    pub collision_body: u64,
+    /// Next motion channel ID.
+    #[serde(default = "default_id_counter")]
+    pub motion_channel: u64,
+    /// Next terrain patch ID.
+    #[serde(default = "default_id_counter")]
+    pub terrain_patch: u64,
+    /// Next export profile ID.
+    #[serde(default = "default_id_counter")]
+    pub export_profile: u64,
+    /// Next authoring operation ID.
+    #[serde(default = "default_id_counter")]
+    pub authoring_op: u64,
+    /// Next validation report ID.
+    #[serde(default = "default_id_counter")]
+    pub validation_report: u64,
 }
 
 impl Default for AssetIdCounters {
@@ -502,12 +579,371 @@ impl Default for AssetIdCounters {
             socket: 1,
             parameter: 1,
             revision: 1,
+            relationship: 1,
+            pattern: 1,
+            surface_slot: 1,
+            material_slot: 1,
+            collision_body: 1,
+            motion_channel: 1,
+            terrain_patch: 1,
+            export_profile: 1,
+            authoring_op: 1,
+            validation_report: 1,
         }
     }
 }
 
 fn default_id_counter() -> u64 {
     1
+}
+
+/// v8 semantic shells reserved for the canonical Orchard asset lane.
+///
+/// These fields are serialized contracts only. They do not implement
+/// material, collision, motion, terrain, export, or public publishing behavior.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AssetRecipeSemanticShells {
+    /// Canonical relationship contracts reserved for composition semantics.
+    #[serde(default)]
+    pub relationships: BTreeMap<RelationshipId, RelationshipContract>,
+    /// Canonical pattern contracts reserved for repetition semantics.
+    #[serde(default)]
+    pub patterns: BTreeMap<PatternId, PatternContract>,
+    /// Future primitive-aware surface slots.
+    #[serde(default)]
+    pub surface_slots: BTreeMap<SurfaceSlotId, SurfaceSlotShell>,
+    /// Future material slots. These are not material looks.
+    #[serde(default)]
+    pub material_slots: BTreeMap<MaterialSlotId, MaterialSlotShell>,
+    /// Future collision body declarations. These are not collision output.
+    #[serde(default)]
+    pub collision_bodies: BTreeMap<CollisionBodyId, CollisionBodyShell>,
+    /// Future motion channel declarations. These are not animation output.
+    #[serde(default)]
+    pub motion_channels: BTreeMap<MotionChannelId, MotionChannelShell>,
+    /// Future terrain patch declarations. These are not terrain output.
+    #[serde(default)]
+    pub terrain_patches: BTreeMap<TerrainPatchId, TerrainPatchShell>,
+    /// Export profile shells used by later export reports.
+    #[serde(default)]
+    pub export_profiles: BTreeMap<ExportProfileId, ExportProfileShell>,
+    /// Authoring operation shells used by later replay logs.
+    #[serde(default)]
+    pub authoring_ops: BTreeMap<AuthoringOpId, AuthoringOpShell>,
+    /// Validation report shells used by later proof gates.
+    #[serde(default)]
+    pub validation_reports: BTreeMap<ValidationReportId, ValidationReportShell>,
+    /// Current review/publication boundary for this recipe.
+    #[serde(default)]
+    pub review_state: ReviewState,
+    /// Copy-on-write lineage reserved for later breadcrumbs.
+    #[serde(default)]
+    pub copy_on_write_lineage: CopyOnWriteLineage,
+    /// Effect hashes reserved for later deterministic evidence.
+    #[serde(default)]
+    pub effect_hashes: EffectHashes,
+    /// Capability include/exclude summary reserved for export reports.
+    #[serde(default)]
+    pub export_includes: ExportIncludes,
+}
+
+/// Canonical authored relationship contract shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationshipContract {
+    /// Stable relationship ID.
+    pub id: RelationshipId,
+    /// Relationship semantic kind.
+    pub relationship_type: RelationshipType,
+    /// Optional parent endpoint for validation once populated.
+    #[serde(default)]
+    pub parent: Option<PartInstanceId>,
+    /// Optional child endpoint for validation once populated.
+    #[serde(default)]
+    pub child: Option<PartInstanceId>,
+    /// Product-safe label for future UI/reports.
+    #[serde(default)]
+    pub label: String,
+    /// Optional export profile expected to realize this relationship.
+    #[serde(default)]
+    pub export_profile: Option<ExportProfileId>,
+}
+
+/// Relationship semantic kind reserved for composition work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelationshipType {
+    /// Child keeps an authored rigid relationship to a parent.
+    RigidChild,
+    /// Child is mounted on a parent surface.
+    SurfaceMounted,
+    /// Child is an embedded feature in a parent.
+    EmbeddedFeature,
+    /// Child is a socketed accessory.
+    SocketedAccessory,
+    /// Child is attached through a future joint contract.
+    JointAttached,
+    /// Child has intentional authored offset.
+    IntentionalOffset,
+    /// Child is a future VFX relationship.
+    VfxChild,
+    /// Child is produced by a pattern.
+    PatternInstance,
+    /// Child is a future collision proxy.
+    CollisionProxy,
+    /// Child is render-only decoration.
+    RenderOnlyDecoration,
+    /// Relationship may later be baked as a union.
+    BakedUnion,
+}
+
+/// Canonical authored pattern contract shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternContract {
+    /// Stable pattern ID.
+    pub id: PatternId,
+    /// Pattern semantic kind.
+    pub pattern_type: PatternType,
+    /// Optional source instance for validation once populated.
+    #[serde(default)]
+    pub source_instance: Option<PartInstanceId>,
+    /// Optional authored count reserved for later evaluation.
+    #[serde(default)]
+    pub count: Option<u32>,
+    /// Product-safe label for future UI/reports.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Pattern semantic kind reserved for repetition work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatternType {
+    /// Linear repeated occurrences.
+    Linear,
+    /// Radial repeated occurrences.
+    Radial,
+    /// Grid repeated occurrences.
+    Grid,
+    /// Mirrored occurrence.
+    Mirror,
+    /// Occurrences placed along a curve.
+    AlongCurve,
+    /// Occurrences placed on a surface.
+    OnSurface,
+    /// Scattered occurrences.
+    Scatter,
+}
+
+/// Future surface slot shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceSlotShell {
+    /// Stable surface slot ID.
+    pub id: SurfaceSlotId,
+    /// Optional owning definition for validation once populated.
+    #[serde(default)]
+    pub owner_definition: Option<PartDefinitionId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future material slot shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaterialSlotShell {
+    /// Stable material slot ID.
+    pub id: MaterialSlotId,
+    /// Optional surface slot this material slot would bind to.
+    #[serde(default)]
+    pub surface_slot: Option<SurfaceSlotId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future collision body shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollisionBodyShell {
+    /// Stable collision body ID.
+    pub id: CollisionBodyId,
+    /// Optional target instance for validation once populated.
+    #[serde(default)]
+    pub target_instance: Option<PartInstanceId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future motion channel shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MotionChannelShell {
+    /// Stable motion channel ID.
+    pub id: MotionChannelId,
+    /// Optional target instance for validation once populated.
+    #[serde(default)]
+    pub target_instance: Option<PartInstanceId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future terrain patch shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerrainPatchShell {
+    /// Stable terrain patch ID.
+    pub id: TerrainPatchId,
+    /// Optional root instance for validation once populated.
+    #[serde(default)]
+    pub root_instance: Option<PartInstanceId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future export profile shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportProfileShell {
+    /// Stable export profile ID.
+    pub id: ExportProfileId,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+    /// Includes/excludes this profile may later report.
+    #[serde(default)]
+    pub includes: ExportIncludes,
+}
+
+/// Future authoring operation shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoringOpShell {
+    /// Stable authoring operation ID.
+    pub id: AuthoringOpId,
+    /// Optional target parameter for validation once populated.
+    #[serde(default)]
+    pub target_parameter: Option<ParameterId>,
+    /// Optional target instance for validation once populated.
+    #[serde(default)]
+    pub target_instance: Option<PartInstanceId>,
+    /// Product-safe label.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Future validation report shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidationReportShell {
+    /// Stable validation report ID.
+    pub id: ValidationReportId,
+    /// Optional export profile this report belongs to.
+    #[serde(default)]
+    pub export_profile: Option<ExportProfileId>,
+    /// Product-safe status label.
+    #[serde(default)]
+    pub status: String,
+}
+
+/// Review status shell. Phase A keeps outputs Draft and review-required.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewState {
+    /// Review tier.
+    pub tier: ReviewTier,
+    /// Human review is still required.
+    pub human_review_required: bool,
+    /// Public publishing is not allowed in Phase A.
+    pub publish_allowed: bool,
+    /// Public catalog visibility is not allowed in Phase A.
+    pub public_catalog_visible: bool,
+}
+
+impl Default for ReviewState {
+    fn default() -> Self {
+        Self {
+            tier: ReviewTier::Draft,
+            human_review_required: true,
+            publish_allowed: false,
+            public_catalog_visible: false,
+        }
+    }
+}
+
+/// Review tier reserved for future gates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReviewTier {
+    /// Draft output, not approved.
+    Draft,
+    /// Explicit review is required.
+    ReviewRequired,
+    /// Reserved for later evidence-backed review.
+    Reviewed,
+    /// Reserved for later publishing gates.
+    Published,
+}
+
+/// Copy-on-write lineage shell reserved for later breadcrumbs.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CopyOnWriteLineage {
+    /// Optional source asset.
+    #[serde(default)]
+    pub source_asset: Option<AssetId>,
+    /// Optional source revision.
+    #[serde(default)]
+    pub source_revision: Option<RevisionId>,
+}
+
+/// Deterministic effect hashes reserved for later evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EffectHashes {
+    /// Named hashes in stable key order.
+    #[serde(default)]
+    pub hashes: BTreeMap<String, String>,
+}
+
+/// Export/proof capability include flags.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportIncludes {
+    /// Geometry was included.
+    pub includes_geometry: bool,
+    /// UVs were included.
+    pub includes_uvs: bool,
+    /// Texture files were included.
+    pub includes_textures: bool,
+    /// Material looks were included.
+    pub includes_material_looks: bool,
+    /// Collision was included.
+    pub includes_collision: bool,
+    /// Gameplay metadata was included.
+    pub includes_gameplay_metadata: bool,
+    /// Rig data was included.
+    pub includes_rig: bool,
+    /// Skinning was included.
+    pub includes_skinning: bool,
+    /// Animation was included.
+    pub includes_animation: bool,
+    /// Terrain collision was included.
+    pub includes_terrain_collision: bool,
+    /// Godot scene output was included.
+    pub includes_godot_scene: bool,
+    /// Output is game-ready. Must remain false in Phase A.
+    pub game_ready: bool,
+    /// Human review is required.
+    pub human_review_required: bool,
+}
+
+impl Default for ExportIncludes {
+    fn default() -> Self {
+        Self {
+            includes_geometry: false,
+            includes_uvs: false,
+            includes_textures: false,
+            includes_material_looks: false,
+            includes_collision: false,
+            includes_gameplay_metadata: false,
+            includes_rig: false,
+            includes_skinning: false,
+            includes_animation: false,
+            includes_terrain_collision: false,
+            includes_godot_scene: false,
+            game_ready: false,
+            human_review_required: true,
+        }
+    }
 }
 
 /// Non-authoritative variation metadata authored alongside a recipe.
@@ -3265,6 +3701,7 @@ pub fn validate_asset_recipe(recipe: &AssetRecipe) -> AssetValidationReport {
     validate_constraints(recipe, &mut report);
     validate_relationships(recipe, &mut report);
     validate_variation_metadata(recipe, &mut report);
+    validate_semantic_shells(recipe, &mut report);
     validate_next_ids(recipe, &mut report);
 
     report
@@ -4578,6 +5015,379 @@ fn validate_variation_metadata(recipe: &AssetRecipe, report: &mut AssetValidatio
     }
 }
 
+fn validate_semantic_shells(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    for (id, relationship) in &recipe.semantic.relationships {
+        validate_shell_id(
+            report,
+            format!("semantic.relationships.{}", id.0),
+            id.0,
+            relationship.id.0,
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.relationships.{}.parent", id.0),
+            relationship.parent,
+            "unknown_semantic_relationship_parent",
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.relationships.{}.child", id.0),
+            relationship.child,
+            "unknown_semantic_relationship_child",
+        );
+        validate_optional_export_profile(
+            recipe,
+            report,
+            format!("semantic.relationships.{}.export_profile", id.0),
+            relationship.export_profile,
+            "unknown_semantic_relationship_export_profile",
+        );
+    }
+
+    for (id, pattern) in &recipe.semantic.patterns {
+        validate_shell_id(
+            report,
+            format!("semantic.patterns.{}", id.0),
+            id.0,
+            pattern.id.0,
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.patterns.{}.source_instance", id.0),
+            pattern.source_instance,
+            "unknown_semantic_pattern_source",
+        );
+        if let Some(count) = pattern.count
+            && !(1..=10_000).contains(&count)
+        {
+            push_issue(
+                report,
+                Some(format!("semantic.patterns.{}.count", id.0)),
+                "invalid_semantic_pattern_count",
+                "Pattern count must be between 1 and 10000.",
+            );
+        }
+    }
+
+    for (id, slot) in &recipe.semantic.surface_slots {
+        validate_shell_id(
+            report,
+            format!("semantic.surface_slots.{}", id.0),
+            id.0,
+            slot.id.0,
+        );
+        validate_optional_definition(
+            recipe,
+            report,
+            format!("semantic.surface_slots.{}.owner_definition", id.0),
+            slot.owner_definition,
+            "unknown_semantic_surface_owner",
+        );
+    }
+
+    for (id, slot) in &recipe.semantic.material_slots {
+        validate_shell_id(
+            report,
+            format!("semantic.material_slots.{}", id.0),
+            id.0,
+            slot.id.0,
+        );
+        if let Some(surface_slot) = slot.surface_slot
+            && !recipe.semantic.surface_slots.contains_key(&surface_slot)
+        {
+            push_issue(
+                report,
+                Some(format!("semantic.material_slots.{}.surface_slot", id.0)),
+                "unknown_semantic_material_surface_slot",
+                "Material slot references an unknown surface slot.",
+            );
+        }
+    }
+
+    for (id, body) in &recipe.semantic.collision_bodies {
+        validate_shell_id(
+            report,
+            format!("semantic.collision_bodies.{}", id.0),
+            id.0,
+            body.id.0,
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.collision_bodies.{}.target_instance", id.0),
+            body.target_instance,
+            "unknown_semantic_collision_target",
+        );
+    }
+
+    for (id, channel) in &recipe.semantic.motion_channels {
+        validate_shell_id(
+            report,
+            format!("semantic.motion_channels.{}", id.0),
+            id.0,
+            channel.id.0,
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.motion_channels.{}.target_instance", id.0),
+            channel.target_instance,
+            "unknown_semantic_motion_target",
+        );
+    }
+
+    for (id, patch) in &recipe.semantic.terrain_patches {
+        validate_shell_id(
+            report,
+            format!("semantic.terrain_patches.{}", id.0),
+            id.0,
+            patch.id.0,
+        );
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.terrain_patches.{}.root_instance", id.0),
+            patch.root_instance,
+            "unknown_semantic_terrain_root",
+        );
+    }
+
+    for (id, profile) in &recipe.semantic.export_profiles {
+        validate_shell_id(
+            report,
+            format!("semantic.export_profiles.{}", id.0),
+            id.0,
+            profile.id.0,
+        );
+        validate_export_includes(
+            report,
+            Some(format!("semantic.export_profiles.{}.includes", id.0)),
+            &profile.includes,
+        );
+    }
+
+    for (id, op) in &recipe.semantic.authoring_ops {
+        validate_shell_id(
+            report,
+            format!("semantic.authoring_ops.{}", id.0),
+            id.0,
+            op.id.0,
+        );
+        if let Some(parameter) = op.target_parameter
+            && !recipe.parameters.contains_key(&parameter)
+        {
+            push_issue(
+                report,
+                Some(format!("semantic.authoring_ops.{}.target_parameter", id.0)),
+                "unknown_semantic_authoring_parameter",
+                "Authoring op references an unknown parameter.",
+            );
+        }
+        validate_optional_instance(
+            recipe,
+            report,
+            format!("semantic.authoring_ops.{}.target_instance", id.0),
+            op.target_instance,
+            "unknown_semantic_authoring_instance",
+        );
+    }
+
+    for (id, validation) in &recipe.semantic.validation_reports {
+        validate_shell_id(
+            report,
+            format!("semantic.validation_reports.{}", id.0),
+            id.0,
+            validation.id.0,
+        );
+        validate_optional_export_profile(
+            recipe,
+            report,
+            format!("semantic.validation_reports.{}.export_profile", id.0),
+            validation.export_profile,
+            "unknown_semantic_validation_export_profile",
+        );
+    }
+
+    validate_review_state(report, &recipe.semantic.review_state);
+    validate_export_includes(
+        report,
+        Some("semantic.export_includes".to_owned()),
+        &recipe.semantic.export_includes,
+    );
+}
+
+fn validate_shell_id(
+    report: &mut AssetValidationReport,
+    subject: String,
+    map_id: u64,
+    payload_id: u64,
+) {
+    if payload_id == 0 {
+        push_issue(
+            report,
+            Some(subject.clone()),
+            "zero_semantic_shell_id",
+            "Semantic shell IDs must be non-zero.",
+        );
+    }
+    if map_id != payload_id {
+        push_issue(
+            report,
+            Some(subject),
+            "semantic_shell_id_mismatch",
+            "Semantic shell map key and payload ID differ.",
+        );
+    }
+}
+
+fn validate_optional_instance(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    subject: String,
+    instance: Option<PartInstanceId>,
+    code: &'static str,
+) {
+    if let Some(instance) = instance
+        && !recipe.instances.contains_key(&instance)
+    {
+        push_issue(
+            report,
+            Some(subject),
+            code,
+            "Semantic shell references an unknown instance.",
+        );
+    }
+}
+
+fn validate_optional_definition(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    subject: String,
+    definition: Option<PartDefinitionId>,
+    code: &'static str,
+) {
+    if let Some(definition) = definition
+        && !recipe.definitions.contains_key(&definition)
+    {
+        push_issue(
+            report,
+            Some(subject),
+            code,
+            "Semantic shell references an unknown definition.",
+        );
+    }
+}
+
+fn validate_optional_export_profile(
+    recipe: &AssetRecipe,
+    report: &mut AssetValidationReport,
+    subject: String,
+    export_profile: Option<ExportProfileId>,
+    code: &'static str,
+) {
+    if let Some(export_profile) = export_profile
+        && !recipe
+            .semantic
+            .export_profiles
+            .contains_key(&export_profile)
+    {
+        push_issue(
+            report,
+            Some(subject),
+            code,
+            "Semantic shell references an unknown export profile.",
+        );
+    }
+}
+
+fn validate_review_state(report: &mut AssetValidationReport, review: &ReviewState) {
+    if matches!(review.tier, ReviewTier::Reviewed | ReviewTier::Published) {
+        push_issue(
+            report,
+            Some("semantic.review_state.tier".to_owned()),
+            "unsupported_semantic_review_tier",
+            "Phase A semantic shells cannot mark assets reviewed or published.",
+        );
+    }
+    if !review.human_review_required {
+        push_issue(
+            report,
+            Some("semantic.review_state.human_review_required".to_owned()),
+            "semantic_human_review_required_false",
+            "Phase A semantic shells must keep human review required.",
+        );
+    }
+    if review.publish_allowed {
+        push_issue(
+            report,
+            Some("semantic.review_state.publish_allowed".to_owned()),
+            "semantic_publish_allowed",
+            "Phase A semantic shells must not allow publishing.",
+        );
+    }
+    if review.public_catalog_visible {
+        push_issue(
+            report,
+            Some("semantic.review_state.public_catalog_visible".to_owned()),
+            "semantic_public_catalog_visible",
+            "Phase A semantic shells must not make assets public catalog visible.",
+        );
+    }
+}
+
+fn validate_export_includes(
+    report: &mut AssetValidationReport,
+    subject: Option<String>,
+    includes: &ExportIncludes,
+) {
+    for (enabled, suffix) in [
+        (includes.includes_uvs, "includes_uvs"),
+        (includes.includes_textures, "includes_textures"),
+        (includes.includes_material_looks, "includes_material_looks"),
+        (includes.includes_collision, "includes_collision"),
+        (
+            includes.includes_gameplay_metadata,
+            "includes_gameplay_metadata",
+        ),
+        (includes.includes_rig, "includes_rig"),
+        (includes.includes_skinning, "includes_skinning"),
+        (includes.includes_animation, "includes_animation"),
+        (
+            includes.includes_terrain_collision,
+            "includes_terrain_collision",
+        ),
+        (includes.includes_godot_scene, "includes_godot_scene"),
+    ] {
+        if enabled {
+            push_issue(
+                report,
+                append_subject(subject.clone(), suffix),
+                "unsupported_semantic_export_include",
+                "Phase A semantic shells cannot claim unsupported export includes.",
+            );
+        }
+    }
+    if includes.game_ready {
+        push_issue(
+            report,
+            append_subject(subject.clone(), "game_ready"),
+            "semantic_game_ready_claim",
+            "Phase A semantic shells must keep game_ready false.",
+        );
+    }
+    if !includes.human_review_required {
+        push_issue(
+            report,
+            append_subject(subject, "human_review_required"),
+            "semantic_export_review_required_false",
+            "Phase A semantic shells must keep export review required.",
+        );
+    }
+}
+
 fn validate_next_ids(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
     validate_counter(
         report,
@@ -4620,6 +5430,71 @@ fn validate_next_ids(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
         "socket",
         recipe.next_ids.socket,
         max_socket_id(recipe),
+    );
+    validate_counter(
+        report,
+        "relationship",
+        recipe.next_ids.relationship,
+        recipe.semantic.relationships.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "pattern",
+        recipe.next_ids.pattern,
+        recipe.semantic.patterns.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "surface_slot",
+        recipe.next_ids.surface_slot,
+        recipe.semantic.surface_slots.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "material_slot",
+        recipe.next_ids.material_slot,
+        recipe.semantic.material_slots.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "collision_body",
+        recipe.next_ids.collision_body,
+        recipe.semantic.collision_bodies.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "motion_channel",
+        recipe.next_ids.motion_channel,
+        recipe.semantic.motion_channels.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "terrain_patch",
+        recipe.next_ids.terrain_patch,
+        recipe.semantic.terrain_patches.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "export_profile",
+        recipe.next_ids.export_profile,
+        recipe.semantic.export_profiles.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "authoring_op",
+        recipe.next_ids.authoring_op,
+        recipe.semantic.authoring_ops.keys().map(|id| id.0).max(),
+    );
+    validate_counter(
+        report,
+        "validation_report",
+        recipe.next_ids.validation_report,
+        recipe
+            .semantic
+            .validation_reports
+            .keys()
+            .map(|id| id.0)
+            .max(),
     );
 }
 
@@ -8133,6 +9008,213 @@ mod tests {
             serde_json::from_str(&json).expect("recipe should deserialize");
 
         assert_eq!(recipe, round_tripped);
+    }
+
+    #[test]
+    fn asset_recipe_v8_empty_semantic_shells_validate() {
+        let recipe = AssetRecipe::new(AssetId(9), "V8 semantic shells");
+
+        assert_eq!(recipe.schema_version, 8);
+        assert_eq!(recipe.semantic.review_state, ReviewState::default());
+        assert_eq!(recipe.semantic.export_includes, ExportIncludes::default());
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn schema_seven_recipe_migrates_to_v8_empty_semantic_shells() {
+        let recipe = test_recipe();
+        let mut value = serde_json::to_value(&recipe).expect("recipe should serialize");
+        value["schema_version"] = serde_json::json!(7);
+        value.as_object_mut().unwrap().remove("semantic");
+        for key in [
+            "relationship",
+            "pattern",
+            "surface_slot",
+            "material_slot",
+            "collision_body",
+            "motion_channel",
+            "terrain_patch",
+            "export_profile",
+            "authoring_op",
+            "validation_report",
+        ] {
+            value["next_ids"].as_object_mut().unwrap().remove(key);
+        }
+
+        let migrated: AssetRecipe =
+            serde_json::from_value(value).expect("schema 7 recipe should migrate");
+
+        assert_eq!(migrated.schema_version, ASSET_RECIPE_SCHEMA_VERSION);
+        assert_eq!(migrated.semantic, AssetRecipeSemanticShells::default());
+        assert!(validate_asset_recipe(&migrated).is_valid());
+    }
+
+    #[test]
+    fn asset_recipe_v8_semantic_shells_round_trip_deterministically() {
+        let mut recipe = multipart_recipe();
+        recipe.semantic.relationships.insert(
+            RelationshipId(1),
+            RelationshipContract {
+                id: RelationshipId(1),
+                relationship_type: RelationshipType::SurfaceMounted,
+                parent: Some(PartInstanceId(1)),
+                child: Some(PartInstanceId(2)),
+                label: "Knob mounted on panel".to_owned(),
+                export_profile: None,
+            },
+        );
+        recipe.semantic.patterns.insert(
+            PatternId(1),
+            PatternContract {
+                id: PatternId(1),
+                pattern_type: PatternType::Linear,
+                source_instance: Some(PartInstanceId(2)),
+                count: Some(3),
+                label: "repeat detail".to_owned(),
+            },
+        );
+        recipe.next_ids.relationship = 2;
+        recipe.next_ids.pattern = 2;
+
+        let first = serde_json::to_string(&recipe).expect("recipe serializes");
+        let round_tripped: AssetRecipe = serde_json::from_str(&first).expect("recipe parses");
+        let second = serde_json::to_string(&round_tripped).expect("recipe serializes");
+
+        assert_eq!(first, second);
+        assert_eq!(recipe, round_tripped);
+        assert!(validate_asset_recipe(&round_tripped).is_valid());
+    }
+
+    #[test]
+    fn semantic_shell_validation_rejects_unknown_references() {
+        let mut recipe = test_recipe();
+        recipe.semantic.relationships.insert(
+            RelationshipId(1),
+            RelationshipContract {
+                id: RelationshipId(1),
+                relationship_type: RelationshipType::RigidChild,
+                parent: Some(PartInstanceId(404)),
+                child: Some(PartInstanceId(1)),
+                label: String::new(),
+                export_profile: Some(ExportProfileId(404)),
+            },
+        );
+        recipe.semantic.patterns.insert(
+            PatternId(1),
+            PatternContract {
+                id: PatternId(1),
+                pattern_type: PatternType::Linear,
+                source_instance: Some(PartInstanceId(405)),
+                count: Some(0),
+                label: String::new(),
+            },
+        );
+        recipe.semantic.material_slots.insert(
+            MaterialSlotId(1),
+            MaterialSlotShell {
+                id: MaterialSlotId(1),
+                surface_slot: Some(SurfaceSlotId(404)),
+                label: String::new(),
+            },
+        );
+        recipe.semantic.authoring_ops.insert(
+            AuthoringOpId(1),
+            AuthoringOpShell {
+                id: AuthoringOpId(1),
+                target_parameter: Some(ParameterId(404)),
+                target_instance: Some(PartInstanceId(406)),
+                label: String::new(),
+            },
+        );
+        recipe.next_ids.relationship = 2;
+        recipe.next_ids.pattern = 2;
+        recipe.next_ids.material_slot = 2;
+        recipe.next_ids.authoring_op = 2;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("unknown_semantic_relationship_parent"));
+        assert!(codes.contains("unknown_semantic_relationship_export_profile"));
+        assert!(codes.contains("unknown_semantic_pattern_source"));
+        assert!(codes.contains("invalid_semantic_pattern_count"));
+        assert!(codes.contains("unknown_semantic_material_surface_slot"));
+        assert!(codes.contains("unknown_semantic_authoring_parameter"));
+        assert!(codes.contains("unknown_semantic_authoring_instance"));
+    }
+
+    #[test]
+    fn semantic_shell_validation_rejects_product_claims() {
+        let mut recipe = test_recipe();
+        recipe.semantic.review_state = ReviewState {
+            tier: ReviewTier::Published,
+            human_review_required: false,
+            publish_allowed: true,
+            public_catalog_visible: true,
+        };
+        recipe.semantic.export_profiles.insert(
+            ExportProfileId(1),
+            ExportProfileShell {
+                id: ExportProfileId(1),
+                label: "invalid export".to_owned(),
+                includes: ExportIncludes {
+                    includes_geometry: true,
+                    includes_textures: true,
+                    includes_collision: true,
+                    game_ready: true,
+                    ..ExportIncludes::default()
+                },
+            },
+        );
+        recipe.next_ids.export_profile = 2;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("unsupported_semantic_review_tier"));
+        assert!(codes.contains("semantic_human_review_required_false"));
+        assert!(codes.contains("semantic_publish_allowed"));
+        assert!(codes.contains("semantic_public_catalog_visible"));
+        assert!(codes.contains("unsupported_semantic_export_include"));
+        assert!(codes.contains("semantic_game_ready_claim"));
+    }
+
+    #[test]
+    fn asset_recipe_v8_fixtures_parse_migrate_and_validate() {
+        for (name, raw) in [
+            (
+                "old_minimal_asset_recipe_v7.json",
+                include_str!("../../../fixtures/shape-asset/old_minimal_asset_recipe_v7.json"),
+            ),
+            (
+                "new_minimal_asset_recipe_v8_shell.json",
+                include_str!(
+                    "../../../fixtures/shape-asset/new_minimal_asset_recipe_v8_shell.json"
+                ),
+            ),
+            (
+                "box_like_asset_recipe_v8.json",
+                include_str!("../../../fixtures/shape-asset/box_like_asset_recipe_v8.json"),
+            ),
+            (
+                "panel_knob_like_asset_recipe_v8.json",
+                include_str!("../../../fixtures/shape-asset/panel_knob_like_asset_recipe_v8.json"),
+            ),
+        ] {
+            let recipe: AssetRecipe =
+                serde_json::from_str(raw).unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                recipe.schema_version, ASSET_RECIPE_SCHEMA_VERSION,
+                "{name} should parse or migrate to current schema"
+            );
+            assert!(
+                validate_asset_recipe(&recipe).is_valid(),
+                "{name} should validate"
+            );
+            assert!(!recipe.semantic.review_state.publish_allowed);
+            assert!(!recipe.semantic.review_state.public_catalog_visible);
+            assert!(!recipe.semantic.export_includes.game_ready);
+        }
     }
 
     #[test]

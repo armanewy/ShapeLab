@@ -1,0 +1,32 @@
+{
+  "schema_version": 7,
+  "id": 1,
+  "title": "Old Minimal Recipe",
+  "definitions": {},
+  "instances": {},
+  "root_instances": [],
+  "parameters": {},
+  "locks": [],
+  "instance_locks": [],
+  "subtree_locks": [],
+  "topology_locks": [],
+  "constraints": [],
+  "relationships": [],
+  "variation": {
+    "optional_instances": [],
+    "replacement_groups": {},
+    "count_ranges": {},
+    "parameter_range_overrides": {},
+    "semantic_cut_groups": {}
+  },
+  "next_ids": {
+    "part_definition": 1,
+    "part_instance": 1,
+    "operation": 1,
+    "region": 1,
+    "boundary_loop": 1,
+    "socket": 1,
+    "parameter": 1,
+    "revision": 1
+  }
+}
