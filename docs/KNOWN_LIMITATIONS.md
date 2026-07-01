@@ -38,8 +38,8 @@
   blocked proof report is not a Godot-ready result.
 - ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
-- Family Studio Lite v0 is limited to internal preview work for local Draft /
-  Personal Direct Kits made from supported direct primitives, safe-anchor
+- Family Studio Lite v0 UI is limited to internal preview work for local Draft
+  / Personal Direct Kits made from supported direct primitives, safe-anchor
   compositions, and supported ObjectPlan Draft evidence.
 - Family Studio Lite v0 test results mean deterministic property endpoint
   checks, preset/contact-sheet evidence, ObjectPlan evidence, composition
