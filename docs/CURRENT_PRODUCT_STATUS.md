@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 ## Verdict
 
-`DIRECT_KIT_FAMILY_STUDIO_V0_INTEGRATED`
+`PHASE_A_CONTRACT_HARDENING_IN_PROGRESS`
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -18,6 +18,10 @@ blocked when no Godot binary is available.
 Family Studio Lite v0 now has an internal preview UI for local reusable Direct
 Kits. That flow remains developer-gated and produces Draft / Personal Kits
 only.
+The next architecture phase is contract hardening toward a semantic asset
+compiler: future A-J work targets `shape-asset::AssetRecipe` / Orchard IR as
+the canonical semantic lane, while `shape-core::ShapeDocument` remains a
+legacy/implicit compatibility lane rather than the new product backbone.
 
 ## Current Truth
 
@@ -95,6 +99,18 @@ only.
   zones, not arbitrary free transforms.
 - Material/surface work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
+- Phase A contract hardening is in progress. It does not add product-facing
+  features; it documents and tests that future controls, ObjectPlan work,
+  export reports, terrain, surface, collision, and motion work must route
+  through canonical semantic contracts.
+- `shape-asset::AssetRecipe` / Orchard IR is the target canonical semantic
+  asset lane for future A-J work.
+- `shape-core::ShapeDocument` remains the legacy/implicit compatibility lane
+  and must not receive new canonical product semantics for terrain, material,
+  collision, motion, ObjectPlan approval, export readiness, or kit publishing.
+- Terrain remains blocked as product-facing work until explicit terrain patch,
+  placement, validation, collision/readiness, and export contracts pass. It is
+  not approved as only a generic mesh primitive.
 
 ## Allowed Product Claims
 
@@ -145,6 +161,9 @@ only.
   validation, and export-report checks.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
+- Semantic asset compiler architecture may be described only as the target
+  contract lane. Phase A does not mean new UI handles, terrain, materials,
+  collision, motion, or game-ready output exists.
 
 ## Current Milestone Sequence
 
@@ -175,6 +194,8 @@ Use one visible operation per milestone:
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
+- Treating `shape-core::ShapeDocument` as the new canonical product IR.
+- Representing product-facing terrain as only a generic mesh primitive.
 - Family Studio Lite public authoring, broad family generation, generated candidate trays,
   reviewed/showcase promotion, and public kit publishing.
 - Historical proof entries in default Choose.

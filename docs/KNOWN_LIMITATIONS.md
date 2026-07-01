@@ -17,6 +17,11 @@
 
 ## Unsupported Workflows
 
+- Phase A contract hardening is in progress. It does not add product-facing
+  features; it establishes that future A-J work should target
+  `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic lane.
+- `shape-core::ShapeDocument` remains a legacy/implicit compatibility lane and
+  is not the new canonical product IR for Object Orchard.
 - Active primitive Make must not rely on generated variation trays.
 - Active primitive Make must not expose random candidate generation.
 - General Visual Foundry assets do not have material/surface work,
@@ -49,6 +54,9 @@
   checks, preset/contact-sheet evidence, ObjectPlan evidence, composition
   validation, and export-report truth checks. Generated candidate trays remain
   blocked.
+- Terrain is not approved as only a generic mesh primitive. Product-facing
+  terrain remains blocked until explicit terrain contracts, validation reports,
+  collision/readiness evidence, and export includes pass.
 
 ## Editing Limits
 
@@ -83,3 +91,7 @@
 - Family Studio Lite v0 does not approve public catalog publishing,
   reviewed/showcase promotion, runtime LLM generation, broad family generation,
   material editor UI, UV editing UI, rigging, animation, or game-ready claims.
+- Phase A contract hardening does not approve material/surface implementation,
+  UV/texturing, collision/gameplay metadata, terrain implementation, motion,
+  rigging, animation, runtime LLM integration, public catalog publishing,
+  Godot-ready claims, or game-ready claims.
