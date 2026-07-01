@@ -31,11 +31,12 @@ Choose Primitive
   safe-anchor composition plans.
 - ObjectPlan outputs remain Draft and review-required. Unsupported plans
   produce truthful blocked reports instead of fake contact sheets.
-- Geometry-only GLB export is the next proof. Current ObjectPlan outputs are
-  not Godot-ready or game-ready engine packages.
-- Geometry-only export will not include UVs, textures, material looks,
-  collision, rigging, animation, or game-ready status.
-- Godot import proof is required before claiming Godot-ready geometry.
+- ObjectPlan Geometry Export v0 exports geometry-only GLB packages for
+  supported primitive and safe-anchor composition plans.
+- Geometry-only GLB reports keep UVs, textures, material looks, collision,
+  rigging, animation, and game-ready status excluded.
+- Godot import proof is required before claiming Godot-ready geometry; the
+  current local proof is blocked when no Godot binary is available.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but every plan is
   validated by Object Orchard before review.
 - ObjectPlan batch review is available as offline review infrastructure; broad
@@ -109,6 +110,10 @@ python scripts/clean_targets.py --list --root ..
 - [`docs/OBJECT_PLAN_DSL_CONTRACTS.md`](docs/OBJECT_PLAN_DSL_CONTRACTS.md)
 - [`docs/OBJECT_PLAN_BATCH_RUNNER_V0.md`](docs/OBJECT_PLAN_BATCH_RUNNER_V0.md)
 - [`docs/GEOMETRY_EXPORT_TRUTH_GATE.md`](docs/GEOMETRY_EXPORT_TRUTH_GATE.md)
+- [`docs/GEOMETRY_ONLY_EXPORT_CONTRACTS_V0.md`](docs/GEOMETRY_ONLY_EXPORT_CONTRACTS_V0.md)
+- [`docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md`](docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md)
+- [`docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md`](docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md)
+- [`docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md`](docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md)
 - [`docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md)
 - [`docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md`](docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md)
 - [`docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md`](docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md)

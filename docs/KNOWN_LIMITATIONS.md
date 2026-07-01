@@ -31,9 +31,11 @@
   plans; contact sheets must not be faked.
 - ObjectPlan outputs remain Draft and review-required.
 - ObjectPlan outputs are not Godot-ready or game-ready engine packages.
-- Geometry-only GLB export is the next proof and is not implemented for
-  ObjectPlan yet.
-- Godot import proof is required before any Godot-ready geometry claim.
+- Geometry-only GLB export exists only for supported ObjectPlan drafts and does
+  not include UVs, textures, material looks, collision, rigging, animation, or
+  game-ready status.
+- Godot import proof is required before any Godot-ready geometry claim. A
+  blocked proof report is not a Godot-ready result.
 - ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -61,3 +63,6 @@
 - ObjectPlan Materialization v1 does not approve runtime LLM integration,
   public kit publishing, materials/surfaces, UV/texturing, collision,
   rigging, animation, Godot-ready claims, or game-ready claims.
+- Geometry Export v0 does not approve material/surface work, UV/texturing,
+  collision/gameplay metadata, rigging, animation, Godot-ready claims, or
+  game-ready claims.

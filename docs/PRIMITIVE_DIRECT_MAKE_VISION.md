@@ -91,10 +91,10 @@ ObjectPlan Materialization v1 validates structured offline plans, materializes
 supported primitive plans into Draft internal asset graphs, renders
 contact-sheet evidence for supported plans, and can run batches for human
 review. Unsupported plans remain blocked with explicit reports. Geometry-only
-GLB export is the next proof, and Godot import proof is required before calling
-any output Godot-ready. Broad family generation, automatic app-side drafting,
-public catalog publishing, automatic approval, and Prototype Pack Mode are not
-part of the active primitive product yet.
+GLB export exists for supported ObjectPlan drafts, and Godot import proof is
+required before calling any output Godot-ready. Broad family generation,
+automatic app-side drafting, public catalog publishing, automatic approval, and
+Prototype Pack Mode are not part of the active primitive product yet.
 
 ## Milestone Rule
 

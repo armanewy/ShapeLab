@@ -8,8 +8,10 @@ Date: 2026-07-01
 
 ObjectPlan has moved from validation-only infrastructure to Draft, review-required materialization and render evidence for supported primitive plans.
 
-It has not yet moved to geometry-only GLB export. Current ObjectPlan outputs
-are not Godot-ready or game-ready engine packages.
+Subsequent Geometry Export v0 work moved supported ObjectPlan drafts to
+geometry-only GLB export. See
+`docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md`. Current ObjectPlan outputs are
+still not Godot-ready or game-ready engine packages.
 
 ## Integrated Work
 
@@ -77,8 +79,10 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 - ObjectPlan can produce contact-sheet evidence for supported plans.
 - Batch review can classify Draft plans for human review.
 - ObjectPlan outputs remain Draft and review-required.
-- Geometry-only GLB export remains the next proof.
-- Godot import proof is required before claiming Godot-ready geometry.
+- Geometry-only GLB export exists for supported ObjectPlan drafts after the
+  subsequent Geometry Export v0 gate.
+- Godot import proof is required before claiming Godot-ready geometry; a
+  blocked Godot proof report is not a Godot-ready claim.
 - No runtime LLM integration exists.
 - No public catalog publishing exists.
 - No material/surface, UV/texturing, collision, rigging, or animation workflow
@@ -87,7 +91,7 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 ## Next Allowed Work
 
 - Primitive Surface V0 contracts
-- GLB/Godot geometry-only export proof
+- Godot import proof on a machine with Godot installed
 - Personal Kit UI / persistence
 - Prototype Pack brief contracts
 

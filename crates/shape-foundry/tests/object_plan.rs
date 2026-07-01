@@ -38,6 +38,22 @@ const OBJECT_PLAN_STATUS_DOCS: &[(&str, &str)] = &[
         include_str!("../../../docs/GEOMETRY_EXPORT_TRUTH_GATE.md"),
     ),
     (
+        "docs/GEOMETRY_ONLY_EXPORT_CONTRACTS_V0.md",
+        include_str!("../../../docs/GEOMETRY_ONLY_EXPORT_CONTRACTS_V0.md"),
+    ),
+    (
+        "docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md",
+        include_str!("../../../docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md"),
+    ),
+    (
+        "docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md",
+        include_str!("../../../docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md"),
+    ),
+    (
+        "docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md",
+        include_str!("../../../docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md"),
+    ),
+    (
         "docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md",
         include_str!("../../../docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md"),
     ),
@@ -546,7 +562,7 @@ fn object_plan_status_docs_do_not_claim_current_godot_or_game_ready_output() {
 }
 
 #[test]
-fn object_plan_status_docs_scope_geometry_export_as_upcoming() {
+fn object_plan_status_docs_scope_geometry_export_as_geometry_only() {
     let combined = OBJECT_PLAN_STATUS_DOCS
         .iter()
         .map(|(_, doc)| *doc)
@@ -554,10 +570,11 @@ fn object_plan_status_docs_scope_geometry_export_as_upcoming() {
         .join("\n")
         .to_ascii_lowercase();
 
-    assert!(combined.contains("geometry-only glb export is the next proof"));
+    assert!(combined.contains("objectplan can export geometry-only glb"));
+    assert!(combined.contains("geometry-only glb is not game-ready"));
     assert!(combined.contains("godot import proof is required"));
     assert!(combined.contains("not godot-ready"));
-    assert!(combined.contains("not yet export glb"));
+    assert!(combined.contains("blocked godot proof"));
     for blocked in [
         "uvs",
         "textures",

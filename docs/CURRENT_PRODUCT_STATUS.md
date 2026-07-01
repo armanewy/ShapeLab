@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 ## Verdict
 
-`OBJECT_PLAN_MATERIALIZATION_V1_REVIEW_READY`
+`GEOMETRY_EXPORT_V0_REVIEW_READY_GODOT_BLOCKED`
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -12,6 +12,9 @@ ObjectPlan Materialization v1 now exists as offline validation and review
 infrastructure for supported primitive and safe-anchor composition plans.
 Supported ObjectPlans can now be materialized into Draft internal asset graphs
 and rendered into contact-sheet evidence for human review.
+Geometry Export v0 now exports geometry-only GLB packages for supported
+ObjectPlan drafts. Godot import proof exists as a harness, but local proof is
+blocked when no Godot binary is available.
 
 ## Current Truth
 
@@ -42,12 +45,14 @@ and rendered into contact-sheet evidence for human review.
   asset graphs and produces contact-sheet evidence for supported render paths.
 - Unsupported or invalid ObjectPlans produce honest blocked reports and no fake
   contact sheets.
-- Geometry-only GLB export is the next proof. Current ObjectPlan outputs are
-  not Godot-ready or game-ready engine packages.
-- Geometry-only export is scoped to mesh data only and will not include UVs,
+- ObjectPlan Geometry Export v0 exports geometry-only GLB packages for
+  supported Box Primitive, Flat Panel Primitive, Sphere Primitive, and Panel
+  with Knob plans.
+- Geometry-only export is scoped to mesh data only and does not include UVs,
   textures, material looks, collision, rigging, animation, or game-ready
   status.
-- Godot import proof is required before claiming Godot-ready geometry.
+- Godot import proof is required before claiming Godot-ready geometry. The
+  current local Godot proof is `Blocked` because no Godot binary was available.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
   validates every plan and LLM drafts remain Draft until reviewed.
 - ObjectPlan review UI is internal-only and dev-gated; it is not part of the
@@ -108,8 +113,10 @@ and rendered into contact-sheet evidence for human review.
 - ObjectPlan batch review may be referenced as offline review infrastructure
   that classifies Keep / Regenerate / Simplify / Blocked, not Prototype Pack
   Mode and not automatic approval.
-- Geometry-only GLB export may be referenced only as upcoming scoped work until
-  the export CLI and Godot import proof gate pass.
+- ObjectPlan Geometry Export v0 may be described as geometry-only GLB export
+  for supported ObjectPlan drafts.
+- Godot import proof may be described only as Passed when the harness reports
+  `Passed`; a `Blocked` report does not make output Godot-ready.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
 
@@ -137,7 +144,7 @@ Use one visible operation per milestone:
 - Rigging, skinning, or animation UI.
 - Runtime LLM integration.
 - Current ObjectPlan outputs being described as Godot-ready or game-ready.
-- Geometry-only GLB export until the export proof lands.
+- Godot-ready claims until a real Godot import proof passes.
 - Public ObjectPlan authoring UI, automatic offline LLM drafting in the app,
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
