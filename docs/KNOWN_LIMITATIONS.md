@@ -38,8 +38,13 @@
   blocked proof report is not a Godot-ready result.
 - ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
-- Family Studio Lite is paused until direct primitive and composition flows are
-  stable.
+- Family Studio Lite v0 is limited to internal preview work for local Draft /
+  Personal Direct Kits made from supported direct primitives, safe-anchor
+  compositions, and supported ObjectPlan Draft evidence.
+- Family Studio Lite v0 test results mean deterministic property endpoint
+  checks, preset/contact-sheet evidence, ObjectPlan evidence, composition
+  validation, and export-report truth checks. Generated candidate trays remain
+  blocked.
 
 ## Editing Limits
 
@@ -66,3 +71,6 @@
 - Geometry Export v0 does not approve material/surface work, UV/texturing,
   collision/gameplay metadata, rigging, animation, Godot-ready claims, or
   game-ready claims.
+- Family Studio Lite v0 does not approve public catalog publishing,
+  reviewed/showcase promotion, runtime LLM generation, broad family generation,
+  material editor UI, UV editing UI, rigging, animation, or game-ready claims.

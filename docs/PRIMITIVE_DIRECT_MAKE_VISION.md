@@ -96,6 +96,20 @@ required before calling any output Godot-ready. Broad family generation,
 automatic app-side drafting, public catalog publishing, automatic approval, and
 Prototype Pack Mode are not part of the active primitive product yet.
 
+## Family Studio Lite Boundary
+
+Family Studio Lite v0 is the next scoped internal preview for Direct Kits. A
+Direct Kit starts from a supported primitive, safe-anchor composition, or
+supported ObjectPlan Draft. The user chooses which bounded properties can
+change, which properties stay fixed, and which deterministic evidence exists.
+
+"Test variations" in this context means property endpoint tests, deterministic
+preset/contact-sheet evidence, ObjectPlan render evidence, composition
+validation, and geometry export/report truth checks. It does not mean a
+generated candidate tray, broad family generation, runtime LLM generation,
+public catalog publishing, automatic approval, material editor UI, UV editing
+UI, rigging, animation, or game-ready output.
+
 ## Milestone Rule
 
 Use one visible operation per milestone:

@@ -54,6 +54,10 @@ const OBJECT_PLAN_STATUS_DOCS: &[(&str, &str)] = &[
         include_str!("../../../docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md"),
     ),
     (
+        "docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md",
+        include_str!("../../../docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md"),
+    ),
+    (
         "docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md",
         include_str!("../../../docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md"),
     ),
@@ -588,6 +592,54 @@ fn object_plan_status_docs_scope_geometry_export_as_geometry_only() {
             combined.contains(blocked),
             "geometry export docs must caveat missing {blocked}"
         );
+    }
+}
+
+#[test]
+fn object_plan_status_docs_scope_family_studio_lite_as_direct_kits_only() {
+    let combined = OBJECT_PLAN_STATUS_DOCS
+        .iter()
+        .map(|(_, doc)| *doc)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+
+    for required in [
+        "family studio lite v0",
+        "direct kits",
+        "draft / personal kits",
+        "deterministic property endpoint",
+        "objectplan evidence",
+        "generated candidate trays",
+        "runtime llm",
+        "public catalog publishing",
+    ] {
+        assert!(
+            combined.contains(required),
+            "Family Studio Direct Kit docs must mention {required}"
+        );
+    }
+
+    for (path, doc) in OBJECT_PLAN_STATUS_DOCS {
+        let lower = doc.to_ascii_lowercase();
+        for forbidden in [
+            "family studio lite publishes",
+            "family studio lite approves",
+            "family studio lite generates families",
+            "family studio lite uses runtime llm",
+            "generated candidate tray returns",
+            "reviewed/showcase quality",
+            "material editor is available",
+            "uv editing is available",
+            "rigging ui is available",
+            "animation ui is available",
+            "game-ready kit",
+        ] {
+            assert!(
+                !contains_positive_claim(&lower, forbidden),
+                "{path} must not overclaim Family Studio Lite: {forbidden}"
+            );
+        }
     }
 }
 

@@ -43,8 +43,12 @@ Choose Primitive
   family generation is not implemented.
 - Future suggestions may return only as deterministic property presets, not
   opaque random candidate generation.
-- Family Studio Lite is paused until direct primitive and composition flows are
-  stable.
+- Family Studio Lite v0 is the next scoped internal preview: create local
+  Draft / Personal Kits from supported direct primitives, safe-anchor
+  compositions, and supported ObjectPlan Draft evidence.
+- Family Studio Lite v0 will use deterministic property endpoint, preset,
+  ObjectPlan evidence, and export-report checks. It will not restore generated
+  candidate trays.
 - Surface/material work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
 
@@ -115,6 +119,7 @@ python scripts/clean_targets.py --list --root ..
 - [`docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md`](docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md)
 - [`docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md`](docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md)
 - [`docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md)
+- [`docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md`](docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md)
 - [`docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md`](docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md)
 - [`docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md`](docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md)
 - [`docs/OBJECT_PLAN_BATCH_REVIEW_V1.md`](docs/OBJECT_PLAN_BATCH_REVIEW_V1.md)

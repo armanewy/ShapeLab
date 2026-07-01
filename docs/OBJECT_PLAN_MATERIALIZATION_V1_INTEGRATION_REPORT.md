@@ -92,7 +92,8 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 
 - Primitive Surface V0 contracts
 - Godot import proof on a machine with Godot installed
-- Personal Kit UI / persistence
+- Family Studio Lite Direct Kit contracts and local/private Personal Kit
+  persistence
 - Prototype Pack brief contracts
 
 ## Still Blocked
@@ -104,3 +105,5 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 - Rigging/animation UI
 - Automatic catalog publishing
 - Game-ready claims
+- Family Studio Lite public authoring, broad family generation, generated
+  candidate trays, reviewed/showcase promotion, and runtime LLM generation

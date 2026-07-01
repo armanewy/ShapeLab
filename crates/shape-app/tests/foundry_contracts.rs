@@ -148,8 +148,16 @@ fn foundry_direct_make_status_docs_agree() {
             "README and status should mark candidate generation inactive in active primitives"
         );
         assert!(
-            text.contains("Family Studio Lite is paused"),
-            "README and status should keep Family Studio Lite paused"
+            text.contains("Family Studio Lite v0"),
+            "README and status should describe the scoped Family Studio Lite v0 boundary"
+        );
+        assert!(
+            text.contains("Draft / Personal Kits"),
+            "README and status should limit Family Studio Lite v0 to Draft / Personal Kits"
+        );
+        assert!(
+            text.contains("generated candidate trays"),
+            "README and status should keep generated candidate trays blocked"
         );
     }
 

@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 ## Verdict
 
-`GEOMETRY_EXPORT_V0_REVIEW_READY_GODOT_BLOCKED`
+`FAMILY_STUDIO_DIRECT_KIT_READY_FOR_CONTRACTS`
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -15,6 +15,9 @@ and rendered into contact-sheet evidence for human review.
 Geometry Export v0 now exports geometry-only GLB packages for supported
 ObjectPlan drafts. Godot import proof exists as a harness, but local proof is
 blocked when no Godot binary is available.
+The next phase is Family Studio Lite v0 for local reusable Direct Kits. That
+phase remains internal/preview-scoped and must produce Draft / Personal Kits
+only.
 
 ## Current Truth
 
@@ -70,13 +73,17 @@ blocked when no Godot binary is available.
 - Users do not edit vertices, faces, loops, cages, booleans, raw mesh
   transforms, or Blender-like modeling controls.
 - Future suggestions may return only as deterministic property presets.
+- Family Studio Lite v0 is scoped to local Direct Kits made from supported
+  primitives, supported safe-anchor compositions, and supported ObjectPlan Draft
+  evidence.
+- Family Studio Lite v0 will use deterministic property endpoint tests, preset
+  contact sheets, ObjectPlan evidence, composition validation, and export-report
+  truth checks. It will not restore generated candidate trays.
 - Internal candidate-like machinery may remain for legacy tests, quality
   evidence, and contact sheets until a deliberate cleanup branch removes or
   repurposes it.
 - Composition will happen through safe anchors and constrained attachment
   zones, not arbitrary free transforms.
-- Family Studio Lite is paused until direct primitive and composition flows are
-  stable.
 - Material/surface work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
 
@@ -117,6 +124,12 @@ blocked when no Godot binary is available.
   for supported ObjectPlan drafts.
 - Godot import proof may be described only as Passed when the harness reports
   `Passed`; a `Blocked` report does not make output Godot-ready.
+- Family Studio Lite v0 may be described only as internal preview infrastructure
+  for creating local Draft / Personal Kits from supported direct primitives,
+  safe-anchor compositions, and supported ObjectPlan Draft evidence.
+- "Test variations" in Family Studio Lite v0 may be described only as
+  deterministic property endpoint, preset, ObjectPlan evidence, composition
+  validation, and export-report checks.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
 
@@ -149,4 +162,5 @@ Use one visible operation per milestone:
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
-- Family Studio Lite until direct primitive and composition flows are stable.
+- Family Studio Lite public authoring, broad family generation, generated
+  candidate trays, reviewed/showcase promotion, and public kit publishing.
