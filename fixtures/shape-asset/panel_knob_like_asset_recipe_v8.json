@@ -100,7 +100,26 @@
         "parent": 1,
         "child": 2,
         "label": "Knob-like form mounted on panel",
-        "export_profile": null
+        "export_profile": null,
+        "placement_policy": {
+          "position_rule": {
+            "ProportionalUv": {
+              "u": 0.5,
+              "v": 0.5
+            }
+          }
+        },
+        "orientation_policy": "PreserveChild",
+        "scale_policy": "PreserveChild",
+        "contact_policy": {
+          "SurfaceContact": {
+            "clearance": 0.0
+          }
+        },
+        "edit_policy": "Editable",
+        "selection_policy": "Independent",
+        "reset_policy": "AuthoredPlacement",
+        "export_realization": "Pending"
       }
     }
   },

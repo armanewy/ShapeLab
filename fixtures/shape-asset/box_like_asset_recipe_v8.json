@@ -53,7 +53,22 @@
   "topology_locks": [],
   "constraints": [],
   "relationships": [],
-  "semantic": {},
+  "semantic": {
+    "patterns": {
+      "1": {
+        "id": 1,
+        "pattern_type": "Linear",
+        "source_instance": 1,
+        "count": 3,
+        "label": "three box copies",
+        "count_policy": {
+          "Exact": 3
+        },
+        "density_policy": null,
+        "export_instancing": "Disabled"
+      }
+    }
+  },
   "next_ids": {
     "part_definition": 2,
     "part_instance": 2,
@@ -64,7 +79,7 @@
     "parameter": 1,
     "revision": 1,
     "relationship": 1,
-    "pattern": 1,
+    "pattern": 2,
     "surface_slot": 1,
     "material_slot": 1,
     "collision_body": 1,
