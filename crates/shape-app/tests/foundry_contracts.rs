@@ -199,6 +199,99 @@ fn foundry_direct_make_status_docs_agree() {
     }
 }
 
+#[test]
+fn phase_a_contract_boundary_docs_are_authoritative() {
+    let readme = doc_text("README.md");
+    let status = doc_text("docs/CURRENT_PRODUCT_STATUS.md");
+    let limitations = doc_text("docs/KNOWN_LIMITATIONS.md");
+    let boundaries = doc_text("docs/CONTRACT_BOUNDARIES.md");
+    let shape_core = doc_text("docs/SHAPE_CORE_LEGACY_BOUNDARY.md");
+    let architecture = doc_text("docs/ARCHITECTURE_STATUS.md");
+    let authoritative_docs = [
+        &status,
+        &limitations,
+        &boundaries,
+        &shape_core,
+        &architecture,
+    ];
+    let joined = authoritative_docs
+        .iter()
+        .map(|text| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+
+    for text in [&status, &boundaries, &architecture] {
+        assert!(
+            text.contains("semantic asset compiler"),
+            "Phase A docs should name the semantic asset compiler target"
+        );
+        assert!(
+            text.contains("AssetRecipe") && text.contains("Orchard IR"),
+            "Phase A docs should name AssetRecipe / Orchard IR as the canonical lane"
+        );
+    }
+
+    for text in [
+        &status,
+        &limitations,
+        &boundaries,
+        &shape_core,
+        &architecture,
+    ] {
+        assert!(
+            text.contains("shape-core::ShapeDocument")
+                || text.contains("ShapeDocument")
+                || text.contains("shape-core"),
+            "Phase A docs should mention the shape-core legacy boundary"
+        );
+        assert!(
+            text.contains("not the new canonical product IR")
+                || text.contains("must not receive new canonical product semantics")
+                || text.contains("not the target product backbone"),
+            "Phase A docs should block ShapeDocument as the new product IR"
+        );
+    }
+
+    for forbidden in [
+        "shapedocument is the new canonical product ir",
+        "shape-core::shapedocument is the canonical product ir",
+        "shape-core shapedocument is the canonical product ir",
+        "terrain can be represented as only a generic mesh primitive",
+        "terrain is only a generic mesh primitive",
+        "game-ready is approved",
+        "runtime llm is approved",
+        "public catalog publishing is approved",
+    ] {
+        assert!(
+            !joined.contains(forbidden),
+            "authoritative docs must not imply blocked Phase A claim: {forbidden}"
+        );
+    }
+
+    assert!(
+        joined.contains("terrain remains blocked")
+            || joined.contains("terrain must not be collapsed"),
+        "Phase A docs should keep terrain contract-blocked"
+    );
+    assert!(
+        joined.contains("runtime llm") && joined.contains("blocked"),
+        "Phase A docs should keep runtime LLM blocked"
+    );
+    assert!(
+        joined.contains("public catalog publishing") && joined.contains("blocked"),
+        "Phase A docs should keep public catalog publishing blocked"
+    );
+    assert!(
+        joined.contains("game-ready") && joined.contains("blocked"),
+        "Phase A docs should keep game-ready claims blocked"
+    );
+    assert!(
+        readme.contains("Surface/material work, UV/texturing, rigging, animation, runtime LLM"),
+        "README should still carry the public unsupported-work boundary"
+    );
+}
+
 fn minimal_foundry_document() -> FoundryAssetDocument {
     FoundryAssetDocument::new(
         FoundryDocumentId("doc".to_string()),
