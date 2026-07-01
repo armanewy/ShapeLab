@@ -41,6 +41,10 @@
 - Family Studio Lite v0 UI is limited to internal preview work for local Draft
   / Personal Direct Kits made from supported direct primitives, safe-anchor
   compositions, and supported ObjectPlan Draft evidence.
+- Personal Kit storage is local/private only and does not publish, review, or
+  promote kits.
+- Prototype Pack brief output is limited to Draft ObjectPlans for offline
+  review.
 - Family Studio Lite v0 test results mean deterministic property endpoint
   checks, preset/contact-sheet evidence, ObjectPlan evidence, composition
   validation, and export-report truth checks. Generated candidate trays remain

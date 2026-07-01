@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 ## Verdict
 
-`FAMILY_STUDIO_DIRECT_KIT_READY_FOR_CONTRACTS`
+`DIRECT_KIT_FAMILY_STUDIO_V0_INTEGRATED`
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -79,6 +79,9 @@ only.
 - Family Studio Lite v0 has a developer-gated internal preview UI for starting
   from the current supported shape, choosing what stays the same, choosing what
   can change, testing the kit, and saving Draft / Personal Kits.
+- Personal Kit storage exists for local/private Direct Kits.
+- Prototype Pack briefs can generate Draft ObjectPlan batches for offline
+  review. They do not approve assets or publish kits.
 - Family Studio Lite v0 uses deterministic property endpoint tests, preset
   contact sheets, ObjectPlan evidence, composition validation, and export-report
   truth checks. It will not restore generated candidate trays.
@@ -130,6 +133,10 @@ only.
 - Family Studio Lite v0 may be described only as internal preview infrastructure
   for creating local Draft / Personal Kits from supported direct primitives,
   safe-anchor compositions, and supported ObjectPlan Draft evidence.
+- Personal Kit storage may be described only as local/private storage for Draft
+  or PersonalOnly Direct Kits.
+- Prototype Pack brief output may be described only as Draft ObjectPlans for
+  offline review.
 - "Test variations" in Family Studio Lite v0 may be described only as
   deterministic property endpoint, preset, ObjectPlan evidence, composition
   validation, and export-report checks.
