@@ -1,11 +1,18 @@
 use shape_foundry::{
     OBJECT_PLAN_SCHEMA_VERSION, ObjectPlan, ObjectPlanAttachment, ObjectPlanCreatedBy,
-    ObjectPlanNode, ObjectPlanProvenance, ObjectPlanReviewTier, ObjectPlanUserSummary,
-    ObjectPlanValidationPolicy, ObjectPlanValidationReport, PrimitiveAttachmentOffsetPolicy,
+    ObjectPlanNode, ObjectPlanProvenance, ObjectPlanRepairRisk, ObjectPlanRepairSuggestion,
+    ObjectPlanReviewTier, ObjectPlanUserSummary, ObjectPlanValidationPolicy,
+    ObjectPlanValidationReport, PrimitiveAttachmentOffsetPolicy,
     PrimitiveAttachmentOrientationPolicy, PrimitiveAttachmentScalePolicy, PrimitiveKind,
     PrimitivePropertyValue, flat_panel_primitive_property_schema, object_plan_user_summary,
     primitive_default_property_values, sphere_primitive_property_schema, validate_object_plan,
+    validate_object_plan_repair_suggestion,
 };
+
+const DRAFT_PROMPT_PACK: &str =
+    include_str!("../../../docs/llm_prompt_packs/object_plan_draft_v0.md");
+const REPAIR_PROMPT_PACK: &str =
+    include_str!("../../../docs/llm_prompt_packs/object_plan_repair_v0.md");
 
 #[test]
 fn object_plan_one_sphere_validates() {
@@ -205,6 +212,57 @@ fn object_plan_serde_roundtrip_is_deterministic() {
 
     assert_eq!(first, second);
     assert_eq!(plan, decoded);
+}
+
+#[test]
+fn object_plan_prompt_pack_does_not_mention_runtime_integration() {
+    for prompt_pack in [DRAFT_PROMPT_PACK, REPAIR_PROMPT_PACK] {
+        let lower = prompt_pack.to_ascii_lowercase();
+        assert!(!lower.contains("runtime integration"));
+        assert!(!lower.contains("runtime llm"));
+    }
+}
+
+#[test]
+fn object_plan_prompt_pack_rejects_raw_mesh_output() {
+    for prompt_pack in [DRAFT_PROMPT_PACK, REPAIR_PROMPT_PACK] {
+        let lower = prompt_pack.to_ascii_lowercase();
+        assert!(lower.contains("do not generate raw mesh"));
+        assert!(lower.contains("mesh payload"));
+    }
+}
+
+#[test]
+fn object_plan_prompt_pack_blocks_unsupported_capabilities() {
+    for prompt_pack in [DRAFT_PROMPT_PACK, REPAIR_PROMPT_PACK] {
+        let lower = prompt_pack.to_ascii_lowercase();
+        assert!(lower.contains("status: \"blocked\""));
+        assert!(lower.contains("unsupported"));
+        assert!(lower.contains("uv"));
+        assert!(lower.contains("rigging"));
+        assert!(lower.contains("animation"));
+    }
+}
+
+#[test]
+fn object_plan_repair_suggestion_requires_human_review() {
+    let mut suggestion = ObjectPlanRepairSuggestion {
+        finding_id: "finding_001".to_owned(),
+        summary: "Width is outside the approved range.".to_owned(),
+        suggested_change: "Set Width inside the approved range.".to_owned(),
+        target_node_id: Some("knob".to_owned()),
+        target_property_id: Some("width".to_owned()),
+        target_attachment_id: None,
+        risk: ObjectPlanRepairRisk::Low,
+        requires_human_review: true,
+    };
+
+    assert!(validate_object_plan_repair_suggestion(&suggestion).is_valid());
+
+    suggestion.requires_human_review = false;
+    let report = validate_object_plan_repair_suggestion(&suggestion);
+
+    assert_issue(&report, "repair_requires_human_review");
 }
 
 fn one_sphere_plan() -> ObjectPlan {

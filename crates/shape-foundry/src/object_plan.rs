@@ -147,6 +147,42 @@ pub enum ObjectPlanCreatedBy {
     LlmDraft,
 }
 
+/// Offline repair suggestion for an ObjectPlan validation finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectPlanRepairSuggestion {
+    /// Stable finding ID from a validator or review report.
+    pub finding_id: String,
+    /// Product-safe repair summary.
+    pub summary: String,
+    /// Product-safe suggested change.
+    pub suggested_change: String,
+    /// Optional target node ID.
+    pub target_node_id: Option<String>,
+    /// Optional target property ID.
+    pub target_property_id: Option<String>,
+    /// Optional target attachment ID.
+    pub target_attachment_id: Option<String>,
+    /// Risk level for the suggested change.
+    pub risk: ObjectPlanRepairRisk,
+    /// All repair suggestions require a human review step.
+    pub requires_human_review: bool,
+}
+
+/// Risk level for an ObjectPlan repair suggestion.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum ObjectPlanRepairRisk {
+    /// Narrow value adjustment inside an approved schema.
+    Low,
+    /// Structural adjustment to an approved node or attachment.
+    Medium,
+    /// Change may alter object intent and needs careful review.
+    High,
+    /// Unsupported request should remain blocked.
+    Blocked,
+}
+
 /// Product-safe summary of an ObjectPlan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -321,6 +357,64 @@ pub fn object_plan_user_summary(plan: &ObjectPlan) -> ObjectPlanUserSummary {
             ObjectPlanReviewTier::Reviewed => "Reviewed plan.".to_owned(),
         },
     }
+}
+
+/// Validate an offline ObjectPlan repair suggestion.
+#[must_use]
+pub fn validate_object_plan_repair_suggestion(
+    suggestion: &ObjectPlanRepairSuggestion,
+) -> ObjectPlanValidationReport {
+    let mut report = ObjectPlanValidationReport::default();
+    validate_identifier(
+        &mut report,
+        "finding_id",
+        &suggestion.finding_id,
+        "invalid_repair_finding_id",
+    );
+    validate_product_text(
+        &mut report,
+        "summary",
+        &suggestion.summary,
+        "invalid_repair_summary",
+    );
+    validate_product_text(
+        &mut report,
+        "suggested_change",
+        &suggestion.suggested_change,
+        "invalid_repair_suggested_change",
+    );
+    if let Some(node_id) = &suggestion.target_node_id {
+        validate_identifier(
+            &mut report,
+            "target_node_id",
+            node_id,
+            "invalid_repair_target_node_id",
+        );
+    }
+    if let Some(property_id) = &suggestion.target_property_id {
+        validate_identifier(
+            &mut report,
+            "target_property_id",
+            property_id,
+            "invalid_repair_target_property_id",
+        );
+    }
+    if let Some(attachment_id) = &suggestion.target_attachment_id {
+        validate_identifier(
+            &mut report,
+            "target_attachment_id",
+            attachment_id,
+            "invalid_repair_target_attachment_id",
+        );
+    }
+    if !suggestion.requires_human_review {
+        report.push(
+            "requires_human_review",
+            "repair_requires_human_review",
+            "ObjectPlan repair suggestions require human review.",
+        );
+    }
+    report
 }
 
 fn validate_policy(report: &mut ObjectPlanValidationReport, policy: &ObjectPlanValidationPolicy) {
