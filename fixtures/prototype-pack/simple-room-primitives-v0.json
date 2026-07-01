@@ -1,0 +1,65 @@
+{
+  "brief_id": "simple_room_primitives_v0",
+  "display_name": "Simple Room Primitives",
+  "purpose": "Draft simple primitive props for early review.",
+  "asset_requests": [
+    {
+      "request_id": "small_box_prop",
+      "display_name": "Small Box Prop",
+      "intended_use": "Small box-like prop for review.",
+      "allowed_primitives": ["BoxPrimitive"],
+      "allowed_compositions": [],
+      "desired_count": 1,
+      "style_hint": "Simple and readable.",
+      "must_have_capabilities": ["ObjectPlanDraft"],
+      "blocked_capabilities": ["PublicCatalogPublishing", "GameReady"]
+    },
+    {
+      "request_id": "wide_panel_prop",
+      "display_name": "Wide Panel Prop",
+      "intended_use": "Wide panel-like prop for review.",
+      "allowed_primitives": ["FlatPanelPrimitive"],
+      "allowed_compositions": [],
+      "desired_count": 1,
+      "style_hint": "Flat and readable.",
+      "must_have_capabilities": ["ObjectPlanDraft"],
+      "blocked_capabilities": ["PublicCatalogPublishing", "GameReady"]
+    },
+    {
+      "request_id": "round_knob_prop",
+      "display_name": "Round Knob-Like Primitive",
+      "intended_use": "Round primitive for review.",
+      "allowed_primitives": ["SpherePrimitive"],
+      "allowed_compositions": [],
+      "desired_count": 1,
+      "style_hint": "Rounded and simple.",
+      "must_have_capabilities": ["ObjectPlanDraft"],
+      "blocked_capabilities": ["PublicCatalogPublishing", "GameReady"]
+    },
+    {
+      "request_id": "panel_with_knob_prop",
+      "display_name": "Panel With Knob",
+      "intended_use": "Panel with one attached knob-like form for review.",
+      "allowed_primitives": [],
+      "allowed_compositions": ["PanelWithKnob"],
+      "desired_count": 1,
+      "style_hint": "Clear panel and attached form.",
+      "must_have_capabilities": ["ObjectPlanDraft"],
+      "blocked_capabilities": ["PublicCatalogPublishing", "GameReady"]
+    }
+  ],
+  "supported_primitive_scope": {
+    "primitive_kinds": ["BoxPrimitive", "FlatPanelPrimitive", "SpherePrimitive"],
+    "composition_kinds": ["PanelWithKnob"]
+  },
+  "output_policy": {
+    "draft_only": true,
+    "human_review_required": true,
+    "approved": false,
+    "publish_allowed": false
+  },
+  "review_policy": {
+    "human_review_required": true,
+    "automatic_approval_allowed": false
+  }
+}

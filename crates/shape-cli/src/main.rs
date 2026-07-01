@@ -76,6 +76,7 @@ mod foundry_kit_cli;
 mod godot_proof_cli;
 mod object_plan_cli;
 mod personal_kit_cli;
+mod prototype_pack_cli;
 
 const DEFAULT_PRESET: &str = "box-primitive";
 const DEFAULT_SEED: u64 = 42;
@@ -137,6 +138,8 @@ enum Command {
     GodotProof(godot_proof_cli::GodotProofArgs),
     /// Save, list, and validate local/private Personal Kits.
     PersonalKit(personal_kit_cli::PersonalKitArgs),
+    /// Plan Draft ObjectPlan batches from Prototype Pack briefs.
+    PrototypePack(prototype_pack_cli::PrototypePackArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Generate Box Primitive visual-readability evidence.
@@ -682,6 +685,7 @@ fn main() -> anyhow::Result<()> {
         Command::ObjectPlan(args) => object_plan_cli::run_object_plan(args),
         Command::GodotProof(args) => godot_proof_cli::run_godot_proof(args),
         Command::PersonalKit(args) => personal_kit_cli::run_personal_kit(args),
+        Command::PrototypePack(args) => prototype_pack_cli::run_prototype_pack(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::BoxPrimitiveVisualReadability(args) => run_box_primitive_visual_readability(args),
         Command::LidSeamFeatureModuleV0(args) => run_lid_seam_feature_module_v0(args),
