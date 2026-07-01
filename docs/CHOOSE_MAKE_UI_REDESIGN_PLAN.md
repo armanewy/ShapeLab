@@ -85,10 +85,23 @@ It is not a Blender clone and should not expose raw mesh operations.
 Recommended implementation order:
 
 1. Apply direct Make stale-warning correctness fix.
-2. Redesign Choose around provenance and grouped starting points.
+2. Redesign Choose around provenance and grouped starting points. Done in
+   Choose Page Provenance Redesign v0.
 3. Clean up the Make stage so it is warm, centered, and not grid-first.
 4. Make the exact-value fallback compact and useful.
 5. Add Orchard stretch handles for Width / Height / Depth / Thickness.
+
+## Choose provenance result
+
+Choose v0 now groups default starting points by source primitive:
+
+- Box Primitive contains Lidded Box as a derived child.
+- Flat Panel Primitive contains Hinged Panel and Panel with Knob as derived
+  children.
+- Sphere Primitive contains Knob-like Form as a preset, not an asset family.
+
+Historical proof entries such as Handled Panel stay hidden from default Choose
+and may appear only in preview/internal mode.
 
 ## Explicit non-goals
 

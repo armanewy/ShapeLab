@@ -65,6 +65,9 @@ only.
 - Primitive editing is property-schema based and bounded.
 - Direct property controls show visible domains, use bounded numeric steppers,
   and support reset to authored defaults.
+- Choose now groups starting points by primitive provenance: primitives first,
+  derived entries under their source primitive, and presets labeled as presets
+  rather than separate asset families.
 - Invalid property values must be rejected or clamped before they become
   current primitive state.
 - Prior valid previews remain visible while a direct property edit rebuilds.
@@ -174,3 +177,4 @@ Use one visible operation per milestone:
 - Full game-ready or marketplace-ready claims.
 - Family Studio Lite public authoring, broad family generation, generated candidate trays,
   reviewed/showcase promotion, and public kit publishing.
+- Historical proof entries in default Choose.

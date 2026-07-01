@@ -20,7 +20,11 @@ pub struct ProductUiGateReport {
     pub app_shell: &'static str,
     /// Whether removed product surfaces are still present in default product copy.
     pub legacy_surfaces_present: bool,
-    /// Number of kit-backed templates visible in the default novice home screen.
+    /// Number of starting points visible in the default novice home screen.
+    ///
+    /// This can be lower than the installed kit count because historical
+    /// evidence and preview-only profiles stay hidden from the default Choose
+    /// page.
     pub product_home_profiles: usize,
     /// Number of installed built-in kits available to preview/developer catalogs.
     pub installed_kit_count: usize,
@@ -71,7 +75,7 @@ impl ProductUiGateReport {
             && !self.default_advanced_recipe_visible
             && !self.default_raw_technical_terms_visible
             && self.product_home_profiles > 0
-            && self.product_home_profiles == self.installed_kit_count
+            && self.product_home_profiles <= self.installed_kit_count
             && self.installed_kit_count == self.core_profiles.len()
             && self.developer_preview_kit_count == self.installed_kit_count
             && self.active_variation_ui_retired
@@ -331,7 +335,7 @@ mod tests {
         assert!(report.passed(), "{report:#?}");
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
-        assert_eq!(report.product_home_profiles, report.installed_kit_count);
+        assert_eq!(report.product_home_profiles, 6);
         assert_eq!(report.installed_kit_count, 7);
         assert_eq!(report.developer_preview_kit_count, 7);
         assert!(report.active_variation_ui_retired);

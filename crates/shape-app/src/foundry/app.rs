@@ -101,6 +101,11 @@ enum FoundryDrawer {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ScreenshotScenario {
+    ChooseGroupedPrimitives,
+    ChooseBoxProvenance,
+    ChooseFlatPanelProvenance,
+    ChooseSpherePreset,
+    ChooseSelectedPreview,
     BoxDirectMakeReady,
     BoxPropertyEdit,
     FlatPanelDirectMakeReady,
@@ -117,6 +122,20 @@ enum ScreenshotScenario {
     FamilyStudioLiteTestResult,
     FamilyStudioLiteSaveDraft,
     FamilyStudioLitePersonalSaved,
+}
+
+impl ScreenshotScenario {
+    const fn choose_selected_slug(self) -> Option<&'static str> {
+        match self {
+            Self::ChooseGroupedPrimitives | Self::ChooseBoxProvenance => {
+                Some(BOX_PRIMITIVE_PROFILE_ID)
+            }
+            Self::ChooseFlatPanelProvenance => Some(FLAT_PANEL_PRIMITIVE_PROFILE_ID),
+            Self::ChooseSpherePreset => Some(SPHERE_PRIMITIVE_PROFILE_ID),
+            Self::ChooseSelectedPreview => Some(PANEL_KNOB_PROFILE_ID),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -767,7 +786,7 @@ const ACTION_EDIT_PANEL_KNOB: &str = "Edit Panel with Knob";
 const VIEW_ORBIT_LABEL: &str = "Orbit view";
 const VIEW_RESET_LABEL: &str = "Reset view";
 const VIEW_AXIS_LABEL: &str = "Axis view";
-const RENDERED_ACTION_LABELS: [&str; 50] = [
+const RENDERED_ACTION_LABELS: [&str; 49] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -813,7 +832,6 @@ const RENDERED_ACTION_LABELS: [&str; 50] = [
     ACTION_KNOB_LIKE_FORM,
     ACTION_EDIT_LIDDED_BOX,
     ACTION_EDIT_HINGED_PANEL,
-    ACTION_EDIT_HANDLED_PANEL,
     ACTION_EDIT_PANEL_KNOB,
     VIEW_ORBIT_LABEL,
     VIEW_RESET_LABEL,
@@ -1437,6 +1455,14 @@ impl FoundryDesktopApp {
     fn current_project_title(&self) -> String {
         if let Some(path) = &self.state.project_path {
             return project_file_title(path);
+        }
+
+        if self.state.document.is_none()
+            && self.tab == FoundryTab::Home
+            && let Some(profile) =
+                selected_home_profile(&self.home_profiles, &self.selected_home_profile_slug)
+        {
+            return format!("Start with {}", profile.label);
         }
 
         self.state
@@ -2199,7 +2225,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before making changes.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before making changes.",
             ));
             return commands;
         }
@@ -3590,7 +3616,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before adjusting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before adjusting.",
             ));
                 } else {
                     ui.add_space(10.0);
@@ -3770,7 +3796,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before exporting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before exporting.",
             ));
             return commands;
         }
@@ -3887,7 +3913,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before starting a pack.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -4445,6 +4471,14 @@ impl FoundryDesktopApp {
         }
 
         let mut commands = Vec::new();
+        if let Some(selected_slug) = scenario.choose_selected_slug() {
+            self.tab = FoundryTab::Home;
+            self.state = FoundryAppState::default();
+            self.selected_home_profile_slug = Some(selected_slug.to_owned());
+            self.complete_screenshot_scenario(scenario);
+            return commands;
+        }
+
         if self.screenshot_scenario_step == 0 {
             self.load_fixture(read_screenshot_fixture_catalog(scenario), ctx);
             self.tab = FoundryTab::Make;
@@ -4460,6 +4494,11 @@ impl FoundryDesktopApp {
         }
 
         match scenario {
+            ScreenshotScenario::ChooseGroupedPrimitives
+            | ScreenshotScenario::ChooseBoxProvenance
+            | ScreenshotScenario::ChooseFlatPanelProvenance
+            | ScreenshotScenario::ChooseSpherePreset
+            | ScreenshotScenario::ChooseSelectedPreview => {}
             ScreenshotScenario::BoxDirectMakeReady
             | ScreenshotScenario::FlatPanelDirectMakeReady
             | ScreenshotScenario::SphereDirectMakeReady => {
@@ -5465,6 +5504,11 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
     let path = env::temp_dir().join("shape-lab-screenshot-scenario.txt");
     let value = fs::read_to_string(path).ok()?;
     match value.trim() {
+        "choose_grouped_primitives" => Some(ScreenshotScenario::ChooseGroupedPrimitives),
+        "choose_box_provenance" => Some(ScreenshotScenario::ChooseBoxProvenance),
+        "choose_flat_panel_provenance" => Some(ScreenshotScenario::ChooseFlatPanelProvenance),
+        "choose_sphere_preset" => Some(ScreenshotScenario::ChooseSpherePreset),
+        "choose_selected_preview" => Some(ScreenshotScenario::ChooseSelectedPreview),
         "box_direct_make_ready" | "make_initial_box" => {
             Some(ScreenshotScenario::BoxDirectMakeReady)
         }
@@ -5498,17 +5542,12 @@ fn read_screenshot_fixture_catalog(
     scenario: ScreenshotScenario,
 ) -> shape_foundry_catalog::FoundryFixtureCatalog {
     match scenario {
-        ScreenshotScenario::FlatPanelDirectMakeReady
-        | ScreenshotScenario::FlatPanelPropertyEdit => {
-            shape_foundry_catalog::flat_panel::fixture_catalog()
-        }
-        ScreenshotScenario::SphereDirectMakeReady
-        | ScreenshotScenario::SpherePropertyEdit
-        | ScreenshotScenario::SphereKnobLikePreset
-        | ScreenshotScenario::SphereExportDrawer => {
-            shape_foundry_catalog::sphere_primitive::fixture_catalog()
-        }
-        ScreenshotScenario::BoxDirectMakeReady
+        ScreenshotScenario::ChooseGroupedPrimitives
+        | ScreenshotScenario::ChooseBoxProvenance
+        | ScreenshotScenario::ChooseFlatPanelProvenance
+        | ScreenshotScenario::ChooseSpherePreset
+        | ScreenshotScenario::ChooseSelectedPreview
+        | ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
         | ScreenshotScenario::PackDrawer
         | ScreenshotScenario::ExportDrawer
@@ -5520,6 +5559,16 @@ fn read_screenshot_fixture_catalog(
         | ScreenshotScenario::FamilyStudioLitePersonalSaved => {
             shape_foundry_catalog::box_primitive::fixture_catalog()
         }
+        ScreenshotScenario::FlatPanelDirectMakeReady
+        | ScreenshotScenario::FlatPanelPropertyEdit => {
+            shape_foundry_catalog::flat_panel::fixture_catalog()
+        }
+        ScreenshotScenario::SphereDirectMakeReady
+        | ScreenshotScenario::SpherePropertyEdit
+        | ScreenshotScenario::SphereKnobLikePreset
+        | ScreenshotScenario::SphereExportDrawer => {
+            shape_foundry_catalog::sphere_primitive::fixture_catalog()
+        }
     }
 }
 
@@ -5528,6 +5577,13 @@ fn screenshot_scenario_assertion(
     view_state: &MakeCanvasViewState,
 ) -> Result<(), String> {
     match scenario {
+        ScreenshotScenario::ChooseGroupedPrimitives
+        | ScreenshotScenario::ChooseBoxProvenance
+        | ScreenshotScenario::ChooseFlatPanelProvenance
+        | ScreenshotScenario::ChooseSpherePreset
+        | ScreenshotScenario::ChooseSelectedPreview => {
+            require_screenshot_state(view_state.mode == MakeCanvasMode::NoAsset, scenario, "Home")
+        }
         ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
         | ScreenshotScenario::FlatPanelDirectMakeReady
@@ -5787,17 +5843,52 @@ struct ProductHomeProfile {
     category_chips: Vec<String>,
 }
 
-#[cfg(test)]
-struct ProductHomeProfileGroup {
-    family_id: String,
-    family_name: String,
-    profiles: Vec<ProductHomeProfile>,
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum StartingPointStatus {
+    Active,
+    Preview,
+    InternalEvidence,
+    HistoricalProof,
+}
+
+impl StartingPointStatus {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Active => "Active",
+            Self::Preview => "Preview",
+            Self::InternalEvidence => "Internal evidence",
+            Self::HistoricalProof => "Historical proof",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DerivedStartingPoint {
+    display_name: &'static str,
+    profile: Option<ProductHomeProfile>,
+    derived_from_label: &'static str,
+    derivation_summary: &'static str,
+    status: StartingPointStatus,
+    preset: bool,
+}
+
+#[derive(Clone)]
+struct StartingPointGroup {
+    source_primitive_slug: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+    status: StartingPointStatus,
+    primitive_profile: Option<ProductHomeProfile>,
+    derived_items: Vec<DerivedStartingPoint>,
 }
 
 fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProfile> {
     let cards = built_in_kit_card_views();
     curated_fixture_catalogs_with_labels(developer_preview_enabled)
         .into_iter()
+        .filter(|(_label, fixture)| {
+            developer_preview_enabled || fixture.slug.as_str() != HANDLED_PANEL_PROFILE_ID
+        })
         .filter_map(|(_label, fixture)| {
             let card = cards
                 .iter()
@@ -5814,31 +5905,97 @@ fn product_home_profiles(developer_preview_enabled: bool) -> Vec<ProductHomeProf
         .collect()
 }
 
-#[cfg(test)]
-fn product_home_profile_groups(profiles: Vec<ProductHomeProfile>) -> Vec<ProductHomeProfileGroup> {
-    let mut groups = BTreeMap::<String, (String, Vec<ProductHomeProfile>)>::new();
-    for profile in profiles {
-        groups
-            .entry(profile.family_id.clone())
-            .or_insert_with(|| (profile.family_name.clone(), Vec::new()))
-            .1
-            .push(profile);
+fn product_home_starting_point_groups(
+    profiles: &[ProductHomeProfile],
+    developer_preview_enabled: bool,
+) -> Vec<StartingPointGroup> {
+    let profile_for = |slug: &str| profiles.iter().find(|profile| profile.fixture.slug == slug);
+
+    let mut groups = Vec::new();
+    if let Some(box_profile) = profile_for(BOX_PRIMITIVE_PROFILE_ID) {
+        let mut derived_items = Vec::new();
+        if let Some(lidded_box) = profile_for(LIDDED_BOX_PROFILE_ID) {
+            derived_items.push(DerivedStartingPoint {
+                display_name: "Lidded Box",
+                profile: Some(lidded_box.clone()),
+                derived_from_label: "Box Primitive",
+                derivation_summary: "Derived from Box Primitive + Lid Seam.",
+                status: StartingPointStatus::Active,
+                preset: false,
+            });
+        }
+        groups.push(StartingPointGroup {
+            source_primitive_slug: BOX_PRIMITIVE_PROFILE_ID,
+            display_name: "Box Primitive",
+            description: profile_description(BOX_PRIMITIVE_PROFILE_ID),
+            status: StartingPointStatus::Active,
+            primitive_profile: Some(box_profile.clone()),
+            derived_items,
+        });
     }
-    let mut groups = groups
-        .into_iter()
-        .map(
-            |(family_id, (family_name, profiles))| ProductHomeProfileGroup {
-                family_id,
-                family_name,
-                profiles,
-            },
-        )
-        .collect::<Vec<_>>();
-    groups.sort_by(|left, right| {
-        left.family_name
-            .cmp(&right.family_name)
-            .then_with(|| left.family_id.cmp(&right.family_id))
-    });
+
+    if let Some(flat_panel) = profile_for(FLAT_PANEL_PRIMITIVE_PROFILE_ID) {
+        let mut derived_items = Vec::new();
+        if let Some(hinged_panel) = profile_for(HINGED_PANEL_PROFILE_ID) {
+            derived_items.push(DerivedStartingPoint {
+                display_name: "Hinged Panel",
+                profile: Some(hinged_panel.clone()),
+                derived_from_label: "Flat Panel Primitive",
+                derivation_summary: "Derived from Flat Panel Primitive + Hinge Edge.",
+                status: StartingPointStatus::Active,
+                preset: false,
+            });
+        }
+        if let Some(panel_knob) = profile_for(PANEL_KNOB_PROFILE_ID) {
+            derived_items.push(DerivedStartingPoint {
+                display_name: "Panel with Knob",
+                profile: Some(panel_knob.clone()),
+                derived_from_label: "Flat Panel Primitive",
+                derivation_summary: "Derived from Flat Panel Primitive + Sphere attachment.",
+                status: StartingPointStatus::Active,
+                preset: false,
+            });
+        }
+        if developer_preview_enabled
+            && let Some(handled_panel) = profile_for(HANDLED_PANEL_PROFILE_ID)
+        {
+            derived_items.push(DerivedStartingPoint {
+                display_name: "Handled Panel",
+                profile: Some(handled_panel.clone()),
+                derived_from_label: "Flat Panel Primitive",
+                derivation_summary: "Historical proof from Flat Panel + Hinge Edge + Handle.",
+                status: StartingPointStatus::HistoricalProof,
+                preset: false,
+            });
+        }
+        groups.push(StartingPointGroup {
+            source_primitive_slug: FLAT_PANEL_PRIMITIVE_PROFILE_ID,
+            display_name: "Flat Panel Primitive",
+            description: profile_description(FLAT_PANEL_PRIMITIVE_PROFILE_ID),
+            status: StartingPointStatus::Active,
+            primitive_profile: Some(flat_panel.clone()),
+            derived_items,
+        });
+    }
+
+    if let Some(sphere) = profile_for(SPHERE_PRIMITIVE_PROFILE_ID) {
+        groups.push(StartingPointGroup {
+            source_primitive_slug: SPHERE_PRIMITIVE_PROFILE_ID,
+            display_name: "Sphere Primitive",
+            description: profile_description(SPHERE_PRIMITIVE_PROFILE_ID),
+            status: StartingPointStatus::Active,
+            primitive_profile: Some(sphere.clone()),
+            derived_items: vec![DerivedStartingPoint {
+                display_name: "Knob-like Form",
+                profile: None,
+                derived_from_label: "Sphere Primitive",
+                derivation_summary: "Preset from Sphere Primitive properties.",
+                status: StartingPointStatus::Preview,
+                preset: true,
+            }],
+        });
+    }
+
     groups
 }
 
@@ -5907,7 +6064,6 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Flat Panel Primitive",
         "Sphere Primitive",
         "Hinged Panel",
-        "Handled Panel",
         "Panel with Knob",
         "Project",
         "Open Project",
@@ -5923,7 +6079,6 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         ACTION_EDIT_SPHERE_PRIMITIVE,
         ACTION_EDIT_LIDDED_BOX,
         ACTION_EDIT_HINGED_PANEL,
-        ACTION_EDIT_HANDLED_PANEL,
         ACTION_EDIT_PANEL_KNOB,
         "Add to Pack",
         "Open Pack",
@@ -5964,20 +6119,27 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         HOME_SUBTITLE,
         BOX_PRIMITIVE_HOME_SUBTITLE,
         HOME_CONTROL_COPY,
+        "Primitives",
+        "Derived from Box Primitive",
+        "Derived from Flat Panel Primitive",
+        "Preset",
+        "Pick a primitive, or choose a derived starting point under its source.",
+        "Starting points are grouped by provenance so the source stays clear.",
+        "Derived from Box Primitive + Lid Seam.",
+        "Derived from Flat Panel Primitive + Hinge Edge.",
+        "Derived from Flat Panel Primitive + Sphere attachment.",
+        "Knob-like Form",
+        "Preset from Sphere Primitive properties.",
         "A simple box with a visible lid seam.",
         "You can vary proportions, edge softness, and lid seam.",
         "One upright clay panel with readable width, height, and thickness.",
         "One closed round clay volume with readable dimensions and flattening.",
         "One upright clay panel with a visible hinge edge.",
         "You can vary proportions, edge softness, and hinge edge.",
-        "One upright clay panel with a visible hinge edge and handle.",
-        "You can vary proportions, edge softness, hinge edge, and handle.",
         "One upright clay panel with a bounded knob-like sphere form attached through a safe anchor.",
         "You can adjust panel size, knob form, and bounded knob position.",
         "Start with Box Primitive.",
-        "Choose a starting point.",
-        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob.",
-        "Each starting point is a simple clay asset with only visible controls.",
+        "Choose a starting point",
         "Preview building",
         "No matching starting point",
         "Make asset",
@@ -6009,15 +6171,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         VIEW_AXIS_LABEL,
         "Current Asset",
         "Current asset",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before making changes.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before making changes.",
         "Project history",
         "Review previous project steps and branch from a saved point.",
         "saved step(s)",
         "Project step",
         "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before adjusting.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob first.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Panel with Knob first.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -6037,8 +6199,6 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         HINGED_PANEL_EXPORT_DETAIL,
         SPHERE_PRIMITIVE_EXPORT_TITLE,
         SPHERE_PRIMITIVE_EXPORT_DETAIL,
-        HANDLED_PANEL_EXPORT_TITLE,
-        HANDLED_PANEL_EXPORT_DETAIL,
         PANEL_KNOB_EXPORT_TITLE,
         PANEL_KNOB_EXPORT_DETAIL,
         BOX_PRIMITIVE_EXPORT_LIMITATION,
@@ -6075,8 +6235,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Primary control",
         "Starting point is not available",
         "Open a saved project, or enable the clay starting points.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before exporting.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before starting a pack.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before exporting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Panel with Knob, or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -6233,7 +6393,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             "Choose an asset".to_owned(),
             concat!(
                 "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, ",
-                "Hinged Panel, Handled Panel, Panel with Knob, or open a project before ",
+                "Hinged Panel, Panel with Knob, or open a project before ",
                 "making changes."
             )
             .to_owned(),
@@ -6566,7 +6726,7 @@ fn make_canvas_next_action_hint(
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => {
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob first."
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Panel with Knob first."
                 .to_owned()
         }
         (MakeCanvasMode::PreparingAsset, _, _) => {
@@ -7045,12 +7205,12 @@ fn show_home_browser_panel(
                 SectionHeaderSpec {
                     eyebrow: "Choose",
                     title: if starter_profile_mode {
-                        "Choose a starting point."
+                        "Choose a starting point"
                     } else {
                         "Choose what to make"
                     },
                     subtitle: Some(if starter_profile_mode {
-                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob."
+                        "Pick a primitive, or choose a derived starting point under its source."
                     } else {
                         HOME_SUBTITLE
                     }),
@@ -7059,7 +7219,7 @@ fn show_home_browser_panel(
             ui.add_space(8.0);
             ui.label(
                 RichText::new(if starter_profile_mode {
-                    "Each starting point is a simple clay asset with only visible controls."
+                    "Starting points are grouped by provenance so the source stays clear."
                 } else {
                     "Choose the Box Primitive starting point below."
                 })
@@ -7114,21 +7274,29 @@ fn show_home_browser_panel(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    if filtered_indices.is_empty() {
-                        ui.label(
-                            RichText::new("No matching starting point")
-                                .color(colors.text_muted)
-                                .small(),
-                        );
-                    }
-                    for index in filtered_indices {
-                        let profile = &profiles[index];
-                        let selected =
-                            selected_slug.as_deref() == Some(profile.fixture.slug.as_str());
-                        if show_home_template_row(ui, profile, selected).clicked() {
-                            *selected_slug = Some(profile.fixture.slug.clone());
+                    if starter_profile_mode {
+                        let preview_mode = profiles
+                            .iter()
+                            .any(|profile| profile.fixture.slug == HANDLED_PANEL_PROFILE_ID);
+                        let groups = product_home_starting_point_groups(profiles, preview_mode);
+                        show_starting_point_provenance_library(ui, &groups, selected_slug);
+                    } else {
+                        if filtered_indices.is_empty() {
+                            ui.label(
+                                RichText::new("No matching starting point")
+                                    .color(colors.text_muted)
+                                    .small(),
+                            );
                         }
-                        ui.add_space(6.0);
+                        for index in filtered_indices {
+                            let profile = &profiles[index];
+                            let selected =
+                                selected_slug.as_deref() == Some(profile.fixture.slug.as_str());
+                            if show_home_template_row(ui, profile, selected).clicked() {
+                                *selected_slug = Some(profile.fixture.slug.clone());
+                            }
+                            ui.add_space(6.0);
+                        }
                     }
                 });
             if starter_profile_mode {
@@ -7137,6 +7305,156 @@ fn show_home_browser_panel(
             }
         }
     });
+}
+
+fn show_starting_point_provenance_library(
+    ui: &mut egui::Ui,
+    groups: &[StartingPointGroup],
+    selected_slug: &mut Option<String>,
+) {
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.label(
+        RichText::new("Primitives")
+            .color(colors.accent_hover)
+            .small()
+            .strong(),
+    );
+    ui.add_space(8.0);
+    for group in groups {
+        let selected = selected_slug.as_deref() == Some(group.source_primitive_slug);
+        if show_starting_point_group_row(ui, group, selected).clicked()
+            && let Some(profile) = &group.primitive_profile
+        {
+            *selected_slug = Some(profile.fixture.slug.clone());
+        }
+        ui.add_space(5.0);
+        for derived in &group.derived_items {
+            let selected = derived.profile.as_ref().is_some_and(|profile| {
+                selected_slug.as_deref() == Some(profile.fixture.slug.as_str())
+            });
+            if show_derived_starting_point_row(ui, derived, selected).clicked()
+                && let Some(profile) = &derived.profile
+            {
+                *selected_slug = Some(profile.fixture.slug.clone());
+            }
+            ui.add_space(5.0);
+        }
+        ui.add_space(10.0);
+    }
+}
+
+fn show_starting_point_group_row(
+    ui: &mut egui::Ui,
+    group: &StartingPointGroup,
+    selected: bool,
+) -> egui::Response {
+    let colors = VisualFoundryTokens::dark().colors;
+    let fill = if selected {
+        colors.accent_soft
+    } else {
+        colors.panel_subtle
+    };
+    let stroke = if selected {
+        egui::Stroke::new(1.0, colors.accent_hover)
+    } else {
+        egui::Stroke::new(1.0, colors.stroke)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(group.display_name)
+                        .color(colors.text)
+                        .strong(),
+                );
+                ui.label(
+                    RichText::new(group.status.label())
+                        .color(colors.text_subtle)
+                        .small(),
+                );
+            });
+            ui.add_space(2.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(group.description)
+                        .color(colors.text_muted)
+                        .small(),
+                )
+                .wrap(),
+            );
+        })
+        .response
+        .interact(egui::Sense::click())
+}
+
+fn show_derived_starting_point_row(
+    ui: &mut egui::Ui,
+    derived: &DerivedStartingPoint,
+    selected: bool,
+) -> egui::Response {
+    let colors = VisualFoundryTokens::dark().colors;
+    let enabled = derived.profile.is_some();
+    let fill = if selected {
+        colors.accent_soft
+    } else {
+        colors.panel_elevated
+    };
+    let stroke = if selected {
+        egui::Stroke::new(1.0, colors.accent_hover)
+    } else {
+        egui::Stroke::new(1.0, colors.stroke)
+    };
+    ui.horizontal(|ui| {
+        ui.add_space(18.0);
+        let response = egui::Frame::new()
+            .fill(fill)
+            .stroke(stroke)
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width((ui.available_width() - 18.0).max(120.0));
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(derived.display_name)
+                            .color(if enabled {
+                                colors.text
+                            } else {
+                                colors.text_subtle
+                            })
+                            .strong(),
+                    );
+                    if derived.preset {
+                        ui.label(RichText::new("Preset").color(colors.accent_hover).small());
+                    }
+                    ui.label(
+                        RichText::new(derived.status.label())
+                            .color(colors.text_subtle)
+                            .small(),
+                    );
+                });
+                ui.add_space(4.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("Derived from {}", derived.derived_from_label))
+                            .color(colors.text_muted)
+                            .small(),
+                    )
+                    .wrap(),
+                );
+            })
+            .response;
+        if enabled {
+            response.interact(egui::Sense::click())
+        } else {
+            response
+        }
+    })
+    .inner
 }
 
 fn home_filter_button(
@@ -7242,6 +7560,10 @@ fn show_home_selected_template_stage(
             )
             .wrap(),
         );
+        if let Some(provenance) = selected_profile_provenance_copy(&profile.fixture.slug) {
+            ui.add_space(6.0);
+            ui.label(RichText::new(provenance).color(colors.accent_hover).small());
+        }
         ui.add_space(14.0);
         let preview_height = (ui.available_height() - 98.0).clamp(320.0, 620.0);
         show_home_selected_model_preview(
@@ -7322,6 +7644,21 @@ fn home_profile_count_label(count: usize) -> String {
     match count {
         1 => "1 starting point".to_owned(),
         count => format!("{count} starting points"),
+    }
+}
+
+fn selected_profile_provenance_copy(slug: &str) -> Option<&'static str> {
+    match slug {
+        BOX_PRIMITIVE_PROFILE_ID => Some("Primitive starting point."),
+        LIDDED_BOX_PROFILE_ID => Some("Derived from Box Primitive + Lid Seam."),
+        FLAT_PANEL_PRIMITIVE_PROFILE_ID => Some("Primitive starting point."),
+        HINGED_PANEL_PROFILE_ID => Some("Derived from Flat Panel Primitive + Hinge Edge."),
+        HANDLED_PANEL_PROFILE_ID => {
+            Some("Historical proof from Flat Panel Primitive + Hinge Edge + Handle.")
+        }
+        PANEL_KNOB_PROFILE_ID => Some("Derived from Flat Panel Primitive + Sphere attachment."),
+        SPHERE_PRIMITIVE_PROFILE_ID => Some("Primitive starting point with a Knob-like preset."),
+        _ => None,
     }
 }
 
@@ -9920,9 +10257,30 @@ mod tests {
     }
 
     #[test]
+    fn choose_header_uses_selected_starting_point_title() {
+        let flat_panel_app = FoundryDesktopApp {
+            selected_home_profile_slug: Some(FLAT_PANEL_PRIMITIVE_PROFILE_ID.to_owned()),
+            ..FoundryDesktopApp::default()
+        };
+        assert_eq!(
+            flat_panel_app.current_project_title(),
+            "Start with Flat Panel Primitive"
+        );
+
+        let panel_knob_app = FoundryDesktopApp {
+            selected_home_profile_slug: Some(PANEL_KNOB_PROFILE_ID.to_owned()),
+            ..FoundryDesktopApp::default()
+        };
+        assert_eq!(
+            panel_knob_app.current_project_title(),
+            "Start with Panel with Knob"
+        );
+    }
+
+    #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
         assert_eq!(installed_product_kit_count(), 7);
-        assert_eq!(default_product_home_profile_count(), 7);
+        assert_eq!(default_product_home_profile_count(), 6);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -9934,8 +10292,7 @@ mod tests {
         assert_eq!(default_profiles[2].fixture.slug, "flat-panel-primitive");
         assert_eq!(default_profiles[3].fixture.slug, "sphere-primitive");
         assert_eq!(default_profiles[4].fixture.slug, "hinged-panel");
-        assert_eq!(default_profiles[5].fixture.slug, "handled-panel");
-        assert_eq!(default_profiles[6].fixture.slug, "panel-with-knob");
+        assert_eq!(default_profiles[5].fixture.slug, "panel-with-knob");
         assert_eq!(
             default_labels,
             vec![
@@ -9944,7 +10301,6 @@ mod tests {
                 "Flat Panel Primitive",
                 "Sphere Primitive",
                 "Hinged Panel",
-                "Handled Panel",
                 "Panel with Knob"
             ]
         );
@@ -9977,18 +10333,19 @@ mod tests {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
 
-        assert_eq!(profiles.len(), 7);
+        assert_eq!(profiles.len(), 6);
         assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[1].fixture.slug, LIDDED_BOX_PROFILE_ID);
         assert_eq!(profiles[2].fixture.slug, FLAT_PANEL_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[3].fixture.slug, SPHERE_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[4].fixture.slug, HINGED_PANEL_PROFILE_ID);
-        assert_eq!(profiles[5].fixture.slug, HANDLED_PANEL_PROFILE_ID);
-        assert_eq!(profiles[6].fixture.slug, PANEL_KNOB_PROFILE_ID);
+        assert_eq!(profiles[5].fixture.slug, PANEL_KNOB_PROFILE_ID);
         assert!(HOME_TEMPLATE_FILTERS.is_empty());
-        assert!(strings.contains(&"Choose a starting point."));
-        assert!(strings.contains(&HOME_SUBTITLE));
-        assert!(strings.contains(&HOME_CONTROL_COPY));
+        assert!(strings.contains(&"Choose a starting point"));
+        assert!(strings.contains(&"Primitives"));
+        assert!(strings.contains(&"Derived from Box Primitive"));
+        assert!(strings.contains(&"Derived from Flat Panel Primitive"));
+        assert!(strings.contains(&"Preset"));
         assert!(strings.contains(&"A simple box with a visible lid seam."));
         assert!(strings.contains(&"You can vary proportions, edge softness, and lid seam."));
         assert!(
@@ -10000,10 +10357,6 @@ mod tests {
         );
         assert!(strings.contains(&"One upright clay panel with a visible hinge edge."));
         assert!(strings.contains(&"You can vary proportions, edge softness, and hinge edge."));
-        assert!(strings.contains(&"One upright clay panel with a visible hinge edge and handle."));
-        assert!(
-            strings.contains(&"You can vary proportions, edge softness, hinge edge, and handle.")
-        );
         assert!(strings.contains(
             &"One upright clay panel with a bounded knob-like sphere form attached through a safe anchor."
         ));
@@ -10027,6 +10380,8 @@ mod tests {
             "7 starting points",
             "Search starting point...",
             "Choose what to make",
+            "Handled Panel",
+            "Historical proof",
         ] {
             assert!(
                 !joined.contains(hidden),
@@ -10036,49 +10391,110 @@ mod tests {
     }
 
     #[test]
-    fn product_home_profiles_group_by_asset_family() {
-        let profiles = product_home_profiles(true);
-        let groups = product_home_profile_groups(profiles.clone());
-        let family_names = groups
+    fn choose_page_provenance_groups_primitives_before_derived_items() {
+        let profiles = product_home_profiles(false);
+        let groups = product_home_starting_point_groups(&profiles, false);
+        let group_names = groups
             .iter()
-            .map(|group| group.family_name.as_str())
+            .map(|group| group.display_name)
             .collect::<Vec<_>>();
-        let mut sorted_family_names = family_names.clone();
-        sorted_family_names.sort_unstable();
 
-        assert_eq!(family_names, sorted_family_names);
         assert_eq!(
-            family_names,
-            vec![
-                "Box Primitive",
-                "Flat Panel Primitive",
-                "Handled Panel",
-                "Hinged Panel",
-                "Lidded Box",
-                "Panel with Knob",
-                "Sphere Primitive"
-            ]
+            group_names,
+            vec!["Box Primitive", "Flat Panel Primitive", "Sphere Primitive"]
         );
-        assert!(!family_names.iter().any(|name| name.contains("MVP")));
+        assert_eq!(groups[0].source_primitive_slug, BOX_PRIMITIVE_PROFILE_ID);
+        assert_eq!(groups[0].derived_items[0].display_name, "Lidded Box");
+        assert_eq!(
+            groups[0].derived_items[0].derived_from_label,
+            "Box Primitive"
+        );
+        assert_eq!(
+            groups[0].derived_items[0].derivation_summary,
+            "Derived from Box Primitive + Lid Seam."
+        );
+        assert_eq!(
+            groups[1]
+                .derived_items
+                .iter()
+                .map(|item| item.display_name)
+                .collect::<Vec<_>>(),
+            vec!["Hinged Panel", "Panel with Knob"]
+        );
+        assert_eq!(
+            groups[1].derived_items[0].derived_from_label,
+            "Flat Panel Primitive"
+        );
+        assert_eq!(
+            groups[1].derived_items[1].derivation_summary,
+            "Derived from Flat Panel Primitive + Sphere attachment."
+        );
+        assert_eq!(groups[2].derived_items[0].display_name, "Knob-like Form");
+        assert!(groups[2].derived_items[0].preset);
+        assert!(groups[2].derived_items[0].profile.is_none());
         assert!(
-            groups
+            !groups
                 .iter()
-                .all(|group| !group.family_id.is_empty() && !group.family_name.is_empty())
+                .flat_map(|group| group.derived_items.iter())
+                .any(|item| item.display_name == "Handled Panel")
         );
+    }
 
-        let expected_labels = profiles
+    #[test]
+    fn choose_page_preview_mode_contains_historical_proofs_only_internally() {
+        let profiles = product_home_profiles(true);
+        let groups = product_home_starting_point_groups(&profiles, true);
+        let flat_panel_group = groups
             .iter()
-            .map(|profile| profile.label.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        let actual_labels = groups
+            .find(|group| group.display_name == "Flat Panel Primitive")
+            .expect("flat panel group");
+        let handled = flat_panel_group
+            .derived_items
             .iter()
-            .flat_map(|group| group.profiles.iter().map(|profile| profile.label.as_str()))
+            .find(|item| item.display_name == "Handled Panel")
+            .expect("handled panel historical proof");
+
+        assert_eq!(handled.status, StartingPointStatus::HistoricalProof);
+        assert_eq!(handled.derived_from_label, "Flat Panel Primitive");
+        assert_eq!(
+            handled.derivation_summary,
+            "Historical proof from Flat Panel + Hinge Edge + Handle."
+        );
+    }
+
+    #[test]
+    fn choose_page_provenance_groups_cover_startable_profiles() {
+        let profiles = product_home_profiles(false);
+        let groups = product_home_starting_point_groups(&profiles, false);
+        let startable_slugs = groups
+            .iter()
+            .flat_map(|group| {
+                group.primitive_profile.iter().chain(
+                    group
+                        .derived_items
+                        .iter()
+                        .filter_map(|item| item.profile.as_ref()),
+                )
+            })
+            .map(|profile| profile.fixture.slug.as_str())
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(actual_labels, expected_labels);
+        let profile_slugs = profiles
+            .iter()
+            .map(|profile| profile.fixture.slug.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(startable_slugs, profile_slugs);
         assert_eq!(
             groups
                 .iter()
-                .map(|group| group.profiles.len())
+                .map(|group| {
+                    group.primitive_profile.iter().count()
+                        + group
+                            .derived_items
+                            .iter()
+                            .filter(|item| item.profile.is_some())
+                            .count()
+                })
                 .sum::<usize>(),
             profiles.len()
         );
@@ -10112,7 +10528,6 @@ mod tests {
                 "flat-panel-primitive",
                 "sphere-primitive",
                 "hinged-panel",
-                "handled-panel",
                 "panel-with-knob"
             ]
         );
@@ -10120,23 +10535,15 @@ mod tests {
 
     #[test]
     fn product_home_grouping_uses_stable_family_ids() {
-        let profiles = product_home_profiles(true);
-        let groups = product_home_profile_groups(profiles);
-        assert_eq!(groups.len(), 7);
-        assert_eq!(groups[0].family_id, "box_primitive");
-        assert_eq!(groups[1].family_id, "flat_panel_primitive");
-        assert_eq!(groups[2].family_id, "handled_panel");
-        assert_eq!(groups[3].family_id, "hinged_panel");
-        assert_eq!(groups[4].family_id, "lidded_box");
-        assert_eq!(groups[5].family_id, "panel_with_knob");
-        assert_eq!(groups[6].family_id, "sphere_primitive");
-        assert_eq!(groups[0].profiles.len(), 1);
-        assert_eq!(groups[1].profiles.len(), 1);
-        assert_eq!(groups[2].profiles.len(), 1);
-        assert_eq!(groups[3].profiles.len(), 1);
-        assert_eq!(groups[4].profiles.len(), 1);
-        assert_eq!(groups[5].profiles.len(), 1);
-        assert_eq!(groups[6].profiles.len(), 1);
+        let profiles = product_home_profiles(false);
+        let groups = product_home_starting_point_groups(&profiles, false);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].source_primitive_slug, "box-primitive");
+        assert_eq!(groups[1].source_primitive_slug, "flat-panel-primitive");
+        assert_eq!(groups[2].source_primitive_slug, "sphere-primitive");
+        assert_eq!(groups[0].derived_items.len(), 1);
+        assert_eq!(groups[1].derived_items.len(), 2);
+        assert_eq!(groups[2].derived_items.len(), 1);
     }
 
     #[test]
