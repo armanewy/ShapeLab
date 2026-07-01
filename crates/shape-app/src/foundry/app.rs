@@ -160,6 +160,37 @@ enum MakeCandidateTrayState {
     ErrorWithRecovery,
 }
 
+fn background_preview_refresh_is_nonblocking(
+    preview_image_ready: bool,
+    preview_matches_current_build: bool,
+    compiling_or_editing: bool,
+    preview_rendering: bool,
+) -> bool {
+    preview_rendering
+        && preview_image_ready
+        && preview_matches_current_build
+        && !compiling_or_editing
+}
+
+fn current_preview_stage_status_message(
+    has_preview: bool,
+    has_output: bool,
+    preview_is_stale: bool,
+    rendering_preview: bool,
+) -> Option<&'static str> {
+    if has_preview {
+        return preview_is_stale.then_some(PREVIEW_UPDATING_REASON);
+    }
+    if !has_output {
+        return None;
+    }
+    Some(if rendering_preview {
+        PREVIEW_UPDATING_REASON
+    } else {
+        PREVIEW_PREPARING_REASON
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MakeCanvasViewState {
     mode: MakeCanvasMode,
@@ -420,6 +451,7 @@ const NEED_PACK_MEMBER_REASON: &str = "Add at least one asset before exporting a
 const NEED_LOCKED_CONTROLS_REASON: &str = "No locked controls are active.";
 const ASSET_PREPARING_REASON: &str = "The asset is preparing. This usually takes a moment.";
 const PREVIEW_UPDATING_REASON: &str = "Preview is updating...";
+const PREVIEW_PREPARING_REASON: &str = "Preview is being prepared.";
 const ACTIVE_IDEA_JOB_REASON: &str = "Finish the current idea search before changing this.";
 const STALE_RESULT_WARNING: &str = "An older result was ignored because you changed the asset.";
 const CANCELED_IDEA_SEARCH_WARNING: &str = "Canceled earlier idea search.";
@@ -1085,7 +1117,6 @@ impl FoundryDesktopApp {
             .active_jobs
             .values()
             .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
-        let current_asset_job_active = compiling_or_editing || preview_rendering;
         let model_ready = self.state.current_output.is_some();
         let quick_template_preview_visible =
             self.state.document.is_some() && self.state.current_output.is_none();
@@ -1100,12 +1131,22 @@ impl FoundryDesktopApp {
             .as_ref()
             .is_some_and(|preview| preview.build == self.state.current_build);
         let stale_preview = preview_image_ready && !preview_matches_current_build;
+        let background_preview_refresh = background_preview_refresh_is_nonblocking(
+            preview_image_ready,
+            preview_matches_current_build,
+            compiling_or_editing,
+            preview_rendering,
+        );
+        let current_asset_job_active =
+            compiling_or_editing || (preview_rendering && !background_preview_refresh);
         let preview_ready = model_ready
             && preview_image_ready
             && (preview_matches_current_build || compiling_or_editing)
-            && !preview_rendering;
-        let preview_updating =
-            model_ready && (preview_rendering || stale_preview || compiling_or_editing);
+            && (!preview_rendering || background_preview_refresh);
+        let preview_updating = model_ready
+            && (stale_preview
+                || compiling_or_editing
+                || (preview_rendering && !background_preview_refresh));
         let preview_update_required =
             model_ready && !preview_ready && !preview_rendering && !compiling_or_editing;
         let preparation_phase = if !model_ready {
@@ -1419,14 +1460,31 @@ impl FoundryDesktopApp {
             .values()
             .any(|request| request.slot() == FoundryJobSlot::RenderPreview);
         let model_ready = self.state.current_output.is_some();
+        let preview_image_ready = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| !preview.rgba8.is_empty());
+        let preview_matches_current_build = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| preview.build == self.state.current_build);
+        let background_preview_refresh = background_preview_refresh_is_nonblocking(
+            preview_image_ready,
+            preview_matches_current_build,
+            compiling_or_editing,
+            preview_rendering,
+        );
         let preview_ready = model_ready
-            && self.state.current_preview.as_ref().is_some_and(|preview| {
-                !preview.rgba8.is_empty()
-                    && (preview.build == self.state.current_build || compiling_or_editing)
-            })
-            && !preview_rendering;
+            && preview_image_ready
+            && (preview_matches_current_build || compiling_or_editing)
+            && (!preview_rendering || background_preview_refresh);
 
-        !model_ready || !preview_ready || compiling_or_editing || preview_rendering
+        !model_ready
+            || !preview_ready
+            || compiling_or_editing
+            || (preview_rendering && !background_preview_refresh)
     }
 
     fn refresh_make_preparation_timer(&mut self) {
@@ -1495,12 +1553,34 @@ impl FoundryDesktopApp {
     }
 
     fn preview_status(&self) -> &'static str {
+        let compiling_or_editing = self.state.active_jobs.values().any(|request| {
+            matches!(
+                request.slot(),
+                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
+            )
+        });
         let rendering_preview = self
             .state
             .active_jobs
             .values()
             .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
-        if rendering_preview {
+        let preview_image_ready = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| !preview.rgba8.is_empty());
+        let preview_matches_current_build = self
+            .state
+            .current_preview
+            .as_ref()
+            .is_some_and(|preview| preview.build == self.state.current_build);
+        let background_preview_refresh = background_preview_refresh_is_nonblocking(
+            preview_image_ready,
+            preview_matches_current_build,
+            compiling_or_editing,
+            rendering_preview,
+        );
+        if rendering_preview && !background_preview_refresh {
             "Preview building"
         } else if self.state.current_preview.is_some() {
             "Ready"
@@ -3612,18 +3692,26 @@ impl FoundryDesktopApp {
                         camera: Some(camera),
                     });
                 }
-                if preview_is_stale || rendering_preview {
+                if let Some(message) = current_preview_stage_status_message(
+                    true,
+                    has_output,
+                    preview_is_stale,
+                    rendering_preview,
+                ) {
                     ui.label(
-                        RichText::new(PREVIEW_UPDATING_REASON)
+                        RichText::new(message)
                             .color(VisualFoundryTokens::dark().colors.warning)
                             .small(),
                     );
                 }
             } else if has_output {
-                if rendering_preview {
-                    ui.weak(PREVIEW_UPDATING_REASON);
-                } else {
-                    ui.weak("Preview is being prepared.");
+                if let Some(message) = current_preview_stage_status_message(
+                    false,
+                    has_output,
+                    preview_is_stale,
+                    rendering_preview,
+                ) {
+                    ui.weak(message);
                 }
             } else {
                 draw_quick_template_preview(ui, draw_edge, &asset_name);
@@ -5335,7 +5423,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "This model has no quick controls yet.",
         "Prepare the current asset before exporting.",
         "No pack workspace is open.",
-        "Preview is being prepared.",
+        PREVIEW_PREPARING_REASON,
         "Primary control",
         "Starting point is not available",
         "Open a saved project, or enable the clay starting points.",
@@ -9410,6 +9498,26 @@ mod tests {
     }
 
     #[test]
+    fn current_preview_stage_hides_refresh_status_when_image_is_available() {
+        assert_eq!(
+            current_preview_stage_status_message(true, true, false, true),
+            None
+        );
+        assert_eq!(
+            current_preview_stage_status_message(true, true, true, true),
+            Some(PREVIEW_UPDATING_REASON)
+        );
+        assert_eq!(
+            current_preview_stage_status_message(false, true, false, true),
+            Some(PREVIEW_UPDATING_REASON)
+        );
+        assert_eq!(
+            current_preview_stage_status_message(false, true, false, false),
+            Some(PREVIEW_PREPARING_REASON)
+        );
+    }
+
+    #[test]
     fn home_thumbnail_drag_delta_orbits_camera() {
         let camera = OrbitCamera::default();
         let rotated = orbit_home_thumbnail_camera(&camera, egui::vec2(20.0, -10.0));
@@ -10664,6 +10772,45 @@ mod tests {
         assert!(strings.contains(&ACTION_UPDATE_PREVIEW));
         assert!(!strings.contains(&"Build Asset"));
         assert!(!strings.contains(&"Refresh Preview"));
+    }
+
+    #[test]
+    fn camera_preview_refresh_stays_ready_without_busy_overlay() {
+        let mut app = ready_visible_state_test_app();
+        let preview = app
+            .state
+            .current_preview
+            .as_ref()
+            .expect("ready fixture has preview")
+            .clone();
+        let camera = current_preview_orbit_camera(&preview, egui::vec2(16.0, 8.0))
+            .expect("drag should request a different camera");
+        let effects = app
+            .state
+            .request_preview(preview.width, preview.height, Some(camera))
+            .expect("preview request schedules");
+
+        assert_eq!(effects.len(), 1);
+        assert!(
+            app.state
+                .active_jobs
+                .values()
+                .any(|request| request.slot() == FoundryJobSlot::RenderPreview)
+        );
+        assert!(!app.make_is_preparing_now());
+        assert_eq!(app.preview_status(), "Ready");
+
+        let visible = app.make_canvas_view_state();
+
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert_eq!(visible.preparation_phase, MakePreparationPhase::Ready);
+        assert!(visible.preview_ready);
+        assert!(!visible.preview_updating);
+        assert_eq!(visible.local_banner_title, "Ready");
+        assert_eq!(visible.local_banner_tone, BannerTone::Success);
+        assert!(visible.primary_action_enabled);
+        assert!(visible.local_busy_label.is_none());
+        assert!(!visible.local_busy_visible);
     }
 
     #[test]
