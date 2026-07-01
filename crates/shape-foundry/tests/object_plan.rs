@@ -30,6 +30,14 @@ const OBJECT_PLAN_STATUS_DOCS: &[(&str, &str)] = &[
         include_str!("../../../docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md"),
     ),
     (
+        "docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md",
+        include_str!("../../../docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md"),
+    ),
+    (
+        "docs/GEOMETRY_EXPORT_TRUTH_GATE.md",
+        include_str!("../../../docs/GEOMETRY_EXPORT_TRUTH_GATE.md"),
+    ),
+    (
         "docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md",
         include_str!("../../../docs/OBJECT_PLAN_OFFLINE_RUNNER_CLI.md"),
     ),
@@ -486,7 +494,7 @@ fn object_plan_status_docs_do_not_claim_auto_approval_or_runtime_llm() {
             "public catalog publishing is enabled",
         ] {
             assert!(
-                !lower.contains(forbidden),
+                !contains_positive_claim(&lower, forbidden),
                 "{path} must not claim approval, runtime LLM, or public publishing: {forbidden}"
             );
         }
@@ -516,6 +524,57 @@ fn object_plan_status_docs_keep_surface_rig_animation_blocked() {
 }
 
 #[test]
+fn object_plan_status_docs_do_not_claim_current_godot_or_game_ready_output() {
+    for (path, doc) in OBJECT_PLAN_STATUS_DOCS {
+        let lower = doc.to_ascii_lowercase();
+        for forbidden in [
+            "current objectplan outputs are godot-ready",
+            "current objectplan outputs are game-ready",
+            "objectplan outputs are godot-ready",
+            "objectplan outputs are game-ready",
+            "objectplan exports godot-ready",
+            "objectplan exports game-ready",
+            "godot-ready engine packages",
+            "game-ready engine packages",
+        ] {
+            assert!(
+                !contains_positive_claim(&lower, forbidden),
+                "{path} must not claim current Godot-ready or game-ready output: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn object_plan_status_docs_scope_geometry_export_as_upcoming() {
+    let combined = OBJECT_PLAN_STATUS_DOCS
+        .iter()
+        .map(|(_, doc)| *doc)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+
+    assert!(combined.contains("geometry-only glb export is the next proof"));
+    assert!(combined.contains("godot import proof is required"));
+    assert!(combined.contains("not godot-ready"));
+    assert!(combined.contains("not yet export glb"));
+    for blocked in [
+        "uvs",
+        "textures",
+        "material looks",
+        "collision",
+        "rigging",
+        "animation",
+        "game-ready status",
+    ] {
+        assert!(
+            combined.contains(blocked),
+            "geometry export docs must caveat missing {blocked}"
+        );
+    }
+}
+
+#[test]
 fn object_plan_render_blocked_state_is_documented_as_valid_but_incomplete() {
     let truth_doc = include_str!("../../../docs/OBJECT_PLAN_V0_TRUTH_RENDER_BLOCKER_GATE.md")
         .to_ascii_lowercase();
@@ -523,6 +582,19 @@ fn object_plan_render_blocked_state_is_documented_as_valid_but_incomplete() {
     assert!(truth_doc.contains("valid for objectplan v0"));
     assert!(truth_doc.contains("incomplete"));
     assert!(truth_doc.contains("next milestone"));
+}
+
+fn contains_positive_claim(document: &str, claim: &str) -> bool {
+    document.lines().any(|line| {
+        let line = line.trim();
+        line.contains(claim)
+            && ![
+                "not ", "no ", "without", "before", "blocked", "must not", "does not", "do not",
+                "required",
+            ]
+            .iter()
+            .any(|negative| line.contains(negative))
+    })
 }
 
 fn one_sphere_plan() -> ObjectPlan {

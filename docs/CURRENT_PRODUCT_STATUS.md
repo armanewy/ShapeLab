@@ -42,6 +42,12 @@ and rendered into contact-sheet evidence for human review.
   asset graphs and produces contact-sheet evidence for supported render paths.
 - Unsupported or invalid ObjectPlans produce honest blocked reports and no fake
   contact sheets.
+- Geometry-only GLB export is the next proof. Current ObjectPlan outputs are
+  not Godot-ready or game-ready engine packages.
+- Geometry-only export is scoped to mesh data only and will not include UVs,
+  textures, material looks, collision, rigging, animation, or game-ready
+  status.
+- Godot import proof is required before claiming Godot-ready geometry.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
   validates every plan and LLM drafts remain Draft until reviewed.
 - ObjectPlan review UI is internal-only and dev-gated; it is not part of the
@@ -102,6 +108,8 @@ and rendered into contact-sheet evidence for human review.
 - ObjectPlan batch review may be referenced as offline review infrastructure
   that classifies Keep / Regenerate / Simplify / Blocked, not Prototype Pack
   Mode and not automatic approval.
+- Geometry-only GLB export may be referenced only as upcoming scoped work until
+  the export CLI and Godot import proof gate pass.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
 
@@ -128,6 +136,8 @@ Use one visible operation per milestone:
 - UV/texturing UI.
 - Rigging, skinning, or animation UI.
 - Runtime LLM integration.
+- Current ObjectPlan outputs being described as Godot-ready or game-ready.
+- Geometry-only GLB export until the export proof lands.
 - Public ObjectPlan authoring UI, automatic offline LLM drafting in the app,
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.

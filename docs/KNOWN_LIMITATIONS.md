@@ -30,6 +30,10 @@
 - ObjectPlan rendering reports honest blocked output for invalid or unsupported
   plans; contact sheets must not be faked.
 - ObjectPlan outputs remain Draft and review-required.
+- ObjectPlan outputs are not Godot-ready or game-ready engine packages.
+- Geometry-only GLB export is the next proof and is not implemented for
+  ObjectPlan yet.
+- Godot import proof is required before any Godot-ready geometry claim.
 - ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -55,5 +59,5 @@
 - Direct primitive editing does not approve material-look persistence.
 - Direct primitive editing does not approve pack-level publishing.
 - ObjectPlan Materialization v1 does not approve runtime LLM integration,
-  public kit publishing, materials/surfaces, UV/texturing, rigging, animation,
-  or game-ready claims.
+  public kit publishing, materials/surfaces, UV/texturing, collision,
+  rigging, animation, Godot-ready claims, or game-ready claims.
