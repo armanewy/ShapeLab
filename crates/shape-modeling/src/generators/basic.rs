@@ -450,7 +450,7 @@ fn build_cut_rounded_box(
     })?;
     let face = operation_face(first_operation)?;
     let host = PlanarHostPatch::rounded_box(face, half, radius)?;
-    let mut cuts = operations
+    let cuts = operations
         .iter()
         .map(|operation| {
             if operation_face(operation)? != face {
@@ -461,14 +461,21 @@ fn build_cut_rounded_box(
                 });
             }
             let cut = PlateCutPlan::from_operation(operation, host.half_u, host.half_v, host.thickness)?;
-            if cut.target_region != ROUNDED_PRIMARY_REGION || cut.outer_region != ROUNDED_PRIMARY_REGION {
-                return Err(ModelingError::InvalidInput(
-                    "rounded-box cuts must target the primary flat face region".to_owned(),
-                ));
-            }
             Ok(cut)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let primary_region = cuts
+        .first()
+        .expect("at least one rounded-box cut should exist")
+        .target_region;
+    for cut in &cuts {
+        if cut.target_region != cut.outer_region || cut.target_region != primary_region {
+            return Err(ModelingError::InvalidInput(
+                "rounded-box cuts must target one shared primary flat face region".to_owned(),
+            ));
+        }
+    }
+    let mut cuts = cuts;
     apply_boundary_loop_bevels(&mut cuts, bevels, host.thickness)?;
     validate_cut_frame_clearance(&cuts)?;
 
@@ -504,7 +511,7 @@ fn build_cut_rounded_box(
         let v_samples = &axis_samples[v_axis];
         for u in 0..u_samples.len() - 1 {
             for v in 0..v_samples.len() - 1 {
-                let region = rounded_box_region(
+                let local_region = rounded_box_region(
                     [u_axis, v_axis],
                     [
                         (u_samples[u] + u_samples[u + 1]) * 0.5,
@@ -513,11 +520,12 @@ fn build_cut_rounded_box(
                     inner,
                     radius,
                 );
-                if region == ROUNDED_PRIMARY_REGION
+                if local_region == ROUNDED_PRIMARY_REGION
                     && (side == entry_side || (side == opposite_side && !through_cuts.is_empty()))
                 {
                     continue;
                 }
+                let region = rounded_box_region_for_primary(local_region, primary_region);
                 let corners = [
                     rounded_box_position(side, u_samples[u], v_samples[v], half, inner, radius),
                     rounded_box_position(side, u_samples[u + 1], v_samples[v], half, inner, radius),
@@ -532,7 +540,10 @@ fn build_cut_rounded_box(
                     rounded_box_position(side, u_samples[u], v_samples[v + 1], half, inner, radius),
                 ];
                 let vertices = builder.add_vertices(&corners)?;
-                builder.add_face(vertices, rounded_box_metadata(context, region));
+                builder.add_face(
+                    vertices,
+                    rounded_box_metadata_for_primary(context, region, primary_region),
+                );
             }
         }
     }
@@ -545,7 +556,7 @@ fn build_cut_rounded_box(
         HostPatchSurface {
             depth: 0.0,
             desired_normal: host.outward_normal,
-            region: ROUNDED_PRIMARY_REGION,
+            region: primary_region,
         },
         context,
     )?;
@@ -558,7 +569,7 @@ fn build_cut_rounded_box(
             HostPatchSurface {
                 depth: host.thickness,
                 desired_normal: negate(host.outward_normal),
-                region: ROUNDED_PRIMARY_REGION,
+                region: primary_region,
             },
             context,
         )?;
@@ -578,7 +589,7 @@ fn build_cut_rounded_box(
             host.outward_normal,
             &xs,
             &zs,
-            ROUNDED_PRIMARY_REGION,
+            primary_region,
             context,
             cut.entry_bevel.as_ref(),
         )?;
@@ -601,7 +612,7 @@ fn build_cut_rounded_box(
                 negate(host.outward_normal),
                 &xs,
                 &zs,
-                ROUNDED_PRIMARY_REGION,
+                primary_region,
                 context,
                 cut.secondary_bevel.as_ref(),
             )?;
@@ -714,7 +725,7 @@ fn build_cut_rounded_box(
             mark.treatment,
         );
     }
-    let mut regions = rounded_box_regions();
+    let mut regions = rounded_box_regions_for_primary(primary_region);
     for cut in &cuts {
         insert_cut_region(&mut regions, cut.rim_region, "cut_rim", SurfaceRole::Rim);
         insert_cut_region(
@@ -4216,6 +4227,14 @@ fn rounded_box_region(
     }
 }
 
+fn rounded_box_region_for_primary(region: RegionId, primary_region: RegionId) -> RegionId {
+    if region == ROUNDED_PRIMARY_REGION {
+        primary_region
+    } else {
+        region
+    }
+}
+
 fn rounded_box_metadata(context: &GeneratorContext, region: RegionId) -> FaceMetadata {
     let (surface_role, smoothing_group) = match region {
         ROUNDED_PRIMARY_REGION => (SurfaceRole::PrimarySurface, None),
@@ -4224,6 +4243,18 @@ fn rounded_box_metadata(context: &GeneratorContext, region: RegionId) -> FaceMet
         _ => (SurfaceRole::Detail, None),
     };
     metadata(context, region, surface_role, smoothing_group)
+}
+
+fn rounded_box_metadata_for_primary(
+    context: &GeneratorContext,
+    region: RegionId,
+    primary_region: RegionId,
+) -> FaceMetadata {
+    if region == primary_region {
+        metadata(context, region, SurfaceRole::PrimarySurface, None)
+    } else {
+        rounded_box_metadata(context, region)
+    }
 }
 
 fn cylinder_metadata(context: &GeneratorContext, region: RegionId) -> FaceMetadata {
@@ -4361,6 +4392,20 @@ fn rounded_box_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {
         (ROUNDED_BEVEL_REGION, "bevel_bands", SurfaceRole::BevelBand),
         (ROUNDED_CORNER_REGION, "corners", SurfaceRole::Detail),
     ])
+}
+
+fn rounded_box_regions_for_primary(
+    primary_region: RegionId,
+) -> BTreeMap<RegionId, SurfaceRegionSpec> {
+    let mut regions = rounded_box_regions();
+    if primary_region != ROUNDED_PRIMARY_REGION {
+        let mut region = regions
+            .remove(&ROUNDED_PRIMARY_REGION)
+            .expect("rounded box primary region exists");
+        region.id = primary_region;
+        regions.insert(primary_region, region);
+    }
+    regions
 }
 
 fn cylinder_regions() -> BTreeMap<RegionId, SurfaceRegionSpec> {

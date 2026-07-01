@@ -3,7 +3,9 @@
 use std::{collections::BTreeSet, fs};
 
 use serde::de::DeserializeOwned;
-use shape_asset::{GeometrySource, PartInstanceId};
+use shape_asset::{
+    GeometrySource, ModelingOperationSpec, PartDefinition, PartInstanceId, PlanarCutFace,
+};
 use shape_compile::{
     export::{verify_model_package, write_model_package},
     validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
@@ -325,6 +327,8 @@ fn lidded_box_lid_seam_reads_as_top_lid_cap() {
 
     let body = rounded_box_bounds_for_role(&output, "body");
     let lid = rounded_box_bounds_for_role(&output, "lid_seam");
+    let body_top = body.translation[1] + body.half_extents[1];
+    let lid_bottom = lid.translation[1] - lid.half_extents[1];
 
     assert!(
         lid.half_extents[0] > body.half_extents[0],
@@ -335,12 +339,55 @@ fn lidded_box_lid_seam_reads_as_top_lid_cap() {
         "lid cap should overhang body depth: body={body:?}, lid={lid:?}"
     );
     assert!(
-        lid.translation[1] > body.translation[1] + body.half_extents[1],
-        "lid cap should sit on top of body: body={body:?}, lid={lid:?}"
+        lid_bottom >= body_top && lid_bottom <= body_top + 0.04,
+        "lid cap should rest just above the open box top without intersecting it: body={body:?}, lid={lid:?}"
     );
     assert!(
         lid.translation[2].abs() < 0.001,
         "lid cap should be centered over the box, not stuck to the front: lid={lid:?}"
+    );
+}
+
+#[test]
+fn lidded_box_body_reads_as_open_container() {
+    let output = compile_lidded_with(&[]);
+    assert_valid_model(&output);
+
+    assert_eq!(role_instances(&output, "body").len(), 1);
+    let definition = definition_for_role(&output, "body");
+    let body = rounded_box_bounds_for_role(&output, "body");
+    let [operation] = definition.geometry.operations.as_slice() else {
+        panic!("open lidded body should be authored by one top-face recess operation");
+    };
+    let ModelingOperationSpec::RecessedPanelCut {
+        face,
+        center,
+        size,
+        depth,
+        rim_width,
+        ..
+    } = operation
+    else {
+        panic!("open lidded body should use a recessed panel cut, got {operation:?}");
+    };
+
+    assert_eq!(*face, PlanarCutFace::PositiveY);
+    assert_eq!(*center, [0.0, 0.0]);
+    assert!(
+        size[0] < body.half_extents[0] * 2.0 && size[1] < body.half_extents[2] * 2.0,
+        "top recess should leave visible box walls: body={body:?}, cut={operation:?}"
+    );
+    assert!(
+        *rim_width > 0.0,
+        "top recess should preserve a visible rim/wall: cut={operation:?}"
+    );
+    assert!(
+        *depth > body.half_extents[1] && *depth < body.half_extents[1] * 2.0,
+        "top recess should hollow the body while leaving a bottom floor: body={body:?}, cut={operation:?}"
+    );
+    assert!(
+        body.translation[1].abs() < 0.001,
+        "open container should stay centered around the origin: body={body:?}"
     );
 }
 
@@ -862,20 +909,13 @@ struct RoundedBoxBounds {
 }
 
 fn rounded_box_bounds_for_role(output: &FoundryCompilationOutput, role: &str) -> RoundedBoxBounds {
-    let instances = role_instances(output, role);
-    let [instance_id] = instances.as_slice() else {
-        panic!("expected exactly one {role} instance");
-    };
+    let instance_id = single_role_instance(output, role);
     let instance = output
         .recipe
         .instances
-        .get(instance_id)
+        .get(&instance_id)
         .expect("role instance exists");
-    let definition = output
-        .recipe
-        .definitions
-        .get(&instance.definition)
-        .expect("role definition exists");
+    let definition = definition_for_role(output, role);
     let half_extents = match &definition.geometry.source {
         GeometrySource::RoundedBox { half_extents, .. } => *half_extents,
         _ => panic!("expected {role} to use rounded box geometry"),
@@ -885,4 +925,26 @@ fn rounded_box_bounds_for_role(output: &FoundryCompilationOutput, role: &str) ->
         half_extents,
         translation: instance.local_transform.translation,
     }
+}
+
+fn definition_for_role<'a>(output: &'a FoundryCompilationOutput, role: &str) -> &'a PartDefinition {
+    let instance_id = single_role_instance(output, role);
+    let instance = output
+        .recipe
+        .instances
+        .get(&instance_id)
+        .expect("role instance exists");
+    output
+        .recipe
+        .definitions
+        .get(&instance.definition)
+        .expect("role definition exists")
+}
+
+fn single_role_instance(output: &FoundryCompilationOutput, role: &str) -> PartInstanceId {
+    let instances = role_instances(output, role);
+    let [instance_id] = instances.as_slice() else {
+        panic!("expected exactly one {role} instance");
+    };
+    *instance_id
 }

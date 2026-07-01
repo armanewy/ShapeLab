@@ -1053,10 +1053,6 @@ fn rasterize_triangle(
     light_direction: Vec3,
     target: &mut RenderTarget<'_>,
 ) {
-    if should_cull_backface(vertices) {
-        return;
-    }
-
     let Some(projected) = project_triangle(vertices, projection) else {
         return;
     };
@@ -1203,11 +1199,6 @@ fn edge_outline_neighbors(
         (Some(x), y.checked_sub(1)),
         (Some(x), (y + 1 < height).then_some(y + 1)),
     ]
-}
-
-fn should_cull_backface(vertices: [RenderVertex; 3]) -> bool {
-    let normal = (vertices[1].view - vertices[0].view).cross(vertices[2].view - vertices[0].view);
-    !is_finite_vec3(normal) || normal.z <= MIN_AREA
 }
 
 fn is_fully_outside_depth(vertices: [RenderVertex; 3]) -> bool {
@@ -1849,7 +1840,7 @@ mod tests {
     }
 
     #[test]
-    fn backface_culling_rejects_reversed_triangle() {
+    fn preview_renders_reversed_triangle_as_two_sided_clay() {
         let mesh = TriangleMesh {
             positions: vec![[-0.8, -0.8, 0.0], [0.0, 0.8, 0.0], [0.8, -0.8, 0.0]],
             normals: vec![[0.0, 0.0, -1.0]; 3],
@@ -1867,7 +1858,8 @@ mod tests {
             image
                 .rgba8
                 .chunks_exact(4)
-                .all(|pixel| pixel == render_settings.background)
+                .any(|pixel| pixel != render_settings.background),
+            "reversed preview triangles should remain visible from orbit views"
         );
     }
 

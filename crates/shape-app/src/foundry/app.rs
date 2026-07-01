@@ -160,18 +160,6 @@ enum MakeCandidateTrayState {
     ErrorWithRecovery,
 }
 
-fn background_preview_refresh_is_nonblocking(
-    preview_image_ready: bool,
-    preview_matches_current_build: bool,
-    compiling_or_editing: bool,
-    preview_rendering: bool,
-) -> bool {
-    preview_rendering
-        && preview_image_ready
-        && preview_matches_current_build
-        && !compiling_or_editing
-}
-
 fn current_preview_stage_status_message(
     has_preview: bool,
     has_output: bool,
@@ -465,7 +453,7 @@ const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
-const CURRENT_PREVIEW_MODEL_IMAGE_SCALE: f32 = 0.78;
+const CURRENT_PREVIEW_MODEL_IMAGE_SCALE: f32 = 0.90;
 const CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT: f32 = 0.35;
 const COORDINATE_REFERENCE_GRID_STEPS: i32 = 8;
 const COORDINATE_REFERENCE_GRID_EXTENT: f32 = 1.18;
@@ -1134,27 +1122,21 @@ impl FoundryDesktopApp {
             .as_ref()
             .is_some_and(|preview| preview.build == self.state.current_build);
         let stale_preview = preview_image_ready && !preview_matches_current_build;
-        let background_preview_refresh = background_preview_refresh_is_nonblocking(
-            preview_image_ready,
-            preview_matches_current_build,
-            compiling_or_editing,
-            preview_rendering,
-        );
         let current_asset_job_active =
-            compiling_or_editing || (preview_rendering && !background_preview_refresh);
-        let preview_ready = model_ready
-            && preview_image_ready
-            && (preview_matches_current_build || compiling_or_editing)
-            && (!preview_rendering || background_preview_refresh);
+            !preview_image_ready && (compiling_or_editing || preview_rendering);
+        let preview_ready = model_ready && preview_image_ready;
         let preview_updating = model_ready
+            && preview_image_ready
             && (stale_preview
                 || compiling_or_editing
-                || (preview_rendering && !background_preview_refresh));
-        let preview_update_required =
-            model_ready && !preview_ready && !preview_rendering && !compiling_or_editing;
+                || (preview_rendering && !preview_matches_current_build));
+        let preview_update_required = model_ready
+            && (!preview_image_ready || stale_preview)
+            && !preview_rendering
+            && !compiling_or_editing;
         let preparation_phase = if !model_ready {
             MakePreparationPhase::PreparingModel
-        } else if !preview_ready {
+        } else if !preview_image_ready {
             MakePreparationPhase::RenderingPreview
         } else {
             MakePreparationPhase::Ready
@@ -1163,7 +1145,7 @@ impl FoundryDesktopApp {
         let focused_part_visible = focused_part_label.is_some();
         let focused_part_actions_visible = focused_part_visible && model_ready && preview_ready;
         let preparing = self.state.document.is_some()
-            && (!model_ready || !preview_ready || current_asset_job_active);
+            && (!model_ready || !preview_image_ready || current_asset_job_active);
         let preparation_timed_out = preparing
             && self
                 .make_preparation_started_at
@@ -1468,26 +1450,11 @@ impl FoundryDesktopApp {
             .current_preview
             .as_ref()
             .is_some_and(|preview| !preview.rgba8.is_empty());
-        let preview_matches_current_build = self
-            .state
-            .current_preview
-            .as_ref()
-            .is_some_and(|preview| preview.build == self.state.current_build);
-        let background_preview_refresh = background_preview_refresh_is_nonblocking(
-            preview_image_ready,
-            preview_matches_current_build,
-            compiling_or_editing,
-            preview_rendering,
-        );
-        let preview_ready = model_ready
-            && preview_image_ready
-            && (preview_matches_current_build || compiling_or_editing)
-            && (!preview_rendering || background_preview_refresh);
+        let preview_ready = model_ready && preview_image_ready;
 
         !model_ready
             || !preview_ready
-            || compiling_or_editing
-            || (preview_rendering && !background_preview_refresh)
+            || (!preview_image_ready && (compiling_or_editing || preview_rendering))
     }
 
     fn refresh_make_preparation_timer(&mut self) {
@@ -1556,12 +1523,6 @@ impl FoundryDesktopApp {
     }
 
     fn preview_status(&self) -> &'static str {
-        let compiling_or_editing = self.state.active_jobs.values().any(|request| {
-            matches!(
-                request.slot(),
-                FoundryJobSlot::CompileCurrent | FoundryJobSlot::ApplyEdit
-            )
-        });
         let rendering_preview = self
             .state
             .active_jobs
@@ -1572,18 +1533,7 @@ impl FoundryDesktopApp {
             .current_preview
             .as_ref()
             .is_some_and(|preview| !preview.rgba8.is_empty());
-        let preview_matches_current_build = self
-            .state
-            .current_preview
-            .as_ref()
-            .is_some_and(|preview| preview.build == self.state.current_build);
-        let background_preview_refresh = background_preview_refresh_is_nonblocking(
-            preview_image_ready,
-            preview_matches_current_build,
-            compiling_or_editing,
-            rendering_preview,
-        );
-        if rendering_preview && !background_preview_refresh {
+        if rendering_preview && !preview_image_ready {
             "Preview building"
         } else if self.state.current_preview.is_some() {
             "Ready"
@@ -4666,6 +4616,7 @@ fn action_spec<'a>(
 fn make_canvas_build_dependent_actions_enabled(view_state: &MakeCanvasViewState) -> bool {
     view_state.model_ready
         && view_state.preview_ready
+        && !view_state.preview_updating
         && !view_state.local_busy_visible
         && view_state.mode != MakeCanvasMode::Error
 }
@@ -4678,6 +4629,8 @@ fn make_canvas_build_dependent_disabled_reason(view_state: &MakeCanvasViewState)
         MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas
     ) {
         ACTIVE_IDEA_JOB_REASON
+    } else if view_state.preview_updating {
+        PREVIEW_UPDATING_REASON
     } else {
         ASSET_PREPARING_REASON
     }
@@ -9519,7 +9472,7 @@ mod tests {
         );
         assert_eq!(
             current_preview_model_image_size(egui::vec2(520.0, 520.0)),
-            egui::vec2(405.59998, 405.59998)
+            egui::vec2(468.0, 468.0)
         );
     }
 
@@ -10781,14 +10734,13 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
         assert!(visible.preview_updating);
         assert!(visible.preview_update_required);
-        assert_eq!(
-            visible.primary_action_disabled_reason.as_deref(),
-            Some(PREVIEW_UPDATING_REASON)
-        );
-        assert_eq!(visible.local_banner_message, PREVIEW_UPDATING_REASON);
+        assert!(visible.primary_action_enabled);
+        assert_eq!(visible.local_banner_title, "Ready");
+        assert!(visible.local_busy_label.is_none());
+        assert!(!visible.local_busy_visible);
         assert_eq!(
             visible.next_action_hint,
             "Update preview to keep making changes."
@@ -12228,12 +12180,17 @@ mod tests {
 
         let visible = app.make_canvas_view_state();
 
-        assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
         assert!(visible.model_ready);
         assert!(visible.preview_ready);
         assert!(visible.preview_updating);
-        assert!(visible.local_busy_visible);
+        assert!(visible.local_busy_label.is_none());
+        assert!(!visible.local_busy_visible);
         assert!(!make_canvas_build_dependent_actions_enabled(&visible));
+        assert_eq!(
+            make_canvas_build_dependent_disabled_reason(&visible),
+            PREVIEW_UPDATING_REASON
+        );
     }
 
     #[test]

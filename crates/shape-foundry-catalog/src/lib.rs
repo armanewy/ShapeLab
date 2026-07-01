@@ -9,8 +9,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetId, AssetRecipe, Frame3, GeometryRecipe, GeometrySource, ModelingOperationSpec,
-    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, SocketId, SocketSpec,
-    Transform3, definition_scalar_path, validate_asset_recipe,
+    PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec,
+    SurfaceRegionSpec, SurfaceRole, Transform3, definition_scalar_path, validate_asset_recipe,
 };
 use shape_family::{
     ASSET_FAMILY_SCHEMA_VERSION, AllowedOperationKind, AssetFamilySchema, BevelPolicy,
@@ -953,6 +953,29 @@ fn fragment(
             ),
         );
     }
+    if !recipe
+        .definitions
+        .get(&LOCAL_DEFINITION)
+        .expect("definition exists")
+        .geometry
+        .operations
+        .is_empty()
+    {
+        recipe
+            .definitions
+            .get_mut(&LOCAL_DEFINITION)
+            .expect("definition exists")
+            .regions
+            .insert(
+                RegionId(1),
+                SurfaceRegionSpec {
+                    id: RegionId(1),
+                    name: "primary faces".to_owned(),
+                    role: SurfaceRole::PrimarySurface,
+                    tags: BTreeSet::from(["primary".to_owned()]),
+                },
+            );
+    }
     let next_operation = recipe
         .definitions
         .get(&LOCAL_DEFINITION)
@@ -965,10 +988,36 @@ fn fragment(
         .max()
         .unwrap_or(0)
         + 1;
+    let next_region = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.regions.keys().map(|id| id.0))
+        .chain(
+            recipe
+                .definitions
+                .values()
+                .flat_map(|definition| definition.geometry.operations.iter())
+                .flat_map(ModelingOperationSpec::generated_region_ids)
+                .map(|id| id.0),
+        )
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let next_boundary_loop = recipe
+        .definitions
+        .values()
+        .flat_map(|definition| definition.geometry.operations.iter())
+        .flat_map(ModelingOperationSpec::boundary_loop_ids)
+        .map(|id| id.0)
+        .max()
+        .unwrap_or(0)
+        + 1;
     recipe.next_ids.part_definition = LOCAL_DEFINITION.0 + 1;
     recipe.next_ids.part_instance = LOCAL_INSTANCE.0 + 1;
     recipe.next_ids.parameter = scalar_paths.len() as u64 + 1;
     recipe.next_ids.operation = next_operation;
+    recipe.next_ids.region = next_region;
+    recipe.next_ids.boundary_loop = next_boundary_loop;
     recipe.next_ids.socket = 8;
     let validation_report = validate_asset_recipe(&recipe);
     assert!(

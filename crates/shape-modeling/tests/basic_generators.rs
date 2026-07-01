@@ -1257,6 +1257,42 @@ fn rounded_box_recessed_panel_cut_is_closed_and_preserves_unaffected_rounding() 
 }
 
 #[test]
+fn rounded_box_recessed_panel_cut_accepts_remapped_primary_region() {
+    let operation = ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(122),
+        region: RegionId(400),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [0.72, 0.42],
+        depth: 0.38,
+        corner_radius: 0.04,
+        rim_width: 0.06,
+        corner_segments: 3,
+        entry_loop: BoundaryLoopId(122),
+        floor_loop: BoundaryLoopId(123),
+        outer_region: RegionId(400),
+        rim_region: RegionId(401),
+        wall_region: RegionId(402),
+        floor_region: RegionId(403),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    };
+
+    let part = generate_cut_rounded_box_with_operations(vec![operation], [1.2, 0.7, 0.55], 0.16)
+        .expect("rounded-box cut should accept remapped primary regions");
+
+    assert_closed_mesh(&part.mesh);
+    assert_common_mesh_quality(&part.mesh);
+    assert_region_role(&part, RegionId(400), SurfaceRole::PrimarySurface);
+    assert_faces_use_regions(
+        &part,
+        &[RegionId(400), RegionId(401), RegionId(402), RegionId(403)],
+    );
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(122), OperationId(122), true);
+    assert_boundary_loop(&part.mesh, BoundaryLoopId(123), OperationId(122), true);
+    assert_face_operation_present(&part.mesh, OperationId(122));
+}
+
+#[test]
 fn rounded_box_through_cuts_work_on_all_primary_faces() {
     for (index, face) in [
         PlanarCutFace::PositiveX,

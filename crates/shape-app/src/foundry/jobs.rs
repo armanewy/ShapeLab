@@ -1395,6 +1395,48 @@ mod tests {
     }
 
     #[test]
+    fn sphere_preview_remains_visible_from_orbit_angles() {
+        let fixture = shape_foundry_catalog::sphere_primitive::fixture_catalog();
+        let output =
+            compile_foundry_document(&fixture.document, &fixture).expect("fixture should compile");
+        for (yaw, pitch) in [(90.0, 0.0), (180.0, 18.0), (270.0, -18.0)] {
+            let event = render_preview(
+                1,
+                &output,
+                128,
+                128,
+                Some(OrbitCamera {
+                    yaw_degrees: yaw,
+                    pitch_degrees: pitch,
+                    ..OrbitCamera::default()
+                }),
+                &mut FoundryPreviewCache::default(),
+            )
+            .expect("current preview should render");
+
+            let FoundryJobEvent::PreviewRendered {
+                rgba8,
+                width,
+                height,
+                ..
+            } = event
+            else {
+                panic!("expected preview event");
+            };
+            let background = clay_readability_render_settings(width, height).background;
+            let foreground_pixels = rgba8
+                .chunks_exact(4)
+                .filter(|pixel| **pixel != background)
+                .count();
+
+            assert!(
+                foreground_pixels > 1_000,
+                "sphere orbit preview should keep a visible volume at yaw {yaw} pitch {pitch}, got {foreground_pixels} foreground pixels"
+            );
+        }
+    }
+
+    #[test]
     fn preview_legibility_filter_promotes_rendered_selectable_candidate() {
         let parent = solid_rgba(16, 16, [16, 20, 24, 255]);
         let candidate = solid_rgba(16, 16, [220, 230, 238, 255]);

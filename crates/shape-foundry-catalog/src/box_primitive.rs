@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use shape_asset::{PartDefinitionId, definition_scalar_path};
+use shape_asset::{
+    BoundaryLoopId, CutEdgeTreatment, ModelingOperationSpec, OperationId, PartDefinitionId,
+    PlanarCutFace, RegionId, definition_scalar_path,
+};
 use shape_family::{AllowedOperationKind, RoleMultiplicity};
 use shape_family_compile::{ParameterBinding, RecipeFragment, ScalarTransform};
 use shape_foundry::{CandidateStrategy, ControlValue};
@@ -93,39 +96,44 @@ const LIDDED_PROPORTIONS: [LiddedBoxProportion; 4] = [
         choice: "compact_box",
         body_provider: "compact_lidded_body",
         seam_provider: "compact_lid_seam",
-        body_half_extents: [0.78, 0.48, 0.58],
-        lid_half_extents: [0.88, 0.10, 0.68],
-        body_translation: [0.0, 0.48, 0.0],
-        lid_translation: [0.0, 1.12, 0.0],
+        body_half_extents: [0.66, 0.42, 0.66],
+        lid_half_extents: [0.74, 0.085, 0.74],
+        body_translation: [0.0, 0.0, 0.0],
+        lid_translation: [0.0, 0.528, 0.0],
     },
     LiddedBoxProportion {
         choice: "wide_box",
         body_provider: "wide_lidded_body",
         seam_provider: "wide_lid_seam",
-        body_half_extents: [1.28, 0.42, 0.56],
-        lid_half_extents: [1.40, 0.095, 0.66],
-        body_translation: [0.0, 0.42, 0.0],
-        lid_translation: [0.0, 1.00, 0.0],
+        body_half_extents: [1.08, 0.36, 0.56],
+        lid_half_extents: [1.18, 0.08, 0.66],
+        body_translation: [0.0, 0.0, 0.0],
+        lid_translation: [0.0, 0.468, 0.0],
     },
     LiddedBoxProportion {
         choice: "tall_box",
         body_provider: "tall_lidded_body",
         seam_provider: "tall_lid_seam",
-        body_half_extents: [0.62, 0.78, 0.48],
-        lid_half_extents: [0.74, 0.11, 0.58],
-        body_translation: [0.0, 0.78, 0.0],
-        lid_translation: [0.0, 1.72, 0.0],
+        body_half_extents: [0.58, 0.62, 0.58],
+        lid_half_extents: [0.66, 0.09, 0.66],
+        body_translation: [0.0, 0.0, 0.0],
+        lid_translation: [0.0, 0.728, 0.0],
     },
     LiddedBoxProportion {
         choice: "flat_box",
         body_provider: "flat_lidded_body",
         seam_provider: "flat_lid_seam",
-        body_half_extents: [1.30, 0.26, 0.78],
-        lid_half_extents: [1.42, 0.085, 0.90],
-        body_translation: [0.0, 0.26, 0.0],
-        lid_translation: [0.0, 0.68, 0.0],
+        body_half_extents: [1.08, 0.28, 0.72],
+        lid_half_extents: [1.18, 0.075, 0.82],
+        body_translation: [0.0, 0.0, 0.0],
+        lid_translation: [0.0, 0.388, 0.0],
     },
 ];
+
+const LIDDED_BOX_WALL_THICKNESS: f32 = 0.08;
+const LIDDED_BOX_FLOOR_THICKNESS: f32 = 0.10;
+const LIDDED_BOX_MAX_BODY_RADIUS: f32 = 0.16;
+const LIDDED_BOX_CUT_MARGIN: f32 = 0.015;
 
 const TRIMMED_PROPORTIONS: [TrimmedBoxProportion; 4] = [
     TrimmedBoxProportion {
@@ -369,6 +377,7 @@ pub fn lidded_box_fixture_catalog() -> FoundryFixtureCatalog {
             AllowedOperationKind::Primitive,
             AllowedOperationKind::Array,
             AllowedOperationKind::Transform,
+            AllowedOperationKind::Cut,
             AllowedOperationKind::Bevel,
         ],
         parameter_slots: vec![
@@ -646,7 +655,7 @@ fn lidded_style_prototypes() -> Vec<(&'static str, &'static str, &'static str)> 
         .into_iter()
         .flat_map(|proportion| {
             [
-                (proportion.body_provider, "Closed lower box body", "body"),
+                (proportion.body_provider, "Open lower box body", "body"),
                 (
                     proportion.seam_provider,
                     "Raised clay line for visible lid seam",
@@ -778,15 +787,15 @@ fn lidded_parameter_bindings() -> Vec<ParameterBinding> {
             crate::LOCAL_DEFINITION,
             "geometry.rounded_box.half_extents.y",
             0.055,
-            0.145,
+            0.105,
         ),
         definition_binding(
             "lid_height",
             "lid_seam",
             crate::LOCAL_DEFINITION,
             "geometry.rounded_box.half_extents.z",
-            0.82,
-            1.12,
+            0.78,
+            1.28,
         ),
     ]
 }
@@ -951,6 +960,36 @@ fn recipe_fragments() -> Vec<RecipeFragment> {
         .collect()
 }
 
+fn lidded_open_body_operations(proportion: LiddedBoxProportion) -> Vec<ModelingOperationSpec> {
+    let half = proportion.body_half_extents;
+    let opening_half = [
+        (half[0] - LIDDED_BOX_MAX_BODY_RADIUS - LIDDED_BOX_WALL_THICKNESS - LIDDED_BOX_CUT_MARGIN)
+            .max(0.10),
+        (half[2] - LIDDED_BOX_MAX_BODY_RADIUS - LIDDED_BOX_WALL_THICKNESS - LIDDED_BOX_CUT_MARGIN)
+            .max(0.10),
+    ];
+    let cut_depth = (half[1] * 2.0 - LIDDED_BOX_FLOOR_THICKNESS).max(half[1]);
+
+    vec![ModelingOperationSpec::RecessedPanelCut {
+        operation: OperationId(210),
+        region: RegionId(1),
+        face: PlanarCutFace::PositiveY,
+        center: [0.0, 0.0],
+        size: [opening_half[0] * 2.0, opening_half[1] * 2.0],
+        depth: cut_depth,
+        corner_radius: 0.025,
+        rim_width: LIDDED_BOX_WALL_THICKNESS,
+        corner_segments: 2,
+        entry_loop: BoundaryLoopId(210),
+        floor_loop: BoundaryLoopId(211),
+        outer_region: RegionId(1),
+        rim_region: RegionId(212),
+        wall_region: RegionId(213),
+        floor_region: RegionId(214),
+        edge_treatment: CutEdgeTreatment::BevelEligible,
+    }]
+}
+
 fn lidded_recipe_fragments() -> Vec<RecipeFragment> {
     LIDDED_PROPORTIONS
         .into_iter()
@@ -960,9 +999,9 @@ fn lidded_recipe_fragments() -> Vec<RecipeFragment> {
                     proportion.body_provider,
                     "body",
                     proportion.body_half_extents,
-                    0.05,
+                    0.055,
                     proportion.body_translation,
-                    Vec::new(),
+                    lidded_open_body_operations(proportion),
                 ),
                 rounded_box_fragment(
                     proportion.seam_provider,
