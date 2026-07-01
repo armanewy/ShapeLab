@@ -285,6 +285,113 @@ fn object_plan_cli_materialize_valid_flat_panel_plan() {
 }
 
 #[test]
+fn object_plan_cli_materialize_box_render_evidence_writes_real_contact_sheet() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = fixture_path("valid_box_plan.json");
+    let out_dir = temp_dir.path().join("box-render-evidence");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg("--render-evidence")
+        .output()
+        .expect("run object-plan materialize render evidence");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_png(out_dir.join("plan-preview.png"));
+    assert_png(out_dir.join("node-previews/box.png"));
+    assert_png(out_dir.join("contact-sheet.png"));
+    let report = read_json(out_dir.join("render-evidence-report.json"));
+    assert_eq!(report["rendered"], true);
+    assert_eq!(report["materialized"], true);
+    assert_eq!(report["plan_id"], "box_plan");
+    assert_eq!(report["preview_count"], 2);
+    assert_eq!(report["contact_sheet_path"], "contact-sheet.png");
+    assert_eq!(report["user_review_required"], true);
+    assert_eq!(report["approved"], false);
+    assert_eq!(
+        report["unsupported_primitives"].as_array().unwrap().len(),
+        0
+    );
+    assert_eq!(
+        report["unsupported_attachments"].as_array().unwrap().len(),
+        0
+    );
+}
+
+#[test]
+fn object_plan_cli_materialize_flat_panel_render_evidence_writes_real_contact_sheet() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = fixture_path("valid_flat_panel_plan.json");
+    let out_dir = temp_dir.path().join("panel-render-evidence");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg("--render-evidence")
+        .output()
+        .expect("run object-plan materialize render evidence");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_png(out_dir.join("plan-preview.png"));
+    assert_png(out_dir.join("node-previews/panel.png"));
+    assert_png(out_dir.join("contact-sheet.png"));
+    let report = read_json(out_dir.join("render-evidence-report.json"));
+    assert_eq!(report["rendered"], true);
+    assert_eq!(report["materialized"], true);
+    assert_eq!(report["plan_id"], "flat_panel_plan");
+    assert_eq!(report["approved"], false);
+}
+
+#[test]
+fn object_plan_cli_materialize_unsupported_render_evidence_blocks_without_contact_sheet() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = fixture_path("invalid_unknown_primitive_plan.json");
+    let out_dir = temp_dir.path().join("unsupported-render-evidence");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg("--render-evidence")
+        .output()
+        .expect("run unsupported object-plan materialize render evidence");
+
+    assert!(!output.status.success());
+    assert!(out_dir.join("materialization-report.json").is_file());
+    assert!(out_dir.join("render-evidence-report.json").is_file());
+    assert!(!out_dir.join("contact-sheet.png").exists());
+    assert!(!out_dir.join("plan-preview.png").exists());
+    assert!(!out_dir.join("node-previews").exists());
+    let report = read_json(out_dir.join("render-evidence-report.json"));
+    assert_eq!(report["rendered"], false);
+    assert_eq!(report["materialized"], false);
+    assert_eq!(report["approved"], false);
+    assert_eq!(report["user_review_required"], true);
+    assert!(
+        !report["unsupported_primitives"]
+            .as_array()
+            .expect("unsupported primitives")
+            .is_empty()
+    );
+    assert!(
+        report["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning.as_str().unwrap_or_default().contains("blocked"))
+    );
+}
+
+#[test]
 fn object_plan_cli_materialize_valid_panel_knob_plan() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -422,6 +529,41 @@ fn object_plan_cli_materialize_outputs_are_deterministic() {
         "materialization-report.json",
         "materialized-user-summary.md",
         "normalized-object-plan.json",
+    ] {
+        let first = fs::read(first_dir.join(name)).expect("read first output");
+        let second = fs::read(second_dir.join(name)).expect("read second output");
+        assert_eq!(first, second, "{name} should be deterministic");
+    }
+}
+
+#[test]
+fn object_plan_cli_materialize_render_evidence_outputs_are_deterministic() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("box-plan.json");
+    let first_dir = temp_dir.path().join("render-evidence-a");
+    let second_dir = temp_dir.path().join("render-evidence-b");
+    write_plan(&plan_path, &one_box_plan());
+
+    for out_dir in [&first_dir, &second_dir] {
+        assert!(
+            Command::new(exe)
+                .args(["object-plan", "materialize", "--plan"])
+                .arg(&plan_path)
+                .args(["--out-dir"])
+                .arg(out_dir)
+                .arg("--render-evidence")
+                .status()
+                .expect("run object-plan materialize render evidence")
+                .success()
+        );
+    }
+
+    for name in [
+        "render-evidence-report.json",
+        "plan-preview.png",
+        "node-previews/box.png",
+        "contact-sheet.png",
     ] {
         let first = fs::read(first_dir.join(name)).expect("read first output");
         let second = fs::read(second_dir.join(name)).expect("read second output");
@@ -714,6 +856,26 @@ fn stderr(output: &std::process::Output) -> String {
 
 fn read_json(path: impl AsRef<std::path::Path>) -> serde_json::Value {
     serde_json::from_slice(&fs::read(path).expect("read json")).expect("parse json")
+}
+
+fn fixture_path(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/object-plan")
+        .join(name)
+}
+
+fn assert_png(path: impl AsRef<std::path::Path>) {
+    let bytes = fs::read(path.as_ref()).expect("read png");
+    assert!(
+        bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "{} should be a PNG",
+        path.as_ref().display()
+    );
+    assert!(
+        bytes.len() > 128,
+        "{} should not be empty",
+        path.as_ref().display()
+    );
 }
 
 fn assert_no_absolute_output_paths(out_dir: &std::path::Path, temp_dir: &std::path::Path) {

@@ -1,18 +1,27 @@
+use std::collections::BTreeMap;
+use std::f32::consts::PI;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::Subcommand;
+use glam::Vec3;
 use serde::{Deserialize, Serialize};
+use shape_core::Aabb;
 use shape_foundry::{
     MaterializationPolicy, MaterializationStatus, MaterializedObjectDraft,
-    MaterializedObjectNextAction, ObjectPlan, ObjectPlanMaterializationOutputMode,
-    ObjectPlanMaterializationRequest, ObjectPlanReviewTier, ObjectPlanValidationReport,
-    PrimitiveKind, materialize_object_plan, materialized_object_summary, object_plan_user_summary,
-    validate_object_plan,
+    MaterializedObjectNextAction, MaterializedPrimitiveInstance, ObjectPlan,
+    ObjectPlanMaterializationOutputMode, ObjectPlanMaterializationRequest, ObjectPlanReviewTier,
+    ObjectPlanValidationReport, PrimitiveAttachmentOffsetPolicy, PrimitiveKind,
+    PrimitivePropertyValue, materialize_object_plan, materialized_object_summary,
+    object_plan_user_summary, validate_object_plan,
+};
+use shape_mesh::TriangleMesh;
+use shape_render::{
+    RenderedImage, clay_readability_render_settings, fit_camera_to_bounds_from_angles, render_mesh,
 };
 
-use crate::write_json;
+use crate::{save_contact_sheet, save_png, write_json};
 
 /// Validate and inspect structured offline ObjectPlans.
 #[derive(Debug, clap::Args)]
@@ -59,6 +68,9 @@ pub enum ObjectPlanCommand {
         /// Output directory.
         #[arg(long)]
         out_dir: PathBuf,
+        /// Write real preview PNG evidence for supported materialized drafts.
+        #[arg(long)]
+        render_evidence: bool,
     },
     /// Run a directory or batch JSON of ObjectPlans for offline review.
     BatchRun {
@@ -81,7 +93,11 @@ pub fn run_object_plan(args: ObjectPlanArgs) -> anyhow::Result<()> {
             out_dir,
             contact_sheet,
         } => run_prepare(&plan, &out_dir, contact_sheet),
-        ObjectPlanCommand::Materialize { plan, out_dir } => run_materialize(&plan, &out_dir),
+        ObjectPlanCommand::Materialize {
+            plan,
+            out_dir,
+            render_evidence,
+        } => run_materialize(&plan, &out_dir, render_evidence),
         ObjectPlanCommand::BatchRun { input, out_dir } => run_batch(&input, &out_dir),
     }
 }
@@ -125,8 +141,8 @@ fn run_prepare(
     }
 }
 
-fn run_materialize(plan_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
-    let outcome = write_materialization_outputs(plan_path, out_dir)?;
+fn run_materialize(plan_path: &Path, out_dir: &Path, render_evidence: bool) -> anyhow::Result<()> {
+    let outcome = write_materialization_outputs(plan_path, out_dir, render_evidence)?;
     println!(
         "Materialized ObjectPlan {} into {}",
         outcome.plan_id,
@@ -193,6 +209,7 @@ fn write_plan_outputs(
 fn write_materialization_outputs(
     plan_path: &Path,
     out_dir: &Path,
+    render_evidence: bool,
 ) -> anyhow::Result<ObjectPlanMaterializationOutcome> {
     let plan = read_object_plan(plan_path)?;
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
@@ -231,6 +248,15 @@ fn write_materialization_outputs(
             out_dir.join("materialized-user-summary.md").display()
         )
     })?;
+    if render_evidence {
+        let render_report = write_render_evidence_outputs(out_dir, &draft)?;
+        if !render_report.rendered {
+            println!(
+                "ObjectPlan render evidence blocked for {}",
+                render_report.plan_id
+            );
+        }
+    }
 
     Ok(ObjectPlanMaterializationOutcome {
         plan_id: plan.plan_id,
@@ -661,6 +687,445 @@ fn materialized_user_summary_markdown(
     )
 }
 
+fn write_render_evidence_outputs(
+    out_dir: &Path,
+    draft: &MaterializedObjectDraft,
+) -> anyhow::Result<ObjectPlanRenderEvidenceReport> {
+    let mut report = blocked_render_evidence_report(draft);
+    if draft.status != MaterializationStatus::Passed {
+        write_json(out_dir.join("render-evidence-report.json"), &report)?;
+        return Ok(report);
+    }
+
+    let Some(preview_set) = render_materialized_preview_set(draft)? else {
+        write_json(out_dir.join("render-evidence-report.json"), &report)?;
+        return Ok(report);
+    };
+
+    let node_dir = out_dir.join("node-previews");
+    fs::create_dir_all(&node_dir).with_context(|| format!("creating {}", node_dir.display()))?;
+    for node_preview in &preview_set.node_previews {
+        save_png(
+            &node_preview.image,
+            node_dir.join(format!("{}.png", safe_identifier(&node_preview.node_id))),
+        )?;
+    }
+    save_png(&preview_set.plan_preview, out_dir.join("plan-preview.png"))?;
+    let node_images = preview_set
+        .node_previews
+        .iter()
+        .map(|preview| &preview.image)
+        .collect::<Vec<_>>();
+    save_contact_sheet(
+        &preview_set.plan_preview,
+        &node_images,
+        out_dir.join("contact-sheet.png"),
+    )?;
+
+    report.rendered = true;
+    report.materialized = true;
+    report.preview_count = 1 + preview_set.node_previews.len();
+    report.contact_sheet_path = Some("contact-sheet.png".to_owned());
+    report.warnings.clear();
+    write_json(out_dir.join("render-evidence-report.json"), &report)?;
+    Ok(report)
+}
+
+fn blocked_render_evidence_report(
+    draft: &MaterializedObjectDraft,
+) -> ObjectPlanRenderEvidenceReport {
+    let mut warnings = Vec::new();
+    if draft.status != MaterializationStatus::Passed {
+        warnings.push(format!(
+            "Render evidence is blocked because materialization status is {}.",
+            materialization_status_label(draft.status)
+        ));
+    }
+    warnings.extend(
+        draft
+            .unresolved_nodes
+            .iter()
+            .map(|node| format!("{}: {}", node.node_id, node.reason)),
+    );
+    warnings.extend(
+        draft
+            .unresolved_attachments
+            .iter()
+            .map(|attachment| format!("{}: {}", attachment.attachment_id, attachment.reason)),
+    );
+    ObjectPlanRenderEvidenceReport {
+        rendered: false,
+        materialized: draft.status == MaterializationStatus::Passed
+            && !draft.primitive_instances.is_empty(),
+        plan_id: draft.source_plan_id.clone(),
+        preview_count: 0,
+        contact_sheet_path: None,
+        unsupported_primitives: draft
+            .unresolved_nodes
+            .iter()
+            .map(|node| format!("{}: {}", node.node_id, node.reason))
+            .collect(),
+        unsupported_attachments: draft
+            .unresolved_attachments
+            .iter()
+            .map(|attachment| format!("{}: {}", attachment.attachment_id, attachment.reason))
+            .collect(),
+        warnings,
+        user_review_required: true,
+        approved: false,
+    }
+}
+
+fn render_materialized_preview_set(
+    draft: &MaterializedObjectDraft,
+) -> anyhow::Result<Option<MaterializedPreviewSet>> {
+    if draft.primitive_instances.is_empty()
+        || !draft.unresolved_nodes.is_empty()
+        || !draft.unresolved_attachments.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let placements = materialized_node_placements(draft);
+    let mut node_previews = Vec::new();
+    let mut placed_meshes = Vec::new();
+    for instance in &draft.primitive_instances {
+        let centered_mesh = primitive_instance_mesh(instance, Vec3::ZERO)?;
+        let image = render_review_image(&centered_mesh, 256)?;
+        node_previews.push(NodePreview {
+            node_id: instance.node_id.clone(),
+            image,
+        });
+
+        let placement = placements
+            .get(instance.node_id.as_str())
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+        placed_meshes.push(translate_mesh(&centered_mesh, placement));
+    }
+
+    let plan_mesh =
+        merge_meshes(&placed_meshes).context("materialized draft has no preview mesh")?;
+    let plan_preview = render_review_image(&plan_mesh, 512)?;
+    Ok(Some(MaterializedPreviewSet {
+        plan_preview,
+        node_previews,
+    }))
+}
+
+fn materialized_node_placements(draft: &MaterializedObjectDraft) -> BTreeMap<String, Vec3> {
+    let mut placements = draft
+        .primitive_instances
+        .iter()
+        .map(|instance| (instance.node_id.clone(), Vec3::ZERO))
+        .collect::<BTreeMap<_, _>>();
+    if draft.composition_document.attachments.is_empty() {
+        return spread_unattached_placements(&draft.primitive_instances);
+    }
+
+    let instances = draft
+        .primitive_instances
+        .iter()
+        .map(|instance| (instance.node_id.as_str(), instance))
+        .collect::<BTreeMap<_, _>>();
+    for attachment in &draft.composition_document.attachments {
+        let Some(parent) = instances.get(attachment.parent_node_id.as_str()).copied() else {
+            continue;
+        };
+        let Some(child) = instances.get(attachment.child_node_id.as_str()).copied() else {
+            continue;
+        };
+        if parent.primitive_kind != PrimitiveKind::FlatPanelPrimitive
+            || child.primitive_kind != PrimitiveKind::SpherePrimitive
+            || attachment.parent_anchor_id != "right_side_handle_zone"
+            || attachment.child_anchor_id != "back_mount_point"
+        {
+            continue;
+        }
+
+        let parent_dimensions = primitive_dimensions(parent);
+        let child_dimensions = primitive_dimensions(child);
+        let (offset_x, offset_y) = match attachment.offset_policy {
+            PrimitiveAttachmentOffsetPolicy::Fixed => (0.0, 0.0),
+            PrimitiveAttachmentOffsetPolicy::BoundedNormalized { x, y, .. } => (x, y),
+        };
+        let x = (0.45 + offset_x) * parent_dimensions.width * 0.5;
+        let y = offset_y * parent_dimensions.height * 0.5;
+        let z = -parent_dimensions.depth * 0.5 - child_dimensions.depth * 0.5;
+        placements.insert(child.node_id.clone(), Vec3::new(x, y, z));
+    }
+    placements
+}
+
+fn spread_unattached_placements(
+    instances: &[MaterializedPrimitiveInstance],
+) -> BTreeMap<String, Vec3> {
+    if instances.len() <= 1 {
+        return instances
+            .iter()
+            .map(|instance| (instance.node_id.clone(), Vec3::ZERO))
+            .collect();
+    }
+
+    let spacing = instances
+        .iter()
+        .map(|instance| primitive_dimensions(instance).width)
+        .fold(0.0, f32::max)
+        + 0.4;
+    let center = (instances.len() as f32 - 1.0) * 0.5;
+    instances
+        .iter()
+        .enumerate()
+        .map(|(index, instance)| {
+            (
+                instance.node_id.clone(),
+                Vec3::new((index as f32 - center) * spacing, 0.0, 0.0),
+            )
+        })
+        .collect()
+}
+
+fn render_review_image(mesh: &TriangleMesh, size: u32) -> anyhow::Result<RenderedImage> {
+    let camera = fit_camera_to_bounds_from_angles(mesh.bounds, 35.0, 24.0, 1.0);
+    let settings = clay_readability_render_settings(size, size);
+    render_mesh(mesh, &camera, &settings).context("rendering ObjectPlan preview")
+}
+
+fn primitive_instance_mesh(
+    instance: &MaterializedPrimitiveInstance,
+    center: Vec3,
+) -> anyhow::Result<TriangleMesh> {
+    let dimensions = primitive_dimensions(instance);
+    match instance.primitive_kind {
+        PrimitiveKind::BoxPrimitive | PrimitiveKind::FlatPanelPrimitive => Ok(cuboid_mesh(
+            dimensions.width,
+            dimensions.height,
+            dimensions.depth,
+            center,
+        )),
+        PrimitiveKind::SpherePrimitive => Ok(sphere_mesh(
+            dimensions.width,
+            dimensions.height,
+            dimensions.depth,
+            property_ratio(instance, "front_flatten", 0.0),
+            property_ratio(instance, "back_flatten", 0.0),
+            center,
+        )),
+        PrimitiveKind::CylinderPrimitive => {
+            anyhow::bail!("Cylinder Primitive is not renderable for ObjectPlan evidence v1")
+        }
+    }
+}
+
+fn primitive_dimensions(instance: &MaterializedPrimitiveInstance) -> PrimitiveDimensions {
+    match instance.primitive_kind {
+        PrimitiveKind::BoxPrimitive => PrimitiveDimensions {
+            width: property_length(instance, "width", 2.0),
+            height: property_length(instance, "height", 1.0),
+            depth: property_length(instance, "depth", 1.4),
+        },
+        PrimitiveKind::FlatPanelPrimitive => PrimitiveDimensions {
+            width: property_length(instance, "width", 1.8),
+            height: property_length(instance, "height", 2.6),
+            depth: property_length(instance, "thickness", 0.18),
+        },
+        PrimitiveKind::SpherePrimitive => PrimitiveDimensions {
+            width: property_length(instance, "width", 1.0),
+            height: property_length(instance, "height", 1.0),
+            depth: property_length(instance, "depth", 1.0),
+        },
+        PrimitiveKind::CylinderPrimitive => PrimitiveDimensions {
+            width: 1.0,
+            height: 1.0,
+            depth: 1.0,
+        },
+    }
+}
+
+fn property_length(
+    instance: &MaterializedPrimitiveInstance,
+    property_id: &str,
+    fallback: f32,
+) -> f32 {
+    match instance.property_values.get(property_id) {
+        Some(PrimitivePropertyValue::Length(value)) if value.is_finite() => *value,
+        _ => fallback,
+    }
+}
+
+fn property_ratio(
+    instance: &MaterializedPrimitiveInstance,
+    property_id: &str,
+    fallback: f32,
+) -> f32 {
+    match instance.property_values.get(property_id) {
+        Some(PrimitivePropertyValue::Ratio(value)) if value.is_finite() => *value,
+        _ => fallback,
+    }
+}
+
+fn cuboid_mesh(width: f32, height: f32, depth: f32, center: Vec3) -> TriangleMesh {
+    let half = Vec3::new(width.max(0.01), height.max(0.01), depth.max(0.01)) * 0.5;
+    let mut builder = MeshBuilder::default();
+    let x = half.x;
+    let y = half.y;
+    let z = half.z;
+    builder.add_quad(
+        [
+            center + Vec3::new(-x, -y, -z),
+            center + Vec3::new(-x, y, -z),
+            center + Vec3::new(x, y, -z),
+            center + Vec3::new(x, -y, -z),
+        ],
+        Vec3::NEG_Z,
+    );
+    builder.add_quad(
+        [
+            center + Vec3::new(-x, -y, z),
+            center + Vec3::new(x, -y, z),
+            center + Vec3::new(x, y, z),
+            center + Vec3::new(-x, y, z),
+        ],
+        Vec3::Z,
+    );
+    builder.add_quad(
+        [
+            center + Vec3::new(x, -y, -z),
+            center + Vec3::new(x, y, -z),
+            center + Vec3::new(x, y, z),
+            center + Vec3::new(x, -y, z),
+        ],
+        Vec3::X,
+    );
+    builder.add_quad(
+        [
+            center + Vec3::new(-x, -y, -z),
+            center + Vec3::new(-x, -y, z),
+            center + Vec3::new(-x, y, z),
+            center + Vec3::new(-x, y, -z),
+        ],
+        Vec3::NEG_X,
+    );
+    builder.add_quad(
+        [
+            center + Vec3::new(-x, y, -z),
+            center + Vec3::new(-x, y, z),
+            center + Vec3::new(x, y, z),
+            center + Vec3::new(x, y, -z),
+        ],
+        Vec3::Y,
+    );
+    builder.add_quad(
+        [
+            center + Vec3::new(-x, -y, -z),
+            center + Vec3::new(x, -y, -z),
+            center + Vec3::new(x, -y, z),
+            center + Vec3::new(-x, -y, z),
+        ],
+        Vec3::NEG_Y,
+    );
+    builder.finish()
+}
+
+fn sphere_mesh(
+    width: f32,
+    height: f32,
+    depth: f32,
+    front_flatten: f32,
+    back_flatten: f32,
+    center: Vec3,
+) -> TriangleMesh {
+    const LATITUDE_SEGMENTS: usize = 16;
+    const LONGITUDE_SEGMENTS: usize = 32;
+    let radii = Vec3::new(width.max(0.01), height.max(0.01), depth.max(0.01)) * 0.5;
+    let front_scale = 1.0 - front_flatten.clamp(0.0, 0.8) * 0.75;
+    let back_scale = 1.0 - back_flatten.clamp(0.0, 0.8) * 0.75;
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    for latitude in 0..=LATITUDE_SEGMENTS {
+        let theta = PI * latitude as f32 / LATITUDE_SEGMENTS as f32;
+        let y = theta.cos();
+        let ring_radius = theta.sin();
+        for longitude in 0..=LONGITUDE_SEGMENTS {
+            let phi = 2.0 * PI * longitude as f32 / LONGITUDE_SEGMENTS as f32;
+            let x = ring_radius * phi.sin();
+            let mut z = ring_radius * phi.cos();
+            z *= if z < 0.0 { front_scale } else { back_scale };
+            let normal = Vec3::new(x, y, z).normalize_or_zero();
+            let position = center + Vec3::new(x * radii.x, y * radii.y, z * radii.z);
+            positions.push(position.to_array());
+            normals.push(normal.to_array());
+        }
+    }
+
+    let stride = LONGITUDE_SEGMENTS + 1;
+    let mut indices = Vec::new();
+    for latitude in 0..LATITUDE_SEGMENTS {
+        for longitude in 0..LONGITUDE_SEGMENTS {
+            let a = (latitude * stride + longitude) as u32;
+            let b = a + 1;
+            let c = ((latitude + 1) * stride + longitude) as u32;
+            let d = c + 1;
+            indices.extend_from_slice(&[a, c, b, b, c, d]);
+        }
+    }
+
+    TriangleMesh {
+        positions,
+        normals,
+        indices,
+        bounds: Aabb {
+            min: center - radii,
+            max: center + radii,
+        },
+    }
+}
+
+fn translate_mesh(mesh: &TriangleMesh, translation: Vec3) -> TriangleMesh {
+    if translation == Vec3::ZERO {
+        return mesh.clone();
+    }
+    TriangleMesh {
+        positions: mesh
+            .positions
+            .iter()
+            .map(|position| (Vec3::from_array(*position) + translation).to_array())
+            .collect(),
+        normals: mesh.normals.clone(),
+        indices: mesh.indices.clone(),
+        bounds: Aabb {
+            min: mesh.bounds.min + translation,
+            max: mesh.bounds.max + translation,
+        },
+    }
+}
+
+fn merge_meshes(meshes: &[TriangleMesh]) -> Option<TriangleMesh> {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+    let mut bounds = Aabb::empty();
+    for mesh in meshes {
+        if mesh.positions.is_empty() || mesh.indices.is_empty() {
+            continue;
+        }
+        let base = u32::try_from(positions.len()).ok()?;
+        positions.extend_from_slice(&mesh.positions);
+        normals.extend_from_slice(&mesh.normals);
+        indices.extend(mesh.indices.iter().map(|index| base + *index));
+        bounds = bounds.union(&mesh.bounds);
+    }
+    if positions.is_empty() || indices.is_empty() {
+        return None;
+    }
+    Some(TriangleMesh {
+        positions,
+        normals,
+        indices,
+        bounds,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct ObjectPlanBatch {
     batch_id: String,
@@ -742,6 +1207,84 @@ struct ObjectPlanMaterializationReport {
     unresolved_attachments: Vec<shape_foundry::UnresolvedObjectPlanAttachment>,
     user_review_required: bool,
     publish_allowed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanRenderEvidenceReport {
+    rendered: bool,
+    materialized: bool,
+    plan_id: String,
+    preview_count: usize,
+    contact_sheet_path: Option<String>,
+    unsupported_primitives: Vec<String>,
+    unsupported_attachments: Vec<String>,
+    warnings: Vec<String>,
+    user_review_required: bool,
+    approved: bool,
+}
+
+#[derive(Debug)]
+struct MaterializedPreviewSet {
+    plan_preview: RenderedImage,
+    node_previews: Vec<NodePreview>,
+}
+
+#[derive(Debug)]
+struct NodePreview {
+    node_id: String,
+    image: RenderedImage,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PrimitiveDimensions {
+    width: f32,
+    height: f32,
+    depth: f32,
+}
+
+#[derive(Debug)]
+struct MeshBuilder {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+    bounds: Aabb,
+}
+
+impl Default for MeshBuilder {
+    fn default() -> Self {
+        Self {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            bounds: Aabb::empty(),
+        }
+    }
+}
+
+impl MeshBuilder {
+    fn add_quad(&mut self, corners: [Vec3; 4], normal: Vec3) {
+        let base = self.positions.len() as u32;
+        self.positions
+            .extend(corners.iter().map(|corner| corner.to_array()));
+        self.normals.extend([normal.to_array(); 4]);
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        for corner in corners {
+            self.bounds = self.bounds.union(&Aabb {
+                min: corner,
+                max: corner,
+            });
+        }
+    }
+
+    fn finish(self) -> TriangleMesh {
+        TriangleMesh {
+            positions: self.positions,
+            normals: self.normals,
+            indices: self.indices,
+            bounds: self.bounds,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
