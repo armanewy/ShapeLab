@@ -11,10 +11,11 @@ use shape_compile::{
 };
 use shape_family::AssetFamilySchema;
 use shape_foundry::{
-    CandidateLegibilityClass, ControlKind, ControlValue, CustomizerProfile,
-    FoundryCompilationOutput, compile_foundry_document,
+    CandidateLegibilityClass, ControlKind, ControlValue, CustomizerProfile, FoundryCommand,
+    FoundryCompilationOutput, FoundryValidationReport, compile_foundry_document,
+    validate_foundry_command, validate_primitive_composition_document,
 };
-use shape_foundry_catalog::{FoundryFixtureCatalog, flat_panel};
+use shape_foundry_catalog::{FoundryFixtureCatalog, flat_panel, panel_knob};
 use shape_search::foundry::generate_foundry_control_endpoint_visibility_report;
 
 fn payload<T: DeserializeOwned>(fixture: &FoundryFixtureCatalog, id: &str) -> T {
@@ -52,6 +53,10 @@ fn compile_hinged_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilation
 
 fn compile_handled_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
     compile_fixture_with(&flat_panel::handled_panel_fixture_catalog(), overrides)
+}
+
+fn compile_panel_knob_with(overrides: &[(&str, ControlValue)]) -> FoundryCompilationOutput {
+    compile_fixture_with(&panel_knob::fixture_catalog(), overrides)
 }
 
 fn assert_valid_model(output: &FoundryCompilationOutput) {
@@ -101,6 +106,24 @@ fn compiled_part_for_role<'a>(
 
 fn ranges_overlap(a_min: f32, a_max: f32, b_min: f32, b_max: f32) -> bool {
     a_min <= b_max && b_min <= a_max
+}
+
+fn assert_close(left: f32, right: f32, tolerance: f32, message: &str) {
+    assert!(
+        (left - right).abs() <= tolerance,
+        "{message}: expected {left} ~= {right}"
+    );
+}
+
+fn assert_foundry_issue(report: &FoundryValidationReport, expected_code: &str) {
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == expected_code),
+        "expected issue {expected_code}, got {:?}",
+        report.issues
+    );
 }
 
 #[test]
@@ -283,6 +306,241 @@ fn handled_panel_validates_exports_and_adds_only_handle_knob_to_hinged_panel() {
         "package verification should pass: {verification:#?}"
     );
     fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn panel_knob_composition_contract_validates() {
+    let document = panel_knob::composition_document();
+    let report = validate_primitive_composition_document(&document);
+
+    assert!(
+        report.is_valid(),
+        "Panel with Knob composition should validate: {:?}",
+        report.issues
+    );
+    assert_eq!(document.nodes.len(), 2);
+    assert_eq!(document.attachments.len(), 1);
+    assert_eq!(
+        document.attachments[0].parent_anchor_id,
+        "right_side_handle_zone"
+    );
+    assert_eq!(document.attachments[0].child_anchor_id, "back_mount_point");
+}
+
+#[test]
+fn panel_knob_validates_exports_and_attaches_knob_to_panel() {
+    let output = compile_panel_knob_with(&[]);
+    assert_valid_model(&output);
+    assert_eq!(role_instances(&output, "panel_body").len(), 1);
+    assert_eq!(role_instances(&output, "knob_form").len(), 1);
+    for forbidden_role in [
+        "door",
+        "hinge_edge",
+        "handle",
+        "motion",
+        "surface_detail",
+        "latch",
+        "frame",
+        "inset_panel",
+    ] {
+        assert!(
+            role_instances(&output, forbidden_role).is_empty(),
+            "Panel with Knob must not expose {forbidden_role}"
+        );
+    }
+
+    let panel = compiled_part_for_role(&output, "panel_body");
+    let knob = compiled_part_for_role(&output, "knob_form");
+    let panel_bounds = panel.world_mesh.bounds;
+    let knob_bounds = knob.world_mesh.bounds;
+    assert!(
+        ranges_overlap(
+            knob_bounds.min[0],
+            knob_bounds.max[0],
+            panel_bounds.min[0],
+            panel_bounds.max[0]
+        ) && ranges_overlap(
+            knob_bounds.min[1],
+            knob_bounds.max[1],
+            panel_bounds.min[1],
+            panel_bounds.max[1]
+        ),
+        "knob should stay inside the panel face area"
+    );
+    assert_close(
+        knob_bounds.min[2],
+        panel_bounds.max[2],
+        0.01,
+        "knob should attach to the panel front without floating",
+    );
+    assert!(
+        knob_bounds.max[2] > panel_bounds.max[2],
+        "knob should visibly protrude from the panel front"
+    );
+
+    let package_dir = std::env::temp_dir().join(format!(
+        "shape-lab-panel-knob-export-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&package_dir);
+    write_model_package(&output.recipe, &output.artifact, &package_dir).expect("write package");
+    let verification = verify_model_package(&package_dir).expect("verify package");
+    assert!(
+        verification.checksums_match
+            && verification.topology_matches_manifest
+            && verification.finite_numeric_payloads,
+        "package verification should pass: {verification:#?}"
+    );
+    fs::remove_dir_all(&package_dir).expect("clean package temp dir");
+}
+
+#[test]
+fn panel_knob_stays_attached_when_panel_proportions_change() {
+    for (label, overrides) in [
+        (
+            "wide panel",
+            vec![("panel_width", ControlValue::Scalar(2.4))],
+        ),
+        (
+            "tall panel",
+            vec![("panel_height", ControlValue::Scalar(3.2))],
+        ),
+        (
+            "moved knob",
+            vec![
+                ("knob_x_offset", ControlValue::Scalar(0.98)),
+                ("knob_y_offset", ControlValue::Scalar(0.86)),
+            ],
+        ),
+    ] {
+        let output = compile_panel_knob_with(&overrides);
+        assert_valid_model(&output);
+        let panel = compiled_part_for_role(&output, "panel_body");
+        let knob = compiled_part_for_role(&output, "knob_form");
+        let panel_bounds = panel.world_mesh.bounds;
+        let knob_bounds = knob.world_mesh.bounds;
+        assert_close(
+            knob_bounds.min[2],
+            panel_bounds.max[2],
+            0.01,
+            "knob should remain attached after {label}",
+        );
+        assert!(
+            knob_bounds.min[0] >= panel_bounds.min[0] - 0.001
+                && knob_bounds.max[0] <= panel_bounds.max[0] + 0.001
+                && knob_bounds.min[1] >= panel_bounds.min[1] - 0.001
+                && knob_bounds.max[1] <= panel_bounds.max[1] + 0.001,
+            "knob should remain inside safe panel bounds after {label}"
+        );
+    }
+}
+
+#[test]
+fn panel_knob_controls_copy_and_bounds_are_honest() {
+    let fixture = panel_knob::fixture_catalog();
+    let family = family(&fixture);
+    let profile = profile(&fixture);
+
+    assert_eq!(fixture.slug, panel_knob::PANEL_KNOB_SLUG);
+    assert_eq!(family.id, panel_knob::PANEL_KNOB_FAMILY_ID);
+    assert_eq!(family.display_name, "Panel with Knob");
+    assert_eq!(profile.family_id, panel_knob::PANEL_KNOB_FAMILY_ID);
+    assert_eq!(
+        profile.style_id.as_deref(),
+        Some(panel_knob::PANEL_KNOB_STYLE_ID)
+    );
+    assert_eq!(
+        family
+            .part_roles
+            .iter()
+            .map(|role| role.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["panel_body", "knob_form"]
+    );
+
+    let controls = profile
+        .controls
+        .iter()
+        .filter(|control| control.visible)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Panel Width",
+            "Panel Height",
+            "Panel Thickness",
+            "Panel Edge Softness",
+            "Knob Width",
+            "Knob Height",
+            "Knob Depth",
+            "Knob Front Flatten",
+            "Knob Back Flatten",
+            "Knob Horizontal Position",
+            "Knob Vertical Position"
+        ]
+    );
+    assert_eq!(controls.iter().filter(|control| control.primary).count(), 7);
+    assert!(
+        controls
+            .iter()
+            .all(|control| matches!(control.kind, ControlKind::ContinuousAxis { .. }))
+    );
+    assert!(
+        profile.candidate_strategies.is_empty(),
+        "Panel with Knob should not expose generated idea strategies"
+    );
+
+    let out_of_bounds = validate_foundry_command(
+        &FoundryCommand::SetControl {
+            control_id: "knob_x_offset".to_owned(),
+            value: ControlValue::Scalar(2.0),
+        },
+        Some(&fixture.document),
+        Some(&profile),
+    );
+    assert_foundry_issue(&out_of_bounds, "control_value_outside_domain");
+
+    let visible_copy = [
+        family.display_name.as_str(),
+        family.summary.as_str(),
+        &controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    for forbidden in [
+        "door",
+        "hinge",
+        "open",
+        "close",
+        "uv",
+        "texture",
+        "material",
+        "rigging",
+        "rigged",
+        "animation",
+        "game-ready",
+        "free transform",
+        "vertex",
+        "face edit",
+    ] {
+        assert!(
+            !visible_copy.contains(forbidden),
+            "Panel with Knob copy must not claim {forbidden}: {visible_copy}"
+        );
+    }
+    for raw_term in ["knob_form", "provider", "slot", "module", "matrix"] {
+        assert!(
+            !visible_copy.contains(raw_term),
+            "Panel with Knob copy must not expose raw term {raw_term}: {visible_copy}"
+        );
+    }
 }
 
 #[test]

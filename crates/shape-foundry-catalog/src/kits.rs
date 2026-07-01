@@ -21,7 +21,7 @@ use shape_foundry::{
 
 use crate::{
     FoundryFixtureCatalog, box_primitive, built_in_fixture_catalogs_with_labels, flat_panel,
-    sphere_primitive,
+    panel_knob, sphere_primitive,
 };
 
 /// Return every built-in Visual Foundry profile as a curated kit package.
@@ -540,7 +540,8 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
         | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG
         | sphere_primitive::SPHERE_PRIMITIVE_SLUG
         | flat_panel::HINGED_PANEL_SLUG
-        | flat_panel::HANDLED_PANEL_SLUG => FoundryKitQualityTier::Usable,
+        | flat_panel::HANDLED_PANEL_SLUG
+        | panel_knob::PANEL_KNOB_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
     }
 }
@@ -553,6 +554,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         sphere_primitive::SPHERE_PRIMITIVE_SLUG => vec!["Primitive", "Round"],
         flat_panel::HINGED_PANEL_SLUG => vec!["Panel", "Hinged"],
         flat_panel::HANDLED_PANEL_SLUG => vec!["Panel", "Handled"],
+        panel_knob::PANEL_KNOB_SLUG => vec!["Panel", "Knob"],
         _ => vec!["Asset"],
     }
     .into_iter()
@@ -568,6 +570,7 @@ fn normalize_kit_slug(slug: &str) -> String {
         "sphere" | "sphere_primitive" => sphere_primitive::SPHERE_PRIMITIVE_SLUG.to_owned(),
         "hinged_panel" => flat_panel::HINGED_PANEL_SLUG.to_owned(),
         "handled_panel" => flat_panel::HANDLED_PANEL_SLUG.to_owned(),
+        "panel_knob" | "panel_with_knob" => panel_knob::PANEL_KNOB_SLUG.to_owned(),
         other => other.to_owned(),
     }
 }
@@ -581,7 +584,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 6);
+        assert_eq!(packages.len(), 7);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -676,6 +679,18 @@ mod tests {
             Some(flat_panel::HANDLED_PANEL_SLUG)
         );
         assert_eq!(handled_package.kit.category_chips, vec!["Panel", "Handled"]);
+
+        let panel_knob_package =
+            built_in_foundry_kit_package(panel_knob::PANEL_KNOB_SLUG).expect("panel knob kit");
+        assert_eq!(
+            panel_knob_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            panel_knob_package.kit.source_profile_slug.as_deref(),
+            Some(panel_knob::PANEL_KNOB_SLUG)
+        );
+        assert_eq!(panel_knob_package.kit.category_chips, vec!["Panel", "Knob"]);
     }
 
     #[test]
@@ -702,6 +717,13 @@ mod tests {
         assert_eq!(
             handled_kit.kit.source_profile_slug.as_deref(),
             Some(flat_panel::HANDLED_PANEL_SLUG)
+        );
+
+        let panel_knob_kit =
+            built_in_foundry_kit_package("panel_with_knob").expect("panel knob alias");
+        assert_eq!(
+            panel_knob_kit.kit.source_profile_slug.as_deref(),
+            Some(panel_knob::PANEL_KNOB_SLUG)
         );
     }
 }

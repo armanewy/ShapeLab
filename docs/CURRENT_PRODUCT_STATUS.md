@@ -14,12 +14,16 @@ the active product surface toward direct primitive property editing.
 - Box Primitive is the direct box primitive baseline.
 - Flat Panel Primitive is the direct panel primitive baseline.
 - Sphere Primitive is the direct round primitive baseline.
+- Panel with Knob is the first safe-anchor composition prototype: Flat Panel
+  plus a knob-like Sphere form.
 - Box Primitive exposes bounded Width, Depth, Height, and Edge Softness
   controls in Make.
 - Flat Panel Primitive exposes bounded Width, Height, Thickness, and Edge
   Softness controls in Make.
 - Sphere Primitive exposes bounded Width, Height, Depth, Front Flatten, and
   Back Flatten controls in Make.
+- Panel with Knob exposes bounded panel size, knob form, and knob position
+  controls in Make.
 - Lidded Box and Hinged Panel are feature proofs, not the future shape of the
   active primitive workflow.
 - Handled Panel evidence is treated as paused historical proof, not the current
@@ -71,6 +75,8 @@ the active product surface toward direct primitive property editing.
   through bounded controls with visible domains.
 - The Knob-like form preset may be referenced only as a Sphere Primitive
   property preset, not as a door or composition claim.
+- Panel with Knob may be referenced only as a constrained composition proof,
+  not as a Door, motion, rigging, animation, material, or game-ready claim.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
 
 ## Current Milestone Sequence

@@ -34,8 +34,8 @@ The Knob-like form preset is a deterministic property preset:
 - Width: 0.72
 - Height: 0.72
 - Depth: 0.38
-- Front Flatten: 0.18
-- Back Flatten: 0.62
+- Front Flatten: 0.42
+- Back Flatten: 0.42
 
 The preset is not generated variation. It is a named set of legal property
 values applied through the same validation and rebuild path as manual edits.
@@ -46,9 +46,9 @@ Sphere Primitive does not expose vertex editing, face selection, sculpting,
 boolean cutting, arbitrary transforms, material looks, UV/texturing, rigging,
 animation, generated ideas, candidate trays, or part chips.
 
-The branch does not claim Door, Door Knob, or composition behavior. Attachment
-to a panel remains blocked until the primitive composition contract and
-composition prototype branches.
+The Sphere Primitive branch did not claim Door, Door Knob, or composition
+behavior. Panel attachment is handled separately by the Panel with Knob
+composition prototype.
 
 ## Validation
 

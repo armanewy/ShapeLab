@@ -510,7 +510,8 @@ fn readable_preview_camera_for_output(
         || family_id.contains("trimmed_box");
     let panel_like = family_id.contains("flat_panel")
         || family_id.contains("hinged_panel")
-        || family_id.contains("handled_panel");
+        || family_id.contains("handled_panel")
+        || family_id.contains("panel_with_knob");
     (box_like || panel_like)
         .then(|| fit_camera_to_bounds_from_angles(bounds, 35.0, 20.0, aspect_ratio))
 }

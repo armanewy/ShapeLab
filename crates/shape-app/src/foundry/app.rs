@@ -204,6 +204,7 @@ struct MakeCanvasViewState {
     flat_panel_baseline: bool,
     hinged_panel_baseline: bool,
     handled_panel_baseline: bool,
+    panel_knob_baseline: bool,
     try_ideas_action_label: &'static str,
     use_candidate_action_label: &'static str,
     adjust_heading_label: &'static str,
@@ -322,6 +323,7 @@ enum MakeProfileKind {
     SpherePrimitive,
     HingedPanel,
     HandledPanel,
+    PanelWithKnob,
     Other,
 }
 
@@ -335,6 +337,7 @@ impl MakeProfileKind {
                 | Self::SpherePrimitive
                 | Self::HingedPanel
                 | Self::HandledPanel
+                | Self::PanelWithKnob
         )
     }
 
@@ -347,6 +350,7 @@ impl MakeProfileKind {
                 | Self::SpherePrimitive
                 | Self::HingedPanel
                 | Self::HandledPanel
+                | Self::PanelWithKnob
         )
     }
 
@@ -370,10 +374,14 @@ impl MakeProfileKind {
         matches!(self, Self::HandledPanel)
     }
 
+    const fn is_panel_with_knob(self) -> bool {
+        matches!(self, Self::PanelWithKnob)
+    }
+
     const fn is_panel_like(self) -> bool {
         matches!(
             self,
-            Self::FlatPanelPrimitive | Self::HingedPanel | Self::HandledPanel
+            Self::FlatPanelPrimitive | Self::HingedPanel | Self::HandledPanel | Self::PanelWithKnob
         )
     }
 }
@@ -415,6 +423,7 @@ const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
 const SPHERE_PRIMITIVE_PROFILE_ID: &str = "sphere-primitive";
 const HINGED_PANEL_PROFILE_ID: &str = "hinged-panel";
 const HANDLED_PANEL_PROFILE_ID: &str = "handled-panel";
+const PANEL_KNOB_PROFILE_ID: &str = "panel-with-knob";
 const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/box-primitive/surface/variants/surface-candidate-report.json";
 const SURFACE_CANDIDATE_SET_FILE: &str = "candidates.json";
 const MATERIAL_LOOK_MISSING_MESSAGE: &str = "Material looks are not generated yet.";
@@ -442,6 +451,8 @@ const HINGED_PANEL_EXPORT_TITLE: &str = "Export Hinged Panel";
 const HINGED_PANEL_EXPORT_DETAIL: &str = "Exports the current clay hinged panel asset.";
 const HANDLED_PANEL_EXPORT_TITLE: &str = "Export Handled Panel";
 const HANDLED_PANEL_EXPORT_DETAIL: &str = "Exports the current clay handled panel asset.";
+const PANEL_KNOB_EXPORT_TITLE: &str = "Export Panel with Knob";
+const PANEL_KNOB_EXPORT_DETAIL: &str = "Exports the current clay panel with knob asset.";
 const BOX_PRIMITIVE_EXPORT_LIMITATION: &str =
     "This is not a textured, rigged, animated, or game-ready package.";
 const MATERIAL_LOOK_TITLES: [&str; 6] = [
@@ -519,10 +530,11 @@ const ACTION_KNOB_LIKE_FORM: &str = "Knob-like form";
 const ACTION_EDIT_LIDDED_BOX: &str = "Edit Lidded Box";
 const ACTION_EDIT_HINGED_PANEL: &str = "Edit Hinged Panel";
 const ACTION_EDIT_HANDLED_PANEL: &str = "Edit Handled Panel";
+const ACTION_EDIT_PANEL_KNOB: &str = "Edit Panel with Knob";
 const VIEW_ORBIT_LABEL: &str = "Orbit view";
 const VIEW_RESET_LABEL: &str = "Reset view";
 const VIEW_AXIS_LABEL: &str = "Axis view";
-const RENDERED_ACTION_LABELS: [&str; 45] = [
+const RENDERED_ACTION_LABELS: [&str; 46] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -565,6 +577,7 @@ const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EDIT_LIDDED_BOX,
     ACTION_EDIT_HINGED_PANEL,
     ACTION_EDIT_HANDLED_PANEL,
+    ACTION_EDIT_PANEL_KNOB,
     VIEW_ORBIT_LABEL,
     VIEW_RESET_LABEL,
     VIEW_AXIS_LABEL,
@@ -957,6 +970,7 @@ impl FoundryDesktopApp {
         let flat_panel_baseline = active_profile_kind.is_flat_panel_primitive();
         let hinged_panel_baseline = active_profile_kind.is_hinged_panel();
         let handled_panel_baseline = active_profile_kind.is_handled_panel();
+        let panel_knob_baseline = active_profile_kind.is_panel_with_knob();
         let try_ideas_action_label = match active_profile_kind {
             MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
             MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
@@ -964,6 +978,7 @@ impl FoundryDesktopApp {
             MakeProfileKind::SpherePrimitive => ACTION_TRY_WHOLE_ASSET_IDEAS,
             MakeProfileKind::HingedPanel => ACTION_TRY_HINGED_PANEL_IDEAS,
             MakeProfileKind::HandledPanel => ACTION_TRY_HANDLED_PANEL_IDEAS,
+            MakeProfileKind::PanelWithKnob => ACTION_TRY_HANDLED_PANEL_IDEAS,
             MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
         };
         let use_candidate_action_label = if lidded_box_baseline {
@@ -980,6 +995,7 @@ impl FoundryDesktopApp {
             MakeProfileKind::SpherePrimitive => ACTION_EDIT_SPHERE_PRIMITIVE,
             MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
             MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
+            MakeProfileKind::PanelWithKnob => ACTION_EDIT_PANEL_KNOB,
             MakeProfileKind::Other => "Adjust",
         };
         let active_candidate_job = self.state.active_jobs.values().any(|request| {
@@ -1133,6 +1149,7 @@ impl FoundryDesktopApp {
                 flat_panel_baseline,
                 hinged_panel_baseline,
                 handled_panel_baseline,
+                panel_knob_baseline,
             });
         let primary_title = match (&mode, focused_part_label.as_deref()) {
             (MakeCanvasMode::NoAsset, _) => "Choose an asset".to_owned(),
@@ -1268,6 +1285,7 @@ impl FoundryDesktopApp {
             flat_panel_baseline,
             hinged_panel_baseline,
             handled_panel_baseline,
+            panel_knob_baseline,
             try_ideas_action_label,
             use_candidate_action_label,
             adjust_heading_label,
@@ -1460,6 +1478,8 @@ impl FoundryDesktopApp {
             MakeProfileKind::HingedPanel
         } else if self.active_profile_matches(HANDLED_PANEL_PROFILE_ID) {
             MakeProfileKind::HandledPanel
+        } else if self.active_profile_matches(PANEL_KNOB_PROFILE_ID) {
+            MakeProfileKind::PanelWithKnob
         } else {
             MakeProfileKind::Other
         }
@@ -1564,6 +1584,8 @@ impl FoundryDesktopApp {
             (HINGED_PANEL_EXPORT_TITLE, HINGED_PANEL_EXPORT_DETAIL)
         } else if self.active_make_profile_kind().is_handled_panel() {
             (HANDLED_PANEL_EXPORT_TITLE, HANDLED_PANEL_EXPORT_DETAIL)
+        } else if self.active_make_profile_kind().is_panel_with_knob() {
+            (PANEL_KNOB_EXPORT_TITLE, PANEL_KNOB_EXPORT_DETAIL)
         } else {
             (BOX_PRIMITIVE_EXPORT_TITLE, BOX_PRIMITIVE_EXPORT_DETAIL)
         }
@@ -1637,7 +1659,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before making changes.",
             ));
             return commands;
         }
@@ -2065,7 +2087,9 @@ impl FoundryDesktopApp {
                                 ui,
                                 &action_spec(
                                     build_actions_enabled,
-                                    if view_state.direct_primitive_workflow {
+                                    if view_state.panel_knob_baseline {
+                                        ACTION_EXPORT_CURRENT_ASSET
+                                    } else if view_state.direct_primitive_workflow {
                                         ACTION_EXPORT_CURRENT_PRIMITIVE
                                     } else {
                                         ACTION_OPEN_EXPORT
@@ -3026,7 +3050,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before adjusting.",
             ));
                 } else {
                     ui.add_space(10.0);
@@ -3206,7 +3230,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before exporting.",
             ));
             return commands;
         }
@@ -3323,7 +3347,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -4784,6 +4808,7 @@ fn asset_title_from_id(document_id: &str) -> &'static str {
     match document_id {
         id if id.contains("box-primitive") => "Box Primitive",
         id if id.contains("lidded-box") => "Lidded Box",
+        id if id.contains("panel-with-knob") => "Panel with Knob",
         id if id.contains("handled-panel") => "Handled Panel",
         id if id.contains("hinged-panel") => "Hinged Panel",
         id if id.contains("flat-panel-primitive") => "Flat Panel Primitive",
@@ -4860,6 +4885,9 @@ fn profile_description(slug: &str) -> &'static str {
         }
         "hinged-panel" => "One upright clay panel with a visible hinge edge.",
         "handled-panel" => "One upright clay panel with a visible hinge edge and handle.",
+        "panel-with-knob" => {
+            "One upright clay panel with a bounded knob-like sphere form attached through a safe anchor."
+        }
         _ => "A simple clay starting point ready for idea generation.",
     }
 }
@@ -4869,6 +4897,7 @@ fn profile_control_copy(slug: &str) -> &'static str {
         "lidded-box" => "You can vary proportions, edge softness, and lid seam.",
         "hinged-panel" => "You can vary proportions, edge softness, and hinge edge.",
         "handled-panel" => "You can vary proportions, edge softness, hinge edge, and handle.",
+        "panel-with-knob" => "You can adjust panel size, knob form, and bounded knob position.",
         _ => HOME_CONTROL_COPY,
     }
 }
@@ -4882,6 +4911,7 @@ fn is_visible_starter_profile(slug: &str) -> bool {
             | SPHERE_PRIMITIVE_PROFILE_ID
             | HINGED_PANEL_PROFILE_ID
             | HANDLED_PANEL_PROFILE_ID
+            | PANEL_KNOB_PROFILE_ID
     )
 }
 
@@ -4994,6 +5024,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Sphere Primitive",
         "Hinged Panel",
         "Handled Panel",
+        "Panel with Knob",
         "Project",
         "Open Project",
         "Save Project",
@@ -5009,9 +5040,11 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         ACTION_EDIT_LIDDED_BOX,
         ACTION_EDIT_HINGED_PANEL,
         ACTION_EDIT_HANDLED_PANEL,
+        ACTION_EDIT_PANEL_KNOB,
         "Add to Pack",
         "Open Pack",
         "Open Export",
+        ACTION_EXPORT_CURRENT_ASSET,
         ACTION_EXPORT_CURRENT_PRIMITIVE,
         ACTION_CHOOSE_TEMPLATE,
         "Preparing model",
@@ -5055,14 +5088,17 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "You can vary proportions, edge softness, and hinge edge.",
         "One upright clay panel with a visible hinge edge and handle.",
         "You can vary proportions, edge softness, hinge edge, and handle.",
+        "One upright clay panel with a bounded knob-like sphere form attached through a safe anchor.",
+        "You can adjust panel size, knob form, and bounded knob position.",
         "Start with Box Primitive.",
         "Choose a starting point.",
-        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel.",
+        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob.",
         "Each starting point is a simple clay asset with only visible controls.",
         "Preview building",
         "No matching starting point",
         "Make asset",
         "Adjust dimensions, Add to Pack, or Export current primitive.",
+        "Adjust properties, Add to Pack, or Export current asset.",
         "Direct properties ready",
         "Width",
         "Depth",
@@ -5071,6 +5107,17 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Edge Softness",
         "Front Flatten",
         "Back Flatten",
+        "Panel Width",
+        "Panel Height",
+        "Panel Thickness",
+        "Panel Edge Softness",
+        "Knob Width",
+        "Knob Height",
+        "Knob Depth",
+        "Knob Front Flatten",
+        "Knob Back Flatten",
+        "Knob Horizontal Position",
+        "Knob Vertical Position",
         "Lid Seam",
         "Hinge Edge",
         VIEW_ORBIT_LABEL,
@@ -5078,14 +5125,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         VIEW_AXIS_LABEL,
         "Current Asset",
         "Current asset",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before making changes.",
         "Project history",
         "Review previous project steps and branch from a saved point.",
         "saved step(s)",
         "Project step",
         "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob first.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -5107,6 +5155,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         SPHERE_PRIMITIVE_EXPORT_DETAIL,
         HANDLED_PANEL_EXPORT_TITLE,
         HANDLED_PANEL_EXPORT_DETAIL,
+        PANEL_KNOB_EXPORT_TITLE,
+        PANEL_KNOB_EXPORT_DETAIL,
         BOX_PRIMITIVE_EXPORT_LIMITATION,
         "Current Asset",
         "Export options",
@@ -5141,8 +5191,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Primary control",
         "Starting point is not available",
         "Open a saved project, or enable the clay starting points.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before exporting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, Panel with Knob, or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -5247,6 +5297,7 @@ struct MakeCanvasBannerContext<'a> {
     flat_panel_baseline: bool,
     hinged_panel_baseline: bool,
     handled_panel_baseline: bool,
+    panel_knob_baseline: bool,
 }
 
 fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, String, BannerTone) {
@@ -5269,6 +5320,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         flat_panel_baseline,
         hinged_panel_baseline,
         handled_panel_baseline,
+        panel_knob_baseline,
     } = context;
     if let Some(message) = local_warning_message {
         return (
@@ -5295,7 +5347,12 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     match mode {
         MakeCanvasMode::NoAsset => (
             "Choose an asset".to_owned(),
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.".to_owned(),
+            concat!(
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, ",
+                "Hinged Panel, Handled Panel, Panel with Knob, or open a project before ",
+                "making changes."
+            )
+            .to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::PreparingAsset => {
@@ -5365,11 +5422,12 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         ),
         MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
             if direct_primitive_workflow {
-                (
-                    "Ready".to_owned(),
-                    "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned(),
-                    BannerTone::Success,
-                )
+                let message = if panel_knob_baseline {
+                    "Adjust properties, Add to Pack, or Export current asset."
+                } else {
+                    "Adjust dimensions, Add to Pack, or Export current primitive."
+                };
+                ("Ready".to_owned(), message.to_owned(), BannerTone::Success)
             } else if lidded_box_baseline && matches!(mode, MakeCanvasMode::Ready) {
                 (
                     "Ready".to_owned(),
@@ -5417,6 +5475,12 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
 
 fn empty_candidate_tray_copy(view_state: &MakeCanvasViewState) -> (&'static str, &'static str) {
     if view_state.direct_primitive_workflow {
+        if view_state.panel_knob_baseline {
+            return (
+                "Direct properties ready",
+                "Adjust properties, Add to Pack, or Export current asset.",
+            );
+        }
         return (
             "Direct properties ready",
             "Adjust dimensions, Add to Pack, or Export current primitive.",
@@ -5473,6 +5537,7 @@ fn direct_property_panel_title(profile_kind: MakeProfileKind) -> &'static str {
         MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
         MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
         MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
+        MakeProfileKind::PanelWithKnob => ACTION_EDIT_PANEL_KNOB,
         MakeProfileKind::Other => "Adjust controls",
     }
 }
@@ -5499,6 +5564,19 @@ fn direct_property_labels(profile_kind: MakeProfileKind) -> &'static [&'static s
             "Edge Softness",
             "Hinge Edge",
             "Handle",
+        ],
+        MakeProfileKind::PanelWithKnob => &[
+            "Panel Width",
+            "Panel Height",
+            "Panel Thickness",
+            "Panel Edge Softness",
+            "Knob Width",
+            "Knob Height",
+            "Knob Depth",
+            "Knob Front Flatten",
+            "Knob Back Flatten",
+            "Knob Horizontal Position",
+            "Knob Vertical Position",
         ],
         MakeProfileKind::Other => &[],
     }
@@ -5570,7 +5648,11 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
         MakeCanvasMode::Ready if view_state.direct_primitive_workflow => {
-            "Adjust dimensions directly."
+            if view_state.panel_knob_baseline {
+                "Adjust panel and knob properties directly."
+            } else {
+                "Adjust dimensions directly."
+            }
         }
         MakeCanvasMode::Ready if view_state.lidded_box_baseline => {
             "Try lidded box ideas or adjust lid seam."
@@ -5600,7 +5682,7 @@ fn make_canvas_next_action_hint(
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => {
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel first."
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob first."
                 .to_owned()
         }
         (MakeCanvasMode::PreparingAsset, _, _) => {
@@ -5640,7 +5722,11 @@ fn make_canvas_next_action_hint(
             "Select an idea to compare it against the current asset.".to_owned()
         }
         (MakeCanvasMode::FocusedPart, _, _) if profile_kind.direct_primitive_workflow() => {
-            "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+            if profile_kind.is_panel_with_knob() {
+                "Adjust properties, Add to Pack, or Export current asset.".to_owned()
+            } else {
+                "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+            }
         }
         (MakeCanvasMode::FocusedPart, Some(part), _) => {
             format!(
@@ -5659,7 +5745,11 @@ fn make_canvas_next_action_hint(
         }
         (MakeCanvasMode::Error, _, _) => "Resolve the local issue before continuing.".to_owned(),
         (MakeCanvasMode::Ready, _, _) if profile_kind.direct_primitive_workflow() => {
-            "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+            if profile_kind.is_panel_with_knob() {
+                "Adjust properties, Add to Pack, or Export current asset.".to_owned()
+            } else {
+                "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
+            }
         }
         (MakeCanvasMode::Ready, _, _) if profile_kind.is_lidded_box() => {
             "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
@@ -6076,7 +6166,7 @@ fn show_home_browser_panel(
                         "Choose what to make"
                     },
                     subtitle: Some(if starter_profile_mode {
-                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel."
+                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or Panel with Knob."
                     } else {
                         HOME_SUBTITLE
                     }),
@@ -8054,9 +8144,15 @@ fn show_customize_option_tile(
 fn display_customize_controls(
     controls: &[crate::foundry::view_model::FoundryControlView],
 ) -> Vec<&crate::foundry::view_model::FoundryControlView> {
-    default_customize_controls(controls)
+    let mut visible = default_customize_controls(controls)
         .take(CUSTOMIZE_PRIMARY_CONTROL_LIMIT)
-        .collect()
+        .collect::<Vec<_>>();
+    visible.extend(
+        controls
+            .iter()
+            .filter(|control| control.visible && !control.primary),
+    );
+    visible
 }
 
 #[derive(Debug, Clone)]
@@ -8850,8 +8946,8 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 6);
-        assert_eq!(default_product_home_profile_count(), 6);
+        assert_eq!(installed_product_kit_count(), 7);
+        assert_eq!(default_product_home_profile_count(), 7);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -8864,6 +8960,7 @@ mod tests {
         assert_eq!(default_profiles[3].fixture.slug, "sphere-primitive");
         assert_eq!(default_profiles[4].fixture.slug, "hinged-panel");
         assert_eq!(default_profiles[5].fixture.slug, "handled-panel");
+        assert_eq!(default_profiles[6].fixture.slug, "panel-with-knob");
         assert_eq!(
             default_labels,
             vec![
@@ -8872,7 +8969,8 @@ mod tests {
                 "Flat Panel Primitive",
                 "Sphere Primitive",
                 "Hinged Panel",
-                "Handled Panel"
+                "Handled Panel",
+                "Panel with Knob"
             ]
         );
 
@@ -8882,7 +8980,7 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 6);
+        assert_eq!(profiles.len(), 7);
         assert_eq!(
             labels,
             vec![
@@ -8891,7 +8989,8 @@ mod tests {
                 "Flat Panel Primitive",
                 "Sphere Primitive",
                 "Hinged Panel",
-                "Handled Panel"
+                "Handled Panel",
+                "Panel with Knob"
             ]
         );
         assert!(!labels.iter().any(|label| label.contains("MVP")));
@@ -8903,13 +9002,14 @@ mod tests {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
 
-        assert_eq!(profiles.len(), 6);
+        assert_eq!(profiles.len(), 7);
         assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[1].fixture.slug, LIDDED_BOX_PROFILE_ID);
         assert_eq!(profiles[2].fixture.slug, FLAT_PANEL_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[3].fixture.slug, SPHERE_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[4].fixture.slug, HINGED_PANEL_PROFILE_ID);
         assert_eq!(profiles[5].fixture.slug, HANDLED_PANEL_PROFILE_ID);
+        assert_eq!(profiles[6].fixture.slug, PANEL_KNOB_PROFILE_ID);
         assert!(HOME_TEMPLATE_FILTERS.is_empty());
         assert!(strings.contains(&"Choose a starting point."));
         assert!(strings.contains(&HOME_SUBTITLE));
@@ -8929,6 +9029,12 @@ mod tests {
         assert!(
             strings.contains(&"You can vary proportions, edge softness, hinge edge, and handle.")
         );
+        assert!(strings.contains(
+            &"One upright clay panel with a bounded knob-like sphere form attached through a safe anchor."
+        ));
+        assert!(
+            strings.contains(&"You can adjust panel size, knob form, and bounded knob position.")
+        );
 
         for hidden in [
             "Props",
@@ -8943,6 +9049,7 @@ mod tests {
             "4 starting points",
             "5 starting points",
             "6 starting points",
+            "7 starting points",
             "Search starting point...",
             "Choose what to make",
         ] {
@@ -8973,6 +9080,7 @@ mod tests {
                 "Handled Panel",
                 "Hinged Panel",
                 "Lidded Box",
+                "Panel with Knob",
                 "Sphere Primitive"
             ]
         );
@@ -9029,7 +9137,8 @@ mod tests {
                 "flat-panel-primitive",
                 "sphere-primitive",
                 "hinged-panel",
-                "handled-panel"
+                "handled-panel",
+                "panel-with-knob"
             ]
         );
     }
@@ -9038,19 +9147,21 @@ mod tests {
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
         let groups = product_home_profile_groups(profiles);
-        assert_eq!(groups.len(), 6);
+        assert_eq!(groups.len(), 7);
         assert_eq!(groups[0].family_id, "box_primitive");
         assert_eq!(groups[1].family_id, "flat_panel_primitive");
         assert_eq!(groups[2].family_id, "handled_panel");
         assert_eq!(groups[3].family_id, "hinged_panel");
         assert_eq!(groups[4].family_id, "lidded_box");
-        assert_eq!(groups[5].family_id, "sphere_primitive");
+        assert_eq!(groups[5].family_id, "panel_with_knob");
+        assert_eq!(groups[6].family_id, "sphere_primitive");
         assert_eq!(groups[0].profiles.len(), 1);
         assert_eq!(groups[1].profiles.len(), 1);
         assert_eq!(groups[2].profiles.len(), 1);
         assert_eq!(groups[3].profiles.len(), 1);
         assert_eq!(groups[4].profiles.len(), 1);
         assert_eq!(groups[5].profiles.len(), 1);
+        assert_eq!(groups[6].profiles.len(), 1);
     }
 
     #[test]
@@ -11380,6 +11491,162 @@ mod tests {
     }
 
     #[test]
+    fn panel_knob_make_flow_is_direct_composition_without_generated_ideas() {
+        let fixture = shape_foundry_catalog::panel_knob::fixture_catalog();
+        let mut app = ready_fixture_state_test_app(fixture.clone());
+        let ready = app.make_canvas_view_state();
+
+        assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
+        assert!(ready.simple_box_make_baseline);
+        assert!(ready.panel_knob_baseline);
+        assert!(!ready.handled_panel_baseline);
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_PANEL_KNOB);
+        assert_eq!(
+            ready.property_labels,
+            vec![
+                "Panel Width",
+                "Panel Height",
+                "Panel Thickness",
+                "Panel Edge Softness",
+                "Knob Width",
+                "Knob Height",
+                "Knob Depth",
+                "Knob Front Flatten",
+                "Knob Back Flatten",
+                "Knob Horizontal Position",
+                "Knob Vertical Position",
+            ]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust properties, Add to Pack, or Export current asset."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
+        let (empty_tray_title, empty_tray_message) = empty_candidate_tray_copy(&ready);
+        assert_eq!(empty_tray_title, "Direct properties ready");
+        assert_eq!(
+            empty_tray_message,
+            "Adjust properties, Add to Pack, or Export current asset."
+        );
+        assert_eq!(
+            app.current_export_copy(),
+            (PANEL_KNOB_EXPORT_TITLE, PANEL_KNOB_EXPORT_DETAIL)
+        );
+
+        let visible_controls = app
+            .state
+            .controls
+            .iter()
+            .filter(|control| control.visible)
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible_controls,
+            vec![
+                "Panel Width",
+                "Panel Height",
+                "Panel Thickness",
+                "Panel Edge Softness",
+                "Knob Width",
+                "Knob Height",
+                "Knob Depth",
+                "Knob Front Flatten",
+                "Knob Back Flatten",
+                "Knob Horizontal Position",
+                "Knob Vertical Position",
+            ]
+        );
+        assert_eq!(
+            app.state
+                .controls
+                .iter()
+                .filter(|control| control.primary && control.visible)
+                .count(),
+            7
+        );
+        let sections = make_context_inspector_controls(&app.state.controls, None);
+        assert_eq!(sections.visible.len(), MAKE_CONTEXT_INITIAL_CONTROL_LIMIT);
+        assert!(
+            sections
+                .overflow
+                .iter()
+                .any(|control| control.id == "knob_x_offset")
+        );
+        assert!(
+            sections
+                .overflow
+                .iter()
+                .any(|control| control.id == "knob_y_offset")
+        );
+
+        let adjust_effects = app
+            .state
+            .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+                control_id: "knob_x_offset".to_owned(),
+                value: shape_foundry::ControlValue::Scalar(0.96),
+            }))
+            .expect("adjust knob offset schedules");
+        let adjust_event = run_fixture_effect(adjust_effects, &fixture);
+        assert!(app.state.handle_job_event(adjust_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("knob_x_offset")),
+            Some(&shape_foundry::ControlValue::Scalar(0.96))
+        );
+
+        let pack_effects = app
+            .state
+            .handle_command(app.add_current_to_pack_command().expect("pack command"))
+            .expect("Add to Pack schedules");
+        let pack_event = run_fixture_effect(pack_effects, &fixture);
+        assert!(app.state.handle_job_event(pack_event));
+        assert_eq!(app.state.pack.members.len(), 1);
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(app.make_canvas_view_state().pack_drawer_visible);
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(app.make_canvas_view_state().export_drawer_visible);
+        assert!(app.make_primary_candidate_command().is_none());
+
+        let simple_make_copy = [
+            ready.primary_action_label.as_str(),
+            ready.property_panel_title,
+            PANEL_KNOB_EXPORT_TITLE,
+            PANEL_KNOB_EXPORT_DETAIL,
+            BOX_PRIMITIVE_EXPORT_LIMITATION,
+            ACTION_ADD_TO_PACK,
+            ACTION_EXPORT_CURRENT_ASSET,
+        ]
+        .join("\n")
+        .to_ascii_lowercase();
+        for forbidden in [
+            "door",
+            "material looks",
+            "focus part",
+            "open",
+            "close",
+            "try ideas",
+            "candidate",
+            "free transform",
+            "vertex",
+            "face edit",
+        ] {
+            assert!(
+                !simple_make_copy.contains(forbidden),
+                "Panel with Knob copy must not expose {forbidden}: {simple_make_copy}"
+            );
+        }
+        assert!(
+            simple_make_copy.contains("not a textured, rigged, animated, or game-ready package")
+        );
+    }
+
+    #[test]
     fn active_candidate_job_disables_conflicting_actions() {
         let mut app = visible_state_test_app();
         app.state.current_output = Some(Box::new(
@@ -11877,13 +12144,11 @@ mod tests {
 
     fn ready_fixture_state_test_app(fixture: FoundryFixtureCatalog) -> FoundryDesktopApp {
         let mut app = fixture_state_test_app(fixture.clone());
-        let output =
-            compile_foundry_document(app.state.document.as_ref().expect("document"), &fixture)
-                .expect("fixture compiles");
-        let build = output.build_stamp.clone();
-        app.state.current_build = Some(build.clone());
-        app.state.current_output = Some(Box::new(output));
-        app.state.current_preview = Some(test_preview_image_for_build("current", Some(build)));
+        let effects = app.state.request_build().expect("fixture schedules build");
+        let event = run_fixture_effect(effects, &fixture);
+        assert!(app.state.handle_job_event(event));
+        let build = app.state.current_build.clone();
+        app.state.current_preview = Some(test_preview_image_for_build("current", build));
         app
     }
 

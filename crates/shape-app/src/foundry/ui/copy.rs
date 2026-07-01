@@ -20,7 +20,7 @@ pub(crate) const WORKFLOW_STEPS: [WorkflowStepCopy; 2] = [
     },
 ];
 
-pub(crate) const PRIMARY_ACTION_LABELS: [&str; 21] = [
+pub(crate) const PRIMARY_ACTION_LABELS: [&str; 23] = [
     "Adjust dimensions",
     "Edit Box Primitive",
     "Edit Flat Panel",
@@ -29,9 +29,11 @@ pub(crate) const PRIMARY_ACTION_LABELS: [&str; 21] = [
     "Edit Lidded Box",
     "Edit Hinged Panel",
     "Edit Handled Panel",
+    "Edit Panel with Knob",
     "Add to Pack",
     "Add Current Asset",
     "Export Pack",
+    "Export Current Asset",
     "Export current primitive",
     "Export",
     "Save",
@@ -55,13 +57,14 @@ pub(crate) const STATUS_LABELS: [&str; 8] = [
     "Ready for adjustments",
 ];
 
-pub(crate) const DEFAULT_SECTION_LABELS: [&str; 12] = [
+pub(crate) const DEFAULT_SECTION_LABELS: [&str; 13] = [
     "Visual Foundry",
     "Start with Box Primitive",
     "Lidded Box",
     "Flat Panel Primitive",
     "Sphere Primitive",
     "Hinged Panel",
+    "Panel with Knob",
     "Make",
     "Make asset",
     "Current asset",

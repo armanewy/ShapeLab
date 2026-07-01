@@ -40,6 +40,7 @@ pub mod authoring;
 pub mod box_primitive;
 pub mod flat_panel;
 pub mod kits;
+pub mod panel_knob;
 pub mod sphere_primitive;
 
 pub use authoring::*;
@@ -324,6 +325,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
         ("Sphere Primitive", sphere_primitive::fixture_catalog()),
         ("Hinged Panel", flat_panel::hinged_panel_fixture_catalog()),
         ("Handled Panel", flat_panel::handled_panel_fixture_catalog()),
+        ("Panel with Knob", panel_knob::fixture_catalog()),
     ]
 }
 
@@ -337,6 +339,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
         sphere_primitive::curation_metadata(),
         flat_panel::hinged_panel_curation_metadata(),
         flat_panel::handled_panel_curation_metadata(),
+        panel_knob::curation_metadata(),
     ]
 }
 

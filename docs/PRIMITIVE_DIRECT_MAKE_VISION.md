@@ -49,6 +49,9 @@ and reset actions:
 - Box Primitive: Width, Depth, Height, Edge Softness
 - Flat Panel Primitive: Width, Height, Thickness, Edge Softness
 - Sphere Primitive: Width, Height, Depth, Front Flatten, Back Flatten
+- Panel with Knob composition: Panel Width, Panel Height, Panel Thickness,
+  Panel Edge Softness, Knob Width, Knob Height, Knob Depth, Knob Front Flatten,
+  Knob Back Flatten, Knob Horizontal Position, Knob Vertical Position
 
 Invalid values cannot become current primitive state. During direct edits, the
 previous valid preview remains visible while the exact updated build compiles,
@@ -71,6 +74,10 @@ hidden mesh rewrite.
 Composition will happen through safe anchors, not arbitrary Blender-like
 transforms. A primitive can expose named attachment places, and child placement
 must be derived from bounded policies.
+
+Panel with Knob is the first visible composition proof. It attaches a knob-like
+Sphere form to a Flat Panel handle zone through a validated anchor attachment.
+It is not a Door claim and it does not include open/close motion.
 
 ## LLM Boundary
 

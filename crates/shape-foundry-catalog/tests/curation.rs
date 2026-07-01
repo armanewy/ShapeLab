@@ -6,7 +6,7 @@ use shape_foundry_catalog::{
     CatalogCurationState, StarterTemplateQualityEvidence, box_primitive,
     built_in_catalog_curation_metadata, built_in_fixture_catalogs_with_labels,
     catalog_curation_metadata_for_slug, curated_fixture_catalogs_with_labels, flat_panel,
-    starter_template_curation_state_from_quality,
+    panel_knob, sphere_primitive, starter_template_curation_state_from_quality,
 };
 
 #[test]
@@ -27,10 +27,13 @@ fn curation_metadata_covers_visible_starter_profiles_once() {
             box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
             box_primitive::LIDDED_BOX_SLUG.to_owned(),
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
+            sphere_primitive::SPHERE_PRIMITIVE_SLUG.to_owned(),
             flat_panel::HINGED_PANEL_SLUG.to_owned(),
+            flat_panel::HANDLED_PANEL_SLUG.to_owned(),
+            panel_knob::PANEL_KNOB_SLUG.to_owned(),
         ])
     );
-    assert_eq!(curation.len(), 4);
+    assert_eq!(curation.len(), 7);
     assert_eq!(curation_slugs, fixture_slugs);
     assert!(
         curation
@@ -53,7 +56,10 @@ fn default_and_preview_catalogs_show_supported_starter_profiles() {
                 box_primitive::BOX_PRIMITIVE_SLUG,
                 box_primitive::LIDDED_BOX_SLUG,
                 flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+                sphere_primitive::SPHERE_PRIMITIVE_SLUG,
                 flat_panel::HINGED_PANEL_SLUG,
+                flat_panel::HANDLED_PANEL_SLUG,
+                panel_knob::PANEL_KNOB_SLUG,
             ]
         );
     }
@@ -109,6 +115,41 @@ fn flat_panel_is_usable_second_kernel_but_not_showcase() {
     assert!(metadata.has_readable_control_evidence);
     assert!(!metadata.has_human_showcase_review);
     assert!(metadata.note.contains("second kernel proof"));
+    assert!(metadata.note.contains("no Door"));
+}
+
+#[test]
+fn sphere_primitive_is_usable_direct_primitive() {
+    let metadata = catalog_curation_metadata_for_slug(sphere_primitive::SPHERE_PRIMITIVE_SLUG)
+        .expect("sphere curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(metadata.has_visual_direction_evidence);
+    assert!(metadata.has_readable_control_evidence);
+    assert!(!metadata.has_human_showcase_review);
+    assert!(metadata.note.contains("Sphere Primitive"));
+}
+
+#[test]
+fn handled_panel_is_usable_but_not_motion_or_door() {
+    let metadata = catalog_curation_metadata_for_slug(flat_panel::HANDLED_PANEL_SLUG)
+        .expect("handled panel curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(metadata.note.contains("Handle / Knob"));
+    assert!(metadata.note.contains("does not claim Door"));
+}
+
+#[test]
+fn panel_knob_is_usable_safe_anchor_composition() {
+    let metadata = catalog_curation_metadata_for_slug(panel_knob::PANEL_KNOB_SLUG)
+        .expect("panel knob curation metadata");
+
+    assert_eq!(metadata.state, CatalogCurationState::Usable);
+    assert!(metadata.default_novice_visible());
+    assert!(metadata.note.contains("safe-anchor composition"));
     assert!(metadata.note.contains("no Door"));
 }
 

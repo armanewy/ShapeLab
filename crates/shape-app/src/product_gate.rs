@@ -172,6 +172,17 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         "Edge Softness",
         "Front Flatten",
         "Back Flatten",
+        "Panel Width",
+        "Panel Height",
+        "Panel Thickness",
+        "Panel Edge Softness",
+        "Knob Width",
+        "Knob Height",
+        "Knob Depth",
+        "Knob Front Flatten",
+        "Knob Back Flatten",
+        "Knob Horizontal Position",
+        "Knob Vertical Position",
     ];
     let direct_property_gate = direct_property_labels
         .iter()
@@ -281,8 +292,8 @@ mod tests {
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
         assert_eq!(report.product_home_profiles, report.installed_kit_count);
-        assert_eq!(report.installed_kit_count, 6);
-        assert_eq!(report.developer_preview_kit_count, 6);
+        assert_eq!(report.installed_kit_count, 7);
+        assert_eq!(report.developer_preview_kit_count, 7);
         assert!(report.active_variation_ui_retired);
         assert!(report.direct_property_gate);
         assert_eq!(
@@ -294,7 +305,18 @@ mod tests {
                 "Thickness",
                 "Edge Softness",
                 "Front Flatten",
-                "Back Flatten"
+                "Back Flatten",
+                "Panel Width",
+                "Panel Height",
+                "Panel Thickness",
+                "Panel Edge Softness",
+                "Knob Width",
+                "Knob Height",
+                "Knob Depth",
+                "Knob Front Flatten",
+                "Knob Back Flatten",
+                "Knob Horizontal Position",
+                "Knob Vertical Position"
             ]
         );
         assert!(report.manual_gate_required);

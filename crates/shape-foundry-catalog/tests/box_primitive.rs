@@ -17,7 +17,7 @@ use shape_foundry::{
 use shape_foundry_catalog::{
     CatalogCurationState, FoundryFixtureCatalog, box_primitive, built_in_catalog_curation_metadata,
     built_in_fixture_catalogs_with_labels, catalog_curation_metadata_for_slug,
-    curated_fixture_catalogs_with_labels, flat_panel,
+    curated_fixture_catalogs_with_labels, flat_panel, panel_knob, sphere_primitive,
 };
 use shape_search::foundry::generate_foundry_control_endpoint_visibility_report;
 
@@ -743,6 +743,12 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
     assert!(handled_panel_metadata.default_novice_visible());
     assert!(handled_panel_metadata.note.contains("Handle / Knob"));
 
+    let panel_knob_metadata = catalog_curation_metadata_for_slug(panel_knob::PANEL_KNOB_SLUG)
+        .expect("panel knob metadata");
+    assert_eq!(panel_knob_metadata.state, CatalogCurationState::Usable);
+    assert!(panel_knob_metadata.default_novice_visible());
+    assert!(panel_knob_metadata.note.contains("safe-anchor composition"));
+
     let all_slugs = built_in_fixture_catalogs_with_labels()
         .into_iter()
         .map(|(_, fixture)| fixture.slug)
@@ -753,8 +759,10 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            sphere_primitive::SPHERE_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
             flat_panel::HANDLED_PANEL_SLUG,
+            panel_knob::PANEL_KNOB_SLUG,
         ]
     );
 
@@ -768,8 +776,10 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            sphere_primitive::SPHERE_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
             flat_panel::HANDLED_PANEL_SLUG,
+            panel_knob::PANEL_KNOB_SLUG,
         ]
     );
 
@@ -783,8 +793,10 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            sphere_primitive::SPHERE_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
             flat_panel::HANDLED_PANEL_SLUG,
+            panel_knob::PANEL_KNOB_SLUG,
         ]
     );
 
@@ -798,8 +810,10 @@ fn two_kernel_profiles_are_the_builtin_catalog_profiles() {
             box_primitive::BOX_PRIMITIVE_SLUG,
             box_primitive::LIDDED_BOX_SLUG,
             flat_panel::FLAT_PANEL_PRIMITIVE_SLUG,
+            sphere_primitive::SPHERE_PRIMITIVE_SLUG,
             flat_panel::HINGED_PANEL_SLUG,
             flat_panel::HANDLED_PANEL_SLUG,
+            panel_knob::PANEL_KNOB_SLUG,
         ]
     );
 }
