@@ -592,15 +592,15 @@ fn object_plan_cli_batch_run_directory_reports_mixed_results() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     for name in [
         "batch-validation-report.json",
+        "batch-materialization-report.json",
+        "batch-render-evidence-report.json",
+        "batch-contact-sheet.png",
         "keep-regenerate-simplify.md",
         "batch-user-summary.md",
     ] {
         assert!(out_dir.join(name).is_file(), "{name} should exist");
     }
-    assert!(
-        !out_dir.join("batch-contact-sheet.png").exists(),
-        "batch contact sheet must not be faked"
-    );
+    assert_png(out_dir.join("batch-contact-sheet.png"));
 
     let report = read_json(out_dir.join("batch-validation-report.json"));
     assert_eq!(report["total_plans"], 2);
@@ -608,8 +608,33 @@ fn object_plan_cli_batch_run_directory_reports_mixed_results() {
     assert_eq!(report["failed_validation"], 1);
     assert_eq!(report["human_review_required"], true);
     assert_eq!(report["approved"], false);
-    assert_eq!(report["rendered"], 0);
+    assert_eq!(report["publish_allowed"], false);
+    assert_eq!(report["rendered"], 1);
     assert_eq!(report["plans"].as_array().expect("plans").len(), 2);
+    assert!(
+        report["plans"]
+            .as_array()
+            .expect("plans")
+            .iter()
+            .any(|plan| plan["recommendation"] == "Keep")
+    );
+    assert!(
+        report["plans"]
+            .as_array()
+            .expect("plans")
+            .iter()
+            .any(|plan| plan["recommendation"] == "Blocked")
+    );
+    let materialization = read_json(out_dir.join("batch-materialization-report.json"));
+    assert_eq!(materialization["passed"], 1);
+    assert_eq!(materialization["failed"], 1);
+    assert_eq!(materialization["publish_allowed"], false);
+    let render = read_json(out_dir.join("batch-render-evidence-report.json"));
+    assert_eq!(render["rendered"], 1);
+    assert_eq!(render["blocked"], 1);
+    assert_eq!(render["contact_sheet_path"], "batch-contact-sheet.png");
+    assert_eq!(render["approved"], false);
+    assert_eq!(render["publish_allowed"], false);
 }
 
 #[test]
@@ -655,17 +680,66 @@ fn object_plan_cli_batch_run_json_uses_relative_plan_refs() {
     assert_eq!(report["total_plans"], 2);
     assert_eq!(report["human_review_required"], true);
     assert_eq!(report["approved"], false);
+    assert_eq!(report["publish_allowed"], false);
+    assert_eq!(report["rendered"], 2);
+    assert_png(out_a.join("batch-contact-sheet.png"));
     assert_no_absolute_output_paths(&out_a, temp_dir.path());
 
     for name in [
         "batch-validation-report.json",
+        "batch-materialization-report.json",
+        "batch-render-evidence-report.json",
         "keep-regenerate-simplify.md",
         "batch-user-summary.md",
+        "batch-contact-sheet.png",
     ] {
         let first = fs::read(out_a.join(name)).expect("read first batch output");
         let second = fs::read(out_b.join(name)).expect("read second batch output");
         assert_eq!(first, second, "{name} should be deterministic");
     }
+}
+
+#[test]
+fn object_plan_cli_batch_run_unsupported_plan_does_not_crash() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plans_dir = temp_dir.path().join("plans");
+    fs::create_dir_all(&plans_dir).expect("create plans dir");
+    fs::copy(
+        fixture_path("valid_box_plan.json"),
+        plans_dir.join("valid-box.json"),
+    )
+    .expect("copy valid box");
+    fs::copy(
+        fixture_path("invalid_unknown_primitive_plan.json"),
+        plans_dir.join("unsupported.json"),
+    )
+    .expect("copy unsupported plan");
+    let out_dir = temp_dir.path().join("batch-out");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "batch-run", "--input"])
+        .arg(&plans_dir)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan batch");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let report = read_json(out_dir.join("batch-validation-report.json"));
+    assert_eq!(report["total_plans"], 2);
+    assert_eq!(report["rendered"], 1);
+    assert!(
+        report["plans"]
+            .as_array()
+            .expect("plans")
+            .iter()
+            .any(|plan| plan["recommendation"] == "Blocked")
+    );
+    let render = read_json(out_dir.join("batch-render-evidence-report.json"));
+    assert_eq!(render["rendered"], 1);
+    assert_eq!(render["blocked"], 1);
+    assert_png(out_dir.join("batch-contact-sheet.png"));
 }
 
 #[test]

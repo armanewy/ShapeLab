@@ -198,11 +198,8 @@ fn write_plan_outputs(
 
     Ok(ObjectPlanRunOutcome {
         plan_id: Some(plan.plan_id),
-        display_name: Some(plan.display_name),
         validation_passed: report.is_valid(),
         validation_issue_count: report.issues.len(),
-        rendered: visual_evidence_report.rendered,
-        renderable: renderability_report.renderable,
     })
 }
 
@@ -248,7 +245,7 @@ fn write_materialization_outputs(
             out_dir.join("materialized-user-summary.md").display()
         )
     })?;
-    if render_evidence {
+    let render_evidence_report = if render_evidence {
         let render_report = write_render_evidence_outputs(out_dir, &draft)?;
         if !render_report.rendered {
             println!(
@@ -256,11 +253,19 @@ fn write_materialization_outputs(
                 render_report.plan_id
             );
         }
-    }
+        Some(render_report)
+    } else {
+        None
+    };
 
     Ok(ObjectPlanMaterializationOutcome {
         plan_id: plan.plan_id,
+        display_name: plan.display_name,
         status: draft.status,
+        validation_passed: draft.validation_report.is_valid(),
+        validation_issue_count: draft.validation_report.issues.len(),
+        materialization_report: report,
+        render_evidence_report,
     })
 }
 
@@ -312,20 +317,23 @@ fn run_batch(input_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(&plans_dir).with_context(|| format!("creating {}", plans_dir.display()))?;
 
     let mut plan_reports = Vec::new();
+    let mut materialization_plan_reports = Vec::new();
+    let mut render_plan_reports = Vec::new();
+    let mut rendered_preview_paths = Vec::new();
     for (index, plan_input) in batch.plans.iter().enumerate() {
         let slug = unique_plan_slug(index, &plan_input.source_ref);
         let relative_out_dir = format!("plans/{slug}");
         let plan_out_dir = out_dir.join(&relative_out_dir);
-        let outcome = write_plan_outputs(
-            &plan_input.path,
-            &plan_out_dir,
-            batch.output_policy.contact_sheet,
-        );
-        plan_reports.push(plan_report_from_outcome(
-            plan_input,
-            &relative_out_dir,
-            outcome,
-        ));
+        let outcome = write_materialization_outputs(&plan_input.path, &plan_out_dir, true);
+        let rendered_preview_path = plan_out_dir.join("plan-preview.png");
+        let (plan_report, materialization_report, render_report) =
+            batch_reports_from_outcome(plan_input, &relative_out_dir, outcome);
+        if render_report.rendered && rendered_preview_path.is_file() {
+            rendered_preview_paths.push(rendered_preview_path);
+        }
+        plan_reports.push(plan_report);
+        materialization_plan_reports.push(materialization_report);
+        render_plan_reports.push(render_report);
     }
 
     let passed_validation = plan_reports
@@ -338,10 +346,20 @@ fn run_batch(input_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
         .count();
     let rendered = plan_reports.iter().filter(|plan| plan.rendered).count();
     let unsupported = plan_reports.iter().filter(|plan| plan.unsupported).count();
+    let contact_sheet_path =
+        if batch.output_policy.contact_sheet && !rendered_preview_paths.is_empty() {
+            write_batch_contact_sheet(
+                &rendered_preview_paths,
+                &out_dir.join("batch-contact-sheet.png"),
+            )?;
+            Some("batch-contact-sheet.png".to_owned())
+        } else {
+            None
+        };
     let _ = batch.review_policy.human_review_required;
     let report = ObjectPlanBatchValidationReport {
-        batch_id: batch.batch_id,
-        display_name: batch.display_name,
+        batch_id: batch.batch_id.clone(),
+        display_name: batch.display_name.clone(),
         total_plans: plan_reports.len(),
         passed_validation,
         failed_validation,
@@ -349,10 +367,55 @@ fn run_batch(input_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
         unsupported,
         human_review_required: true,
         approved: false,
+        publish_allowed: false,
         plans: plan_reports,
+    };
+    let materialization_report = ObjectPlanBatchMaterializationReport {
+        batch_id: batch.batch_id.clone(),
+        display_name: batch.display_name.clone(),
+        total_plans: materialization_plan_reports.len(),
+        passed: materialization_plan_reports
+            .iter()
+            .filter(|plan| plan.status == "Passed")
+            .count(),
+        partial: materialization_plan_reports
+            .iter()
+            .filter(|plan| plan.status == "Partial")
+            .count(),
+        failed: materialization_plan_reports
+            .iter()
+            .filter(|plan| plan.status == "Failed")
+            .count(),
+        human_review_required: true,
+        approved: false,
+        publish_allowed: false,
+        plans: materialization_plan_reports,
+    };
+    let render_evidence_report = ObjectPlanBatchRenderEvidenceReport {
+        batch_id: batch.batch_id,
+        display_name: batch.display_name,
+        total_plans: render_plan_reports.len(),
+        rendered,
+        blocked: render_plan_reports
+            .iter()
+            .filter(|plan| !plan.rendered)
+            .count(),
+        contact_sheet_path,
+        human_review_required: true,
+        approved: false,
+        publish_allowed: false,
+        plans: render_plan_reports,
     };
 
     write_json(out_dir.join("batch-validation-report.json"), &report)?;
+    write_json(
+        out_dir.join("batch-materialization-report.json"),
+        &materialization_report,
+    )?;
+    write_json(
+        out_dir.join("batch-render-evidence-report.json"),
+        &render_evidence_report,
+    )?;
     fs::write(
         out_dir.join("keep-regenerate-simplify.md"),
         keep_regenerate_simplify_markdown(&report),
@@ -451,50 +514,184 @@ fn resolve_batch_input(input_path: &Path) -> anyhow::Result<ObjectPlanBatchInput
     })
 }
 
-fn plan_report_from_outcome(
+fn batch_reports_from_outcome(
     plan_input: &ObjectPlanBatchPlanInput,
     relative_out_dir: &str,
-    outcome: anyhow::Result<ObjectPlanRunOutcome>,
-) -> ObjectPlanBatchPlanReport {
+    outcome: anyhow::Result<ObjectPlanMaterializationOutcome>,
+) -> (
+    ObjectPlanBatchPlanReport,
+    ObjectPlanBatchMaterializationPlanReport,
+    ObjectPlanBatchRenderEvidencePlanReport,
+) {
     match outcome {
         Ok(outcome) => {
-            let recommendation = if outcome.validation_passed && outcome.rendered {
-                BatchReviewRecommendation::Keep
-            } else if outcome.validation_passed {
-                BatchReviewRecommendation::Simplify
-            } else {
-                BatchReviewRecommendation::Regenerate
-            };
-            ObjectPlanBatchPlanReport {
+            let render_report = outcome.render_evidence_report.clone().unwrap_or_else(|| {
+                ObjectPlanRenderEvidenceReport {
+                    rendered: false,
+                    materialized: outcome.status == MaterializationStatus::Passed,
+                    plan_id: outcome.plan_id.clone(),
+                    preview_count: 0,
+                    contact_sheet_path: None,
+                    unsupported_primitives: Vec::new(),
+                    unsupported_attachments: Vec::new(),
+                    warnings: vec!["Render evidence was not requested.".to_owned()],
+                    user_review_required: true,
+                    approved: false,
+                }
+            });
+            let recommendation =
+                batch_recommendation(&outcome, render_report.rendered, &render_report);
+            let plan_report = ObjectPlanBatchPlanReport {
                 source_ref: plan_input.source_ref.clone(),
                 output_dir: relative_out_dir.to_owned(),
-                plan_id: outcome.plan_id,
-                display_name: outcome.display_name,
+                plan_id: Some(outcome.plan_id.clone()),
+                display_name: Some(outcome.display_name.clone()),
                 validation_status: if outcome.validation_passed {
                     "Passed".to_owned()
                 } else {
                     "Failed".to_owned()
                 },
                 validation_issue_count: outcome.validation_issue_count,
-                rendered: outcome.rendered,
-                unsupported: !outcome.renderable,
+                materialization_status: materialization_status_label(outcome.status).to_owned(),
+                rendered: render_report.rendered,
+                unsupported: !render_report.unsupported_primitives.is_empty()
+                    || !render_report.unsupported_attachments.is_empty()
+                    || !outcome.validation_passed,
                 recommendation,
                 errors: Vec::new(),
-            }
+            };
+            let materialization_plan_report = ObjectPlanBatchMaterializationPlanReport {
+                source_ref: plan_input.source_ref.clone(),
+                output_dir: relative_out_dir.to_owned(),
+                plan_id: Some(outcome.plan_id.clone()),
+                status: materialization_status_label(outcome.status).to_owned(),
+                primitive_count: outcome.materialization_report.primitive_count,
+                materialized_primitive_count: outcome
+                    .materialization_report
+                    .materialized_primitive_count,
+                attachment_count: outcome.materialization_report.attachment_count,
+                materialized_attachment_count: outcome
+                    .materialization_report
+                    .materialized_attachment_count,
+                unresolved_node_count: outcome.materialization_report.unresolved_nodes.len(),
+                unresolved_attachment_count: outcome
+                    .materialization_report
+                    .unresolved_attachments
+                    .len(),
+                user_review_required: true,
+                publish_allowed: false,
+                errors: Vec::new(),
+            };
+            let render_plan_report = ObjectPlanBatchRenderEvidencePlanReport {
+                source_ref: plan_input.source_ref.clone(),
+                output_dir: relative_out_dir.to_owned(),
+                plan_id: Some(outcome.plan_id),
+                rendered: render_report.rendered,
+                materialized: render_report.materialized,
+                preview_count: render_report.preview_count,
+                contact_sheet_path: render_report
+                    .contact_sheet_path
+                    .map(|path| format!("{relative_out_dir}/{path}")),
+                warnings: render_report.warnings,
+                user_review_required: true,
+                approved: false,
+                publish_allowed: false,
+                errors: Vec::new(),
+            };
+            (plan_report, materialization_plan_report, render_plan_report)
         }
-        Err(_error) => ObjectPlanBatchPlanReport {
-            source_ref: plan_input.source_ref.clone(),
-            output_dir: relative_out_dir.to_owned(),
-            plan_id: None,
-            display_name: None,
-            validation_status: "Failed".to_owned(),
-            validation_issue_count: 1,
-            rendered: false,
-            unsupported: true,
-            recommendation: BatchReviewRecommendation::Blocked,
-            errors: vec!["Plan could not be read or parsed.".to_owned()],
-        },
+        Err(_error) => {
+            let errors = vec!["Plan could not be read or parsed.".to_owned()];
+            (
+                ObjectPlanBatchPlanReport {
+                    source_ref: plan_input.source_ref.clone(),
+                    output_dir: relative_out_dir.to_owned(),
+                    plan_id: None,
+                    display_name: None,
+                    validation_status: "Failed".to_owned(),
+                    validation_issue_count: 1,
+                    materialization_status: "Failed".to_owned(),
+                    rendered: false,
+                    unsupported: true,
+                    recommendation: BatchReviewRecommendation::Blocked,
+                    errors: errors.clone(),
+                },
+                ObjectPlanBatchMaterializationPlanReport {
+                    source_ref: plan_input.source_ref.clone(),
+                    output_dir: relative_out_dir.to_owned(),
+                    plan_id: None,
+                    status: "Failed".to_owned(),
+                    primitive_count: 0,
+                    materialized_primitive_count: 0,
+                    attachment_count: 0,
+                    materialized_attachment_count: 0,
+                    unresolved_node_count: 0,
+                    unresolved_attachment_count: 0,
+                    user_review_required: true,
+                    publish_allowed: false,
+                    errors: errors.clone(),
+                },
+                ObjectPlanBatchRenderEvidencePlanReport {
+                    source_ref: plan_input.source_ref.clone(),
+                    output_dir: relative_out_dir.to_owned(),
+                    plan_id: None,
+                    rendered: false,
+                    materialized: false,
+                    preview_count: 0,
+                    contact_sheet_path: None,
+                    warnings: Vec::new(),
+                    user_review_required: true,
+                    approved: false,
+                    publish_allowed: false,
+                    errors,
+                },
+            )
+        }
     }
+}
+
+fn batch_recommendation(
+    outcome: &ObjectPlanMaterializationOutcome,
+    rendered: bool,
+    render_report: &ObjectPlanRenderEvidenceReport,
+) -> BatchReviewRecommendation {
+    if !outcome.validation_passed
+        || !render_report.unsupported_primitives.is_empty()
+        || !render_report.unsupported_attachments.is_empty()
+    {
+        return BatchReviewRecommendation::Blocked;
+    }
+    if outcome.status != MaterializationStatus::Passed {
+        return BatchReviewRecommendation::Simplify;
+    }
+    if rendered {
+        BatchReviewRecommendation::Keep
+    } else {
+        BatchReviewRecommendation::Regenerate
+    }
+}
+
+fn write_batch_contact_sheet(preview_paths: &[PathBuf], path: &Path) -> anyhow::Result<()> {
+    let images = preview_paths
+        .iter()
+        .map(|preview_path| read_rendered_png(preview_path))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let Some((parent, candidates)) = images.split_first() else {
+        return Ok(());
+    };
+    let candidate_refs = candidates.iter().collect::<Vec<_>>();
+    save_contact_sheet(parent, &candidate_refs, path)
+}
+
+fn read_rendered_png(path: &Path) -> anyhow::Result<RenderedImage> {
+    let image = image::open(path)
+        .with_context(|| format!("reading rendered preview {}", path.display()))?
+        .into_rgba8();
+    Ok(RenderedImage {
+        width: image.width(),
+        height: image.height(),
+        rgba8: image.into_raw(),
+    })
 }
 
 fn keep_regenerate_simplify_markdown(report: &ObjectPlanBatchValidationReport) -> String {
@@ -514,7 +711,7 @@ fn keep_regenerate_simplify_markdown(report: &ObjectPlanBatchValidationReport) -
 
 fn batch_user_summary_markdown(report: &ObjectPlanBatchValidationReport) -> String {
     format!(
-        "# {}\n\nTotal plans: {}\n\nPassed validation: {}\n\nFailed validation: {}\n\nRendered: {}\n\nHuman review required: true\n\nApproved: false\n",
+        "# {}\n\nTotal plans: {}\n\nPassed validation: {}\n\nFailed validation: {}\n\nRendered: {}\n\nHuman review required: true\n\nApproved: false\n\nPublish allowed: false\n",
         report.display_name,
         report.total_plans,
         report.passed_validation,
@@ -525,10 +722,10 @@ fn batch_user_summary_markdown(report: &ObjectPlanBatchValidationReport) -> Stri
 
 fn recommendation_reason(plan: &ObjectPlanBatchPlanReport) -> &'static str {
     match plan.recommendation {
-        BatchReviewRecommendation::Keep => "rendered evidence is available for review",
-        BatchReviewRecommendation::Regenerate => "validation failed",
-        BatchReviewRecommendation::Simplify => "validation passed but preview output is blocked",
-        BatchReviewRecommendation::Blocked => "the plan could not be read",
+        BatchReviewRecommendation::Keep => "rendered evidence is available for human review",
+        BatchReviewRecommendation::Regenerate => "valid draft needs stronger visual evidence",
+        BatchReviewRecommendation::Simplify => "available primitives or anchors are not enough",
+        BatchReviewRecommendation::Blocked => "the plan is invalid or unsupported",
     }
 }
 
@@ -1183,20 +1380,22 @@ struct ObjectPlanBatchPlanInput {
 #[derive(Debug)]
 struct ObjectPlanRunOutcome {
     plan_id: Option<String>,
-    display_name: Option<String>,
     validation_passed: bool,
     validation_issue_count: usize,
-    rendered: bool,
-    renderable: bool,
 }
 
 #[derive(Debug)]
 struct ObjectPlanMaterializationOutcome {
     plan_id: String,
+    display_name: String,
     status: MaterializationStatus,
+    validation_passed: bool,
+    validation_issue_count: usize,
+    materialization_report: ObjectPlanMaterializationReport,
+    render_evidence_report: Option<ObjectPlanRenderEvidenceReport>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ObjectPlanMaterializationReport {
     status: MaterializationStatus,
     primitive_count: usize,
@@ -1209,7 +1408,7 @@ struct ObjectPlanMaterializationReport {
     publish_allowed: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ObjectPlanRenderEvidenceReport {
     rendered: bool,
     materialized: bool,
@@ -1298,6 +1497,7 @@ struct ObjectPlanBatchValidationReport {
     unsupported: usize,
     human_review_required: bool,
     approved: bool,
+    publish_allowed: bool,
     plans: Vec<ObjectPlanBatchPlanReport>,
 }
 
@@ -1309,9 +1509,71 @@ struct ObjectPlanBatchPlanReport {
     display_name: Option<String>,
     validation_status: String,
     validation_issue_count: usize,
+    materialization_status: String,
     rendered: bool,
     unsupported: bool,
     recommendation: BatchReviewRecommendation,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchMaterializationReport {
+    batch_id: String,
+    display_name: String,
+    total_plans: usize,
+    passed: usize,
+    partial: usize,
+    failed: usize,
+    human_review_required: bool,
+    approved: bool,
+    publish_allowed: bool,
+    plans: Vec<ObjectPlanBatchMaterializationPlanReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchMaterializationPlanReport {
+    source_ref: String,
+    output_dir: String,
+    plan_id: Option<String>,
+    status: String,
+    primitive_count: usize,
+    materialized_primitive_count: usize,
+    attachment_count: usize,
+    materialized_attachment_count: usize,
+    unresolved_node_count: usize,
+    unresolved_attachment_count: usize,
+    user_review_required: bool,
+    publish_allowed: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchRenderEvidenceReport {
+    batch_id: String,
+    display_name: String,
+    total_plans: usize,
+    rendered: usize,
+    blocked: usize,
+    contact_sheet_path: Option<String>,
+    human_review_required: bool,
+    approved: bool,
+    publish_allowed: bool,
+    plans: Vec<ObjectPlanBatchRenderEvidencePlanReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanBatchRenderEvidencePlanReport {
+    source_ref: String,
+    output_dir: String,
+    plan_id: Option<String>,
+    rendered: bool,
+    materialized: bool,
+    preview_count: usize,
+    contact_sheet_path: Option<String>,
+    warnings: Vec<String>,
+    user_review_required: bool,
+    approved: bool,
+    publish_allowed: bool,
     errors: Vec<String>,
 }
 
