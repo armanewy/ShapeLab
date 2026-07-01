@@ -3,6 +3,9 @@
 ## Catalog
 
 - The active primitive baselines are Box Primitive and Flat Panel Primitive.
+- Sphere Primitive is the active round primitive baseline.
+- Panel with Knob is a safe-anchor composition proof, not a broad composition
+  editor.
 - Lidded Box and Hinged Panel are feature proofs, not the target active
   primitive workflow.
 - Handled Panel evidence is paused historical proof and should not steer the
@@ -21,6 +24,10 @@
   game-ready export support.
 - Surface/material preview workflows are not part of the active primitive
   baseline.
+- ObjectPlan contract and CLI groundwork exists, but app-visible ObjectPlan
+  review, offline LLM drafting, batch review, and broad family generation are
+  not implemented.
+- Public catalog publishing is blocked.
 - Family Studio Lite is paused until direct primitive and composition flows are
   stable.
 

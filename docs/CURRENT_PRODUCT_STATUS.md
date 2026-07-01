@@ -1,6 +1,6 @@
 # Current Product Status
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Verdict
 
@@ -31,6 +31,9 @@ the active product surface toward direct primitive property editing.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
 - The active Make workflow exposes direct property controls before suggestions.
+- ObjectPlan contracts and a CLI runner exist as offline infrastructure, but
+  ObjectPlan review UI, offline LLM drafting, batch review, and broad family
+  generation are not implemented in the app.
 - Deterministic presets are allowed only when they are named sets of legal
   property values. Sphere Primitive includes a Knob-like form preset.
 - Primitive editing is property-schema based and bounded.
@@ -52,7 +55,7 @@ the active product surface toward direct primitive property editing.
 - Family Studio Lite is paused until direct primitive and composition flows are
   stable.
 - Material/surface work, UV/texturing, rigging, animation, runtime LLM
-  integration, and game-ready UI remain blocked.
+  integration, public catalog publishing, and game-ready UI remain blocked.
 
 ## Allowed Product Claims
 
@@ -78,6 +81,9 @@ the active product surface toward direct primitive property editing.
 - Panel with Knob may be referenced only as a constrained composition proof,
   not as a Door, motion, rigging, animation, material, or game-ready claim.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
+- ObjectPlan may be referenced only as structured offline validation
+  infrastructure. It is not runtime LLM integration, broad generation, catalog
+  publishing, or visible app review workflow.
 
 ## Current Milestone Sequence
 
@@ -102,5 +108,7 @@ Use one visible operation per milestone:
 - UV/texturing UI.
 - Rigging, skinning, or animation UI.
 - Runtime LLM integration.
+- ObjectPlan review UI and automatic offline LLM drafting in the app.
+- Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
 - Family Studio Lite until direct primitive and composition flows are stable.

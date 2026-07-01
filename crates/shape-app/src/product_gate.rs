@@ -34,6 +34,8 @@ pub struct ProductUiGateReport {
     pub default_raw_technical_terms_visible: bool,
     /// Whether active primitive Make copy has retired product-visible variation UI.
     pub active_variation_ui_retired: bool,
+    /// Forbidden active primitive terms found after allowed negative caveats are removed.
+    pub active_primitive_forbidden_terms_found: Vec<&'static str>,
     /// Whether default product copy exposes direct primitive property controls.
     pub direct_property_gate: bool,
     /// Whether core profiles compile and expose novice controls.
@@ -73,6 +75,7 @@ impl ProductUiGateReport {
             && self.installed_kit_count == self.core_profiles.len()
             && self.developer_preview_kit_count == self.installed_kit_count
             && self.active_variation_ui_retired
+            && self.active_primitive_forbidden_terms_found.is_empty()
             && self.direct_property_gate
             && self.customize_deck_gate
             && self.pack_gate
@@ -164,6 +167,8 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
     let active_variation_ui_retired = retired_terms
         .iter()
         .all(|term| !joined_lower.contains(term));
+    let active_primitive_forbidden_terms_found =
+        active_primitive_forbidden_terms_in_default_copy(&visible_strings);
     let direct_property_labels = vec![
         "Width",
         "Depth",
@@ -222,6 +227,7 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         default_advanced_recipe_visible,
         default_raw_technical_terms_visible: !forbidden_terms_found.is_empty(),
         active_variation_ui_retired,
+        active_primitive_forbidden_terms_found,
         direct_property_gate,
         customize_deck_gate,
         pack_gate,
@@ -235,6 +241,40 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
         core_profiles,
         direct_property_labels,
     })
+}
+
+fn active_primitive_forbidden_terms_in_default_copy(visible_strings: &[&str]) -> Vec<&'static str> {
+    let mut joined = visible_strings.join("\n").to_ascii_lowercase();
+    for allowed in [
+        "not a textured, rigged, animated, or game-ready package",
+        "not textured",
+        "not rigged",
+        "not animated",
+        "not game-ready",
+    ] {
+        joined = joined.replace(allowed, "");
+    }
+    [
+        "generated ideas",
+        "candidate",
+        "survivor",
+        "rejected candidate",
+        "variation mode",
+        "uv",
+        "texture",
+        "rigging",
+        "animation",
+        "game-ready",
+        "vertex",
+        "face",
+        "topology",
+        "raw transform",
+        "boolean",
+        "mesh edit",
+    ]
+    .into_iter()
+    .filter(|term| joined.contains(term))
+    .collect()
 }
 
 fn core_profile_fixtures() -> Vec<(&'static str, FoundryFixtureCatalog)> {
@@ -295,6 +335,11 @@ mod tests {
         assert_eq!(report.installed_kit_count, 7);
         assert_eq!(report.developer_preview_kit_count, 7);
         assert!(report.active_variation_ui_retired);
+        assert!(
+            report.active_primitive_forbidden_terms_found.is_empty(),
+            "{:?}",
+            report.active_primitive_forbidden_terms_found
+        );
         assert!(report.direct_property_gate);
         assert_eq!(
             report.direct_property_labels,

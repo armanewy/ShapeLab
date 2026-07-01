@@ -86,6 +86,11 @@ control mesh generation, bypass validators, or create runtime modeling behavior.
 The active primitive workflow does not include runtime LLM integration.
 Material/surface work, UV/texturing, rigging, and animation remain blocked.
 
+ObjectPlan contracts and a CLI runner may validate structured offline plans,
+but the app-visible ObjectPlan review workflow, offline LLM drafting workflow,
+batch review, broad family generation, and public catalog publishing are not
+part of the active primitive product yet.
+
 ## Milestone Rule
 
 Use one visible operation per milestone:

@@ -20,16 +20,21 @@ Choose Primitive
 
 - Box Primitive is the direct box baseline.
 - Flat Panel Primitive is the direct panel baseline.
+- Sphere Primitive is the direct round baseline.
+- Panel with Knob is the first approved safe-anchor composition proof.
 - Lidded Box and Hinged Panel are feature proofs that remain useful evidence,
   but future active primitive work favors direct property editing.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
+- ObjectPlan contract and CLI groundwork exists for structured offline
+  validation, but app-visible ObjectPlan review, offline LLM drafting, batch
+  review, and broad family generation are not implemented.
 - Future suggestions may return only as deterministic property presets, not
   opaque random candidate generation.
 - Family Studio Lite is paused until direct primitive and composition flows are
   stable.
 - Surface/material work, UV/texturing, rigging, animation, runtime LLM
-  integration, and game-ready UI remain blocked.
+  integration, public catalog publishing, and game-ready UI remain blocked.
 
 ## Milestone Rule
 
@@ -52,6 +57,9 @@ Composition will happen through safe anchors and constrained attachment zones,
 not arbitrary scene transforms. LLMs may later draft preset or repair plans, but
 validators own the legal property domains and mesh generation remains native and
 offline.
+
+The current app does not run LLMs. Offline LLMs may only become useful through
+validated ObjectPlan JSON and human review gates.
 
 ## Build
 
@@ -83,6 +91,7 @@ python scripts/clean_targets.py --list --root ..
 ## Status Docs
 
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
+- [`docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md`](docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md)
 - [`docs/PRIMITIVE_DIRECT_MAKE_VISION.md`](docs/PRIMITIVE_DIRECT_MAKE_VISION.md)
 - [`docs/ACTIVE_VARIATION_UI_RETIREMENT.md`](docs/ACTIVE_VARIATION_UI_RETIREMENT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
