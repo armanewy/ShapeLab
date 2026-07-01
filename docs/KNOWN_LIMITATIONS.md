@@ -59,6 +59,11 @@
   transforms, or Blender-like modeling controls.
 - Invalid values must not become current state.
 - Future suggestions may return only as deterministic property presets.
+- Direct primitive Make is expected to evolve from inspector-first controls to
+  model-anchored Orchard handles. The current exact-value inspector is a
+  temporary fallback, not the target interaction model.
+- Background candidate results must not surface as stale warning banners while
+  users edit direct primitive properties.
 
 ## Product Boundaries
 

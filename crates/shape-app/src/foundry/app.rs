@@ -1194,7 +1194,7 @@ impl FoundryDesktopApp {
                 ui.label(RichText::new("Read-only recovery").color(colors.warning));
             }
             if let Some(status) = &self.state.status
-                && !self.family_studio_lite_suppresses_stale_status(status)
+                && !self.suppresses_background_result_status(status)
             {
                 ui.separator();
                 ui.label(RichText::new(product_safe_status(status)).color(colors.text_subtle));
@@ -1808,7 +1808,7 @@ impl FoundryDesktopApp {
 
     fn make_canvas_local_warning(&self) -> Option<String> {
         let status = self.state.status.as_deref()?;
-        if self.family_studio_lite_suppresses_stale_status(status) {
+        if self.suppresses_background_result_status(status) {
             return None;
         }
         if status.starts_with("Ignored a background result") {
@@ -1820,10 +1820,14 @@ impl FoundryDesktopApp {
         }
     }
 
-    fn family_studio_lite_suppresses_stale_status(&self, status: &str) -> bool {
-        self.drawer == Some(FoundryDrawer::FamilyStudioLite)
-            && self.family_studio_lite_enabled
-            && status.starts_with("Ignored a background result")
+    fn suppresses_background_result_status(&self, status: &str) -> bool {
+        if !status.starts_with("Ignored a background result") {
+            return false;
+        }
+
+        self.active_make_profile_kind().direct_primitive_workflow()
+            || (self.drawer == Some(FoundryDrawer::FamilyStudioLite)
+                && self.family_studio_lite_enabled)
     }
 
     fn make_canvas_rejected_candidate_summary(&self) -> Option<String> {
@@ -11368,9 +11372,9 @@ mod tests {
         let visible = app.make_canvas_view_state();
 
         assert!(drawer.drawer_visible);
-        assert!(app.family_studio_lite_suppresses_stale_status(
-            app.state.status.as_deref().expect("status")
-        ));
+        assert!(
+            app.suppresses_background_result_status(app.state.status.as_deref().expect("status"))
+        );
         assert!(visible.local_warning_message.is_none());
         assert_eq!(visible.local_banner_title, "Ready");
         assert_eq!(app.status_summary(), "Ready");
@@ -11921,7 +11925,10 @@ mod tests {
 
     #[test]
     fn stale_result_warning_is_local_and_recoverable_with_try_again() {
-        let mut app = ready_visible_state_test_app();
+        let mut app = FoundryDesktopApp {
+            tab: FoundryTab::Make,
+            ..FoundryDesktopApp::default()
+        };
         app.state.status =
             Some("Ignored a background result because newer work is active.".to_owned());
 
@@ -11934,6 +11941,28 @@ mod tests {
         assert_eq!(visible.local_banner_title, "Older result ignored");
         assert!(visible.local_banner_message.contains(ACTION_TRY_AGAIN));
         assert!(rendered_action_labels_for_default_shell().contains(&ACTION_TRY_AGAIN));
+    }
+
+    #[test]
+    fn direct_primitive_make_suppresses_stale_background_warning() {
+        let mut app = ready_visible_state_test_app();
+        app.state.status =
+            Some("Ignored a background result because newer work is active.".to_owned());
+
+        let visible = app.make_canvas_view_state();
+
+        assert!(app.active_make_profile_kind().direct_primitive_workflow());
+        assert!(
+            app.suppresses_background_result_status(app.state.status.as_deref().expect("status"))
+        );
+        assert!(visible.local_warning_message.is_none());
+        assert_eq!(visible.local_banner_title, "Ready");
+        assert!(!app.status_summary().contains("Ignored a background result"));
+        assert!(
+            !visible
+                .local_banner_message
+                .contains("An older result was ignored")
+        );
     }
 
     #[test]
@@ -13131,7 +13160,10 @@ mod tests {
 
     #[test]
     fn stale_result_status_becomes_local_make_warning() {
-        let mut app = visible_state_test_app();
+        let mut app = FoundryDesktopApp {
+            tab: FoundryTab::Make,
+            ..FoundryDesktopApp::default()
+        };
         app.state.status =
             Some("Ignored a background result because newer work is active.".to_owned());
 
