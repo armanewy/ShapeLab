@@ -507,21 +507,15 @@ impl FoundryAppState {
             .values()
             .find(|request| request.slot() == FoundryJobSlot::RenderPreview)
             .cloned()
-        {
-            if equivalent_preview_request(
+            && equivalent_preview_request(
                 &active_request,
                 &output.build_stamp,
                 width,
                 height,
                 camera.as_ref(),
-            ) {
-                self.record_job_reused(&active_request, "Equivalent preview job already active.");
-            } else {
-                self.record_user_action_blocked(
-                    &active_request,
-                    "Preview request blocked while another preview is active.",
-                );
-            }
+            )
+        {
+            self.record_job_reused(&active_request, "Equivalent preview job already active.");
             return Ok(Vec::new());
         }
         if self.current_preview.as_ref().is_some_and(|preview| {

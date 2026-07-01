@@ -3631,12 +3631,11 @@ impl FoundryDesktopApp {
                 let drag_response = ui.interact(
                     response.rect,
                     ui.id().with("current_preview_orbit_drag"),
-                    egui::Sense::drag(),
+                    egui::Sense::click_and_drag(),
                 );
                 if let Some(camera) = self
                     .current_preview_orbit
                     .camera_for_response(preview, &drag_response)
-                    && !rendering_preview
                     && preview.camera != camera
                 {
                     commands.push(FoundryAppCommand::RequestPreview {

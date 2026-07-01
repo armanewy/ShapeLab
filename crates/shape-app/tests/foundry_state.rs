@@ -44,7 +44,7 @@ use shape_foundry::{
     VariationChannel, VariationIntent, document_catalog_refs,
 };
 use shape_project::foundry::FoundryProjectFile;
-use shape_render::foundry::FoundryPreviewCache;
+use shape_render::{OrbitCamera, foundry::FoundryPreviewCache};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateRequest, generate_foundry_candidate_draft_plans,
 };
@@ -204,6 +204,46 @@ fn equivalent_preview_job_is_reused_without_queueing_second_job() {
     assert_eq!(summary.reused_job_count, 1);
     assert_eq!(summary.coalesced_job_count, 1);
     assert_eq!(summary.duplicate_preview_jobs, 1);
+}
+
+#[test]
+fn non_equivalent_preview_request_replaces_active_preview_job() {
+    let fixture = shape_foundry_catalog::box_primitive::fixture_catalog();
+    let mut state = compiled_fixture_state(&fixture);
+
+    let first = start_job(
+        state
+            .request_preview(512, 512, None)
+            .expect("first preview should schedule"),
+    );
+    let FoundryJobRequest::RenderPreview {
+        job_id: first_job_id,
+        ..
+    } = first
+    else {
+        panic!("expected first preview job");
+    };
+    let mut camera = OrbitCamera::default();
+    camera.orbit(18.0, -8.0);
+    let second = start_job(
+        state
+            .request_preview(512, 512, Some(camera.clone()))
+            .expect("different preview camera should replace active preview"),
+    );
+
+    let FoundryJobRequest::RenderPreview {
+        job_id: second_job_id,
+        camera: second_camera,
+        ..
+    } = second
+    else {
+        panic!("expected replacement preview job");
+    };
+    assert_ne!(first_job_id, second_job_id);
+    assert!(!state.active_jobs.contains_key(&first_job_id));
+    assert!(state.stale_jobs.contains(&first_job_id));
+    assert!(state.active_jobs.contains_key(&second_job_id));
+    assert_eq!(second_camera, Some(camera));
 }
 
 #[test]
