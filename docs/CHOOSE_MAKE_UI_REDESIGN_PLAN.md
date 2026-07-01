@@ -89,7 +89,8 @@ Recommended implementation order:
    Choose Page Provenance Redesign v0.
 3. Clean up the Make stage so it is warm, centered, and not grid-first. Done in
    Make Stage Cleanup v0.
-4. Make the exact-value fallback compact and useful.
+4. Make the exact-value fallback compact and useful. Done in Make Exact-Value
+   Fallback Redesign.
 5. Add Orchard stretch handles for Width / Height / Depth / Thickness.
 
 ## Choose provenance result
@@ -110,6 +111,18 @@ Make v0 now uses a warm studio stage for direct primitive previews by default.
 The permanent coordinate grid, red/green crossing axes, and center origin cursor
 are removed from the default stage. A small corner orientation cue remains, and
 secondary-button orbit plus Reset view remain available.
+
+## Make exact-value fallback result
+
+Direct primitive Make now uses a compact exact-value fallback panel instead of a
+scroll-heavy stack of full inspector cards. The fallback exposes the current
+bounded sliders for Box, Flat Panel, Sphere, and Panel with Knob using plain
+shape language, while keeping Orchard handles as the intended primary control
+surface.
+
+Add to Pack and Export remain visually available from the Make panel when the
+asset is ready. Stale background candidate-result warnings stay hidden in direct
+primitive editing.
 
 ## Explicit non-goals
 

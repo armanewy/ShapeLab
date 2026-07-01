@@ -2567,293 +2567,511 @@ impl FoundryDesktopApp {
         let colors = VisualFoundryTokens::dark().colors;
         product_card(ui, false, |ui| {
             ui.set_min_height(ui.available_height().max(240.0));
-            egui::ScrollArea::vertical()
-                .id_salt("make_inspector_panel_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(
-                        RichText::new(&view_state.primary_title)
-                            .color(colors.text)
-                            .size(18.0)
-                            .strong(),
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(make_canvas_mode_summary(view_state))
-                                .color(colors.text_muted)
-                                .small(),
-                        )
-                        .wrap(),
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&view_state.next_action_hint)
-                                .color(colors.accent_hover)
+            if view_state.direct_primitive_workflow {
+                commands.extend(self.show_direct_make_exact_value_panel(ui, view_state));
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("make_inspector_panel_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(
+                            RichText::new(&view_state.primary_title)
+                                .color(colors.text)
+                                .size(18.0)
                                 .strong(),
-                        )
-                        .wrap(),
-                    );
-                    ui.add_space(12.0);
-                    if make_canvas_inspector_build_actions_visible(view_state) {
-                        ui.horizontal_wrapped(|ui| {
-                            let build_actions_enabled =
-                                make_canvas_build_dependent_actions_enabled(view_state);
-                            let build_actions_reason =
-                                make_canvas_build_dependent_disabled_reason(view_state);
-                            if view_state.mode == MakeCanvasMode::ReviewingIdeas
-                                && action_button(
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(make_canvas_mode_summary(view_state))
+                                    .color(colors.text_muted)
+                                    .small(),
+                            )
+                            .wrap(),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&view_state.next_action_hint)
+                                    .color(colors.accent_hover)
+                                    .strong(),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(12.0);
+                        if make_canvas_inspector_build_actions_visible(view_state) {
+                            ui.horizontal_wrapped(|ui| {
+                                let build_actions_enabled =
+                                    make_canvas_build_dependent_actions_enabled(view_state);
+                                let build_actions_reason =
+                                    make_canvas_build_dependent_disabled_reason(view_state);
+                                if view_state.mode == MakeCanvasMode::ReviewingIdeas
+                                    && action_button(
+                                        ui,
+                                        &action_spec(
+                                            make_canvas_candidate_actions_enabled(view_state),
+                                            view_state.try_ideas_action_label,
+                                            ButtonTone::Secondary,
+                                            build_actions_reason,
+                                        ),
+                                    )
+                                    .clicked()
+                                    && let Some(command) = self.make_primary_candidate_command()
+                                {
+                                    commands.push(command);
+                                }
+                                if self.material_look_action_visible(view_state)
+                                    && action_button(
+                                        ui,
+                                        &ActionSpec::enabled(
+                                            ACTION_TRY_MATERIAL_LOOKS,
+                                            ButtonTone::Secondary,
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    self.open_material_looks_panel();
+                                }
+                                if action_button(
                                     ui,
                                     &action_spec(
-                                        make_canvas_candidate_actions_enabled(view_state),
-                                        view_state.try_ideas_action_label,
+                                        build_actions_enabled,
+                                        ACTION_ADD_TO_PACK,
                                         ButtonTone::Secondary,
                                         build_actions_reason,
                                     ),
+                                )
+                                .clicked()
+                                    && let Some(command) = self.add_current_to_pack_command()
+                                {
+                                    commands.push(command);
+                                    self.drawer = Some(FoundryDrawer::Pack);
+                                }
+                                if action_button(
+                                    ui,
+                                    &action_spec(
+                                        build_actions_enabled,
+                                        ACTION_OPEN_PACK,
+                                        ButtonTone::Secondary,
+                                        build_actions_reason,
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    self.drawer = Some(FoundryDrawer::Pack);
+                                }
+                                if action_button(
+                                    ui,
+                                    &action_spec(
+                                        build_actions_enabled,
+                                        if view_state.panel_knob_baseline {
+                                            ACTION_EXPORT_CURRENT_ASSET
+                                        } else if view_state.direct_primitive_workflow {
+                                            ACTION_EXPORT_CURRENT_PRIMITIVE
+                                        } else {
+                                            ACTION_OPEN_EXPORT
+                                        },
+                                        ButtonTone::Secondary,
+                                        build_actions_reason,
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    self.drawer = Some(FoundryDrawer::Export);
+                                }
+                            });
+                            ui.add_space(10.0);
+                        }
+                        if view_state.material_look_tray_visible {
+                            self.show_material_look_inspector_summary(ui);
+                            ui.add_space(10.0);
+                        }
+                        if view_state.mode != MakeCanvasMode::ReviewingIdeas
+                            || matches!(
+                                view_state.local_banner_tone,
+                                BannerTone::Warning | BannerTone::Error
+                            )
+                        {
+                            status_banner(
+                                ui,
+                                StatusBannerSpec {
+                                    title: &view_state.local_banner_title,
+                                    message: &view_state.local_banner_message,
+                                    tone: view_state.local_banner_tone,
+                                },
+                            );
+                            ui.add_space(8.0);
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if view_state.local_warning_message.is_some()
+                                && action_button(
+                                    ui,
+                                    &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
                                 )
                                 .clicked()
                                 && let Some(command) = self.make_primary_candidate_command()
                             {
                                 commands.push(command);
                             }
-                            if self.material_look_action_visible(view_state)
-                                && action_button(
+                            if view_state.idea_generation_fallback_visible {
+                                if action_button(
+                                    ui,
+                                    &ActionSpec::enabled(ACTION_CANCEL, ButtonTone::Secondary),
+                                )
+                                .clicked()
+                                {
+                                    commands.push(FoundryAppCommand::CancelIdeaGeneration);
+                                }
+                                if action_button(
                                     ui,
                                     &ActionSpec::enabled(
-                                        ACTION_TRY_MATERIAL_LOOKS,
+                                        ACTION_KEEP_WAITING,
                                         ButtonTone::Secondary,
                                     ),
                                 )
                                 .clicked()
-                            {
-                                self.open_material_looks_panel();
+                                {
+                                    self.make_generation_started_at = Some(Instant::now());
+                                }
                             }
-                            if action_button(
-                                ui,
-                                &action_spec(
-                                    build_actions_enabled,
-                                    ACTION_ADD_TO_PACK,
-                                    ButtonTone::Secondary,
-                                    build_actions_reason,
-                                ),
-                            )
-                            .clicked()
-                                && let Some(command) = self.add_current_to_pack_command()
-                            {
-                                commands.push(command);
-                                self.drawer = Some(FoundryDrawer::Pack);
+                            if view_state.preparation_fallback_visible {
+                                if action_button(
+                                    ui,
+                                    &ActionSpec::enabled(
+                                        ACTION_RETRY_PREPARATION,
+                                        ButtonTone::Primary,
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    commands.push(FoundryAppCommand::RetryPreparation);
+                                }
+                                if action_button(
+                                    ui,
+                                    &ActionSpec::enabled(
+                                        ACTION_CHOOSE_ANOTHER_TEMPLATE,
+                                        ButtonTone::Secondary,
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    self.tab = FoundryTab::Home;
+                                }
+                                if action_button(
+                                    ui,
+                                    &ActionSpec::enabled(
+                                        ACTION_OPEN_PROJECT,
+                                        ButtonTone::Secondary,
+                                    ),
+                                )
+                                .clicked()
+                                    && let Some(path) = open_foundry_project_file()
+                                {
+                                    commands.push(FoundryAppCommand::Load(path));
+                                }
                             }
-                            if action_button(
-                                ui,
-                                &action_spec(
-                                    build_actions_enabled,
-                                    ACTION_OPEN_PACK,
-                                    ButtonTone::Secondary,
-                                    build_actions_reason,
-                                ),
-                            )
-                            .clicked()
+                            if view_state.preview_update_required
+                                && action_button(
+                                    ui,
+                                    &ActionSpec::enabled(
+                                        ACTION_UPDATE_PREVIEW,
+                                        ButtonTone::Primary,
+                                    ),
+                                )
+                                .clicked()
                             {
-                                self.drawer = Some(FoundryDrawer::Pack);
-                            }
-                            if action_button(
-                                ui,
-                                &action_spec(
-                                    build_actions_enabled,
-                                    if view_state.panel_knob_baseline {
-                                        ACTION_EXPORT_CURRENT_ASSET
-                                    } else if view_state.direct_primitive_workflow {
-                                        ACTION_EXPORT_CURRENT_PRIMITIVE
-                                    } else {
-                                        ACTION_OPEN_EXPORT
-                                    },
-                                    ButtonTone::Secondary,
-                                    build_actions_reason,
-                                ),
-                            )
-                            .clicked()
-                            {
-                                self.drawer = Some(FoundryDrawer::Export);
+                                let preview_pixels = current_preview_pixels_for_context(ui.ctx());
+                                commands.push(FoundryAppCommand::RequestPreview {
+                                    width: preview_pixels,
+                                    height: preview_pixels,
+                                    camera: None,
+                                });
                             }
                         });
-                        ui.add_space(10.0);
-                    }
-                    if view_state.material_look_tray_visible {
-                        self.show_material_look_inspector_summary(ui);
-                        ui.add_space(10.0);
-                    }
-                    if view_state.mode != MakeCanvasMode::ReviewingIdeas
-                        || matches!(
-                            view_state.local_banner_tone,
-                            BannerTone::Warning | BannerTone::Error
-                        )
-                    {
-                        status_banner(
-                            ui,
-                            StatusBannerSpec {
-                                title: &view_state.local_banner_title,
-                                message: &view_state.local_banner_message,
-                                tone: view_state.local_banner_tone,
-                            },
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(view_state.property_panel_title)
+                                .color(colors.text)
+                                .strong(),
                         );
-                        ui.add_space(8.0);
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        if view_state.local_warning_message.is_some()
-                            && action_button(
-                                ui,
-                                &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
-                            )
-                            .clicked()
-                            && let Some(command) = self.make_primary_candidate_command()
+                        if view_state.direct_primitive_workflow
+                            && self.active_make_profile_kind().is_sphere_primitive()
                         {
-                            commands.push(command);
-                        }
-                        if view_state.idea_generation_fallback_visible {
+                            ui.add_space(6.0);
+                            let preset_enabled = make_canvas_controls_enabled(view_state);
+                            let disabled_reason = view_state
+                                .primary_action_disabled_reason
+                                .as_deref()
+                                .unwrap_or(ACTIVE_IDEA_JOB_REASON);
                             if action_button(
                                 ui,
-                                &ActionSpec::enabled(ACTION_CANCEL, ButtonTone::Secondary),
-                            )
-                            .clicked()
-                            {
-                                commands.push(FoundryAppCommand::CancelIdeaGeneration);
-                            }
-                            if action_button(
-                                ui,
-                                &ActionSpec::enabled(ACTION_KEEP_WAITING, ButtonTone::Secondary),
-                            )
-                            .clicked()
-                            {
-                                self.make_generation_started_at = Some(Instant::now());
-                            }
-                        }
-                        if view_state.preparation_fallback_visible {
-                            if action_button(
-                                ui,
-                                &ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
-                            )
-                            .clicked()
-                            {
-                                commands.push(FoundryAppCommand::RetryPreparation);
-                            }
-                            if action_button(
-                                ui,
-                                &ActionSpec::enabled(
-                                    ACTION_CHOOSE_ANOTHER_TEMPLATE,
+                                &action_spec(
+                                    preset_enabled,
+                                    ACTION_KNOB_LIKE_FORM,
                                     ButtonTone::Secondary,
+                                    disabled_reason,
                                 ),
                             )
                             .clicked()
                             {
-                                self.tab = FoundryTab::Home;
-                            }
-                            if action_button(
-                                ui,
-                                &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
-                            )
-                            .clicked()
-                                && let Some(path) = open_foundry_project_file()
-                            {
-                                commands.push(FoundryAppCommand::Load(path));
+                                commands.push(sphere_knob_like_form_preset_command());
                             }
                         }
-                        if view_state.preview_update_required
-                            && action_button(
+                        ui.add_space(6.0);
+                        let active_group = self.active_make_part_group();
+                        let control_sections = make_context_inspector_controls(
+                            &self.state.controls,
+                            active_group.as_ref(),
+                        );
+                        if control_sections.visible.is_empty() {
+                            product_compact_empty_state(
                                 ui,
-                                &ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
-                            )
-                            .clicked()
-                        {
-                            let preview_pixels = current_preview_pixels_for_context(ui.ctx());
-                            commands.push(FoundryAppCommand::RequestPreview {
-                                width: preview_pixels,
-                                height: preview_pixels,
-                                camera: None,
-                            });
+                                control_sections.empty_title,
+                                control_sections.empty_message,
+                            );
+                        } else {
+                            let current_build = self.state.current_build.clone();
+                            let texture_cache = &mut self.texture_cache;
+                            let actions_enabled = make_canvas_controls_enabled(view_state);
+                            let disabled_reason = view_state
+                                .primary_action_disabled_reason
+                                .as_deref()
+                                .unwrap_or(ACTIVE_IDEA_JOB_REASON);
+                            for control in &control_sections.visible {
+                                commands.extend(show_customize_control_card(
+                                    ui,
+                                    texture_cache,
+                                    current_build.as_ref(),
+                                    control,
+                                    actions_enabled,
+                                    disabled_reason,
+                                    !view_state.simple_box_make_baseline,
+                                ));
+                                ui.add_space(8.0);
+                            }
+                            if !control_sections.overflow.is_empty() {
+                                egui::CollapsingHeader::new(control_sections.disclosure_label)
+                                    .id_salt("make_context_more_controls")
+                                    .show(ui, |ui| {
+                                        for control in &control_sections.overflow {
+                                            commands.extend(show_customize_control_card(
+                                                ui,
+                                                texture_cache,
+                                                current_build.as_ref(),
+                                                control,
+                                                actions_enabled,
+                                                disabled_reason,
+                                                !view_state.simple_box_make_baseline,
+                                            ));
+                                            ui.add_space(8.0);
+                                        }
+                                    });
+                            }
                         }
                     });
-                    ui.add_space(12.0);
-                    ui.label(
-                        RichText::new(view_state.property_panel_title)
-                            .color(colors.text)
-                            .strong(),
-                    );
-                    if view_state.direct_primitive_workflow
-                        && self.active_make_profile_kind().is_sphere_primitive()
-                    {
-                        ui.add_space(6.0);
-                        let preset_enabled = make_canvas_controls_enabled(view_state);
-                        let disabled_reason = view_state
-                            .primary_action_disabled_reason
-                            .as_deref()
-                            .unwrap_or(ACTIVE_IDEA_JOB_REASON);
-                        if action_button(
-                            ui,
-                            &action_spec(
-                                preset_enabled,
-                                ACTION_KNOB_LIKE_FORM,
-                                ButtonTone::Secondary,
-                                disabled_reason,
-                            ),
-                        )
-                        .clicked()
-                        {
-                            commands.push(sphere_knob_like_form_preset_command());
-                        }
-                    }
-                    ui.add_space(6.0);
-                    let active_group = self.active_make_part_group();
-                    let control_sections = make_context_inspector_controls(
-                        &self.state.controls,
-                        active_group.as_ref(),
-                    );
-                    if control_sections.visible.is_empty() {
-                        product_compact_empty_state(
-                            ui,
-                            control_sections.empty_title,
-                            control_sections.empty_message,
-                        );
-                    } else {
-                        let current_build = self.state.current_build.clone();
-                        let texture_cache = &mut self.texture_cache;
-                        let actions_enabled = make_canvas_controls_enabled(view_state);
-                        let disabled_reason = view_state
-                            .primary_action_disabled_reason
-                            .as_deref()
-                            .unwrap_or(ACTIVE_IDEA_JOB_REASON);
-                        for control in &control_sections.visible {
-                            commands.extend(show_customize_control_card(
-                                ui,
-                                texture_cache,
-                                current_build.as_ref(),
-                                control,
-                                actions_enabled,
-                                disabled_reason,
-                                !view_state.simple_box_make_baseline,
-                            ));
-                            ui.add_space(8.0);
-                        }
-                        if !control_sections.overflow.is_empty() {
-                            egui::CollapsingHeader::new(control_sections.disclosure_label)
-                                .id_salt("make_context_more_controls")
-                                .show(ui, |ui| {
-                                    for control in &control_sections.overflow {
-                                        commands.extend(show_customize_control_card(
-                                            ui,
-                                            texture_cache,
-                                            current_build.as_ref(),
-                                            control,
-                                            actions_enabled,
-                                            disabled_reason,
-                                            !view_state.simple_box_make_baseline,
-                                        ));
-                                        ui.add_space(8.0);
-                                    }
-                                });
-                        }
+            }
+        });
+        commands
+    }
+
+    fn show_direct_make_exact_value_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        view_state: &MakeCanvasViewState,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
+        let colors = VisualFoundryTokens::dark().colors;
+
+        ui.set_width(ui.available_width());
+        ui.label(
+            RichText::new(&view_state.primary_title)
+                .color(colors.text)
+                .size(18.0)
+                .strong(),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(make_canvas_mode_summary(view_state))
+                    .color(colors.text_muted)
+                    .small(),
+            )
+            .wrap(),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(&view_state.next_action_hint)
+                    .color(colors.accent_hover)
+                    .strong(),
+            )
+            .wrap(),
+        );
+        ui.add_space(10.0);
+
+        if make_canvas_inspector_build_actions_visible(view_state) {
+            let build_actions_enabled = make_canvas_build_dependent_actions_enabled(view_state);
+            let build_actions_reason = make_canvas_build_dependent_disabled_reason(view_state);
+            ui.horizontal_wrapped(|ui| {
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        ACTION_ADD_TO_PACK,
+                        ButtonTone::Secondary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                    && let Some(command) = self.add_current_to_pack_command()
+                {
+                    commands.push(command);
+                    self.drawer = Some(FoundryDrawer::Pack);
+                }
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        ACTION_OPEN_PACK,
+                        ButtonTone::Secondary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::Pack);
+                }
+                if action_button(
+                    ui,
+                    &action_spec(
+                        build_actions_enabled,
+                        if view_state.panel_knob_baseline {
+                            ACTION_EXPORT_CURRENT_ASSET
+                        } else {
+                            ACTION_EXPORT_CURRENT_PRIMITIVE
+                        },
+                        ButtonTone::Primary,
+                        build_actions_reason,
+                    ),
+                )
+                .clicked()
+                {
+                    self.drawer = Some(FoundryDrawer::Export);
+                }
+            });
+            if !build_actions_enabled {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(product_panel_message(
+                        build_actions_reason,
+                        PREVIEW_UPDATING_REASON,
+                    ))
+                    .color(colors.text_muted)
+                    .small(),
+                );
+            }
+            ui.add_space(10.0);
+        }
+
+        if matches!(
+            view_state.local_banner_tone,
+            BannerTone::Warning | BannerTone::Error
+        ) {
+            status_banner(
+                ui,
+                StatusBannerSpec {
+                    title: &view_state.local_banner_title,
+                    message: &view_state.local_banner_message,
+                    tone: view_state.local_banner_tone,
+                },
+            );
+            ui.add_space(8.0);
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            if view_state.preview_update_required
+                && action_button(
+                    ui,
+                    &ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
+                )
+                .clicked()
+            {
+                let preview_pixels = current_preview_pixels_for_context(ui.ctx());
+                commands.push(FoundryAppCommand::RequestPreview {
+                    width: preview_pixels,
+                    height: preview_pixels,
+                    camera: None,
+                });
+            }
+        });
+        ui.add_space(8.0);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(view_state.property_panel_title)
+                    .color(colors.text)
+                    .strong(),
+            );
+            if self.active_make_profile_kind().is_sphere_primitive() {
+                let preset_enabled = make_canvas_controls_enabled(view_state);
+                let disabled_reason = view_state
+                    .primary_action_disabled_reason
+                    .as_deref()
+                    .unwrap_or(ACTIVE_IDEA_JOB_REASON);
+                if action_button(
+                    ui,
+                    &action_spec(
+                        preset_enabled,
+                        ACTION_KNOB_LIKE_FORM,
+                        ButtonTone::Secondary,
+                        disabled_reason,
+                    ),
+                )
+                .clicked()
+                {
+                    commands.push(sphere_knob_like_form_preset_command());
+                }
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new("Use exact values while Orchard handles are being built.")
+                    .color(colors.text_muted)
+                    .small(),
+            )
+            .wrap(),
+        );
+        ui.add_space(6.0);
+
+        let controls = direct_exact_value_controls(&self.state.controls);
+        if controls.is_empty() {
+            product_compact_empty_state(
+                ui,
+                "No direct controls",
+                "This starting point has no editable exact values yet.",
+            );
+        } else {
+            let current_build = self.state.current_build.clone();
+            let texture_cache = &mut self.texture_cache;
+            let actions_enabled = make_canvas_controls_enabled(view_state);
+            let disabled_reason = view_state
+                .primary_action_disabled_reason
+                .as_deref()
+                .unwrap_or(ACTIVE_IDEA_JOB_REASON);
+            for row in controls.chunks(2) {
+                ui.columns(2, |columns| {
+                    for (column, control) in columns.iter_mut().zip(row.iter()) {
+                        commands.extend(show_direct_exact_value_control_row(
+                            column,
+                            texture_cache,
+                            current_build.as_ref(),
+                            control,
+                            actions_enabled,
+                            disabled_reason,
+                        ));
                     }
                 });
-        });
+                ui.add_space(8.0);
+            }
+        }
+
         commands
     }
 
@@ -5519,20 +5737,24 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "choose_flat_panel_provenance" => Some(ScreenshotScenario::ChooseFlatPanelProvenance),
         "choose_sphere_preset" => Some(ScreenshotScenario::ChooseSpherePreset),
         "choose_selected_preview" => Some(ScreenshotScenario::ChooseSelectedPreview),
-        "box_direct_make_ready" | "make_initial_box" | "box_stage_no_grid" => {
-            Some(ScreenshotScenario::BoxDirectMakeReady)
-        }
+        "box_direct_make_ready"
+        | "make_initial_box"
+        | "box_stage_no_grid"
+        | "box_exact_values_compact"
+        | "box_ready_actions" => Some(ScreenshotScenario::BoxDirectMakeReady),
         "box_property_edit" | "adjusted_box_control" => Some(ScreenshotScenario::BoxPropertyEdit),
-        "flat_panel_direct_make_ready" | "flat_panel_stage_no_grid" => {
-            Some(ScreenshotScenario::FlatPanelDirectMakeReady)
-        }
+        "flat_panel_direct_make_ready"
+        | "flat_panel_stage_no_grid"
+        | "flat_panel_exact_values_compact" => Some(ScreenshotScenario::FlatPanelDirectMakeReady),
         "flat_panel_property_edit" => Some(ScreenshotScenario::FlatPanelPropertyEdit),
-        "sphere_direct_make_ready" | "sphere_stage_no_grid" => {
+        "sphere_direct_make_ready" | "sphere_stage_no_grid" | "sphere_exact_values_compact" => {
             Some(ScreenshotScenario::SphereDirectMakeReady)
         }
         "sphere_property_edit" => Some(ScreenshotScenario::SpherePropertyEdit),
         "sphere_knob_like_preset" => Some(ScreenshotScenario::SphereKnobLikePreset),
-        "panel_knob_stage_no_grid" => Some(ScreenshotScenario::PanelKnobDirectMakeReady),
+        "panel_knob_stage_no_grid" | "panel_knob_exact_values_compact" => {
+            Some(ScreenshotScenario::PanelKnobDirectMakeReady)
+        }
         "orbit_after_drag_or_tool" => Some(ScreenshotScenario::OrbitAfterDragOrTool),
         "reset_view" => Some(ScreenshotScenario::ResetView),
         "sphere_export_drawer" => Some(ScreenshotScenario::SphereExportDrawer),
@@ -6209,7 +6431,15 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "No quick controls yet",
         "This asset has no quick controls yet.",
         "Preview",
-        "Bounded property",
+        "Controls width.",
+        "Controls depth.",
+        "Controls height.",
+        "Controls thickness.",
+        "Controls corner softness.",
+        "Controls front flattening.",
+        "Controls back flattening.",
+        "Keeps knob position within the safe anchor area.",
+        "Keep within authored safe range.",
         "More options",
         "This option is not available right now.",
         "This control is locked.",
@@ -6303,11 +6533,30 @@ fn product_control_summary(
     control: &crate::foundry::view_model::FoundryControlView,
 ) -> &'static str {
     if control.numeric_range.is_some() {
-        "Bounded property"
+        numeric_control_summary(control)
     } else if control.options.len() > 1 {
         "Whole-model options"
     } else {
         "Primary control"
+    }
+}
+
+fn numeric_control_summary(
+    control: &crate::foundry::view_model::FoundryControlView,
+) -> &'static str {
+    match control.label.as_str() {
+        "Width" | "Panel Width" | "Knob Width" => "Controls width.",
+        "Depth" | "Knob Depth" => "Controls depth.",
+        "Height" | "Panel Height" | "Knob Height" => "Controls height.",
+        "Thickness" | "Panel Thickness" => "Controls thickness.",
+        "Edge Softness" | "Panel Edge Softness" => "Controls corner softness.",
+        "Front Flatten" | "Knob Front Flatten" => "Controls front flattening.",
+        "Back Flatten" | "Knob Back Flatten" => "Controls back flattening.",
+        "Knob Horizontal Position" | "Knob Vertical Position" => {
+            "Keeps knob position within the safe anchor area."
+        }
+        "Lid Seam" | "Hinge Edge" => "Keep within authored safe range.",
+        _ => "Keep within authored safe range.",
     }
 }
 
@@ -9154,6 +9403,169 @@ fn show_customize_control_card(
             }
         }
     });
+    commands
+}
+
+fn direct_exact_value_controls(
+    controls: &[crate::foundry::view_model::FoundryControlView],
+) -> Vec<crate::foundry::view_model::FoundryControlView> {
+    display_customize_controls(controls)
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+fn show_direct_exact_value_control_row(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    current_build: Option<&FoundryBuildStamp>,
+    control: &crate::foundry::view_model::FoundryControlView,
+    actions_enabled: bool,
+    disabled_reason: &str,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let colors = VisualFoundryTokens::dark().colors;
+    let header_width = ui.available_width();
+    if header_width < CONTROL_HEADER_STACK_BREAKPOINT {
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(RichText::new(&control.label).strong()).wrap());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(product_control_summary(control))
+                        .color(colors.text_muted)
+                        .small(),
+                )
+                .wrap(),
+            );
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                show_customize_control_header_actions(
+                    ui,
+                    control,
+                    actions_enabled,
+                    disabled_reason,
+                    false,
+                    &mut commands,
+                );
+            });
+        });
+    } else {
+        ui.horizontal(|ui| {
+            let actions_width = CONTROL_HEADER_ACTIONS_WIDTH.min(header_width * 0.5);
+            let text_width = (header_width - actions_width - 12.0).max(140.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(text_width, 34.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.add(egui::Label::new(RichText::new(&control.label).strong()).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(product_control_summary(control))
+                                .color(colors.text_muted)
+                                .small(),
+                        )
+                        .wrap(),
+                    );
+                },
+            );
+            ui.add_space(8.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(actions_width, 34.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    show_customize_control_header_actions(
+                        ui,
+                        control,
+                        actions_enabled,
+                        disabled_reason,
+                        false,
+                        &mut commands,
+                    );
+                },
+            );
+        });
+    }
+    if let Some(reason) = &control.locked_reason {
+        ui.label(
+            RichText::new(product_panel_message(reason, "This control is locked."))
+                .color(colors.text_muted)
+                .small(),
+        );
+    }
+    ui.add_space(4.0);
+    let action_state = CustomizeActionState {
+        enabled: actions_enabled,
+        disabled_reason,
+    };
+    if let Some(range) = control.numeric_range {
+        commands.extend(show_compact_direct_numeric_control(
+            ui,
+            control,
+            range,
+            action_state,
+        ));
+    } else {
+        let visible_options = control
+            .options
+            .iter()
+            .take(CONTROL_FILMSTRIP_LIMIT)
+            .collect::<Vec<_>>();
+        commands.extend(show_customize_option_grid(
+            ui,
+            texture_cache,
+            current_build,
+            control,
+            &visible_options,
+            true,
+            action_state,
+        ));
+    }
+    commands
+}
+
+fn show_compact_direct_numeric_control(
+    ui: &mut egui::Ui,
+    control: &crate::foundry::view_model::FoundryControlView,
+    range: crate::foundry::view_model::FoundryNumericRange,
+    action_state: CustomizeActionState<'_>,
+) -> Vec<FoundryAppCommand> {
+    let mut commands = Vec::new();
+    let colors = VisualFoundryTokens::dark().colors;
+    let current = direct_numeric_value(control, range);
+    let step = range.step.max(0.01);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Value").color(colors.text_muted).small());
+        ui.monospace(format!("{current:.2}"));
+    });
+    let mut adjusted = current;
+    let response = ui
+        .add_enabled_ui(action_state.enabled, |ui| {
+            ui.add_sized(
+                [ui.available_width(), 18.0],
+                egui::Slider::new(&mut adjusted, range.minimum..=range.maximum)
+                    .step_by(f64::from(step))
+                    .show_value(false),
+            )
+        })
+        .inner;
+    if !action_state.enabled {
+        response.on_disabled_hover_text(action_state.disabled_reason);
+    } else if response.changed() {
+        commands.extend(customize::release_control_value_intents(
+            control,
+            shape_foundry::ControlValue::Scalar(snap_direct_numeric_value(adjusted, range, step)),
+        ));
+    }
+    if !action_state.enabled {
+        ui.label(
+            RichText::new(product_panel_message(
+                action_state.disabled_reason,
+                PREVIEW_UPDATING_REASON,
+            ))
+            .color(colors.text_muted)
+            .small(),
+        );
+    }
     commands
 }
 
@@ -13884,9 +14296,75 @@ mod tests {
             .iter()
             .map(|control| product_control_summary(control))
             .collect::<Vec<_>>();
+        assert!(!visible.contains(&"Bounded property"));
+        assert!(visible.contains(&"Controls width."));
+        assert!(visible.contains(&"Controls depth."));
+        assert!(visible.contains(&"Controls height."));
+        assert!(visible.contains(&"Controls corner softness."));
         assert!(
             crate::foundry::ui::copy::labels_are_product_safe(&visible),
             "visible customize summaries contain implementation copy: {visible:?}"
+        );
+    }
+
+    #[test]
+    fn direct_exact_value_fallback_lists_primary_make_controls() {
+        let cases = [
+            (
+                shape_foundry_catalog::box_primitive::fixture_catalog(),
+                vec!["Width", "Depth", "Height", "Edge Softness"],
+            ),
+            (
+                shape_foundry_catalog::flat_panel::fixture_catalog(),
+                vec!["Width", "Height", "Thickness", "Edge Softness"],
+            ),
+            (
+                shape_foundry_catalog::sphere_primitive::fixture_catalog(),
+                vec!["Width", "Height", "Depth", "Front Flatten", "Back Flatten"],
+            ),
+            (
+                shape_foundry_catalog::panel_knob::fixture_catalog(),
+                vec![
+                    "Panel Width",
+                    "Panel Height",
+                    "Panel Thickness",
+                    "Panel Edge Softness",
+                    "Knob Width",
+                    "Knob Height",
+                    "Knob Depth",
+                    "Knob Front Flatten",
+                    "Knob Back Flatten",
+                    "Knob Horizontal Position",
+                    "Knob Vertical Position",
+                ],
+            ),
+        ];
+
+        for (fixture, expected_labels) in cases {
+            let app = ready_fixture_state_test_app(fixture);
+            let visible_labels = direct_exact_value_controls(&app.state.controls)
+                .iter()
+                .map(|control| control.label.clone())
+                .collect::<Vec<_>>();
+            for expected_label in expected_labels {
+                assert!(
+                    visible_labels.iter().any(|label| label == expected_label),
+                    "direct exact-value fallback should include {expected_label}: {visible_labels:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn direct_make_ready_actions_are_available_from_exact_value_panel() {
+        let ready = ready_visible_state_test_app().make_canvas_view_state();
+
+        assert!(ready.direct_primitive_workflow);
+        assert!(make_canvas_inspector_build_actions_visible(&ready));
+        assert!(make_canvas_build_dependent_actions_enabled(&ready));
+        assert!(rendered_action_labels_for_default_shell().contains(&ACTION_ADD_TO_PACK));
+        assert!(
+            rendered_action_labels_for_default_shell().contains(&ACTION_EXPORT_CURRENT_PRIMITIVE)
         );
     }
 
