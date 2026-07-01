@@ -18,9 +18,13 @@ use thiserror::Error;
 
 pub mod edits;
 pub mod parameters;
+pub mod patterns;
+pub mod relationships;
 
 pub use edits::*;
 pub use parameters::*;
+pub use patterns::*;
+pub use relationships::*;
 
 /// Current schema version for asset recipes.
 pub const ASSET_RECIPE_SCHEMA_VERSION: u32 = 8;
@@ -648,7 +652,7 @@ pub struct AssetRecipeSemanticShells {
 }
 
 /// Canonical authored relationship contract shell.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelationshipContract {
     /// Stable relationship ID.
     pub id: RelationshipId,
@@ -666,6 +670,30 @@ pub struct RelationshipContract {
     /// Optional export profile expected to realize this relationship.
     #[serde(default)]
     pub export_profile: Option<ExportProfileId>,
+    /// Placement policy shell.
+    #[serde(default)]
+    pub placement_policy: PlacementPolicy,
+    /// Orientation policy shell.
+    #[serde(default)]
+    pub orientation_policy: OrientationPolicy,
+    /// Scale policy shell.
+    #[serde(default)]
+    pub scale_policy: ScalePolicy,
+    /// Contact policy shell.
+    #[serde(default)]
+    pub contact_policy: ContactPolicy,
+    /// Edit policy shell.
+    #[serde(default)]
+    pub edit_policy: RelationshipEditPolicy,
+    /// Selection policy shell.
+    #[serde(default)]
+    pub selection_policy: SelectionPolicy,
+    /// Reset policy shell.
+    #[serde(default)]
+    pub reset_policy: ResetPolicy,
+    /// Export realization policy shell.
+    #[serde(default)]
+    pub export_realization: ExportRealizationPolicy,
 }
 
 /// Relationship semantic kind reserved for composition work.
@@ -696,7 +724,7 @@ pub enum RelationshipType {
 }
 
 /// Canonical authored pattern contract shell.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatternContract {
     /// Stable pattern ID.
     pub id: PatternId,
@@ -711,6 +739,15 @@ pub struct PatternContract {
     /// Product-safe label for future UI/reports.
     #[serde(default)]
     pub label: String,
+    /// Count policy shell.
+    #[serde(default)]
+    pub count_policy: PatternCountPolicy,
+    /// Optional density policy shell.
+    #[serde(default)]
+    pub density_policy: Option<PatternDensityPolicy>,
+    /// Export instancing policy shell.
+    #[serde(default)]
+    pub export_instancing: PatternExportInstancingPolicy,
 }
 
 /// Pattern semantic kind reserved for repetition work.
@@ -5044,7 +5081,9 @@ fn validate_semantic_shells(recipe: &AssetRecipe, report: &mut AssetValidationRe
             relationship.export_profile,
             "unknown_semantic_relationship_export_profile",
         );
+        validate_relationship_contract_policy(report, *id, relationship);
     }
+    validate_semantic_relationship_cycles(recipe, report);
 
     for (id, pattern) in &recipe.semantic.patterns {
         validate_shell_id(
@@ -5070,6 +5109,7 @@ fn validate_semantic_shells(recipe: &AssetRecipe, report: &mut AssetValidationRe
                 "Pattern count must be between 1 and 10000.",
             );
         }
+        validate_pattern_contract_policy(report, *id, pattern);
     }
 
     for (id, slot) in &recipe.semantic.surface_slots {
@@ -5217,6 +5257,208 @@ fn validate_semantic_shells(recipe: &AssetRecipe, report: &mut AssetValidationRe
         Some("semantic.export_includes".to_owned()),
         &recipe.semantic.export_includes,
     );
+}
+
+fn validate_relationship_contract_policy(
+    report: &mut AssetValidationReport,
+    id: RelationshipId,
+    relationship: &RelationshipContract,
+) {
+    match &relationship.placement_policy.position_rule {
+        PositionRule::FixedOffsetFromEdge { edge, offset } => {
+            if edge.trim().is_empty() {
+                push_issue(
+                    report,
+                    Some(format!("semantic.relationships.{}.placement.edge", id.0)),
+                    "empty_relationship_edge",
+                    "Fixed edge placement must name an edge.",
+                );
+            }
+            validate_finite_array(
+                report,
+                Some(format!("semantic.relationships.{}.placement.offset", id.0)),
+                offset,
+            );
+        }
+        PositionRule::ProportionalUv { u, v } => {
+            validate_range(
+                report,
+                Some(format!("semantic.relationships.{}.placement.u", id.0)),
+                *u,
+                0.0,
+                1.0,
+            );
+            validate_range(
+                report,
+                Some(format!("semantic.relationships.{}.placement.v", id.0)),
+                *v,
+                0.0,
+                1.0,
+            );
+        }
+        PositionRule::CenteredInZone { zone } => {
+            if zone.trim().is_empty() {
+                push_issue(
+                    report,
+                    Some(format!("semantic.relationships.{}.placement.zone", id.0)),
+                    "empty_relationship_zone",
+                    "Centered placement must name a zone.",
+                );
+            }
+        }
+        PositionRule::PreserveCurrentOnDetach => {}
+    }
+
+    if let OrientationPolicy::AlignToSurfaceNormal { max_angle_degrees } =
+        relationship.orientation_policy
+    {
+        validate_range(
+            report,
+            Some(format!(
+                "semantic.relationships.{}.orientation.max_angle_degrees",
+                id.0
+            )),
+            max_angle_degrees,
+            0.0,
+            180.0,
+        );
+    }
+
+    if let ScalePolicy::ClampToRange { minimum, maximum } = relationship.scale_policy {
+        validate_positive(
+            report,
+            Some(format!("semantic.relationships.{}.scale.minimum", id.0)),
+            minimum,
+        );
+        validate_positive(
+            report,
+            Some(format!("semantic.relationships.{}.scale.maximum", id.0)),
+            maximum,
+        );
+        if minimum > maximum {
+            push_issue(
+                report,
+                Some(format!("semantic.relationships.{}.scale", id.0)),
+                "invalid_relationship_scale_range",
+                "Scale policy minimum must be less than or equal to maximum.",
+            );
+        }
+    }
+
+    match relationship.contact_policy {
+        ContactPolicy::SurfaceContact { clearance }
+        | ContactPolicy::IntentionalGap { clearance } => validate_non_negative(
+            report,
+            Some(format!("semantic.relationships.{}.contact.clearance", id.0)),
+            clearance,
+        ),
+        ContactPolicy::NotChecked | ContactPolicy::IntentionalOverlap => {}
+    }
+}
+
+fn validate_semantic_relationship_cycles(recipe: &AssetRecipe, report: &mut AssetValidationReport) {
+    let mut graph: BTreeMap<PartInstanceId, Vec<PartInstanceId>> = BTreeMap::new();
+    for relationship in recipe.semantic.relationships.values() {
+        if let (Some(parent), Some(child)) = (relationship.parent, relationship.child) {
+            graph.entry(parent).or_default().push(child);
+        }
+    }
+
+    for (parent, children) in &graph {
+        for child in children {
+            let mut visited = BTreeSet::new();
+            if *parent == *child || relationship_path_exists(&graph, *child, *parent, &mut visited)
+            {
+                push_issue(
+                    report,
+                    Some("semantic.relationships".to_owned()),
+                    "semantic_relationship_cycle",
+                    "Relationship contracts must not form cycles.",
+                );
+                return;
+            }
+        }
+    }
+}
+
+fn relationship_path_exists(
+    graph: &BTreeMap<PartInstanceId, Vec<PartInstanceId>>,
+    current: PartInstanceId,
+    target: PartInstanceId,
+    visited: &mut BTreeSet<PartInstanceId>,
+) -> bool {
+    if !visited.insert(current) {
+        return false;
+    }
+    graph.get(&current).is_some_and(|children| {
+        children.iter().any(|child| {
+            *child == target || relationship_path_exists(graph, *child, target, visited)
+        })
+    })
+}
+
+fn validate_pattern_contract_policy(
+    report: &mut AssetValidationReport,
+    id: PatternId,
+    pattern: &PatternContract,
+) {
+    match pattern.count_policy {
+        PatternCountPolicy::Unspecified => {}
+        PatternCountPolicy::Exact(count) => validate_pattern_count(report, id, count),
+        PatternCountPolicy::Range { minimum, maximum } => {
+            validate_pattern_count(report, id, minimum);
+            validate_pattern_count(report, id, maximum);
+            if minimum > maximum {
+                push_issue(
+                    report,
+                    Some(format!("semantic.patterns.{}.count_policy", id.0)),
+                    "invalid_semantic_pattern_count_range",
+                    "Pattern count range minimum must be less than or equal to maximum.",
+                );
+            }
+        }
+    }
+
+    if let Some(density) = pattern.density_policy {
+        match density {
+            PatternDensityPolicy::Exact(value) => validate_non_negative(
+                report,
+                Some(format!("semantic.patterns.{}.density", id.0)),
+                value,
+            ),
+            PatternDensityPolicy::Range { minimum, maximum } => {
+                validate_non_negative(
+                    report,
+                    Some(format!("semantic.patterns.{}.density.minimum", id.0)),
+                    minimum,
+                );
+                validate_non_negative(
+                    report,
+                    Some(format!("semantic.patterns.{}.density.maximum", id.0)),
+                    maximum,
+                );
+                if minimum > maximum {
+                    push_issue(
+                        report,
+                        Some(format!("semantic.patterns.{}.density", id.0)),
+                        "invalid_semantic_pattern_density_range",
+                        "Pattern density range minimum must be less than or equal to maximum.",
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn validate_pattern_count(report: &mut AssetValidationReport, id: PatternId, count: u32) {
+    if !(1..=10_000).contains(&count) {
+        push_issue(
+            report,
+            Some(format!("semantic.patterns.{}.count_policy", id.0)),
+            "invalid_semantic_pattern_count",
+            "Pattern count must be between 1 and 10000.",
+        );
+    }
 }
 
 fn validate_shell_id(
@@ -8999,6 +9241,42 @@ mod tests {
             .collect()
     }
 
+    fn relationship_contract(
+        id: RelationshipId,
+        parent: PartInstanceId,
+        child: PartInstanceId,
+    ) -> RelationshipContract {
+        RelationshipContract {
+            id,
+            relationship_type: RelationshipType::SurfaceMounted,
+            parent: Some(parent),
+            child: Some(child),
+            label: "mounted child".to_owned(),
+            export_profile: None,
+            placement_policy: PlacementPolicy::default(),
+            orientation_policy: OrientationPolicy::default(),
+            scale_policy: ScalePolicy::default(),
+            contact_policy: ContactPolicy::default(),
+            edit_policy: RelationshipEditPolicy::default(),
+            selection_policy: SelectionPolicy::default(),
+            reset_policy: ResetPolicy::default(),
+            export_realization: ExportRealizationPolicy::default(),
+        }
+    }
+
+    fn linear_pattern_contract(id: PatternId, source_instance: PartInstanceId) -> PatternContract {
+        PatternContract {
+            id,
+            pattern_type: PatternType::Linear,
+            source_instance: Some(source_instance),
+            count: Some(3),
+            label: "repeat detail".to_owned(),
+            count_policy: PatternCountPolicy::Exact(3),
+            density_policy: None,
+            export_instancing: PatternExportInstancingPolicy::default(),
+        }
+    }
+
     #[test]
     fn serde_json_round_trip_preserves_ordered_recipe() {
         let recipe = test_recipe();
@@ -9054,24 +9332,11 @@ mod tests {
         let mut recipe = multipart_recipe();
         recipe.semantic.relationships.insert(
             RelationshipId(1),
-            RelationshipContract {
-                id: RelationshipId(1),
-                relationship_type: RelationshipType::SurfaceMounted,
-                parent: Some(PartInstanceId(1)),
-                child: Some(PartInstanceId(2)),
-                label: "Knob mounted on panel".to_owned(),
-                export_profile: None,
-            },
+            relationship_contract(RelationshipId(1), PartInstanceId(1), PartInstanceId(2)),
         );
         recipe.semantic.patterns.insert(
             PatternId(1),
-            PatternContract {
-                id: PatternId(1),
-                pattern_type: PatternType::Linear,
-                source_instance: Some(PartInstanceId(2)),
-                count: Some(3),
-                label: "repeat detail".to_owned(),
-            },
+            linear_pattern_contract(PatternId(1), PartInstanceId(2)),
         );
         recipe.next_ids.relationship = 2;
         recipe.next_ids.pattern = 2;
@@ -9091,22 +9356,18 @@ mod tests {
         recipe.semantic.relationships.insert(
             RelationshipId(1),
             RelationshipContract {
-                id: RelationshipId(1),
-                relationship_type: RelationshipType::RigidChild,
                 parent: Some(PartInstanceId(404)),
-                child: Some(PartInstanceId(1)),
-                label: String::new(),
                 export_profile: Some(ExportProfileId(404)),
+                ..relationship_contract(RelationshipId(1), PartInstanceId(404), PartInstanceId(1))
             },
         );
         recipe.semantic.patterns.insert(
             PatternId(1),
             PatternContract {
-                id: PatternId(1),
-                pattern_type: PatternType::Linear,
                 source_instance: Some(PartInstanceId(405)),
                 count: Some(0),
-                label: String::new(),
+                count_policy: PatternCountPolicy::Exact(0),
+                ..linear_pattern_contract(PatternId(1), PartInstanceId(405))
             },
         );
         recipe.semantic.material_slots.insert(
@@ -9177,6 +9438,121 @@ mod tests {
         assert!(codes.contains("semantic_public_catalog_visible"));
         assert!(codes.contains("unsupported_semantic_export_include"));
         assert!(codes.contains("semantic_game_ready_claim"));
+    }
+
+    #[test]
+    fn relationship_contract_accepts_fixed_and_proportional_placement() {
+        let mut recipe = multipart_recipe();
+        let mut fixed =
+            relationship_contract(RelationshipId(1), PartInstanceId(1), PartInstanceId(2));
+        fixed.placement_policy = PlacementPolicy {
+            position_rule: PositionRule::FixedOffsetFromEdge {
+                edge: "right".to_owned(),
+                offset: [0.1, 0.0, 0.0],
+            },
+        };
+        fixed.contact_policy = ContactPolicy::SurfaceContact { clearance: 0.0 };
+        let mut proportional =
+            relationship_contract(RelationshipId(2), PartInstanceId(1), PartInstanceId(2));
+        proportional.placement_policy = PlacementPolicy {
+            position_rule: PositionRule::ProportionalUv { u: 0.5, v: 0.25 },
+        };
+        proportional.scale_policy = ScalePolicy::ClampToRange {
+            minimum: 0.5,
+            maximum: 2.0,
+        };
+        recipe
+            .semantic
+            .relationships
+            .insert(RelationshipId(1), fixed);
+        recipe
+            .semantic
+            .relationships
+            .insert(RelationshipId(2), proportional);
+        recipe.next_ids.relationship = 3;
+
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn relationship_contract_rejects_cycles_and_invalid_domains() {
+        let mut recipe = multipart_recipe();
+        let mut first =
+            relationship_contract(RelationshipId(1), PartInstanceId(1), PartInstanceId(2));
+        first.placement_policy = PlacementPolicy {
+            position_rule: PositionRule::ProportionalUv { u: 2.0, v: 0.5 },
+        };
+        first.scale_policy = ScalePolicy::ClampToRange {
+            minimum: 2.0,
+            maximum: 1.0,
+        };
+        first.contact_policy = ContactPolicy::IntentionalGap { clearance: -0.1 };
+        recipe
+            .semantic
+            .relationships
+            .insert(RelationshipId(1), first);
+        recipe.semantic.relationships.insert(
+            RelationshipId(2),
+            relationship_contract(RelationshipId(2), PartInstanceId(2), PartInstanceId(1)),
+        );
+        recipe.next_ids.relationship = 3;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("value_out_of_range"));
+        assert!(codes.contains("invalid_relationship_scale_range"));
+        assert!(codes.contains("negative_value"));
+        assert!(codes.contains("semantic_relationship_cycle"));
+    }
+
+    #[test]
+    fn pattern_contract_accepts_valid_linear_pattern() {
+        let mut recipe = multipart_recipe();
+        recipe.semantic.patterns.insert(
+            PatternId(1),
+            PatternContract {
+                count_policy: PatternCountPolicy::Range {
+                    minimum: 2,
+                    maximum: 6,
+                },
+                density_policy: Some(PatternDensityPolicy::Range {
+                    minimum: 0.0,
+                    maximum: 1.0,
+                }),
+                export_instancing: PatternExportInstancingPolicy::Disabled,
+                ..linear_pattern_contract(PatternId(1), PartInstanceId(2))
+            },
+        );
+        recipe.next_ids.pattern = 2;
+
+        assert!(validate_asset_recipe(&recipe).is_valid());
+    }
+
+    #[test]
+    fn pattern_contract_rejects_invalid_count_and_density() {
+        let mut recipe = multipart_recipe();
+        recipe.semantic.patterns.insert(
+            PatternId(1),
+            PatternContract {
+                count_policy: PatternCountPolicy::Range {
+                    minimum: 0,
+                    maximum: 20_000,
+                },
+                density_policy: Some(PatternDensityPolicy::Range {
+                    minimum: 3.0,
+                    maximum: 1.0,
+                }),
+                ..linear_pattern_contract(PatternId(1), PartInstanceId(2))
+            },
+        );
+        recipe.next_ids.pattern = 2;
+
+        let report = validate_asset_recipe(&recipe);
+        let codes = issue_codes(&report);
+
+        assert!(codes.contains("invalid_semantic_pattern_count"));
+        assert!(codes.contains("invalid_semantic_pattern_density_range"));
     }
 
     #[test]
