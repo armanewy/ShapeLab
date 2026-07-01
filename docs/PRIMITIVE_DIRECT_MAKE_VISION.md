@@ -81,15 +81,16 @@ It is not a Door claim and it does not include open/close motion.
 
 ## LLM Boundary
 
-LLMs may later draft preset/property plans and repair suggestions. They do not
-control mesh generation, bypass validators, or create runtime modeling behavior.
-The active primitive workflow does not include runtime LLM integration.
+LLMs may draft ObjectPlan JSON outside the app and may suggest preset/property
+plans or repair suggestions. They do not control mesh generation, bypass
+validators, publish catalog entries, or create runtime modeling behavior. The
+active primitive workflow does not include runtime LLM integration.
 Material/surface work, UV/texturing, rigging, and animation remain blocked.
 
-ObjectPlan contracts and a CLI runner may validate structured offline plans,
-but the app-visible ObjectPlan review workflow, offline LLM drafting workflow,
-batch review, broad family generation, and public catalog publishing are not
-part of the active primitive product yet.
+ObjectPlan v0 validates structured offline plans and can run batches for human
+review. The internal review drawer is dev-gated and review-only. Broad family
+generation, automatic app-side drafting, public catalog publishing, and
+Prototype Pack Mode are not part of the active primitive product yet.
 
 ## Milestone Rule
 

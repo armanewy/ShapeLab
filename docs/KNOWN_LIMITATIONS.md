@@ -24,9 +24,12 @@
   game-ready export support.
 - Surface/material preview workflows are not part of the active primitive
   baseline.
-- ObjectPlan contract and CLI groundwork exists, but app-visible ObjectPlan
-  review, offline LLM drafting, batch review, and broad family generation are
-  not implemented.
+- ObjectPlan v0 is offline validation and review infrastructure only. It does
+  not generate broad families, publish catalog entries, or call LLMs in the
+  app.
+- ObjectPlan rendering currently reports honest render-blocked output when
+  preview materialization is unavailable; contact sheets must not be faked.
+- ObjectPlan review UI is internal-only and dev-gated.
 - Public catalog publishing is blocked.
 - Family Studio Lite is paused until direct primitive and composition flows are
   stable.
@@ -50,3 +53,6 @@
   features.
 - Direct primitive editing does not approve material-look persistence.
 - Direct primitive editing does not approve pack-level publishing.
+- ObjectPlan v0 does not approve runtime LLM integration, public kit
+  publishing, materials/surfaces, UV/texturing, rigging, animation, or
+  game-ready claims.

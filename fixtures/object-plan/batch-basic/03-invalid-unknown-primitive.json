@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "plan_id": "unsupported_cylinder_plan",
+  "display_name": "Unsupported Cylinder Plan",
+  "intent_summary": "A draft using an unsupported primitive kind for rejection evidence.",
+  "nodes": [
+    {
+      "node_id": "cylinder",
+      "primitive_kind": "CylinderPrimitive",
+      "display_name": "Cylinder",
+      "property_values": {
+        "width": { "kind": "Length", "value": 1.0 }
+      },
+      "role_hint": "Unsupported draft primitive",
+      "locked": false
+    }
+  ],
+  "attachments": [],
+  "validation_policy": {
+    "require_primitive_schema_validation": true,
+    "require_anchor_validation": true,
+    "allow_public_catalog_publish": false
+  },
+  "review_tier": "Draft",
+  "provenance": {
+    "created_by": "LlmDraft",
+    "source_prompt_hash": "integration_rejection_seed",
+    "source_seed_refs": ["unsupported_seed"],
+    "created_at": "2026-07-01T00:00:00Z"
+  }
+}

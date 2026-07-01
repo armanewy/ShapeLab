@@ -4,10 +4,12 @@ Date: 2026-07-01
 
 ## Verdict
 
-`ACTIVE_VARIATION_UI_RETIRED`
+`OBJECT_PLAN_V0_OFFLINE_REVIEW_READY`
 
 Shape Lab has retired active variation UI for current primitives and is moving
-the active product surface toward direct primitive property editing.
+the active product surface toward direct primitive property editing. ObjectPlan
+v0 now exists as offline validation and review infrastructure for supported
+primitive and safe-anchor composition plans.
 
 ## Current Truth
 
@@ -31,9 +33,14 @@ the active product surface toward direct primitive property editing.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
 - The active Make workflow exposes direct property controls before suggestions.
-- ObjectPlan contracts and a CLI runner exist as offline infrastructure, but
-  ObjectPlan review UI, offline LLM drafting, batch review, and broad family
-  generation are not implemented in the app.
+- ObjectPlan v0 exists for offline validation and review of supported
+  primitive plans and safe-anchor composition plans.
+- ObjectPlan CLI runs produce validation reports, user summaries, normalized
+  plans, honest renderability reports, and batch review reports.
+- Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
+  validates every plan and LLM drafts remain Draft until reviewed.
+- ObjectPlan review UI is internal-only and dev-gated; it is not part of the
+  default novice UI and does not publish catalog entries.
 - Deterministic presets are allowed only when they are named sets of legal
   property values. Sphere Primitive includes a Knob-like form preset.
 - Primitive editing is property-schema based and bounded.
@@ -81,9 +88,12 @@ the active product surface toward direct primitive property editing.
 - Panel with Knob may be referenced only as a constrained composition proof,
   not as a Door, motion, rigging, animation, material, or game-ready claim.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
-- ObjectPlan may be referenced only as structured offline validation
-  infrastructure. It is not runtime LLM integration, broad generation, catalog
-  publishing, or visible app review workflow.
+- ObjectPlan may be referenced as structured offline validation and review
+  infrastructure for supported primitives and safe-anchor compositions.
+- ObjectPlan batch review may be referenced as offline review infrastructure,
+  not Prototype Pack Mode and not automatic approval.
+- Offline LLM drafting may be referenced only as external draft JSON
+  production. The app does not call LLMs at runtime.
 
 ## Current Milestone Sequence
 
@@ -108,7 +118,8 @@ Use one visible operation per milestone:
 - UV/texturing UI.
 - Rigging, skinning, or animation UI.
 - Runtime LLM integration.
-- ObjectPlan review UI and automatic offline LLM drafting in the app.
+- Public ObjectPlan authoring UI, automatic offline LLM drafting in the app,
+  and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
 - Family Studio Lite until direct primitive and composition flows are stable.

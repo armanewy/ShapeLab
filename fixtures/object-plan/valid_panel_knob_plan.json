@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "plan_id": "panel_with_knob_plan",
+  "display_name": "Panel with Knob",
+  "intent_summary": "A flat panel with one rounded form attached by a safe anchor.",
+  "nodes": [
+    {
+      "node_id": "panel",
+      "primitive_kind": "FlatPanelPrimitive",
+      "display_name": "Panel",
+      "property_values": {
+        "width": { "kind": "Length", "value": 1.8 },
+        "height": { "kind": "Length", "value": 2.6 },
+        "thickness": { "kind": "Length", "value": 0.18 },
+        "edge_softness": { "kind": "Ratio", "value": 0.05 }
+      },
+      "role_hint": "Base panel",
+      "locked": false
+    },
+    {
+      "node_id": "knob",
+      "primitive_kind": "SpherePrimitive",
+      "display_name": "Knob-like form",
+      "property_values": {
+        "width": { "kind": "Length", "value": 1.0 },
+        "height": { "kind": "Length", "value": 1.0 },
+        "depth": { "kind": "Length", "value": 1.0 },
+        "front_flatten": { "kind": "Ratio", "value": 0.0 },
+        "back_flatten": { "kind": "Ratio", "value": 0.0 }
+      },
+      "role_hint": "Rounded attached form",
+      "locked": false
+    }
+  ],
+  "attachments": [
+    {
+      "attachment_id": "panel_knob_attachment",
+      "parent_node_id": "panel",
+      "parent_anchor_id": "right_side_handle_zone",
+      "child_node_id": "knob",
+      "child_anchor_id": "back_mount_point",
+      "offset": {
+        "kind": "BoundedNormalized",
+        "x": 0.25,
+        "y": 0.0,
+        "minimum_x": -0.6,
+        "maximum_x": 0.6,
+        "minimum_y": -0.5,
+        "maximum_y": 0.5
+      },
+      "orientation_policy": "AlignChildToParentNormal",
+      "scale_policy": "KeepChildScale"
+    }
+  ],
+  "validation_policy": {
+    "require_primitive_schema_validation": true,
+    "require_anchor_validation": true,
+    "allow_public_catalog_publish": false
+  },
+  "review_tier": "Draft",
+  "provenance": {
+    "created_by": "InternalTool",
+    "source_prompt_hash": "integration_panel_knob_seed",
+    "source_seed_refs": ["panel_knob_seed"],
+    "created_at": "2026-07-01T00:00:00Z"
+  }
+}

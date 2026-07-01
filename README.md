@@ -26,9 +26,13 @@ Choose Primitive
   but future active primitive work favors direct property editing.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
-- ObjectPlan contract and CLI groundwork exists for structured offline
-  validation, but app-visible ObjectPlan review, offline LLM drafting, batch
-  review, and broad family generation are not implemented.
+- ObjectPlan v0 exists for structured offline validation and review of
+  supported primitive and safe-anchor composition plans.
+- Offline LLMs may draft ObjectPlan JSON outside the app, but every plan is
+  validated by Object Orchard before review.
+- ObjectPlan batch review and the internal review drawer are available as
+  offline/internal review infrastructure; broad family generation is not
+  implemented.
 - Future suggestions may return only as deterministic property presets, not
   opaque random candidate generation.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -59,7 +63,8 @@ validators own the legal property domains and mesh generation remains native and
 offline.
 
 The current app does not run LLMs. Offline LLMs may only become useful through
-validated ObjectPlan JSON and human review gates.
+validated ObjectPlan JSON, honest render-blocked or visual evidence reports,
+and human review gates.
 
 ## Build
 
@@ -91,7 +96,10 @@ python scripts/clean_targets.py --list --root ..
 ## Status Docs
 
 - [`docs/CURRENT_PRODUCT_STATUS.md`](docs/CURRENT_PRODUCT_STATUS.md)
+- [`docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_V0_INTEGRATION_REPORT.md)
 - [`docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md`](docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md)
+- [`docs/OBJECT_PLAN_DSL_CONTRACTS.md`](docs/OBJECT_PLAN_DSL_CONTRACTS.md)
+- [`docs/OBJECT_PLAN_BATCH_RUNNER_V0.md`](docs/OBJECT_PLAN_BATCH_RUNNER_V0.md)
 - [`docs/PRIMITIVE_DIRECT_MAKE_VISION.md`](docs/PRIMITIVE_DIRECT_MAKE_VISION.md)
 - [`docs/ACTIVE_VARIATION_UI_RETIREMENT.md`](docs/ACTIVE_VARIATION_UI_RETIREMENT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
