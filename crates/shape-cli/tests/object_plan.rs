@@ -8,8 +8,8 @@ use shape_foundry::{
     ObjectPlanNode, ObjectPlanProvenance, ObjectPlanReviewTier, ObjectPlanValidationPolicy,
     PrimitiveAttachmentOffsetPolicy, PrimitiveAttachmentOrientationPolicy,
     PrimitiveAttachmentScalePolicy, PrimitiveKind, PrimitivePropertyValue,
-    flat_panel_primitive_property_schema, primitive_default_property_values,
-    sphere_primitive_property_schema,
+    box_primitive_property_schema, flat_panel_primitive_property_schema,
+    primitive_default_property_values, sphere_primitive_property_schema,
 };
 
 #[test]
@@ -226,6 +226,210 @@ fn object_plan_cli_invalid_run_does_not_fake_contact_sheet() {
 }
 
 #[test]
+fn object_plan_cli_materialize_valid_box_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("box-plan.json");
+    let out_dir = temp_dir.path().join("box-materialized");
+    write_plan(&plan_path, &one_box_plan());
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    for name in [
+        "materialized-object-draft.json",
+        "materialization-report.json",
+        "materialized-user-summary.md",
+        "normalized-object-plan.json",
+    ] {
+        assert!(out_dir.join(name).is_file(), "{name} should exist");
+    }
+    let report = read_json(out_dir.join("materialization-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["primitive_count"], 1);
+    assert_eq!(report["materialized_primitive_count"], 1);
+    assert_eq!(report["attachment_count"], 0);
+    assert_eq!(report["materialized_attachment_count"], 0);
+    assert_eq!(report["user_review_required"], true);
+    assert_eq!(report["publish_allowed"], false);
+    assert!(!out_dir.join("unresolved-nodes.json").exists());
+    assert!(!out_dir.join("unresolved-attachments.json").exists());
+}
+
+#[test]
+fn object_plan_cli_materialize_valid_flat_panel_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("flat-panel-plan.json");
+    let out_dir = temp_dir.path().join("flat-panel-materialized");
+    write_plan(&plan_path, &one_flat_panel_plan());
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let report = read_json(out_dir.join("materialization-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["materialized_primitive_count"], 1);
+}
+
+#[test]
+fn object_plan_cli_materialize_valid_panel_knob_plan() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("panel-knob-plan.json");
+    let out_dir = temp_dir.path().join("panel-knob-materialized");
+    write_plan(&plan_path, &panel_with_sphere_plan());
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let report = read_json(out_dir.join("materialization-report.json"));
+    assert_eq!(report["status"], "Passed");
+    assert_eq!(report["primitive_count"], 2);
+    assert_eq!(report["materialized_primitive_count"], 2);
+    assert_eq!(report["attachment_count"], 1);
+    assert_eq!(report["materialized_attachment_count"], 1);
+    assert_eq!(report["publish_allowed"], false);
+}
+
+#[test]
+fn object_plan_cli_materialize_raw_mesh_payload_fails() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("raw-plan.json");
+    let out_dir = temp_dir.path().join("raw-materialized");
+    let mut value = serde_json::to_value(one_box_plan()).expect("plan value");
+    value.as_object_mut().expect("plan object").insert(
+        "raw_mesh_payload".to_owned(),
+        serde_json::json!({"vertices": [[0, 0, 0]]}),
+    );
+    fs::write(
+        &plan_path,
+        serde_json::to_vec_pretty(&value).expect("serialize raw plan"),
+    )
+    .expect("write raw plan");
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(!output.status.success());
+    assert!(!out_dir.join("materialization-report.json").exists());
+}
+
+#[test]
+fn object_plan_cli_materialize_public_publish_plan_fails() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("publish-plan.json");
+    let out_dir = temp_dir.path().join("publish-materialized");
+    let mut plan = one_box_plan();
+    plan.validation_policy.allow_public_catalog_publish = true;
+    write_plan(&plan_path, &plan);
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(!output.status.success());
+    let report = read_json(out_dir.join("materialization-report.json"));
+    assert_eq!(report["status"], "Failed");
+    assert_eq!(report["publish_allowed"], false);
+    assert_eq!(report["user_review_required"], true);
+}
+
+#[test]
+fn object_plan_cli_materialize_invalid_attachment_plan_fails() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("invalid-attachment-plan.json");
+    let out_dir = temp_dir.path().join("invalid-attachment-materialized");
+    let mut plan = panel_with_sphere_plan();
+    plan.attachments[0].parent_anchor_id = "hinge_edge_zone".to_owned();
+    write_plan(&plan_path, &plan);
+
+    let output = Command::new(exe)
+        .args(["object-plan", "materialize", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .output()
+        .expect("run object-plan materialize");
+
+    assert!(!output.status.success());
+    let report = read_json(out_dir.join("materialization-report.json"));
+    assert_eq!(report["status"], "Failed");
+    assert_eq!(
+        report["unresolved_attachments"]
+            .as_array()
+            .expect("attachments")
+            .len(),
+        1
+    );
+    assert!(out_dir.join("unresolved-attachments.json").is_file());
+}
+
+#[test]
+fn object_plan_cli_materialize_outputs_are_deterministic() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("box-plan.json");
+    let first_dir = temp_dir.path().join("materialized-a");
+    let second_dir = temp_dir.path().join("materialized-b");
+    write_plan(&plan_path, &one_box_plan());
+
+    for out_dir in [&first_dir, &second_dir] {
+        assert!(
+            Command::new(exe)
+                .args(["object-plan", "materialize", "--plan"])
+                .arg(&plan_path)
+                .args(["--out-dir"])
+                .arg(out_dir)
+                .status()
+                .expect("run object-plan materialize")
+                .success()
+        );
+    }
+
+    for name in [
+        "materialized-object-draft.json",
+        "materialization-report.json",
+        "materialized-user-summary.md",
+        "normalized-object-plan.json",
+    ] {
+        let first = fs::read(first_dir.join(name)).expect("read first output");
+        let second = fs::read(second_dir.join(name)).expect("read second output");
+        assert_eq!(first, second, "{name} should be deterministic");
+    }
+}
+
+#[test]
 fn object_plan_cli_batch_run_directory_reports_mixed_results() {
     let exe = env!("CARGO_BIN_EXE_shape-cli");
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -368,6 +572,44 @@ fn write_plan(path: &std::path::Path, plan: &ObjectPlan) {
     .expect("write plan");
 }
 
+fn one_box_plan() -> ObjectPlan {
+    ObjectPlan {
+        schema_version: OBJECT_PLAN_SCHEMA_VERSION,
+        plan_id: "box_plan".to_owned(),
+        display_name: "Box plan".to_owned(),
+        intent_summary: "One editable box primitive with bounded dimensions.".to_owned(),
+        nodes: vec![box_node()],
+        attachments: Vec::new(),
+        validation_policy: ObjectPlanValidationPolicy::default(),
+        review_tier: ObjectPlanReviewTier::Draft,
+        provenance: ObjectPlanProvenance {
+            created_by: ObjectPlanCreatedBy::Human,
+            source_prompt_hash: Some("box123".to_owned()),
+            source_seed_refs: vec!["seed_box".to_owned()],
+            created_at: "2026-07-01T00:00:00Z".to_owned(),
+        },
+    }
+}
+
+fn one_flat_panel_plan() -> ObjectPlan {
+    ObjectPlan {
+        schema_version: OBJECT_PLAN_SCHEMA_VERSION,
+        plan_id: "flat_panel_plan".to_owned(),
+        display_name: "Flat panel plan".to_owned(),
+        intent_summary: "One editable flat panel primitive with bounded dimensions.".to_owned(),
+        nodes: vec![panel_node()],
+        attachments: Vec::new(),
+        validation_policy: ObjectPlanValidationPolicy::default(),
+        review_tier: ObjectPlanReviewTier::Draft,
+        provenance: ObjectPlanProvenance {
+            created_by: ObjectPlanCreatedBy::Human,
+            source_prompt_hash: Some("panel123".to_owned()),
+            source_seed_refs: vec!["seed_panel".to_owned()],
+            created_at: "2026-07-01T00:00:00Z".to_owned(),
+        },
+    }
+}
+
 fn one_sphere_plan() -> ObjectPlan {
     ObjectPlan {
         schema_version: OBJECT_PLAN_SCHEMA_VERSION,
@@ -438,6 +680,18 @@ fn panel_node() -> ObjectPlanNode {
         display_name: "Panel".to_owned(),
         property_values: primitive_default_property_values(&schema),
         role_hint: "Base panel".to_owned(),
+        locked: false,
+    }
+}
+
+fn box_node() -> ObjectPlanNode {
+    let schema = box_primitive_property_schema();
+    ObjectPlanNode {
+        node_id: "box".to_owned(),
+        primitive_kind: PrimitiveKind::BoxPrimitive,
+        display_name: "Box".to_owned(),
+        property_values: primitive_default_property_values(&schema),
+        role_hint: "Simple box body".to_owned(),
         locked: false,
     }
 }

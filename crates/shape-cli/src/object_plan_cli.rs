@@ -5,8 +5,11 @@ use anyhow::Context;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use shape_foundry::{
-    ObjectPlan, ObjectPlanReviewTier, ObjectPlanValidationReport, PrimitiveKind,
-    object_plan_user_summary, validate_object_plan,
+    MaterializationPolicy, MaterializationStatus, MaterializedObjectDraft,
+    MaterializedObjectNextAction, ObjectPlan, ObjectPlanMaterializationOutputMode,
+    ObjectPlanMaterializationRequest, ObjectPlanReviewTier, ObjectPlanValidationReport,
+    PrimitiveKind, materialize_object_plan, materialized_object_summary, object_plan_user_summary,
+    validate_object_plan,
 };
 
 use crate::write_json;
@@ -48,6 +51,15 @@ pub enum ObjectPlanCommand {
         #[arg(long)]
         contact_sheet: bool,
     },
+    /// Materialize an ObjectPlan into a review-required draft graph.
+    Materialize {
+        /// ObjectPlan JSON file.
+        #[arg(long)]
+        plan: PathBuf,
+        /// Output directory.
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
     /// Run a directory or batch JSON of ObjectPlans for offline review.
     BatchRun {
         /// Directory of ObjectPlan JSON files or an ObjectPlanBatch JSON file.
@@ -69,6 +81,7 @@ pub fn run_object_plan(args: ObjectPlanArgs) -> anyhow::Result<()> {
             out_dir,
             contact_sheet,
         } => run_prepare(&plan, &out_dir, contact_sheet),
+        ObjectPlanCommand::Materialize { plan, out_dir } => run_materialize(&plan, &out_dir),
         ObjectPlanCommand::BatchRun { input, out_dir } => run_batch(&input, &out_dir),
     }
 }
@@ -110,6 +123,19 @@ fn run_prepare(
             outcome.validation_issue_count
         )
     }
+}
+
+fn run_materialize(plan_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
+    let outcome = write_materialization_outputs(plan_path, out_dir)?;
+    println!(
+        "Materialized ObjectPlan {} into {}",
+        outcome.plan_id,
+        out_dir.display()
+    );
+    if outcome.status == MaterializationStatus::Failed {
+        anyhow::bail!("ObjectPlan materialization failed");
+    }
+    Ok(())
 }
 
 fn write_plan_outputs(
@@ -161,6 +187,54 @@ fn write_plan_outputs(
         validation_issue_count: report.issues.len(),
         rendered: visual_evidence_report.rendered,
         renderable: renderability_report.renderable,
+    })
+}
+
+fn write_materialization_outputs(
+    plan_path: &Path,
+    out_dir: &Path,
+) -> anyhow::Result<ObjectPlanMaterializationOutcome> {
+    let plan = read_object_plan(plan_path)?;
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+    let request = ObjectPlanMaterializationRequest {
+        plan: plan.clone(),
+        materialization_policy: MaterializationPolicy::default(),
+        target_preview_profile: "clay-review".to_owned(),
+        output_mode: ObjectPlanMaterializationOutputMode::DraftReview,
+    };
+    let draft = materialize_object_plan(request);
+    let summary = materialized_object_summary(&plan, &draft);
+    let report = materialization_report(&plan, &draft);
+
+    write_json(out_dir.join("materialized-object-draft.json"), &draft)?;
+    write_json(out_dir.join("materialization-report.json"), &report)?;
+    write_json(out_dir.join("normalized-object-plan.json"), &plan)?;
+    if !draft.unresolved_nodes.is_empty() {
+        write_json(
+            out_dir.join("unresolved-nodes.json"),
+            &draft.unresolved_nodes,
+        )?;
+    }
+    if !draft.unresolved_attachments.is_empty() {
+        write_json(
+            out_dir.join("unresolved-attachments.json"),
+            &draft.unresolved_attachments,
+        )?;
+    }
+    fs::write(
+        out_dir.join("materialized-user-summary.md"),
+        materialized_user_summary_markdown(&summary, &report),
+    )
+    .with_context(|| {
+        format!(
+            "writing {}",
+            out_dir.join("materialized-user-summary.md").display()
+        )
+    })?;
+
+    Ok(ObjectPlanMaterializationOutcome {
+        plan_id: plan.plan_id,
+        status: draft.status,
     })
 }
 
@@ -554,6 +628,39 @@ fn user_summary_markdown(
     markdown
 }
 
+fn materialization_report(
+    plan: &ObjectPlan,
+    draft: &MaterializedObjectDraft,
+) -> ObjectPlanMaterializationReport {
+    ObjectPlanMaterializationReport {
+        status: draft.status,
+        primitive_count: plan.nodes.len(),
+        materialized_primitive_count: draft.primitive_instances.len(),
+        attachment_count: plan.attachments.len(),
+        materialized_attachment_count: draft.composition_document.attachments.len(),
+        unresolved_nodes: draft.unresolved_nodes.clone(),
+        unresolved_attachments: draft.unresolved_attachments.clone(),
+        user_review_required: true,
+        publish_allowed: false,
+    }
+}
+
+fn materialized_user_summary_markdown(
+    summary: &shape_foundry::MaterializedObjectSummary,
+    report: &ObjectPlanMaterializationReport,
+) -> String {
+    format!(
+        "# {}\n\nSupported primitives: {}\n\nUnresolved primitives: {}\n\nSupported attachments: {}\n\nUnresolved attachments: {}\n\nHuman review required: true\n\nPublish allowed: false\n\nNext action: {}\n\nStatus: {}\n",
+        summary.source_plan_label,
+        summary.supported_primitive_count,
+        summary.unresolved_primitive_count,
+        summary.supported_attachment_count,
+        summary.unresolved_attachment_count,
+        materialized_next_action_label(summary.next_action),
+        materialization_status_label(report.status)
+    )
+}
+
 #[derive(Debug, Deserialize)]
 struct ObjectPlanBatch {
     batch_id: String,
@@ -618,6 +725,25 @@ struct ObjectPlanRunOutcome {
     renderable: bool,
 }
 
+#[derive(Debug)]
+struct ObjectPlanMaterializationOutcome {
+    plan_id: String,
+    status: MaterializationStatus,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanMaterializationReport {
+    status: MaterializationStatus,
+    primitive_count: usize,
+    materialized_primitive_count: usize,
+    attachment_count: usize,
+    materialized_attachment_count: usize,
+    unresolved_nodes: Vec<shape_foundry::UnresolvedObjectPlanNode>,
+    unresolved_attachments: Vec<shape_foundry::UnresolvedObjectPlanAttachment>,
+    user_review_required: bool,
+    publish_allowed: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ObjectPlanBatchValidationReport {
     batch_id: String,
@@ -667,6 +793,23 @@ impl BatchReviewRecommendation {
 
 fn default_true() -> bool {
     true
+}
+
+fn materialization_status_label(status: MaterializationStatus) -> &'static str {
+    match status {
+        MaterializationStatus::Passed => "Passed",
+        MaterializationStatus::Partial => "Partial",
+        MaterializationStatus::Failed => "Failed",
+    }
+}
+
+fn materialized_next_action_label(action: MaterializedObjectNextAction) -> &'static str {
+    match action {
+        MaterializedObjectNextAction::Review => "Review",
+        MaterializedObjectNextAction::Simplify => "Simplify",
+        MaterializedObjectNextAction::Regenerate => "Regenerate",
+        MaterializedObjectNextAction::Blocked => "Blocked",
+    }
 }
 
 #[derive(Debug, Serialize)]

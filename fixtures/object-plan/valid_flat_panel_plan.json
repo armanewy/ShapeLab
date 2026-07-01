@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "plan_id": "flat_panel_plan",
+  "display_name": "Flat Panel Plan",
+  "intent_summary": "One editable flat panel primitive with bounded dimensions.",
+  "nodes": [
+    {
+      "node_id": "panel",
+      "primitive_kind": "FlatPanelPrimitive",
+      "display_name": "Panel",
+      "property_values": {
+        "width": { "kind": "Length", "value": 1.8 },
+        "height": { "kind": "Length", "value": 2.6 },
+        "thickness": { "kind": "Length", "value": 0.18 },
+        "edge_softness": { "kind": "Ratio", "value": 0.05 }
+      },
+      "role_hint": "Base panel",
+      "locked": false
+    }
+  ],
+  "attachments": [],
+  "validation_policy": {
+    "require_primitive_schema_validation": true,
+    "require_anchor_validation": true,
+    "allow_public_catalog_publish": false
+  },
+  "review_tier": "Draft",
+  "provenance": {
+    "created_by": "Human",
+    "source_prompt_hash": "integration_panel_seed",
+    "source_seed_refs": ["panel_seed"],
+    "created_at": "2026-07-01T00:00:00Z"
+  }
+}

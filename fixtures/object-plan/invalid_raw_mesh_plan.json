@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "plan_id": "raw_mesh_plan",
+  "display_name": "Raw Mesh Plan",
+  "intent_summary": "A draft that tries to include raw mesh payload.",
+  "nodes": [
+    {
+      "node_id": "box",
+      "primitive_kind": "BoxPrimitive",
+      "display_name": "Box",
+      "property_values": {
+        "width": { "kind": "Length", "value": 2.0 },
+        "depth": { "kind": "Length", "value": 1.4 },
+        "height": { "kind": "Length", "value": 1.0 },
+        "edge_softness": { "kind": "Ratio", "value": 0.08 }
+      },
+      "role_hint": "Simple box body",
+      "locked": false
+    }
+  ],
+  "attachments": [],
+  "validation_policy": {
+    "require_primitive_schema_validation": true,
+    "require_anchor_validation": true,
+    "allow_public_catalog_publish": false
+  },
+  "review_tier": "Draft",
+  "provenance": {
+    "created_by": "LlmDraft",
+    "source_prompt_hash": "raw_mesh_seed",
+    "source_seed_refs": ["raw_mesh_seed"],
+    "created_at": "2026-07-01T00:00:00Z"
+  },
+  "raw_mesh_payload": {
+    "vertices": [[0, 0, 0]]
+  }
+}
