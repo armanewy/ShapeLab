@@ -4,12 +4,14 @@ Date: 2026-07-01
 
 ## Verdict
 
-`OBJECT_PLAN_V0_OFFLINE_REVIEW_READY`
+`OBJECT_PLAN_MATERIALIZATION_V1_REVIEW_READY`
 
 Shape Lab has retired active variation UI for current primitives and is moving
-the active product surface toward direct primitive property editing. ObjectPlan
-v0 now exists as offline validation and review infrastructure for supported
-primitive and safe-anchor composition plans.
+the active product surface toward direct primitive property editing.
+ObjectPlan Materialization v1 now exists as offline validation and review
+infrastructure for supported primitive and safe-anchor composition plans.
+Supported ObjectPlans can now be materialized into Draft internal asset graphs
+and rendered into contact-sheet evidence for human review.
 
 ## Current Truth
 
@@ -33,13 +35,13 @@ primitive and safe-anchor composition plans.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
 - The active Make workflow exposes direct property controls before suggestions.
-- ObjectPlan v0 exists for offline validation and review of supported
-  primitive plans and safe-anchor composition plans.
-- ObjectPlan CLI runs produce validation reports, user summaries, normalized
-  plans, honest renderability reports, and batch review reports.
-- ObjectPlan v0 does not yet guarantee renderable asset materialization for
-  every supported plan. Render-blocked reports are acceptable and truthful, but
-  incomplete.
+- ObjectPlan Materialization v1 exists for offline validation, materialization,
+  render evidence, and batch review of supported primitive plans and
+  safe-anchor composition plans.
+- ObjectPlan CLI materializes supported primitive plans into Draft internal
+  asset graphs and produces contact-sheet evidence for supported render paths.
+- Unsupported or invalid ObjectPlans produce honest blocked reports and no fake
+  contact sheets.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
   validates every plan and LLM drafts remain Draft until reviewed.
 - ObjectPlan review UI is internal-only and dev-gated; it is not part of the
@@ -93,11 +95,13 @@ primitive and safe-anchor composition plans.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
 - ObjectPlan may be referenced as structured offline validation and review
   infrastructure for supported primitives and safe-anchor compositions.
-- ObjectPlan materialization and render evidence are the next required
-  milestones before ObjectPlan can be described as producing reusable prototype
-  geometry.
-- ObjectPlan batch review may be referenced as offline review infrastructure,
-  not Prototype Pack Mode and not automatic approval.
+- ObjectPlan can be described as producing reviewable Draft prototype geometry
+  for supported primitive plans only.
+- ObjectPlan render evidence can be described as contact-sheet evidence, not
+  approval.
+- ObjectPlan batch review may be referenced as offline review infrastructure
+  that classifies Keep / Regenerate / Simplify / Blocked, not Prototype Pack
+  Mode and not automatic approval.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
 

@@ -655,13 +655,12 @@ fn batch_recommendation(
     rendered: bool,
     render_report: &ObjectPlanRenderEvidenceReport,
 ) -> BatchReviewRecommendation {
-    if !outcome.validation_passed
-        || !render_report.unsupported_primitives.is_empty()
-        || !render_report.unsupported_attachments.is_empty()
-    {
+    if !outcome.validation_passed || !render_report.unsupported_primitives.is_empty() {
         return BatchReviewRecommendation::Blocked;
     }
-    if outcome.status != MaterializationStatus::Passed {
+    if outcome.status != MaterializationStatus::Passed
+        || !render_report.unsupported_attachments.is_empty()
+    {
         return BatchReviewRecommendation::Simplify;
     }
     if rendered {

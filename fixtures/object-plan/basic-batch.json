@@ -5,7 +5,8 @@
     "batch-basic/00-valid-box.json",
     "batch-basic/01-valid-sphere.json",
     "batch-basic/02-valid-panel-knob.json",
-    "batch-basic/03-invalid-unknown-primitive.json"
+    "batch-basic/03-invalid-unknown-primitive.json",
+    "batch-basic/04-valid-unsupported-attachment.json"
   ],
   "review_policy": {
     "human_review_required": true

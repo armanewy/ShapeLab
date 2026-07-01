@@ -87,10 +87,13 @@ validators, publish catalog entries, or create runtime modeling behavior. The
 active primitive workflow does not include runtime LLM integration.
 Material/surface work, UV/texturing, rigging, and animation remain blocked.
 
-ObjectPlan v0 validates structured offline plans and can run batches for human
-review. The internal review drawer is dev-gated and review-only. Broad family
-generation, automatic app-side drafting, public catalog publishing, and
-Prototype Pack Mode are not part of the active primitive product yet.
+ObjectPlan Materialization v1 validates structured offline plans, materializes
+supported primitive plans into Draft internal asset graphs, renders
+contact-sheet evidence for supported plans, and can run batches for human
+review. Unsupported plans remain blocked with explicit reports. Broad family
+generation, automatic app-side drafting, public catalog publishing, automatic
+approval, and Prototype Pack Mode are not part of the active primitive product
+yet.
 
 ## Milestone Rule
 

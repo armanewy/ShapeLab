@@ -26,15 +26,15 @@ Choose Primitive
   but future active primitive work favors direct property editing.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
-- ObjectPlan v0 exists for structured offline validation and review of
-  supported primitive and safe-anchor composition plans.
-- ObjectPlan v0 does not yet guarantee renderable asset materialization for
-  every supported plan; render-blocked reports are truthful incomplete output.
+- ObjectPlan Materialization v1 exists for structured offline validation,
+  materialization, render evidence, and batch review of supported primitive and
+  safe-anchor composition plans.
+- ObjectPlan outputs remain Draft and review-required. Unsupported plans
+  produce truthful blocked reports instead of fake contact sheets.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but every plan is
   validated by Object Orchard before review.
-- ObjectPlan batch review and the internal review drawer are available as
-  offline/internal review infrastructure; broad family generation is not
-  implemented.
+- ObjectPlan batch review is available as offline review infrastructure; broad
+  family generation is not implemented.
 - Future suggestions may return only as deterministic property presets, not
   opaque random candidate generation.
 - Family Studio Lite is paused until direct primitive and composition flows are
@@ -65,8 +65,8 @@ validators own the legal property domains and mesh generation remains native and
 offline.
 
 The current app does not run LLMs. Offline LLMs may only become useful through
-validated ObjectPlan JSON, honest render-blocked or visual evidence reports,
-and human review gates.
+validated ObjectPlan JSON, materialized Draft outputs, honest blocked or visual
+evidence reports, and human review gates.
 
 ## Build
 
@@ -103,6 +103,10 @@ python scripts/clean_targets.py --list --root ..
 - [`docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md`](docs/POST_PRIMITIVE_COMPOSITION_TRUTH_GATE.md)
 - [`docs/OBJECT_PLAN_DSL_CONTRACTS.md`](docs/OBJECT_PLAN_DSL_CONTRACTS.md)
 - [`docs/OBJECT_PLAN_BATCH_RUNNER_V0.md`](docs/OBJECT_PLAN_BATCH_RUNNER_V0.md)
+- [`docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md)
+- [`docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md`](docs/OBJECT_PLAN_MATERIALIZER_CLI_V1.md)
+- [`docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md`](docs/OBJECT_PLAN_RENDER_EVIDENCE_V1.md)
+- [`docs/OBJECT_PLAN_BATCH_REVIEW_V1.md`](docs/OBJECT_PLAN_BATCH_REVIEW_V1.md)
 - [`docs/PRIMITIVE_DIRECT_MAKE_VISION.md`](docs/PRIMITIVE_DIRECT_MAKE_VISION.md)
 - [`docs/ACTIVE_VARIATION_UI_RETIREMENT.md`](docs/ACTIVE_VARIATION_UI_RETIREMENT.md)
 - [`docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md`](docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md)
