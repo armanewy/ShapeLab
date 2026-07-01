@@ -73,6 +73,7 @@ use shape_search::{ExplorationMode, SearchRequest, TargetScope, generate_candida
 mod foundry_cli;
 mod foundry_foundation_cli;
 mod foundry_kit_cli;
+mod object_plan_cli;
 
 const DEFAULT_PRESET: &str = "box-primitive";
 const DEFAULT_SEED: u64 = 42;
@@ -128,6 +129,8 @@ enum Command {
     FoundryKit(foundry_kit_cli::FoundryKitArgs),
     /// Create, validate, materialize, and review internal Foundry foundation drafts.
     FoundryFoundation(foundry_foundation_cli::FoundryFoundationArgs),
+    /// Validate and inspect structured offline ObjectPlans.
+    ObjectPlan(object_plan_cli::ObjectPlanArgs),
     /// Print a machine-readable Wave 30 release readiness report.
     ReleaseReadiness(ReleaseReadinessArgs),
     /// Generate Box Primitive visual-readability evidence.
@@ -670,6 +673,7 @@ fn main() -> anyhow::Result<()> {
         Command::FoundryPackageProfile(args) => run_foundry_package_profile(args),
         Command::FoundryKit(args) => foundry_kit_cli::run_foundry_kit(args),
         Command::FoundryFoundation(args) => foundry_foundation_cli::run_foundry_foundation(args),
+        Command::ObjectPlan(args) => object_plan_cli::run_object_plan(args),
         Command::ReleaseReadiness(args) => run_release_readiness(args),
         Command::BoxPrimitiveVisualReadability(args) => run_box_primitive_visual_readability(args),
         Command::LidSeamFeatureModuleV0(args) => run_lid_seam_feature_module_v0(args),
