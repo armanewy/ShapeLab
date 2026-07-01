@@ -61,6 +61,7 @@ pub(crate) struct FoundryDesktopApp {
     jobs: FoundryJobCoordinator,
     home_thumbnails: HomeThumbnailCoordinator,
     texture_cache: FoundryTextureCache,
+    current_preview_orbit: CurrentPreviewOrbitState,
     home_profiles: Vec<ProductHomeProfile>,
     home_search_query: String,
     home_filter: HomeTemplateFilter,
@@ -614,6 +615,7 @@ impl Default for FoundryDesktopApp {
             jobs: FoundryJobCoordinator::default(),
             home_thumbnails: HomeThumbnailCoordinator::default(),
             texture_cache: FoundryTextureCache::default(),
+            current_preview_orbit: CurrentPreviewOrbitState::default(),
             home_profiles,
             home_search_query: String::new(),
             home_filter: HomeTemplateFilter::All,
@@ -3598,10 +3600,11 @@ impl FoundryDesktopApp {
                     ui.id().with("current_preview_orbit_drag"),
                     egui::Sense::drag(),
                 );
-                if !rendering_preview
-                    && drag_response.dragged_by(current_preview_orbit_button())
-                    && let Some(camera) =
-                        current_preview_orbit_camera(preview, drag_response.drag_motion())
+                if let Some(camera) = self
+                    .current_preview_orbit
+                    .camera_for_response(preview, &drag_response)
+                    && !rendering_preview
+                    && preview.camera != camera
                 {
                     commands.push(FoundryAppCommand::RequestPreview {
                         width: preview.width,
@@ -4475,11 +4478,18 @@ fn current_preview_orbit_camera(
     preview: &FoundryPreviewImage,
     delta: egui::Vec2,
 ) -> Option<OrbitCamera> {
+    current_preview_orbit_camera_from_base(&preview.camera, delta)
+}
+
+fn current_preview_orbit_camera_from_base(
+    base_camera: &OrbitCamera,
+    delta: egui::Vec2,
+) -> Option<OrbitCamera> {
     if delta.length_sq() <= 0.01 {
         return None;
     }
 
-    let mut camera = preview.camera.clone();
+    let mut camera = base_camera.clone();
     camera.target = Default::default();
     camera.orbit(
         delta.x * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT,
@@ -8797,6 +8807,42 @@ struct FoundryPreviewDraw<'a> {
     max_edge: f32,
 }
 
+#[derive(Default)]
+struct CurrentPreviewOrbitState {
+    drag_start_camera: Option<OrbitCamera>,
+}
+
+impl CurrentPreviewOrbitState {
+    fn camera_for_response(
+        &mut self,
+        preview: &FoundryPreviewImage,
+        response: &egui::Response,
+    ) -> Option<OrbitCamera> {
+        self.camera_for_drag_delta(
+            preview,
+            response.dragged_by(current_preview_orbit_button()),
+            response.drag_delta(),
+        )
+    }
+
+    fn camera_for_drag_delta(
+        &mut self,
+        preview: &FoundryPreviewImage,
+        dragging_secondary: bool,
+        drag_delta: egui::Vec2,
+    ) -> Option<OrbitCamera> {
+        if !dragging_secondary {
+            self.drag_start_camera = None;
+            return None;
+        }
+
+        let drag_start_camera = self
+            .drag_start_camera
+            .get_or_insert_with(|| preview.camera.clone());
+        current_preview_orbit_camera_from_base(drag_start_camera, drag_delta)
+    }
+}
+
 fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, _asset_name: &str) {
     let edge = max_edge.clamp(180.0, 360.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(edge, edge), egui::Sense::hover());
@@ -9387,6 +9433,35 @@ mod tests {
         assert_eq!(rotated.target, OrbitCamera::default().target);
         assert_eq!(rotated.distance, preview.camera.distance);
         assert!(current_preview_orbit_camera(&preview, egui::Vec2::ZERO).is_none());
+    }
+
+    #[test]
+    fn current_preview_orbit_drag_accumulates_vertical_motion_from_drag_start() {
+        let mut preview = test_preview_image("current");
+        preview.camera.distance = 7.5;
+        preview.camera.pitch_degrees = 20.0;
+        let mut orbit = CurrentPreviewOrbitState::default();
+
+        let first = orbit
+            .camera_for_drag_delta(&preview, true, egui::vec2(0.0, 6.0))
+            .expect("vertical drag should orbit the preview camera");
+        let mut updated_preview = preview.clone();
+        updated_preview.camera = first;
+        let second = orbit
+            .camera_for_drag_delta(&updated_preview, true, egui::vec2(0.0, 18.0))
+            .expect("continued vertical drag should keep orbiting from drag start");
+
+        let expected_pitch =
+            preview.camera.pitch_degrees - 18.0 * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT;
+        assert!((second.pitch_degrees - expected_pitch).abs() < 1.0e-5);
+        assert_eq!(second.yaw_degrees, preview.camera.yaw_degrees);
+        assert_eq!(second.target, OrbitCamera::default().target);
+        assert_eq!(second.distance, preview.camera.distance);
+        assert!(
+            orbit
+                .camera_for_drag_delta(&updated_preview, false, egui::Vec2::ZERO)
+                .is_none()
+        );
     }
 
     #[test]
