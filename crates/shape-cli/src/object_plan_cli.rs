@@ -36,6 +36,18 @@ pub enum ObjectPlanCommand {
         #[arg(long)]
         out_dir: PathBuf,
     },
+    /// Validate an ObjectPlan and optionally request contact-sheet evidence.
+    Run {
+        /// ObjectPlan JSON file.
+        #[arg(long)]
+        plan: PathBuf,
+        /// Output directory.
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Request contact-sheet evidence when renderable bindings exist.
+        #[arg(long)]
+        contact_sheet: bool,
+    },
 }
 
 /// Run an ObjectPlan CLI command.
@@ -43,6 +55,11 @@ pub fn run_object_plan(args: ObjectPlanArgs) -> anyhow::Result<()> {
     match args.command {
         ObjectPlanCommand::Validate { plan } => run_validate(&plan),
         ObjectPlanCommand::Render { plan, out_dir } => run_render(&plan, &out_dir),
+        ObjectPlanCommand::Run {
+            plan,
+            out_dir,
+            contact_sheet,
+        } => run_prepare(&plan, &out_dir, contact_sheet),
     }
 }
 
@@ -61,20 +78,44 @@ fn run_validate(plan_path: &Path) -> anyhow::Result<()> {
 }
 
 fn run_render(plan_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
+    run_prepare(plan_path, out_dir, false)
+}
+
+fn run_prepare(
+    plan_path: &Path,
+    out_dir: &Path,
+    contact_sheet_requested: bool,
+) -> anyhow::Result<()> {
     let plan = read_object_plan(plan_path)?;
     let report = validate_object_plan(&plan);
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
     let user_summary = object_plan_user_summary(&plan);
     let primitive_summary = primitive_summary(&plan, &report);
-    let rendering_report = ObjectPlanRenderingReport::blocked(
-        &plan.plan_id,
+    let renderability_report = object_plan_renderability_report(&plan, &report);
+    let visual_evidence_report = ObjectPlanVisualEvidenceReport::from_renderability(
+        &renderability_report,
+        contact_sheet_requested,
+    );
+    let rendering_report = ObjectPlanRenderingReport::from_reports(
+        &renderability_report,
+        &visual_evidence_report,
         report.is_valid(),
-        "ObjectPlan rendering is blocked until plan materialization is implemented.",
     );
 
     write_json(out_dir.join("validation-report.json"), &report)?;
     write_json(out_dir.join("primitive-summary.json"), &primitive_summary)?;
+    write_json(out_dir.join("normalized-object-plan.json"), &plan)?;
+    write_json(
+        out_dir.join("renderability-report.json"),
+        &renderability_report,
+    )?;
+    if contact_sheet_requested {
+        write_json(
+            out_dir.join("visual-evidence-report.json"),
+            &visual_evidence_report,
+        )?;
+    }
     write_json(out_dir.join("rendering-report.json"), &rendering_report)?;
     fs::write(
         out_dir.join("plan-user-summary.md"),
@@ -94,6 +135,47 @@ fn run_render(plan_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
             "ObjectPlan validation failed with {} issue(s)",
             report.issues.len()
         )
+    }
+}
+
+fn object_plan_renderability_report(
+    plan: &ObjectPlan,
+    validation_report: &ObjectPlanValidationReport,
+) -> ObjectPlanRenderabilityReport {
+    let unsupported_primitives = plan
+        .nodes
+        .iter()
+        .filter(|node| matches!(node.primitive_kind, PrimitiveKind::CylinderPrimitive))
+        .map(|node| format!("{}: unsupported primitive kind", node.node_id))
+        .collect::<Vec<_>>();
+    if !validation_report.is_valid() {
+        return ObjectPlanRenderabilityReport {
+            plan_id: plan.plan_id.clone(),
+            renderable: false,
+            unsupported_primitives,
+            unsupported_attachments: Vec::new(),
+            missing_preview_bindings: Vec::new(),
+            reason: "Validation failed before rendering.".to_owned(),
+        };
+    }
+
+    ObjectPlanRenderabilityReport {
+        plan_id: plan.plan_id.clone(),
+        renderable: false,
+        unsupported_primitives,
+        unsupported_attachments: Vec::new(),
+        missing_preview_bindings: plan
+            .nodes
+            .iter()
+            .map(|node| {
+                format!(
+                    "{}: ObjectPlan preview materialization is not wired yet.",
+                    node.node_id
+                )
+            })
+            .collect(),
+        reason: "ObjectPlan rendering is blocked until plan materialization is implemented."
+            .to_owned(),
     }
 }
 
@@ -211,6 +293,49 @@ struct ObjectPlanAttachmentSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct ObjectPlanRenderabilityReport {
+    plan_id: String,
+    renderable: bool,
+    unsupported_primitives: Vec<String>,
+    unsupported_attachments: Vec<String>,
+    missing_preview_bindings: Vec<String>,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ObjectPlanVisualEvidenceReport {
+    plan_id: String,
+    rendered: bool,
+    preview_count: usize,
+    contact_sheet_path: Option<String>,
+    warnings: Vec<String>,
+    user_review_required: bool,
+    approved: bool,
+}
+
+impl ObjectPlanVisualEvidenceReport {
+    fn from_renderability(
+        renderability_report: &ObjectPlanRenderabilityReport,
+        contact_sheet_requested: bool,
+    ) -> Self {
+        let warnings = if contact_sheet_requested && !renderability_report.renderable {
+            vec![renderability_report.reason.clone()]
+        } else {
+            Vec::new()
+        };
+        Self {
+            plan_id: renderability_report.plan_id.clone(),
+            rendered: false,
+            preview_count: 0,
+            contact_sheet_path: None,
+            warnings,
+            user_review_required: true,
+            approved: false,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct ObjectPlanRenderingReport {
     plan_id: String,
     status: String,
@@ -220,13 +345,21 @@ struct ObjectPlanRenderingReport {
 }
 
 impl ObjectPlanRenderingReport {
-    fn blocked(plan_id: &str, validation_passed: bool, reason: &str) -> Self {
+    fn from_reports(
+        renderability_report: &ObjectPlanRenderabilityReport,
+        visual_evidence_report: &ObjectPlanVisualEvidenceReport,
+        validation_passed: bool,
+    ) -> Self {
         Self {
-            plan_id: plan_id.to_owned(),
-            status: "blocked".to_owned(),
+            plan_id: renderability_report.plan_id.clone(),
+            status: if visual_evidence_report.rendered {
+                "rendered".to_owned()
+            } else {
+                "blocked".to_owned()
+            },
             validation_passed,
-            contact_sheet_written: false,
-            reason: reason.to_owned(),
+            contact_sheet_written: visual_evidence_report.rendered,
+            reason: renderability_report.reason.clone(),
         }
     }
 }

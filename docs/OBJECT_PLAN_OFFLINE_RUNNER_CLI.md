@@ -16,21 +16,26 @@ when the plan is invalid.
 Prepare deterministic runner artifacts:
 
 ```bash
-shape-cli object-plan render \
+shape-cli object-plan run \
   --plan object-plan.json \
   --out-dir target/object-plan-runs/example-plan
 ```
 
-The render command writes:
+The run command writes:
 
 - `validation-report.json`
 - `primitive-summary.json`
+- `normalized-object-plan.json`
+- `renderability-report.json`
 - `rendering-report.json`
 - `plan-user-summary.md`
 
-`contact-sheet.png` is written only after ObjectPlan materialization to renderable
-geometry exists. Until then, `rendering-report.json` records a blocked rendering
-status with a clear reason.
+Contact-sheet evidence can be requested with `--contact-sheet`. Until
+ObjectPlan materialization to renderable geometry exists, the command writes
+an honest blocked report and does not create `contact-sheet.png`.
+
+The legacy `shape-cli object-plan render --plan ... --out-dir ...` command is
+kept as a compatibility alias for the same validation and preparation flow.
 
 The runner uses the ObjectPlan validator, so it rejects unsupported primitives,
 unknown properties, out-of-domain property values, invalid attachments, raw mesh

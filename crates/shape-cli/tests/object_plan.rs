@@ -131,6 +131,101 @@ fn object_plan_cli_render_outputs_are_deterministic() {
 }
 
 #[test]
+fn object_plan_cli_run_contact_sheet_reports_missing_render_binding() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("panel-plan.json");
+    let out_dir = temp_dir.path().join("run-contact-sheet");
+    write_plan(&plan_path, &panel_with_sphere_plan());
+
+    let output = Command::new(exe)
+        .args(["object-plan", "run", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg("--contact-sheet")
+        .output()
+        .expect("run object-plan contact sheet");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    for name in [
+        "validation-report.json",
+        "primitive-summary.json",
+        "normalized-object-plan.json",
+        "renderability-report.json",
+        "rendering-report.json",
+        "visual-evidence-report.json",
+        "plan-user-summary.md",
+    ] {
+        assert!(out_dir.join(name).is_file(), "{name} should exist");
+    }
+    assert!(
+        !out_dir.join("contact-sheet.png").exists(),
+        "contact sheet must not be faked without render bindings"
+    );
+
+    let renderability: serde_json::Value = serde_json::from_slice(
+        &fs::read(out_dir.join("renderability-report.json")).expect("read renderability report"),
+    )
+    .expect("parse renderability report");
+    assert_eq!(renderability["renderable"], false);
+    assert!(
+        renderability["missing_preview_bindings"]
+            .as_array()
+            .expect("missing bindings array")
+            .len()
+            >= 2
+    );
+    assert!(
+        renderability["reason"]
+            .as_str()
+            .expect("reason string")
+            .contains("materialization")
+    );
+
+    let evidence: serde_json::Value = serde_json::from_slice(
+        &fs::read(out_dir.join("visual-evidence-report.json"))
+            .expect("read visual evidence report"),
+    )
+    .expect("parse visual evidence report");
+    assert_eq!(evidence["rendered"], false);
+    assert_eq!(evidence["preview_count"], 0);
+    assert_eq!(evidence["contact_sheet_path"], serde_json::Value::Null);
+    assert_eq!(evidence["user_review_required"], true);
+    assert_eq!(evidence["approved"], false);
+}
+
+#[test]
+fn object_plan_cli_invalid_run_does_not_fake_contact_sheet() {
+    let exe = env!("CARGO_BIN_EXE_shape-cli");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let plan_path = temp_dir.path().join("invalid-plan.json");
+    let out_dir = temp_dir.path().join("invalid-run");
+    let mut plan = one_sphere_plan();
+    plan.nodes[0]
+        .property_values
+        .insert("width".to_owned(), PrimitivePropertyValue::Length(99.0));
+    write_plan(&plan_path, &plan);
+
+    let output = Command::new(exe)
+        .args(["object-plan", "run", "--plan"])
+        .arg(&plan_path)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg("--contact-sheet")
+        .output()
+        .expect("run invalid object-plan contact sheet");
+
+    assert!(!output.status.success());
+    assert!(out_dir.join("validation-report.json").is_file());
+    assert!(out_dir.join("renderability-report.json").is_file());
+    assert!(
+        !out_dir.join("contact-sheet.png").exists(),
+        "invalid plans must not emit contact sheets"
+    );
+}
+
+#[test]
 fn object_plan_cli_has_no_llm_runtime_dependency() {
     let manifest = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
     let forbidden = ["openai", "reqwest", "ureq", "llm", "async-openai"];
