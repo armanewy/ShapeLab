@@ -245,9 +245,11 @@ impl FoundryAppState {
             }
             FoundryAppCommand::RequestBuild => self.request_build(),
             FoundryAppCommand::RetryPreparation => self.retry_preparation(),
-            FoundryAppCommand::RequestPreview { width, height } => {
-                self.request_preview(width, height)
-            }
+            FoundryAppCommand::RequestPreview {
+                width,
+                height,
+                camera,
+            } => self.request_preview(width, height, camera),
             FoundryAppCommand::Save => self.save(),
             FoundryAppCommand::SaveAs(path) => self.save_as(path),
             FoundryAppCommand::Load(path) => Ok(vec![FoundryAppEffect::LoadProject(path)]),
@@ -492,7 +494,9 @@ impl FoundryAppState {
         &mut self,
         width: u32,
         height: u32,
+        camera: Option<shape_render::OrbitCamera>,
     ) -> Result<Vec<FoundryAppEffect>, FoundryAppStateError> {
+        let camera = camera.map(|camera| camera.clamped());
         let output = self
             .current_output
             .as_ref()
@@ -504,7 +508,13 @@ impl FoundryAppState {
             .find(|request| request.slot() == FoundryJobSlot::RenderPreview)
             .cloned()
         {
-            if equivalent_preview_request(&active_request, &output.build_stamp, width, height) {
+            if equivalent_preview_request(
+                &active_request,
+                &output.build_stamp,
+                width,
+                height,
+                camera.as_ref(),
+            ) {
                 self.record_job_reused(&active_request, "Equivalent preview job already active.");
             } else {
                 self.record_user_action_blocked(
@@ -518,6 +528,9 @@ impl FoundryAppState {
             preview.width == width
                 && preview.height == height
                 && preview.build == self.current_build
+                && camera
+                    .as_ref()
+                    .is_none_or(|requested| preview.camera == *requested)
         }) {
             return Ok(Vec::new());
         }
@@ -528,6 +541,7 @@ impl FoundryAppState {
             output,
             width,
             height,
+            camera,
         }))
     }
 
@@ -1710,14 +1724,21 @@ fn equivalent_preview_request(
     build: &FoundryBuildStamp,
     width: u32,
     height: u32,
+    camera: Option<&shape_render::OrbitCamera>,
 ) -> bool {
     match active_request {
         FoundryJobRequest::RenderPreview {
             output,
             width: active_width,
             height: active_height,
+            camera: active_camera,
             ..
-        } => output.build_stamp == *build && *active_width == width && *active_height == height,
+        } => {
+            output.build_stamp == *build
+                && *active_width == width
+                && *active_height == height
+                && active_camera.as_ref() == camera
+        }
         _ => false,
     }
 }

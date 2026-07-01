@@ -13,18 +13,22 @@ the active product surface toward direct primitive property editing.
 
 - Box Primitive is the direct box primitive baseline.
 - Flat Panel Primitive is the direct panel primitive baseline.
+- Sphere Primitive is the direct round primitive baseline.
 - Box Primitive exposes bounded Width, Depth, Height, and Edge Softness
   controls in Make.
 - Flat Panel Primitive exposes bounded Width, Height, Thickness, and Edge
   Softness controls in Make.
+- Sphere Primitive exposes bounded Width, Height, Depth, Front Flatten, and
+  Back Flatten controls in Make.
 - Lidded Box and Hinged Panel are feature proofs, not the future shape of the
   active primitive workflow.
 - Handled Panel evidence is treated as paused historical proof, not the current
   active direction.
 - Generated idea workflows are retired from active primitive UI.
 - Candidate generation is inactive in the current primitive product flow.
-- The active Make workflow should expose direct property controls before it
-  offers presets or suggestions.
+- The active Make workflow exposes direct property controls before suggestions.
+- Deterministic presets are allowed only when they are named sets of legal
+  property values. Sphere Primitive includes a Knob-like form preset.
 - Primitive editing is property-schema based and bounded.
 - Direct property controls show visible domains, use bounded numeric steppers,
   and support reset to authored defaults.
@@ -50,6 +54,7 @@ the active product surface toward direct primitive property editing.
 
 - Shape Lab can start from a Box Primitive profile.
 - Shape Lab can start from a Flat Panel Primitive profile.
+- Shape Lab can start from a Sphere Primitive profile.
 - Shape Lab can compile clay primitive previews and exports.
 - Shape Lab can expose bounded primitive properties through direct controls.
 - Lidded Box may be referenced as Box Primitive plus one visible Lid Seam proof.
@@ -62,6 +67,10 @@ the active product surface toward direct primitive property editing.
   Pack, and Export rather than Try ideas or selected-candidate comparison.
 - Current Box and Flat Panel Make screens allow direct dimension edits through
   bounded controls with visible domains.
+- Current Sphere Make screens allow direct dimension and flattening edits
+  through bounded controls with visible domains.
+- The Knob-like form preset may be referenced only as a Sphere Primitive
+  property preset, not as a door or composition claim.
 - View controls are inspection-only: orbit, reset view, and axis orientation.
 
 ## Current Milestone Sequence

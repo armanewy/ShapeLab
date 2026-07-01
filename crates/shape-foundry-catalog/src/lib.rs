@@ -40,6 +40,7 @@ pub mod authoring;
 pub mod box_primitive;
 pub mod flat_panel;
 pub mod kits;
+pub mod sphere_primitive;
 
 pub use authoring::*;
 pub use kits::*;
@@ -320,6 +321,7 @@ pub fn built_in_fixture_catalogs_with_labels() -> Vec<(&'static str, FoundryFixt
         ("Box Primitive", box_primitive::fixture_catalog()),
         ("Lidded Box", box_primitive::lidded_box_fixture_catalog()),
         ("Flat Panel Primitive", flat_panel::fixture_catalog()),
+        ("Sphere Primitive", sphere_primitive::fixture_catalog()),
         ("Hinged Panel", flat_panel::hinged_panel_fixture_catalog()),
         ("Handled Panel", flat_panel::handled_panel_fixture_catalog()),
     ]
@@ -332,6 +334,7 @@ pub fn built_in_catalog_curation_metadata() -> Vec<CatalogCurationMetadata> {
         box_primitive::curation_metadata(),
         box_primitive::lidded_box_curation_metadata(),
         flat_panel::curation_metadata(),
+        sphere_primitive::curation_metadata(),
         flat_panel::hinged_panel_curation_metadata(),
         flat_panel::handled_panel_curation_metadata(),
     ]
@@ -861,6 +864,25 @@ fn rounded_box_fragment(
     )
 }
 
+fn lathe_fragment(
+    id: &str,
+    role: &str,
+    profile: Vec<[f32; 2]>,
+    segments: u32,
+    translation: [f32; 3],
+    operations: Vec<ModelingOperationSpec>,
+    scalar_paths: &[(&str, f32, f32, f32)],
+) -> RecipeFragment {
+    fragment(
+        id,
+        role,
+        GeometrySource::Lathe { profile, segments },
+        translation,
+        operations,
+        scalar_paths,
+    )
+}
+
 fn fragment(
     id: &str,
     role: &str,
@@ -917,7 +939,7 @@ fn fragment(
             shape_asset::ParameterId(parameter_id),
             scalar_parameter(
                 parameter_id,
-                definition_scalar_path(LOCAL_DEFINITION, path),
+                local_scalar_path(path),
                 format!("{id} {path}"),
                 *minimum,
                 *maximum,
@@ -964,6 +986,14 @@ fn fragment(
             surface_ports: Vec::new(),
         },
         recipe,
+    }
+}
+
+fn local_scalar_path(path: &str) -> String {
+    if path.starts_with("definition.") || path.starts_with("instance.") {
+        path.to_owned()
+    } else {
+        definition_scalar_path(LOCAL_DEFINITION, path)
     }
 }
 

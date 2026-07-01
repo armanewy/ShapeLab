@@ -41,12 +41,14 @@ transforms, or arbitrary topology.
 
 ## Direct Property UI
 
-Box Primitive and Flat Panel Primitive are the active direct-edit baselines.
+Box Primitive, Flat Panel Primitive, and Sphere Primitive are the active
+direct-edit baselines.
 Their Make panels expose bounded numeric property controls with visible domains
 and reset actions:
 
 - Box Primitive: Width, Depth, Height, Edge Softness
 - Flat Panel Primitive: Width, Height, Thickness, Edge Softness
+- Sphere Primitive: Width, Height, Depth, Front Flatten, Back Flatten
 
 Invalid values cannot become current primitive state. During direct edits, the
 previous valid preview remains visible while the exact updated build compiles,
@@ -60,7 +62,9 @@ or object-level free transform handles.
 
 Future suggestions may return only as deterministic property presets. A preset
 is a named set of legal property values that validators can inspect and reject.
-It is not random candidate generation and it is not a hidden mesh rewrite.
+Sphere Primitive's Knob-like form is the first visible preset and remains a
+property preset only. It is not random candidate generation and it is not a
+hidden mesh rewrite.
 
 ## Composition
 

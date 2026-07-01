@@ -168,7 +168,7 @@ fn starting_box_primitive_records_template_build_and_preview_trace() {
     assert!(state.handle_job_event(build_event));
     let preview_request = start_job(
         state
-            .request_preview(512, 512)
+            .request_preview(512, 512, None)
             .expect("preview should schedule"),
     );
 
@@ -192,11 +192,11 @@ fn equivalent_preview_job_is_reused_without_queueing_second_job() {
     let mut state = compiled_fixture_state(&fixture);
 
     let first = state
-        .request_preview(512, 512)
+        .request_preview(512, 512, None)
         .expect("first preview should schedule");
     assert!(start_job_optional(first).is_some());
     let second = state
-        .request_preview(512, 512)
+        .request_preview(512, 512, None)
         .expect("second equivalent preview should be reused");
 
     assert!(second.is_empty());
@@ -351,7 +351,7 @@ fn make_job_trace_dogfood_hook_writes_trace_files() {
     state.set_make_trace_elapsed_ms(120);
     let preview_request = start_job(
         state
-            .request_preview(512, 512)
+            .request_preview(512, 512, None)
             .expect("preview should schedule"),
     );
     let preview_event = run_fixture_job(preview_request, &fixture);

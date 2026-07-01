@@ -16,6 +16,10 @@ required=(
   "box_property_edit.png"
   "flat_panel_direct_make_ready.png"
   "flat_panel_property_edit.png"
+  "sphere_direct_make_ready.png"
+  "sphere_property_edit.png"
+  "sphere_knob_like_preset.png"
+  "sphere_export_drawer.png"
   "pack_drawer.png"
   "export_drawer.png"
 )
@@ -74,6 +78,10 @@ pairs=(
   "box_property_edit.png box_direct_make_ready.png"
   "flat_panel_direct_make_ready.png box_direct_make_ready.png"
   "flat_panel_property_edit.png flat_panel_direct_make_ready.png"
+  "sphere_direct_make_ready.png flat_panel_direct_make_ready.png"
+  "sphere_property_edit.png sphere_direct_make_ready.png"
+  "sphere_knob_like_preset.png sphere_property_edit.png"
+  "sphere_export_drawer.png sphere_knob_like_preset.png"
   "pack_drawer.png box_property_edit.png"
   "export_drawer.png pack_drawer.png"
 )

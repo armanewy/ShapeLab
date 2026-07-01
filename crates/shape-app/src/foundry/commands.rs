@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use shape_foundry::{ControlValue, FoundryCandidateId, FoundryCommand, FoundryEdit};
 use shape_project::foundry::FoundryProject;
+use shape_render::OrbitCamera;
 use shape_search::foundry::FoundryCandidateRequest;
 
 use super::jobs::FoundryJobRequest;
@@ -53,6 +54,8 @@ pub(crate) enum FoundryAppCommand {
         width: u32,
         /// Requested image height.
         height: u32,
+        /// Optional explicit orbit camera for user-controlled viewport renders.
+        camera: Option<OrbitCamera>,
     },
     /// Persist the current project to its existing path.
     Save,

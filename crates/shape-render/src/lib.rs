@@ -30,16 +30,16 @@ const MAX_PIXELS: u64 = 16_777_216;
 const MIN_AREA: f32 = 1.0e-5;
 const MIN_NORMAL_LENGTH_SQUARED: f32 = 1.0e-12;
 const EDGE_EPSILON: f32 = 1.0e-4;
-const WIRE_DISTANCE_PIXELS: f32 = 0.85;
+const WIRE_DISTANCE_PIXELS: f32 = 1.65;
 const FRAME_PADDING: f32 = 1.18;
 const EDGE_OUTLINE_NORMAL_DOT_THRESHOLD: f32 = 0.88;
 const EDGE_OUTLINE_DEPTH_THRESHOLD: f32 = 0.028;
-const EDGE_OUTLINE_MIX_AMOUNT: f32 = 0.58;
+const EDGE_OUTLINE_MIX_AMOUNT: f32 = 0.72;
 const CACHE_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
 const CACHE_HASH_PRIME: u64 = 1_099_511_628_211;
 const MATERIAL_COLOR: Vec3 = Vec3::new(196.0, 202.0, 193.0);
-const WIREFRAME_MIX: Vec3 = Vec3::new(34.0, 36.0, 38.0);
-const EDGE_OUTLINE_MIX: Vec3 = Vec3::new(42.0, 45.0, 44.0);
+const WIREFRAME_MIX: Vec3 = Vec3::new(70.0, 74.0, 76.0);
+const EDGE_OUTLINE_MIX: Vec3 = Vec3::new(58.0, 64.0, 64.0);
 
 /// Number of fixed views used by mesh visual descriptors.
 pub const VISUAL_DESCRIPTOR_CAMERA_COUNT: usize = 4;
@@ -1294,7 +1294,7 @@ fn shade(normal: Vec3, ambient: f32, light_direction: Vec3, wireframe: bool) -> 
     let intensity = (ambient + (1.0 - ambient) * lambert).clamp(0.0, 1.0);
     let mut color = MATERIAL_COLOR * intensity;
     if wireframe {
-        color = color * 0.45 + WIREFRAME_MIX * 0.55;
+        color = color * 0.25 + WIREFRAME_MIX * 0.75;
     }
     [
         color_channel(color.x),

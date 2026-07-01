@@ -94,6 +94,10 @@ enum ScreenshotScenario {
     BoxPropertyEdit,
     FlatPanelDirectMakeReady,
     FlatPanelPropertyEdit,
+    SphereDirectMakeReady,
+    SpherePropertyEdit,
+    SphereKnobLikePreset,
+    SphereExportDrawer,
     PackDrawer,
     ExportDrawer,
 }
@@ -315,6 +319,7 @@ enum MakeProfileKind {
     BoxPrimitive,
     LiddedBox,
     FlatPanelPrimitive,
+    SpherePrimitive,
     HingedPanel,
     HandledPanel,
     Other,
@@ -327,6 +332,7 @@ impl MakeProfileKind {
             Self::BoxPrimitive
                 | Self::LiddedBox
                 | Self::FlatPanelPrimitive
+                | Self::SpherePrimitive
                 | Self::HingedPanel
                 | Self::HandledPanel
         )
@@ -338,6 +344,7 @@ impl MakeProfileKind {
             Self::BoxPrimitive
                 | Self::LiddedBox
                 | Self::FlatPanelPrimitive
+                | Self::SpherePrimitive
                 | Self::HingedPanel
                 | Self::HandledPanel
         )
@@ -349,6 +356,10 @@ impl MakeProfileKind {
 
     const fn is_flat_panel_primitive(self) -> bool {
         matches!(self, Self::FlatPanelPrimitive)
+    }
+
+    const fn is_sphere_primitive(self) -> bool {
+        matches!(self, Self::SpherePrimitive)
     }
 
     const fn is_hinged_panel(self) -> bool {
@@ -396,10 +407,12 @@ const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
+const CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT: f32 = 0.35;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
 const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
+const SPHERE_PRIMITIVE_PROFILE_ID: &str = "sphere-primitive";
 const HINGED_PANEL_PROFILE_ID: &str = "hinged-panel";
 const HANDLED_PANEL_PROFILE_ID: &str = "handled-panel";
 const SURFACE_CANDIDATE_REPORT_RELATIVE_PATH: &str = "target/surface-candidate-evidence-v0/box-primitive/surface/variants/surface-candidate-report.json";
@@ -423,6 +436,8 @@ const LIDDED_BOX_EXPORT_TITLE: &str = "Export Lidded Box";
 const LIDDED_BOX_EXPORT_DETAIL: &str = "Exports the current clay lidded box asset.";
 const FLAT_PANEL_EXPORT_TITLE: &str = "Export Flat Panel";
 const FLAT_PANEL_EXPORT_DETAIL: &str = "Exports the current clay flat panel asset.";
+const SPHERE_PRIMITIVE_EXPORT_TITLE: &str = "Export Sphere Primitive";
+const SPHERE_PRIMITIVE_EXPORT_DETAIL: &str = "Exports the current clay sphere primitive asset.";
 const HINGED_PANEL_EXPORT_TITLE: &str = "Export Hinged Panel";
 const HINGED_PANEL_EXPORT_DETAIL: &str = "Exports the current clay hinged panel asset.";
 const HANDLED_PANEL_EXPORT_TITLE: &str = "Export Handled Panel";
@@ -499,13 +514,15 @@ const ACTION_ADJUST_HANDLE_KNOB: &str = "Adjust handle";
 const ACTION_ADJUST_DIMENSIONS: &str = "Adjust dimensions";
 const ACTION_EDIT_BOX_PRIMITIVE: &str = "Edit Box Primitive";
 const ACTION_EDIT_FLAT_PANEL: &str = "Edit Flat Panel";
+const ACTION_EDIT_SPHERE_PRIMITIVE: &str = "Edit Sphere Primitive";
+const ACTION_KNOB_LIKE_FORM: &str = "Knob-like form";
 const ACTION_EDIT_LIDDED_BOX: &str = "Edit Lidded Box";
 const ACTION_EDIT_HINGED_PANEL: &str = "Edit Hinged Panel";
 const ACTION_EDIT_HANDLED_PANEL: &str = "Edit Handled Panel";
 const VIEW_ORBIT_LABEL: &str = "Orbit view";
 const VIEW_RESET_LABEL: &str = "Reset view";
 const VIEW_AXIS_LABEL: &str = "Axis view";
-const RENDERED_ACTION_LABELS: [&str; 43] = [
+const RENDERED_ACTION_LABELS: [&str; 45] = [
     ACTION_EXPORT,
     ACTION_SAVE,
     ACTION_UNDO,
@@ -543,6 +560,8 @@ const RENDERED_ACTION_LABELS: [&str; 43] = [
     ACTION_ADJUST_DIMENSIONS,
     ACTION_EDIT_BOX_PRIMITIVE,
     ACTION_EDIT_FLAT_PANEL,
+    ACTION_EDIT_SPHERE_PRIMITIVE,
+    ACTION_KNOB_LIKE_FORM,
     ACTION_EDIT_LIDDED_BOX,
     ACTION_EDIT_HINGED_PANEL,
     ACTION_EDIT_HANDLED_PANEL,
@@ -942,6 +961,7 @@ impl FoundryDesktopApp {
             MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
             MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
             MakeProfileKind::FlatPanelPrimitive => ACTION_TRY_PANEL_IDEAS,
+            MakeProfileKind::SpherePrimitive => ACTION_TRY_WHOLE_ASSET_IDEAS,
             MakeProfileKind::HingedPanel => ACTION_TRY_HINGED_PANEL_IDEAS,
             MakeProfileKind::HandledPanel => ACTION_TRY_HANDLED_PANEL_IDEAS,
             MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
@@ -957,6 +977,7 @@ impl FoundryDesktopApp {
             MakeProfileKind::BoxPrimitive => ACTION_EDIT_BOX_PRIMITIVE,
             MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
             MakeProfileKind::FlatPanelPrimitive => ACTION_EDIT_FLAT_PANEL,
+            MakeProfileKind::SpherePrimitive => ACTION_EDIT_SPHERE_PRIMITIVE,
             MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
             MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
             MakeProfileKind::Other => "Adjust",
@@ -1433,6 +1454,8 @@ impl FoundryDesktopApp {
             MakeProfileKind::LiddedBox
         } else if self.active_profile_matches(FLAT_PANEL_PRIMITIVE_PROFILE_ID) {
             MakeProfileKind::FlatPanelPrimitive
+        } else if self.active_profile_matches(SPHERE_PRIMITIVE_PROFILE_ID) {
+            MakeProfileKind::SpherePrimitive
         } else if self.active_profile_matches(HINGED_PANEL_PROFILE_ID) {
             MakeProfileKind::HingedPanel
         } else if self.active_profile_matches(HANDLED_PANEL_PROFILE_ID) {
@@ -1532,6 +1555,11 @@ impl FoundryDesktopApp {
             (LIDDED_BOX_EXPORT_TITLE, LIDDED_BOX_EXPORT_DETAIL)
         } else if self.active_make_profile_kind().is_flat_panel_primitive() {
             (FLAT_PANEL_EXPORT_TITLE, FLAT_PANEL_EXPORT_DETAIL)
+        } else if self.active_make_profile_kind().is_sphere_primitive() {
+            (
+                SPHERE_PRIMITIVE_EXPORT_TITLE,
+                SPHERE_PRIMITIVE_EXPORT_DETAIL,
+            )
         } else if self.active_make_profile_kind().is_hinged_panel() {
             (HINGED_PANEL_EXPORT_TITLE, HINGED_PANEL_EXPORT_DETAIL)
         } else if self.active_make_profile_kind().is_handled_panel() {
@@ -1609,7 +1637,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
             ));
             return commands;
         }
@@ -1760,7 +1788,7 @@ impl FoundryDesktopApp {
             });
             ui.add_space(8.0);
             let preview_edge = make_stage_preview_edge(ui.available_width(), ui.available_height());
-            self.show_current_preview_sized(ui, preview_edge);
+            commands.extend(self.show_current_preview_sized(ui, preview_edge));
             ui.add_space(10.0);
             ui.horizontal_wrapped(|ui| {
                 for group in &part_groups {
@@ -1944,220 +1972,244 @@ impl FoundryDesktopApp {
         let colors = VisualFoundryTokens::dark().colors;
         product_card(ui, false, |ui| {
             ui.set_min_height(ui.available_height().max(240.0));
-            ui.label(
-                RichText::new(&view_state.primary_title)
-                    .color(colors.text)
-                    .size(18.0)
-                    .strong(),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(make_canvas_mode_summary(view_state))
-                        .color(colors.text_muted)
-                        .small(),
-                )
-                .wrap(),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(&view_state.next_action_hint)
-                        .color(colors.accent_hover)
-                        .strong(),
-                )
-                .wrap(),
-            );
-            ui.add_space(12.0);
-            if make_canvas_inspector_build_actions_visible(view_state) {
-                ui.horizontal_wrapped(|ui| {
-                    let build_actions_enabled =
-                        make_canvas_build_dependent_actions_enabled(view_state);
-                    let build_actions_reason =
-                        make_canvas_build_dependent_disabled_reason(view_state);
-                    if view_state.mode == MakeCanvasMode::ReviewingIdeas
-                        && action_button(
+            egui::ScrollArea::vertical()
+                .id_salt("make_inspector_panel_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new(&view_state.primary_title)
+                            .color(colors.text)
+                            .size(18.0)
+                            .strong(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(make_canvas_mode_summary(view_state))
+                                .color(colors.text_muted)
+                                .small(),
+                        )
+                        .wrap(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&view_state.next_action_hint)
+                                .color(colors.accent_hover)
+                                .strong(),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(12.0);
+                    if make_canvas_inspector_build_actions_visible(view_state) {
+                        ui.horizontal_wrapped(|ui| {
+                            let build_actions_enabled =
+                                make_canvas_build_dependent_actions_enabled(view_state);
+                            let build_actions_reason =
+                                make_canvas_build_dependent_disabled_reason(view_state);
+                            if view_state.mode == MakeCanvasMode::ReviewingIdeas
+                                && action_button(
+                                    ui,
+                                    &action_spec(
+                                        make_canvas_candidate_actions_enabled(view_state),
+                                        view_state.try_ideas_action_label,
+                                        ButtonTone::Secondary,
+                                        build_actions_reason,
+                                    ),
+                                )
+                                .clicked()
+                                && let Some(command) = self.make_primary_candidate_command()
+                            {
+                                commands.push(command);
+                            }
+                            if self.material_look_action_visible(view_state)
+                                && action_button(
+                                    ui,
+                                    &ActionSpec::enabled(
+                                        ACTION_TRY_MATERIAL_LOOKS,
+                                        ButtonTone::Secondary,
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.open_material_looks_panel();
+                            }
+                            if action_button(
+                                ui,
+                                &action_spec(
+                                    build_actions_enabled,
+                                    ACTION_ADD_TO_PACK,
+                                    ButtonTone::Secondary,
+                                    build_actions_reason,
+                                ),
+                            )
+                            .clicked()
+                                && let Some(command) = self.add_current_to_pack_command()
+                            {
+                                commands.push(command);
+                                self.drawer = Some(FoundryDrawer::Pack);
+                            }
+                            if action_button(
+                                ui,
+                                &action_spec(
+                                    build_actions_enabled,
+                                    ACTION_OPEN_PACK,
+                                    ButtonTone::Secondary,
+                                    build_actions_reason,
+                                ),
+                            )
+                            .clicked()
+                            {
+                                self.drawer = Some(FoundryDrawer::Pack);
+                            }
+                            if action_button(
+                                ui,
+                                &action_spec(
+                                    build_actions_enabled,
+                                    if view_state.direct_primitive_workflow {
+                                        ACTION_EXPORT_CURRENT_PRIMITIVE
+                                    } else {
+                                        ACTION_OPEN_EXPORT
+                                    },
+                                    ButtonTone::Secondary,
+                                    build_actions_reason,
+                                ),
+                            )
+                            .clicked()
+                            {
+                                self.drawer = Some(FoundryDrawer::Export);
+                            }
+                        });
+                        ui.add_space(10.0);
+                    }
+                    if view_state.material_look_tray_visible {
+                        self.show_material_look_inspector_summary(ui);
+                        ui.add_space(10.0);
+                    }
+                    if view_state.mode != MakeCanvasMode::ReviewingIdeas
+                        || matches!(
+                            view_state.local_banner_tone,
+                            BannerTone::Warning | BannerTone::Error
+                        )
+                    {
+                        status_banner(
+                            ui,
+                            StatusBannerSpec {
+                                title: &view_state.local_banner_title,
+                                message: &view_state.local_banner_message,
+                                tone: view_state.local_banner_tone,
+                            },
+                        );
+                        ui.add_space(8.0);
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if view_state.local_warning_message.is_some()
+                            && action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                            && let Some(command) = self.make_primary_candidate_command()
+                        {
+                            commands.push(command);
+                        }
+                        if view_state.idea_generation_fallback_visible {
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_CANCEL, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                            {
+                                commands.push(FoundryAppCommand::CancelIdeaGeneration);
+                            }
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_KEEP_WAITING, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                            {
+                                self.make_generation_started_at = Some(Instant::now());
+                            }
+                        }
+                        if view_state.preparation_fallback_visible {
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
+                            )
+                            .clicked()
+                            {
+                                commands.push(FoundryAppCommand::RetryPreparation);
+                            }
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(
+                                    ACTION_CHOOSE_ANOTHER_TEMPLATE,
+                                    ButtonTone::Secondary,
+                                ),
+                            )
+                            .clicked()
+                            {
+                                self.tab = FoundryTab::Home;
+                            }
+                            if action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
+                            )
+                            .clicked()
+                                && let Some(path) = open_foundry_project_file()
+                            {
+                                commands.push(FoundryAppCommand::Load(path));
+                            }
+                        }
+                        if view_state.preview_update_required
+                            && action_button(
+                                ui,
+                                &ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
+                            )
+                            .clicked()
+                        {
+                            let preview_pixels = current_preview_pixels_for_context(ui.ctx());
+                            commands.push(FoundryAppCommand::RequestPreview {
+                                width: preview_pixels,
+                                height: preview_pixels,
+                                camera: None,
+                            });
+                        }
+                    });
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(view_state.property_panel_title)
+                            .color(colors.text)
+                            .strong(),
+                    );
+                    if view_state.direct_primitive_workflow
+                        && self.active_make_profile_kind().is_sphere_primitive()
+                    {
+                        ui.add_space(6.0);
+                        let preset_enabled = make_canvas_controls_enabled(view_state);
+                        let disabled_reason = view_state
+                            .primary_action_disabled_reason
+                            .as_deref()
+                            .unwrap_or(ACTIVE_IDEA_JOB_REASON);
+                        if action_button(
                             ui,
                             &action_spec(
-                                make_canvas_candidate_actions_enabled(view_state),
-                                view_state.try_ideas_action_label,
+                                preset_enabled,
+                                ACTION_KNOB_LIKE_FORM,
                                 ButtonTone::Secondary,
-                                build_actions_reason,
+                                disabled_reason,
                             ),
                         )
                         .clicked()
-                        && let Some(command) = self.make_primary_candidate_command()
-                    {
-                        commands.push(command);
+                        {
+                            commands.push(sphere_knob_like_form_preset_command());
+                        }
                     }
-                    if self.material_look_action_visible(view_state)
-                        && action_button(
-                            ui,
-                            &ActionSpec::enabled(ACTION_TRY_MATERIAL_LOOKS, ButtonTone::Secondary),
-                        )
-                        .clicked()
-                    {
-                        self.open_material_looks_panel();
-                    }
-                    if action_button(
-                        ui,
-                        &action_spec(
-                            build_actions_enabled,
-                            ACTION_ADD_TO_PACK,
-                            ButtonTone::Secondary,
-                            build_actions_reason,
-                        ),
-                    )
-                    .clicked()
-                        && let Some(command) = self.add_current_to_pack_command()
-                    {
-                        commands.push(command);
-                        self.drawer = Some(FoundryDrawer::Pack);
-                    }
-                    if action_button(
-                        ui,
-                        &action_spec(
-                            build_actions_enabled,
-                            ACTION_OPEN_PACK,
-                            ButtonTone::Secondary,
-                            build_actions_reason,
-                        ),
-                    )
-                    .clicked()
-                    {
-                        self.drawer = Some(FoundryDrawer::Pack);
-                    }
-                    if action_button(
-                        ui,
-                        &action_spec(
-                            build_actions_enabled,
-                            if view_state.direct_primitive_workflow {
-                                ACTION_EXPORT_CURRENT_PRIMITIVE
-                            } else {
-                                ACTION_OPEN_EXPORT
-                            },
-                            ButtonTone::Secondary,
-                            build_actions_reason,
-                        ),
-                    )
-                    .clicked()
-                    {
-                        self.drawer = Some(FoundryDrawer::Export);
-                    }
-                });
-                ui.add_space(10.0);
-            }
-            if view_state.material_look_tray_visible {
-                self.show_material_look_inspector_summary(ui);
-                ui.add_space(10.0);
-            }
-            if view_state.mode != MakeCanvasMode::ReviewingIdeas
-                || matches!(
-                    view_state.local_banner_tone,
-                    BannerTone::Warning | BannerTone::Error
-                )
-            {
-                status_banner(
-                    ui,
-                    StatusBannerSpec {
-                        title: &view_state.local_banner_title,
-                        message: &view_state.local_banner_message,
-                        tone: view_state.local_banner_tone,
-                    },
-                );
-                ui.add_space(8.0);
-            }
-            ui.horizontal_wrapped(|ui| {
-                if view_state.local_warning_message.is_some()
-                    && action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Secondary),
-                    )
-                    .clicked()
-                    && let Some(command) = self.make_primary_candidate_command()
-                {
-                    commands.push(command);
-                }
-                if view_state.idea_generation_fallback_visible {
-                    if action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_CANCEL, ButtonTone::Secondary),
-                    )
-                    .clicked()
-                    {
-                        commands.push(FoundryAppCommand::CancelIdeaGeneration);
-                    }
-                    if action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_KEEP_WAITING, ButtonTone::Secondary),
-                    )
-                    .clicked()
-                    {
-                        self.make_generation_started_at = Some(Instant::now());
-                    }
-                }
-                if view_state.preparation_fallback_visible {
-                    if action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_RETRY_PREPARATION, ButtonTone::Primary),
-                    )
-                    .clicked()
-                    {
-                        commands.push(FoundryAppCommand::RetryPreparation);
-                    }
-                    if action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_CHOOSE_ANOTHER_TEMPLATE, ButtonTone::Secondary),
-                    )
-                    .clicked()
-                    {
-                        self.tab = FoundryTab::Home;
-                    }
-                    if action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_OPEN_PROJECT, ButtonTone::Secondary),
-                    )
-                    .clicked()
-                        && let Some(path) = open_foundry_project_file()
-                    {
-                        commands.push(FoundryAppCommand::Load(path));
-                    }
-                }
-                if view_state.preview_update_required
-                    && action_button(
-                        ui,
-                        &ActionSpec::enabled(ACTION_UPDATE_PREVIEW, ButtonTone::Primary),
-                    )
-                    .clicked()
-                {
-                    let preview_pixels = current_preview_pixels_for_context(ui.ctx());
-                    commands.push(FoundryAppCommand::RequestPreview {
-                        width: preview_pixels,
-                        height: preview_pixels,
-                    });
-                }
-            });
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(view_state.property_panel_title)
-                    .color(colors.text)
-                    .strong(),
-            );
-            if view_state.direct_primitive_workflow {
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    for label in &view_state.property_labels {
-                        let _ = status_pill(ui, StatusPillSpec::new(label, StatusTone::Neutral));
-                    }
-                });
-            }
-            ui.add_space(6.0);
-            let active_group = self.active_make_part_group();
-            let control_sections =
-                make_context_inspector_controls(&self.state.controls, active_group.as_ref());
-            egui::ScrollArea::vertical()
-                .id_salt("make_context_inspector_controls")
-                .auto_shrink([false, false])
-                .max_height((ui.available_height() - 8.0).max(72.0))
-                .show(ui, |ui| {
+                    ui.add_space(6.0);
+                    let active_group = self.active_make_part_group();
+                    let control_sections = make_context_inspector_controls(
+                        &self.state.controls,
+                        active_group.as_ref(),
+                    );
                     if control_sections.visible.is_empty() {
                         product_compact_empty_state(
                             ui,
@@ -2974,7 +3026,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
             ));
                 } else {
                     ui.add_space(10.0);
@@ -3013,7 +3065,7 @@ impl FoundryDesktopApp {
                     .small()
                     .strong(),
             );
-            self.show_current_preview_sized(ui, preview_edge);
+            let _ = self.show_current_preview_sized(ui, preview_edge);
             ui.add_space(8.0);
             ui.label(
                 RichText::new(self.current_project_title())
@@ -3154,7 +3206,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
             ));
             return commands;
         }
@@ -3187,7 +3239,7 @@ impl FoundryDesktopApp {
                             .color(VisualFoundryTokens::dark().colors.accent_hover)
                             .small(),
                     );
-                    self.show_current_preview_sized(ui, 420.0);
+                    let _ = self.show_current_preview_sized(ui, 420.0);
                 });
                 commands.extend(show_export_readiness_panel(
                     &mut columns[1],
@@ -3203,7 +3255,7 @@ impl FoundryDesktopApp {
                         .color(VisualFoundryTokens::dark().colors.accent_hover)
                         .small(),
                 );
-                self.show_current_preview_sized(ui, 320.0);
+                let _ = self.show_current_preview_sized(ui, 320.0);
             });
             ui.add_space(12.0);
             commands.extend(show_export_readiness_panel(
@@ -3271,7 +3323,7 @@ impl FoundryDesktopApp {
             commands.extend(self.show_choose_asset_empty_state(
                 ui,
                 "Choose an asset first",
-                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
+                "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
             ));
             return commands;
         }
@@ -3284,7 +3336,7 @@ impl FoundryDesktopApp {
                             .color(colors.accent_hover)
                             .small(),
                     );
-                    self.show_current_preview_sized(ui, 280.0);
+                    let _ = self.show_current_preview_sized(ui, 280.0);
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(self.current_project_title())
@@ -3376,22 +3428,28 @@ impl FoundryDesktopApp {
         self.show_export(ui)
     }
 
-    fn show_current_preview_sized(&mut self, ui: &mut egui::Ui, max_edge: f32) {
+    fn show_current_preview_sized(
+        &mut self,
+        ui: &mut egui::Ui,
+        max_edge: f32,
+    ) -> Vec<FoundryAppCommand> {
+        let mut commands = Vec::new();
         let asset_name = self.current_project_title();
-        let preview = self.state.current_preview.as_ref();
+        let preview = self.state.current_preview.clone();
         let has_output = self.state.current_output.is_some();
         let rendering_preview = self
             .state
             .active_jobs
             .values()
             .any(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
-        let preview_is_stale =
-            preview.is_some_and(|preview| preview.build != self.state.current_build);
+        let preview_is_stale = preview
+            .as_ref()
+            .is_some_and(|preview| preview.build != self.state.current_build);
         let draw_edge = max_edge.min(ui.available_width().max(1.0));
         ui.vertical_centered(|ui| {
             if let Some(preview) = &preview {
                 let preview_id = format!("current-{}", preview.preview_id);
-                show_rgba_preview(
+                let response = show_current_rgba_preview(
                     ui,
                     &mut self.texture_cache,
                     FoundryPreviewDraw {
@@ -3403,6 +3461,22 @@ impl FoundryDesktopApp {
                         max_edge: draw_edge,
                     },
                 );
+                let drag_response = ui.interact(
+                    response.rect,
+                    ui.id().with("current_preview_orbit_drag"),
+                    egui::Sense::drag(),
+                );
+                if !rendering_preview
+                    && drag_response.dragged_by(egui::PointerButton::Primary)
+                    && let Some(camera) =
+                        current_preview_orbit_camera(preview, drag_response.drag_motion())
+                {
+                    commands.push(FoundryAppCommand::RequestPreview {
+                        width: preview.width,
+                        height: preview.height,
+                        camera: Some(camera),
+                    });
+                }
                 if preview_is_stale || rendering_preview {
                     ui.label(
                         RichText::new(PREVIEW_UPDATING_REASON)
@@ -3422,6 +3496,7 @@ impl FoundryDesktopApp {
                 ui.weak("Preparing your asset...");
             }
         });
+        commands
     }
 
     fn history_dispatch_command(
@@ -3550,7 +3625,10 @@ impl FoundryDesktopApp {
         if schedule_preview {
             self.refresh_make_trace_clock();
             let preview_pixels = current_preview_pixels_for_context(ctx);
-            match self.state.request_preview(preview_pixels, preview_pixels) {
+            match self
+                .state
+                .request_preview(preview_pixels, preview_pixels, None)
+            {
                 Ok(effects) => self.apply_effects(effects, ctx),
                 Err(error) => self.state.status = Some(error.to_string()),
             }
@@ -3606,7 +3684,8 @@ impl FoundryDesktopApp {
 
         match scenario {
             ScreenshotScenario::BoxDirectMakeReady
-            | ScreenshotScenario::FlatPanelDirectMakeReady => {
+            | ScreenshotScenario::FlatPanelDirectMakeReady
+            | ScreenshotScenario::SphereDirectMakeReady => {
                 if self.state.active_jobs.is_empty() {
                     self.complete_screenshot_scenario(scenario);
                 }
@@ -3631,6 +3710,49 @@ impl FoundryDesktopApp {
                     self.screenshot_scenario_step = 2;
                 } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
                     self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::SpherePropertyEdit => {
+                if self.screenshot_scenario_step < 2 {
+                    commands.push(FoundryAppCommand::RunFoundryCommandProgram {
+                        label: "Edit sphere properties".to_owned(),
+                        commands: vec![
+                            FoundryCommand::SetControl {
+                                control_id: "width".to_owned(),
+                                value: shape_foundry::ControlValue::Scalar(1.08),
+                            },
+                            FoundryCommand::SetControl {
+                                control_id: "height".to_owned(),
+                                value: shape_foundry::ControlValue::Scalar(1.0),
+                            },
+                            FoundryCommand::SetControl {
+                                control_id: "depth".to_owned(),
+                                value: shape_foundry::ControlValue::Scalar(1.0),
+                            },
+                        ],
+                    });
+                    self.screenshot_scenario_step = 2;
+                } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::SphereKnobLikePreset => {
+                if self.screenshot_scenario_step < 2 {
+                    commands.push(sphere_knob_like_form_preset_command());
+                    self.screenshot_scenario_step = 2;
+                } else if self.make_canvas_view_state().mode == MakeCanvasMode::Ready {
+                    self.complete_screenshot_scenario(scenario);
+                }
+            }
+            ScreenshotScenario::SphereExportDrawer => {
+                if self.screenshot_scenario_step < 2 {
+                    commands.push(sphere_knob_like_form_preset_command());
+                    self.screenshot_scenario_step = 2;
+                } else {
+                    self.drawer = Some(FoundryDrawer::Export);
+                    if self.make_canvas_view_state().export_drawer_visible {
+                        self.complete_screenshot_scenario(scenario);
+                    }
                 }
             }
             ScreenshotScenario::PackDrawer => {
@@ -4207,6 +4329,23 @@ fn orbit_home_thumbnail_camera(camera: &OrbitCamera, delta: egui::Vec2) -> Orbit
     camera
 }
 
+fn current_preview_orbit_camera(
+    preview: &FoundryPreviewImage,
+    delta: egui::Vec2,
+) -> Option<OrbitCamera> {
+    if delta.length_sq() <= 0.01 {
+        return None;
+    }
+
+    let mut camera = preview.camera.clone();
+    camera.target = Default::default();
+    camera.orbit(
+        delta.x * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT,
+        -delta.y * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT,
+    );
+    Some(camera)
+}
+
 fn home_turntable_yaw(yaw_degrees: f32) -> f32 {
     yaw_degrees.rem_euclid(360.0)
 }
@@ -4483,6 +4622,10 @@ fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
         "box_property_edit" | "adjusted_box_control" => Some(ScreenshotScenario::BoxPropertyEdit),
         "flat_panel_direct_make_ready" => Some(ScreenshotScenario::FlatPanelDirectMakeReady),
         "flat_panel_property_edit" => Some(ScreenshotScenario::FlatPanelPropertyEdit),
+        "sphere_direct_make_ready" => Some(ScreenshotScenario::SphereDirectMakeReady),
+        "sphere_property_edit" => Some(ScreenshotScenario::SpherePropertyEdit),
+        "sphere_knob_like_preset" => Some(ScreenshotScenario::SphereKnobLikePreset),
+        "sphere_export_drawer" => Some(ScreenshotScenario::SphereExportDrawer),
         "pack_drawer" => Some(ScreenshotScenario::PackDrawer),
         "export_drawer" => Some(ScreenshotScenario::ExportDrawer),
         _ => None,
@@ -4496,6 +4639,12 @@ fn read_screenshot_fixture_catalog(
         ScreenshotScenario::FlatPanelDirectMakeReady
         | ScreenshotScenario::FlatPanelPropertyEdit => {
             shape_foundry_catalog::flat_panel::fixture_catalog()
+        }
+        ScreenshotScenario::SphereDirectMakeReady
+        | ScreenshotScenario::SpherePropertyEdit
+        | ScreenshotScenario::SphereKnobLikePreset
+        | ScreenshotScenario::SphereExportDrawer => {
+            shape_foundry_catalog::sphere_primitive::fixture_catalog()
         }
         ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
@@ -4514,7 +4663,10 @@ fn screenshot_scenario_assertion(
         ScreenshotScenario::BoxDirectMakeReady
         | ScreenshotScenario::BoxPropertyEdit
         | ScreenshotScenario::FlatPanelDirectMakeReady
-        | ScreenshotScenario::FlatPanelPropertyEdit => {
+        | ScreenshotScenario::FlatPanelPropertyEdit
+        | ScreenshotScenario::SphereDirectMakeReady
+        | ScreenshotScenario::SpherePropertyEdit
+        | ScreenshotScenario::SphereKnobLikePreset => {
             require_screenshot_state(view_state.mode == MakeCanvasMode::Ready, scenario, "Ready")?;
             require_screenshot_state(view_state.model_ready, scenario, "model_ready")?;
             require_screenshot_state(view_state.preview_ready, scenario, "preview_ready")?;
@@ -4538,6 +4690,11 @@ fn screenshot_scenario_assertion(
             view_state.export_drawer_visible,
             scenario,
             "export_drawer_visible",
+        ),
+        ScreenshotScenario::SphereExportDrawer => require_screenshot_state(
+            view_state.export_drawer_visible && view_state.direct_primitive_workflow,
+            scenario,
+            "sphere_export_drawer_visible",
         ),
     }
 }
@@ -4630,6 +4787,7 @@ fn asset_title_from_id(document_id: &str) -> &'static str {
         id if id.contains("handled-panel") => "Handled Panel",
         id if id.contains("hinged-panel") => "Hinged Panel",
         id if id.contains("flat-panel-primitive") => "Flat Panel Primitive",
+        id if id.contains("sphere-primitive") => "Sphere Primitive",
         _ => "Shape Lab Project",
     }
 }
@@ -4697,6 +4855,9 @@ fn profile_description(slug: &str) -> &'static str {
         "flat-panel-primitive" => {
             "One upright clay panel with readable width, height, and thickness."
         }
+        "sphere-primitive" => {
+            "One closed round clay volume with readable dimensions and flattening."
+        }
         "hinged-panel" => "One upright clay panel with a visible hinge edge.",
         "handled-panel" => "One upright clay panel with a visible hinge edge and handle.",
         _ => "A simple clay starting point ready for idea generation.",
@@ -4718,6 +4879,7 @@ fn is_visible_starter_profile(slug: &str) -> bool {
         BOX_PRIMITIVE_PROFILE_ID
             | LIDDED_BOX_PROFILE_ID
             | FLAT_PANEL_PRIMITIVE_PROFILE_ID
+            | SPHERE_PRIMITIVE_PROFILE_ID
             | HINGED_PANEL_PROFILE_ID
             | HANDLED_PANEL_PROFILE_ID
     )
@@ -4829,6 +4991,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Start with Box Primitive",
         "Lidded Box",
         "Flat Panel Primitive",
+        "Sphere Primitive",
         "Hinged Panel",
         "Handled Panel",
         "Project",
@@ -4842,6 +5005,7 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         ACTION_ADJUST_DIMENSIONS,
         ACTION_EDIT_BOX_PRIMITIVE,
         ACTION_EDIT_FLAT_PANEL,
+        ACTION_EDIT_SPHERE_PRIMITIVE,
         ACTION_EDIT_LIDDED_BOX,
         ACTION_EDIT_HINGED_PANEL,
         ACTION_EDIT_HANDLED_PANEL,
@@ -4886,13 +5050,14 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "A simple box with a visible lid seam.",
         "You can vary proportions, edge softness, and lid seam.",
         "One upright clay panel with readable width, height, and thickness.",
+        "One closed round clay volume with readable dimensions and flattening.",
         "One upright clay panel with a visible hinge edge.",
         "You can vary proportions, edge softness, and hinge edge.",
         "One upright clay panel with a visible hinge edge and handle.",
         "You can vary proportions, edge softness, hinge edge, and handle.",
         "Start with Box Primitive.",
         "Choose a starting point.",
-        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or Handled Panel.",
+        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel.",
         "Each starting point is a simple clay asset with only visible controls.",
         "Preview building",
         "No matching starting point",
@@ -4904,6 +5069,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Height",
         "Thickness",
         "Edge Softness",
+        "Front Flatten",
+        "Back Flatten",
         "Lid Seam",
         "Hinge Edge",
         VIEW_ORBIT_LABEL,
@@ -4911,14 +5078,14 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         VIEW_AXIS_LABEL,
         "Current Asset",
         "Current asset",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.",
         "Project history",
         "Review previous project steps and branch from a saved point.",
         "saved step(s)",
         "Project step",
         "Tune the main box controls and lock the settings you want to keep.",
         "Choose an asset first",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before adjusting.",
         "Make it yours",
         "No quick controls yet",
         "This asset has no quick controls yet.",
@@ -4936,6 +5103,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         FLAT_PANEL_EXPORT_DETAIL,
         HINGED_PANEL_EXPORT_TITLE,
         HINGED_PANEL_EXPORT_DETAIL,
+        SPHERE_PRIMITIVE_EXPORT_TITLE,
+        SPHERE_PRIMITIVE_EXPORT_DETAIL,
         HANDLED_PANEL_EXPORT_TITLE,
         HANDLED_PANEL_EXPORT_DETAIL,
         BOX_PRIMITIVE_EXPORT_LIMITATION,
@@ -4972,8 +5141,8 @@ pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
         "Primary control",
         "Starting point is not available",
         "Open a saved project, or enable the clay starting points.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
-        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before exporting.",
+        "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before starting a pack.",
     ];
     strings.extend(RENDERED_ACTION_LABELS);
     for step in WORKFLOW_STEPS {
@@ -4993,6 +5162,8 @@ pub(crate) fn core_make_action_specs_for_default_shell() -> Vec<ActionSpec<'stat
         ActionSpec::enabled(ACTION_ADJUST_DIMENSIONS, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_EDIT_BOX_PRIMITIVE, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_EDIT_FLAT_PANEL, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_EDIT_SPHERE_PRIMITIVE, ButtonTone::Primary),
+        ActionSpec::enabled(ACTION_KNOB_LIKE_FORM, ButtonTone::Secondary),
         ActionSpec::enabled(ACTION_EDIT_LIDDED_BOX, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_EDIT_HINGED_PANEL, ButtonTone::Primary),
         ActionSpec::enabled(ACTION_TRY_AGAIN, ButtonTone::Primary),
@@ -5124,7 +5295,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
     match mode {
         MakeCanvasMode::NoAsset => (
             "Choose an asset".to_owned(),
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, Handled Panel, or open a project before making changes.".to_owned(),
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, Handled Panel, or open a project before making changes.".to_owned(),
             BannerTone::Info,
         ),
         MakeCanvasMode::PreparingAsset => {
@@ -5298,6 +5469,7 @@ fn direct_property_panel_title(profile_kind: MakeProfileKind) -> &'static str {
     match profile_kind {
         MakeProfileKind::BoxPrimitive => ACTION_EDIT_BOX_PRIMITIVE,
         MakeProfileKind::FlatPanelPrimitive => ACTION_EDIT_FLAT_PANEL,
+        MakeProfileKind::SpherePrimitive => ACTION_EDIT_SPHERE_PRIMITIVE,
         MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
         MakeProfileKind::HingedPanel => ACTION_EDIT_HINGED_PANEL,
         MakeProfileKind::HandledPanel => ACTION_EDIT_HANDLED_PANEL,
@@ -5309,6 +5481,9 @@ fn direct_property_labels(profile_kind: MakeProfileKind) -> &'static [&'static s
     match profile_kind {
         MakeProfileKind::BoxPrimitive => &["Width", "Depth", "Height", "Edge Softness"],
         MakeProfileKind::FlatPanelPrimitive => &["Width", "Height", "Thickness", "Edge Softness"],
+        MakeProfileKind::SpherePrimitive => {
+            &["Width", "Height", "Depth", "Front Flatten", "Back Flatten"]
+        }
         MakeProfileKind::LiddedBox => &["Width", "Depth", "Height", "Edge Softness", "Lid Seam"],
         MakeProfileKind::HingedPanel => &[
             "Width",
@@ -5326,6 +5501,16 @@ fn direct_property_labels(profile_kind: MakeProfileKind) -> &'static [&'static s
             "Handle",
         ],
         MakeProfileKind::Other => &[],
+    }
+}
+
+fn sphere_knob_like_form_preset_command() -> FoundryAppCommand {
+    FoundryAppCommand::RunFoundryCommandProgram {
+        label: ACTION_KNOB_LIKE_FORM.to_owned(),
+        commands: shape_foundry_catalog::sphere_primitive::knob_like_form_preset_values()
+            .into_iter()
+            .map(|(control_id, value)| FoundryCommand::SetControl { control_id, value })
+            .collect(),
     }
 }
 
@@ -5415,7 +5600,7 @@ fn make_canvas_next_action_hint(
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => {
-            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or Handled Panel first."
+            "Choose Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel first."
                 .to_owned()
         }
         (MakeCanvasMode::PreparingAsset, _, _) => {
@@ -5891,7 +6076,7 @@ fn show_home_browser_panel(
                         "Choose what to make"
                     },
                     subtitle: Some(if starter_profile_mode {
-                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Hinged Panel, or Handled Panel."
+                        "Start with Box Primitive, Lidded Box, Flat Panel Primitive, Sphere Primitive, Hinged Panel, or Handled Panel."
                     } else {
                         HOME_SUBTITLE
                     }),
@@ -7611,49 +7796,43 @@ fn show_direct_numeric_control(
     let colors = VisualFoundryTokens::dark().colors;
     let current = direct_numeric_value(control, range);
     let step = range.step.max(0.01);
-    ui.label(
-        RichText::new(format!(
-            "Domain {:.2} to {:.2}",
-            range.minimum, range.maximum
-        ))
-        .color(colors.text_muted)
-        .small(),
-    );
-    ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
-        let decrease = (current - step).max(range.minimum);
-        let increase = (current + step).min(range.maximum);
-        let decrease_enabled = action_state.enabled && decrease < current;
-        let increase_enabled = action_state.enabled && increase > current;
-        if ui
-            .add_enabled(decrease_enabled, egui::Button::new("-"))
-            .on_disabled_hover_text(if action_state.enabled {
-                "Minimum reached."
-            } else {
-                action_state.disabled_reason
-            })
-            .clicked()
-        {
-            commands.extend(customize::release_control_value_intents(
-                control,
-                shape_foundry::ControlValue::Scalar(decrease),
-            ));
-        }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Value").color(colors.text_muted).small());
         ui.monospace(format!("{current:.2}"));
-        if ui
-            .add_enabled(increase_enabled, egui::Button::new("+"))
-            .on_disabled_hover_text(if action_state.enabled {
-                "Maximum reached."
-            } else {
-                action_state.disabled_reason
-            })
-            .clicked()
-        {
-            commands.extend(customize::release_control_value_intents(
-                control,
-                shape_foundry::ControlValue::Scalar(increase),
-            ));
-        }
+    });
+    ui.add_space(4.0);
+    let mut adjusted = current;
+    let response = ui
+        .add_enabled_ui(action_state.enabled, |ui| {
+            ui.add_sized(
+                [ui.available_width(), 22.0],
+                egui::Slider::new(&mut adjusted, range.minimum..=range.maximum)
+                    .step_by(f64::from(step))
+                    .show_value(false),
+            )
+        })
+        .inner;
+    if !action_state.enabled {
+        response.on_disabled_hover_text(action_state.disabled_reason);
+    } else if response.changed() {
+        commands.extend(customize::release_control_value_intents(
+            control,
+            shape_foundry::ControlValue::Scalar(snap_direct_numeric_value(adjusted, range, step)),
+        ));
+    }
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{:.2}", range.minimum))
+                .color(colors.text_muted)
+                .small(),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("{:.2}", range.maximum))
+                    .color(colors.text_muted)
+                    .small(),
+            );
+        });
     });
     if !action_state.enabled {
         ui.label(
@@ -7666,6 +7845,16 @@ fn show_direct_numeric_control(
         );
     }
     commands
+}
+
+fn snap_direct_numeric_value(
+    value: f32,
+    range: crate::foundry::view_model::FoundryNumericRange,
+    step: f32,
+) -> f32 {
+    let step = step.max(0.01);
+    let steps = ((value - range.minimum) / step).round();
+    (range.minimum + steps * step).clamp(range.minimum, range.maximum)
 }
 
 fn direct_numeric_value(
@@ -8407,33 +8596,91 @@ fn draw_quick_template_preview(ui: &mut egui::Ui, max_edge: f32, _asset_name: &s
     }
 }
 
-fn show_rgba_preview(
+fn draw_coordinate_reference_overlay(ui: &egui::Ui, rect: egui::Rect) {
+    if rect.width() <= 1.0 || rect.height() <= 1.0 {
+        return;
+    }
+
+    let painter = ui.painter();
+    let center = rect.center();
+    let margin = 8.0;
+    let x_color = egui::Color32::from_rgba_unmultiplied(78, 160, 244, 128);
+    let y_color = egui::Color32::from_rgba_unmultiplied(78, 198, 124, 128);
+    let z_color = egui::Color32::from_rgba_unmultiplied(238, 156, 74, 118);
+    let grid_color = egui::Color32::from_rgba_unmultiplied(112, 130, 148, 42);
+    let label_font = egui::FontId::proportional(11.0);
+
+    for fraction in [0.125, 0.25, 0.375, 0.625, 0.75, 0.875] {
+        let x = egui::lerp(rect.left()..=rect.right(), fraction);
+        let y = egui::lerp(rect.top()..=rect.bottom(), fraction);
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.top() + margin),
+                egui::pos2(x, rect.bottom() - margin),
+            ],
+            egui::Stroke::new(1.0, grid_color),
+        );
+        painter.line_segment(
+            [
+                egui::pos2(rect.left() + margin, y),
+                egui::pos2(rect.right() - margin, y),
+            ],
+            egui::Stroke::new(1.0, grid_color),
+        );
+    }
+
+    painter.line_segment(
+        [
+            egui::pos2(rect.left() + margin, center.y),
+            egui::pos2(rect.right() - margin, center.y),
+        ],
+        egui::Stroke::new(1.35, x_color),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(center.x, rect.top() + margin),
+            egui::pos2(center.x, rect.bottom() - margin),
+        ],
+        egui::Stroke::new(1.35, y_color),
+    );
+    let z_vector = egui::vec2(rect.width() * 0.42, -rect.height() * 0.42);
+    painter.line_segment(
+        [center - z_vector, center + z_vector],
+        egui::Stroke::new(1.35, z_color),
+    );
+    painter.text(
+        egui::pos2(rect.right() - margin - 4.0, center.y - 6.0),
+        egui::Align2::RIGHT_CENTER,
+        "X",
+        label_font.clone(),
+        x_color,
+    );
+    painter.text(
+        egui::pos2(center.x + 6.0, rect.top() + margin + 6.0),
+        egui::Align2::LEFT_CENTER,
+        "Y",
+        label_font.clone(),
+        y_color,
+    );
+    painter.text(
+        center + z_vector + egui::vec2(4.0, -4.0),
+        egui::Align2::LEFT_BOTTOM,
+        "Z",
+        label_font,
+        z_color,
+    );
+}
+
+fn show_current_rgba_preview(
     ui: &mut egui::Ui,
     texture_cache: &mut FoundryTextureCache,
     preview: FoundryPreviewDraw<'_>,
-) {
+) -> egui::Response {
     let width_usize = preview.width as usize;
     let height_usize = preview.height as usize;
     let expected_len = width_usize.saturating_mul(height_usize).saturating_mul(4);
     if preview.width == 0 || preview.height == 0 || preview.rgba8.len() != expected_len {
-        let size = egui::vec2(preview.max_edge, preview.max_edge);
-        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let colors = VisualFoundryTokens::dark().colors;
-        ui.painter().rect_filled(rect, 6.0, colors.panel_elevated);
-        ui.painter().rect_stroke(
-            rect,
-            6.0,
-            egui::Stroke::new(1.0, colors.stroke),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "Preview pending",
-            egui::FontId::proportional(12.0),
-            colors.text_muted,
-        );
-        return;
+        return draw_preview_pending_placeholder(ui, preview.max_edge);
     }
 
     let texture = texture_cache.texture(
@@ -8445,8 +8692,66 @@ fn show_rgba_preview(
         preview.height,
     );
     if let Some(size) = scaled_preview_size(preview.width, preview.height, preview.max_edge) {
-        ui.image((texture.id(), size));
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+        draw_coordinate_reference_overlay(ui, rect);
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        return response;
     }
+    let size = egui::vec2(preview.max_edge.max(1.0), preview.max_edge.max(1.0));
+    ui.allocate_exact_size(size, egui::Sense::hover()).1
+}
+
+fn draw_preview_pending_placeholder(ui: &mut egui::Ui, max_edge: f32) -> egui::Response {
+    let size = egui::vec2(max_edge, max_edge);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let colors = VisualFoundryTokens::dark().colors;
+    ui.painter().rect_filled(rect, 6.0, colors.panel_elevated);
+    ui.painter().rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.0, colors.stroke),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "Preview pending",
+        egui::FontId::proportional(12.0),
+        colors.text_muted,
+    );
+    response
+}
+
+fn show_rgba_preview(
+    ui: &mut egui::Ui,
+    texture_cache: &mut FoundryTextureCache,
+    preview: FoundryPreviewDraw<'_>,
+) -> egui::Response {
+    let width_usize = preview.width as usize;
+    let height_usize = preview.height as usize;
+    let expected_len = width_usize.saturating_mul(height_usize).saturating_mul(4);
+    if preview.width == 0 || preview.height == 0 || preview.rgba8.len() != expected_len {
+        return draw_preview_pending_placeholder(ui, preview.max_edge);
+    }
+
+    let texture = texture_cache.texture(
+        ui.ctx(),
+        preview.preview_id,
+        preview.build,
+        preview.rgba8,
+        preview.width,
+        preview.height,
+    );
+    if let Some(size) = scaled_preview_size(preview.width, preview.height, preview.max_edge) {
+        return ui.image((texture.id(), size));
+    }
+    let size = egui::vec2(preview.max_edge.max(1.0), preview.max_edge.max(1.0));
+    ui.allocate_exact_size(size, egui::Sense::hover()).1
 }
 
 fn scaled_preview_size(width: u32, height: u32, max_edge: f32) -> Option<egui::Vec2> {
@@ -8545,8 +8850,8 @@ mod tests {
 
     #[test]
     fn product_home_shows_curated_usable_kits_by_default_and_preview_mode_hides_drafts() {
-        assert_eq!(installed_product_kit_count(), 5);
-        assert_eq!(default_product_home_profile_count(), 5);
+        assert_eq!(installed_product_kit_count(), 6);
+        assert_eq!(default_product_home_profile_count(), 6);
 
         let default_profiles = product_home_profiles(false);
         let default_labels = default_profiles
@@ -8556,14 +8861,16 @@ mod tests {
         assert_eq!(default_profiles[0].fixture.slug, "box-primitive");
         assert_eq!(default_profiles[1].fixture.slug, "lidded-box");
         assert_eq!(default_profiles[2].fixture.slug, "flat-panel-primitive");
-        assert_eq!(default_profiles[3].fixture.slug, "hinged-panel");
-        assert_eq!(default_profiles[4].fixture.slug, "handled-panel");
+        assert_eq!(default_profiles[3].fixture.slug, "sphere-primitive");
+        assert_eq!(default_profiles[4].fixture.slug, "hinged-panel");
+        assert_eq!(default_profiles[5].fixture.slug, "handled-panel");
         assert_eq!(
             default_labels,
             vec![
                 "Box Primitive",
                 "Lidded Box",
                 "Flat Panel Primitive",
+                "Sphere Primitive",
                 "Hinged Panel",
                 "Handled Panel"
             ]
@@ -8575,13 +8882,14 @@ mod tests {
             .map(|profile| profile.label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(profiles.len(), 5);
+        assert_eq!(profiles.len(), 6);
         assert_eq!(
             labels,
             vec![
                 "Box Primitive",
                 "Lidded Box",
                 "Flat Panel Primitive",
+                "Sphere Primitive",
                 "Hinged Panel",
                 "Handled Panel"
             ]
@@ -8595,12 +8903,13 @@ mod tests {
         let strings = product_visible_strings_for_default_shell();
         let joined = strings.join("\n");
 
-        assert_eq!(profiles.len(), 5);
+        assert_eq!(profiles.len(), 6);
         assert_eq!(profiles[0].fixture.slug, BOX_PRIMITIVE_PROFILE_ID);
         assert_eq!(profiles[1].fixture.slug, LIDDED_BOX_PROFILE_ID);
         assert_eq!(profiles[2].fixture.slug, FLAT_PANEL_PRIMITIVE_PROFILE_ID);
-        assert_eq!(profiles[3].fixture.slug, HINGED_PANEL_PROFILE_ID);
-        assert_eq!(profiles[4].fixture.slug, HANDLED_PANEL_PROFILE_ID);
+        assert_eq!(profiles[3].fixture.slug, SPHERE_PRIMITIVE_PROFILE_ID);
+        assert_eq!(profiles[4].fixture.slug, HINGED_PANEL_PROFILE_ID);
+        assert_eq!(profiles[5].fixture.slug, HANDLED_PANEL_PROFILE_ID);
         assert!(HOME_TEMPLATE_FILTERS.is_empty());
         assert!(strings.contains(&"Choose a starting point."));
         assert!(strings.contains(&HOME_SUBTITLE));
@@ -8609,6 +8918,10 @@ mod tests {
         assert!(strings.contains(&"You can vary proportions, edge softness, and lid seam."));
         assert!(
             strings.contains(&"One upright clay panel with readable width, height, and thickness.")
+        );
+        assert!(
+            strings
+                .contains(&"One closed round clay volume with readable dimensions and flattening.")
         );
         assert!(strings.contains(&"One upright clay panel with a visible hinge edge."));
         assert!(strings.contains(&"You can vary proportions, edge softness, and hinge edge."));
@@ -8629,6 +8942,7 @@ mod tests {
             "3 starting points",
             "4 starting points",
             "5 starting points",
+            "6 starting points",
             "Search starting point...",
             "Choose what to make",
         ] {
@@ -8658,7 +8972,8 @@ mod tests {
                 "Flat Panel Primitive",
                 "Handled Panel",
                 "Hinged Panel",
-                "Lidded Box"
+                "Lidded Box",
+                "Sphere Primitive"
             ]
         );
         assert!(!family_names.iter().any(|name| name.contains("MVP")));
@@ -8712,6 +9027,7 @@ mod tests {
                 "box-primitive",
                 "lidded-box",
                 "flat-panel-primitive",
+                "sphere-primitive",
                 "hinged-panel",
                 "handled-panel"
             ]
@@ -8722,17 +9038,19 @@ mod tests {
     fn product_home_grouping_uses_stable_family_ids() {
         let profiles = product_home_profiles(true);
         let groups = product_home_profile_groups(profiles);
-        assert_eq!(groups.len(), 5);
+        assert_eq!(groups.len(), 6);
         assert_eq!(groups[0].family_id, "box_primitive");
         assert_eq!(groups[1].family_id, "flat_panel_primitive");
         assert_eq!(groups[2].family_id, "handled_panel");
         assert_eq!(groups[3].family_id, "hinged_panel");
         assert_eq!(groups[4].family_id, "lidded_box");
+        assert_eq!(groups[5].family_id, "sphere_primitive");
         assert_eq!(groups[0].profiles.len(), 1);
         assert_eq!(groups[1].profiles.len(), 1);
         assert_eq!(groups[2].profiles.len(), 1);
         assert_eq!(groups[3].profiles.len(), 1);
         assert_eq!(groups[4].profiles.len(), 1);
+        assert_eq!(groups[5].profiles.len(), 1);
     }
 
     #[test]
@@ -8761,6 +9079,21 @@ mod tests {
         assert_eq!(rotated.pitch_degrees, camera.pitch_degrees);
         assert_eq!(rotated.target, camera.target);
         assert_eq!(rotated.distance, camera.distance);
+    }
+
+    #[test]
+    fn current_preview_drag_orbits_yaw_and_pitch_around_origin() {
+        let mut preview = test_preview_image("current");
+        preview.camera.pan(1.0, 2.0);
+        let rotated = current_preview_orbit_camera(&preview, egui::vec2(10.0, -12.0))
+            .expect("nonzero drag should orbit the preview camera");
+
+        assert!((rotated.yaw_degrees - 38.5).abs() < f32::EPSILON);
+        assert!((rotated.pitch_degrees - 29.2).abs() < f32::EPSILON);
+        assert_ne!(preview.camera.target, OrbitCamera::default().target);
+        assert_eq!(rotated.target, OrbitCamera::default().target);
+        assert_eq!(rotated.distance, preview.camera.distance);
+        assert!(current_preview_orbit_camera(&preview, egui::Vec2::ZERO).is_none());
     }
 
     #[test]
@@ -9722,6 +10055,22 @@ mod tests {
                 .is_ok()
         );
 
+        let sphere = ready_fixture_state_test_app(
+            shape_foundry_catalog::sphere_primitive::fixture_catalog(),
+        )
+        .make_canvas_view_state();
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::SphereDirectMakeReady, &sphere)
+                .is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::SpherePropertyEdit, &sphere).is_ok()
+        );
+        assert!(
+            screenshot_scenario_assertion(ScreenshotScenario::SphereKnobLikePreset, &sphere)
+                .is_ok()
+        );
+
         app.drawer = Some(FoundryDrawer::Pack);
         assert!(
             screenshot_scenario_assertion(
@@ -9735,6 +10084,17 @@ mod tests {
             screenshot_scenario_assertion(
                 ScreenshotScenario::ExportDrawer,
                 &app.make_canvas_view_state(),
+            )
+            .is_ok()
+        );
+        let mut sphere_export_app = ready_fixture_state_test_app(
+            shape_foundry_catalog::sphere_primitive::fixture_catalog(),
+        );
+        sphere_export_app.drawer = Some(FoundryDrawer::Export);
+        assert!(
+            screenshot_scenario_assertion(
+                ScreenshotScenario::SphereExportDrawer,
+                &sphere_export_app.make_canvas_view_state(),
             )
             .is_ok()
         );
@@ -10530,6 +10890,122 @@ mod tests {
             assert!(
                 !simple_make_copy.contains(forbidden),
                 "Flat Panel baseline copy must not expose {forbidden}: {simple_make_copy}"
+            );
+        }
+        assert!(
+            simple_make_copy.contains("not a textured, rigged, animated, or game-ready package")
+        );
+    }
+
+    #[test]
+    fn sphere_primitive_make_baseline_flow_is_plain_and_complete() {
+        let fixture = shape_foundry_catalog::sphere_primitive::fixture_catalog();
+        let mut app = ready_fixture_state_test_app(fixture.clone());
+        let ready = app.make_canvas_view_state();
+
+        assert_eq!(ready.mode, MakeCanvasMode::Ready);
+        assert!(ready.direct_primitive_workflow);
+        assert!(ready.simple_box_make_baseline);
+        assert_eq!(ready.primary_action_label, ACTION_ADJUST_DIMENSIONS);
+        assert_eq!(ready.property_panel_title, ACTION_EDIT_SPHERE_PRIMITIVE);
+        assert_eq!(
+            ready.property_labels,
+            vec!["Width", "Height", "Depth", "Front Flatten", "Back Flatten"]
+        );
+        assert_eq!(
+            ready.next_action_hint,
+            "Adjust dimensions, Add to Pack, or Export current primitive."
+        );
+        assert!(!ready.candidate_tray_visible);
+        assert!(!ready.selected_comparison_visible);
+        assert!(!app.material_look_action_visible(&ready));
+        assert!(!ready.material_look_tray_visible);
+        assert_eq!(app.material_look_export_copy(), None);
+        assert_eq!(
+            app.current_export_copy(),
+            (
+                SPHERE_PRIMITIVE_EXPORT_TITLE,
+                SPHERE_PRIMITIVE_EXPORT_DETAIL
+            )
+        );
+        let controls = app
+            .state
+            .current_output
+            .as_ref()
+            .expect("compiled sphere output")
+            .catalog
+            .customizer_profile
+            .controls
+            .iter()
+            .filter(|control| control.primary && control.visible)
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            controls,
+            vec!["Width", "Height", "Depth", "Front Flatten", "Back Flatten"]
+        );
+        assert!(app.make_primary_candidate_command().is_none());
+
+        let preset_commands =
+            shape_foundry_catalog::sphere_primitive::knob_like_form_preset_values()
+                .into_iter()
+                .map(|(control_id, value)| FoundryCommand::SetControl { control_id, value })
+                .collect();
+        let preset_effects = app
+            .state
+            .handle_command(FoundryAppCommand::RunFoundryCommandProgram {
+                label: "Knob-like form".to_owned(),
+                commands: preset_commands,
+            })
+            .expect("preset schedules");
+        let preset_event = run_fixture_effect(preset_effects, &fixture);
+        assert!(app.state.handle_job_event(preset_event));
+        assert_eq!(
+            app.state
+                .document
+                .as_ref()
+                .and_then(|document| document.control_state.get("back_flatten")),
+            Some(&shape_foundry::ControlValue::Scalar(0.42))
+        );
+
+        let pack_effects = app
+            .state
+            .handle_command(app.add_current_to_pack_command().expect("pack command"))
+            .expect("Add to Pack schedules");
+        let pack_event = run_fixture_effect(pack_effects, &fixture);
+        assert!(app.state.handle_job_event(pack_event));
+        assert_eq!(app.state.pack.members.len(), 1);
+
+        app.drawer = Some(FoundryDrawer::Pack);
+        assert!(app.make_canvas_view_state().pack_drawer_visible);
+        app.drawer = Some(FoundryDrawer::Export);
+        assert!(app.make_canvas_view_state().export_drawer_visible);
+
+        let simple_make_copy = [
+            ready.primary_action_label.as_str(),
+            ready.property_panel_title,
+            SPHERE_PRIMITIVE_EXPORT_TITLE,
+            SPHERE_PRIMITIVE_EXPORT_DETAIL,
+            BOX_PRIMITIVE_EXPORT_LIMITATION,
+            ACTION_ADD_TO_PACK,
+            ACTION_EXPORT_CURRENT_PRIMITIVE,
+        ]
+        .join("\n")
+        .to_ascii_lowercase();
+        for forbidden in [
+            "door",
+            "material looks",
+            "focus part",
+            "open",
+            "close",
+            "try ideas",
+            "candidate",
+            "sculpt",
+            "vertex",
+        ] {
+            assert!(
+                !simple_make_copy.contains(forbidden),
+                "Sphere Primitive baseline copy must not expose {forbidden}: {simple_make_copy}"
             );
         }
         assert!(

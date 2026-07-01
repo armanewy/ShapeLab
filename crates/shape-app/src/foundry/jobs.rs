@@ -59,6 +59,8 @@ pub(crate) enum FoundryJobRequest {
         width: u32,
         /// Requested image height.
         height: u32,
+        /// Optional explicit orbit camera for user-controlled viewport renders.
+        camera: Option<OrbitCamera>,
     },
     /// Render a whole-model preview for a transient control value without persisting it.
     PreviewControlValue {
@@ -327,8 +329,9 @@ pub(crate) fn run_foundry_job(
             output,
             width,
             height,
+            camera,
             ..
-        } => render_preview(job_id, &output, width, height, preview_cache),
+        } => render_preview(job_id, &output, width, height, camera, preview_cache),
         FoundryJobRequest::PreviewControlValue {
             document,
             control_id,
@@ -470,7 +473,8 @@ fn render_preview(
     output: &FoundryCompilationOutput,
     width: u32,
     height: u32,
-    preview_cache: &mut FoundryPreviewCache,
+    camera: Option<OrbitCamera>,
+    _preview_cache: &mut FoundryPreviewCache,
 ) -> Result<FoundryJobEvent, String> {
     let mesh = preview_mesh_from_output(output);
     let readable_camera = readable_preview_camera_for_output(
@@ -478,34 +482,10 @@ fn render_preview(
         mesh.bounds,
         width as f32 / height.max(1) as f32,
     );
-    if width == height
-        && readable_camera.is_none()
-        && let Some(resolution) = FoundryPreviewResolution::from_pixels(width)
-    {
-        let request = foundry_preview_request(output);
-        let mut batch =
-            FoundryPreviewBatchRequest::new("current-document", vec![request], resolution);
-        batch.max_parallel_jobs = 1;
-        let rendered = preview_cache
-            .render_batch(batch)
-            .map_err(|error| error.to_string())?;
-        let preview = rendered
-            .previews
-            .into_iter()
-            .next()
-            .ok_or_else(|| "preview batch did not return an image".to_owned())?;
-        return Ok(FoundryJobEvent::PreviewRendered {
-            job_id,
-            preview_id: preview.preview_id,
-            rgba8: preview.image.rgba8,
-            width: preview.image.width,
-            height: preview.image.height,
-            camera: preview.camera,
-            build: Some(output.build_stamp.clone()),
-        });
-    }
-
-    let camera = readable_camera.unwrap_or_else(|| fit_camera_to_bounds(mesh.bounds));
+    let camera = camera
+        .map(|camera| camera.clamped())
+        .or(readable_camera)
+        .unwrap_or_else(|| fit_camera_to_bounds(mesh.bounds));
     let settings = clay_readability_render_settings(width, height);
     let image = render_mesh(&mesh, &camera, &settings).map_err(|error| error.to_string())?;
     Ok(FoundryJobEvent::PreviewRendered {
@@ -595,17 +575,7 @@ fn render_transient_control_preview(
     let output = compile_foundry_document(&preview_document, resolver)
         .map_err(|error| format!("{error:?}"))?;
     let (width, height) = size;
-    render_preview(job_id, &output, width, height, preview_cache)
-}
-
-fn foundry_preview_request(output: &FoundryCompilationOutput) -> FoundryPreviewRequest {
-    preview_request_for_output(
-        CURRENT_PREVIEW_ID,
-        FoundryPreviewKind::ChangedRoleOverlay {
-            role: "current".to_owned(),
-        },
-        output,
-    )
+    render_preview(job_id, &output, width, height, None, preview_cache)
 }
 
 fn preview_request_for_output(
@@ -1385,6 +1355,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn current_preview_preserves_clay_readability_edge_aids() {
+        let fixture = shape_foundry_catalog::sphere_primitive::fixture_catalog();
+        let output =
+            compile_foundry_document(&fixture.document, &fixture).expect("fixture should compile");
+        let event = render_preview(
+            1,
+            &output,
+            128,
+            128,
+            None,
+            &mut FoundryPreviewCache::default(),
+        )
+        .expect("current preview should render");
+
+        let FoundryJobEvent::PreviewRendered {
+            rgba8,
+            width,
+            height,
+            ..
+        } = event
+        else {
+            panic!("expected preview event");
+        };
+        let background = clay_readability_render_settings(width, height).background;
+        let colors = unique_foreground_colors(&rgba8, background);
+
+        assert!(
+            colors.len() > 3,
+            "current previews should preserve lit clay and edge-aid colors"
+        );
+        assert!(
+            colors
+                .keys()
+                .any(|[red, green, blue]| red != green || green != blue),
+            "current previews must not be flattened to comparison gray bands"
+        );
+    }
+
+    #[test]
     fn preview_legibility_filter_promotes_rendered_selectable_candidate() {
         let parent = solid_rgba(16, 16, [16, 20, 24, 255]);
         let candidate = solid_rgba(16, 16, [220, 230, 238, 255]);
@@ -1454,5 +1463,16 @@ mod tests {
             focus_part_label: None,
             surface_unavailable_reason: None,
         }
+    }
+
+    fn unique_foreground_colors(rgba8: &[u8], background: [u8; 4]) -> BTreeMap<[u8; 3], usize> {
+        let mut colors = BTreeMap::new();
+        for pixel in rgba8.chunks_exact(4) {
+            if [pixel[0], pixel[1], pixel[2], pixel[3]] == background {
+                continue;
+            }
+            *colors.entry([pixel[0], pixel[1], pixel[2]]).or_insert(0) += 1;
+        }
+        colors
     }
 }

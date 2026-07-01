@@ -21,6 +21,7 @@ use shape_foundry::{
 
 use crate::{
     FoundryFixtureCatalog, box_primitive, built_in_fixture_catalogs_with_labels, flat_panel,
+    sphere_primitive,
 };
 
 /// Return every built-in Visual Foundry profile as a curated kit package.
@@ -537,6 +538,7 @@ fn built_in_quality_tier(slug: &str) -> FoundryKitQualityTier {
         box_primitive::BOX_PRIMITIVE_SLUG
         | box_primitive::LIDDED_BOX_SLUG
         | flat_panel::FLAT_PANEL_PRIMITIVE_SLUG
+        | sphere_primitive::SPHERE_PRIMITIVE_SLUG
         | flat_panel::HINGED_PANEL_SLUG
         | flat_panel::HANDLED_PANEL_SLUG => FoundryKitQualityTier::Usable,
         _ => FoundryKitQualityTier::Prototype,
@@ -548,6 +550,7 @@ fn product_category_chips(slug: &str) -> Vec<String> {
         box_primitive::BOX_PRIMITIVE_SLUG => vec!["Primitive", "Box"],
         box_primitive::LIDDED_BOX_SLUG => vec!["Box", "Lidded"],
         flat_panel::FLAT_PANEL_PRIMITIVE_SLUG => vec!["Primitive", "Panel"],
+        sphere_primitive::SPHERE_PRIMITIVE_SLUG => vec!["Primitive", "Round"],
         flat_panel::HINGED_PANEL_SLUG => vec!["Panel", "Hinged"],
         flat_panel::HANDLED_PANEL_SLUG => vec!["Panel", "Handled"],
         _ => vec!["Asset"],
@@ -562,6 +565,7 @@ fn normalize_kit_slug(slug: &str) -> String {
         "box" | "box_primitive" => box_primitive::BOX_PRIMITIVE_SLUG.to_owned(),
         "lidded_box" => box_primitive::LIDDED_BOX_SLUG.to_owned(),
         "flat_panel" | "panel" => flat_panel::FLAT_PANEL_PRIMITIVE_SLUG.to_owned(),
+        "sphere" | "sphere_primitive" => sphere_primitive::SPHERE_PRIMITIVE_SLUG.to_owned(),
         "hinged_panel" => flat_panel::HINGED_PANEL_SLUG.to_owned(),
         "handled_panel" => flat_panel::HANDLED_PANEL_SLUG.to_owned(),
         other => other.to_owned(),
@@ -577,7 +581,7 @@ mod tests {
     #[test]
     fn built_in_profiles_have_valid_kit_metadata() {
         let packages = built_in_foundry_kit_packages_with_labels();
-        assert_eq!(packages.len(), 4);
+        assert_eq!(packages.len(), 6);
         for (label, package) in packages {
             let report = validate_foundry_kit_package(&package);
             assert!(
@@ -645,6 +649,21 @@ mod tests {
             Some(flat_panel::HINGED_PANEL_SLUG)
         );
         assert_eq!(hinged_package.kit.category_chips, vec!["Panel", "Hinged"]);
+
+        let sphere_package = built_in_foundry_kit_package(sphere_primitive::SPHERE_PRIMITIVE_SLUG)
+            .expect("sphere kit");
+        assert_eq!(
+            sphere_package.kit.quality_tier,
+            FoundryKitQualityTier::Usable
+        );
+        assert_eq!(
+            sphere_package.kit.source_profile_slug.as_deref(),
+            Some(sphere_primitive::SPHERE_PRIMITIVE_SLUG)
+        );
+        assert_eq!(
+            sphere_package.kit.category_chips,
+            vec!["Primitive", "Round"]
+        );
 
         let handled_package =
             built_in_foundry_kit_package(flat_panel::HANDLED_PANEL_SLUG).expect("handled kit");

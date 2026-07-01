@@ -164,7 +164,15 @@ pub fn visual_foundry_product_ui_gate_report() -> Result<ProductUiGateReport, St
     let active_variation_ui_retired = retired_terms
         .iter()
         .all(|term| !joined_lower.contains(term));
-    let direct_property_labels = vec!["Width", "Depth", "Height", "Thickness", "Edge Softness"];
+    let direct_property_labels = vec![
+        "Width",
+        "Depth",
+        "Height",
+        "Thickness",
+        "Edge Softness",
+        "Front Flatten",
+        "Back Flatten",
+    ];
     let direct_property_gate = direct_property_labels
         .iter()
         .all(|label| visible_strings.contains(label))
@@ -273,13 +281,21 @@ mod tests {
         assert_eq!(report.app_shell, "direct_visual_foundry");
         assert!(report.product_home_profiles > 0);
         assert_eq!(report.product_home_profiles, report.installed_kit_count);
-        assert_eq!(report.installed_kit_count, 5);
-        assert_eq!(report.developer_preview_kit_count, 5);
+        assert_eq!(report.installed_kit_count, 6);
+        assert_eq!(report.developer_preview_kit_count, 6);
         assert!(report.active_variation_ui_retired);
         assert!(report.direct_property_gate);
         assert_eq!(
             report.direct_property_labels,
-            vec!["Width", "Depth", "Height", "Thickness", "Edge Softness"]
+            vec![
+                "Width",
+                "Depth",
+                "Height",
+                "Thickness",
+                "Edge Softness",
+                "Front Flatten",
+                "Back Flatten"
+            ]
         );
         assert!(report.manual_gate_required);
     }

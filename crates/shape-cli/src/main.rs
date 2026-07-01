@@ -452,7 +452,6 @@ struct ReleaseProductUiGate {
     startup_blank: bool,
     default_advanced_recipe_visible: bool,
     default_raw_technical_terms_visible: bool,
-    directions_board_gate: &'static str,
     customize_deck_gate: &'static str,
     pack_gate: &'static str,
     export_gate: &'static str,
@@ -468,8 +467,6 @@ struct ReleaseProductUiGateEvidence {
     rendered_action_labels_audited: bool,
     forbidden_terms_found: Vec<ReleaseProductForbiddenTermFinding>,
     core_profiles: Vec<ReleaseProductUiProfileEvidence>,
-    direction_modes: Vec<&'static str>,
-    direction_candidate_slots: usize,
     automated_gate_passed: bool,
 }
 
@@ -1749,7 +1746,6 @@ fn unverified_release_product_ui_gate() -> ReleaseProductUiGate {
         startup_blank: false,
         default_advanced_recipe_visible: false,
         default_raw_technical_terms_visible: false,
-        directions_board_gate: "not-run",
         customize_deck_gate: "not-run",
         pack_gate: "not-run",
         export_gate: "not-run",
@@ -1777,7 +1773,6 @@ fn verified_release_product_ui_gate() -> anyhow::Result<ReleaseProductUiGate> {
         startup_blank: report.startup_blank,
         default_advanced_recipe_visible: report.default_advanced_recipe_visible,
         default_raw_technical_terms_visible: report.default_raw_technical_terms_visible,
-        directions_board_gate: gate_label(report.directions_board_gate),
         customize_deck_gate: gate_label(report.customize_deck_gate),
         pack_gate: gate_label(report.pack_gate),
         export_gate: gate_label(report.export_gate),
@@ -1808,8 +1803,6 @@ fn verified_release_product_ui_gate() -> anyhow::Result<ReleaseProductUiGate> {
                     triangle_count: profile.triangle_count,
                 })
                 .collect(),
-            direction_modes: report.direction_modes,
-            direction_candidate_slots: report.direction_candidate_slots,
             automated_gate_passed: true,
         }),
     })
