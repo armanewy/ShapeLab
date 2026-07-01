@@ -1,9 +1,11 @@
 use shape_foundry::{
     DirectKitCreatedFrom, DirectKitDraft, DirectKitEvidenceKind, DirectKitEvidenceRef,
     DirectKitEvidenceStatus, DirectKitPresetRef, DirectKitSourceKind, DirectKitUserSummary,
-    DirectKitValidationReport, DirectKitVisibility, ObjectPlanReviewTier, PresetSource,
+    DirectKitValidationReport, DirectKitVisibility, KitCapabilityAvailability, KitCapabilityCard,
+    KitCapabilitySourceKind, KitCapabilityValidationReport, ObjectPlanReviewTier, PresetSource,
     PrimitiveKind, direct_kit_property_exposures_for_primitive, direct_kit_user_summary,
-    validate_direct_kit_draft,
+    kit_capability_cards_for_panel_with_knob, kit_capability_cards_for_primitive,
+    validate_direct_kit_draft, validate_kit_capability_card, validate_kit_capability_cards,
 };
 
 #[test]
@@ -139,6 +141,112 @@ fn direct_kit_serde_roundtrip_is_deterministic() {
     assert_eq!(kit, decoded);
 }
 
+#[test]
+fn direct_kit_box_capability_cards_include_dimensions_and_edge_softness() {
+    let cards = kit_capability_cards_for_primitive(PrimitiveKind::BoxPrimitive, false);
+
+    assert_valid_cards(&cards);
+    assert_card(&cards, "Width");
+    assert_card(&cards, "Depth");
+    assert_card(&cards, "Height");
+    assert_card(&cards, "Edge Softness");
+}
+
+#[test]
+fn direct_kit_flat_panel_capability_cards_include_dimensions_thickness_and_edge_softness() {
+    let cards = kit_capability_cards_for_primitive(PrimitiveKind::FlatPanelPrimitive, false);
+
+    assert_valid_cards(&cards);
+    assert_card(&cards, "Width");
+    assert_card(&cards, "Height");
+    assert_card(&cards, "Thickness");
+    assert_card(&cards, "Edge Softness");
+}
+
+#[test]
+fn direct_kit_sphere_capability_cards_include_dimensions_and_flattening() {
+    let cards = kit_capability_cards_for_primitive(PrimitiveKind::SpherePrimitive, false);
+
+    assert_valid_cards(&cards);
+    assert_card(&cards, "Width");
+    assert_card(&cards, "Height");
+    assert_card(&cards, "Depth");
+    assert_card(&cards, "Front Flatten");
+    assert_card(&cards, "Back Flatten");
+}
+
+#[test]
+fn direct_kit_panel_with_knob_capability_cards_include_panel_and_knob_controls() {
+    let cards = kit_capability_cards_for_panel_with_knob(false);
+
+    assert_valid_cards(&cards);
+    assert_card(&cards, "Panel Width");
+    assert_card(&cards, "Knob Width");
+    assert_card(&cards, "Knob Position");
+    assert!(
+        cards
+            .iter()
+            .any(|card| card.source_kind == KitCapabilitySourceKind::CompositionOffset)
+    );
+}
+
+#[test]
+fn direct_kit_material_look_card_is_later_when_surface_evidence_missing() {
+    let cards = kit_capability_cards_for_primitive(PrimitiveKind::BoxPrimitive, false);
+    let card = cards
+        .iter()
+        .find(|card| card.display_name == "Material Look")
+        .expect("material look card exists");
+
+    assert_eq!(card.availability, KitCapabilityAvailability::Later);
+    assert!(card.reason.blocked_reason.is_some());
+    assert!(!card.reason.requirements_satisfied);
+}
+
+#[test]
+fn direct_kit_capability_cards_do_not_use_generated_variation_or_technical_copy() {
+    let mut cards = kit_capability_cards_for_panel_with_knob(false);
+    cards.extend(kit_capability_cards_for_primitive(
+        PrimitiveKind::SpherePrimitive,
+        false,
+    ));
+
+    assert_valid_cards(&cards);
+    for card in &cards {
+        assert_card_copy_safe(card);
+    }
+
+    let mut invalid = cards[0].clone();
+    invalid.description = "Generated variation candidate from provider slot.".to_owned();
+    let report = validate_kit_capability_card(&invalid);
+    assert_card_issue(&report, "kit_capability_user_copy_forbidden_term");
+}
+
+#[test]
+fn direct_kit_capability_unknown_property_mapping_rejected() {
+    let mut card = kit_capability_cards_for_primitive(PrimitiveKind::BoxPrimitive, false)
+        .into_iter()
+        .find(|card| card.display_name == "Width")
+        .expect("width card exists");
+    card.maps_to = "unknown_width".to_owned();
+
+    let report = validate_kit_capability_card(&card);
+
+    assert_card_issue(&report, "kit_capability_unknown_mapping");
+}
+
+#[test]
+fn direct_kit_capability_serde_roundtrip_is_deterministic() {
+    let cards = kit_capability_cards_for_primitive(PrimitiveKind::FlatPanelPrimitive, false);
+
+    let first = serde_json::to_string(&cards).expect("cards serialize");
+    let decoded = serde_json::from_str::<Vec<KitCapabilityCard>>(&first).expect("cards decode");
+    let second = serde_json::to_string(&decoded).expect("cards serialize again");
+
+    assert_eq!(first, second);
+    assert_eq!(cards, decoded);
+}
+
 fn primitive_kit(primitive_kind: PrimitiveKind, source_ref: &str) -> DirectKitDraft {
     let mut exposures = direct_kit_property_exposures_for_primitive(primitive_kind);
     let locked_properties = exposures.split_off(1);
@@ -239,4 +347,72 @@ fn assert_summary_safe(summary: &DirectKitUserSummary) {
     }
     assert!(!lower.contains("generated variation"));
     assert!(!lower.contains("public catalog"));
+}
+
+fn assert_valid_cards(cards: &[KitCapabilityCard]) {
+    let report = validate_kit_capability_cards(cards);
+    assert!(
+        report.is_valid(),
+        "expected valid capability cards, got {report:?}"
+    );
+}
+
+fn assert_card(cards: &[KitCapabilityCard], display_name: &str) {
+    assert!(
+        cards.iter().any(|card| card.display_name == display_name),
+        "missing capability card {display_name}; got {:?}",
+        cards
+            .iter()
+            .map(|card| card.display_name.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+fn assert_card_issue(report: &KitCapabilityValidationReport, expected_code: &str) {
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == expected_code),
+        "missing capability issue {expected_code}; got {:?}",
+        report.issues
+    );
+}
+
+fn assert_card_copy_safe(card: &KitCapabilityCard) {
+    let text = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        card.display_name,
+        card.description,
+        card.reason.plain_language_reason,
+        card.reason.suggested_next_action,
+        card.reason.blocked_reason.as_deref().unwrap_or_default()
+    );
+    let lower = text.to_ascii_lowercase();
+    for forbidden in [
+        "kernel",
+        "module",
+        "provider",
+        "slot",
+        "topology",
+        "fingerprint",
+        "conformance",
+        "artifact",
+        "raw transform",
+        "mesh payload",
+        "generated variation",
+        "candidate",
+        "runtime llm",
+        "public catalog",
+        "publish",
+        "uv",
+        "rigging",
+        "animation",
+        "game-ready",
+    ] {
+        assert!(
+            !lower.contains(forbidden),
+            "card should not expose {forbidden}: {text}"
+        );
+    }
 }
