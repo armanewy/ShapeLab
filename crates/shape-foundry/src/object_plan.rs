@@ -201,6 +201,172 @@ pub struct ObjectPlanUserSummary {
     pub review_summary: String,
 }
 
+/// Request to turn a validated ObjectPlan into an internal draft graph.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectPlanMaterializationRequest {
+    /// Source ObjectPlan.
+    pub plan: ObjectPlan,
+    /// Materialization safety policy.
+    pub materialization_policy: MaterializationPolicy,
+    /// Product-safe preview target, such as "clay-review".
+    pub target_preview_profile: String,
+    /// Output mode for the draft.
+    pub output_mode: ObjectPlanMaterializationOutputMode,
+}
+
+/// Safety policy for ObjectPlan materialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializationPolicy {
+    /// Validation must pass before any draft can be materialized.
+    pub require_valid_plan: bool,
+    /// Primitive kinds must be supported by this materializer.
+    pub require_supported_primitives: bool,
+    /// Attachments must be supported by this materializer.
+    pub require_supported_attachments: bool,
+    /// Keep product-facing node labels in draft instances.
+    pub preserve_node_labels: bool,
+    /// Catalog publishing is forbidden from materialization.
+    pub forbid_catalog_publish: bool,
+}
+
+impl Default for MaterializationPolicy {
+    fn default() -> Self {
+        Self {
+            require_valid_plan: true,
+            require_supported_primitives: true,
+            require_supported_attachments: true,
+            preserve_node_labels: true,
+            forbid_catalog_publish: true,
+        }
+    }
+}
+
+/// Output mode for a materialized ObjectPlan.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum ObjectPlanMaterializationOutputMode {
+    /// Internal draft for review evidence.
+    DraftReview,
+}
+
+/// Materialization status.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum MaterializationStatus {
+    /// All supported nodes and attachments materialized.
+    Passed,
+    /// Some supported content materialized and unresolved content was reported.
+    Partial,
+    /// Materialization failed.
+    Failed,
+}
+
+/// Materialized primitive instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializedPrimitiveInstance {
+    /// Source node ID.
+    pub node_id: String,
+    /// Supported primitive kind.
+    pub primitive_kind: PrimitiveKind,
+    /// Product-facing label.
+    pub display_name: String,
+    /// Validated property values.
+    pub property_values: BTreeMap<String, PrimitivePropertyValue>,
+    /// Whether review tools should avoid changing this instance.
+    pub locked: bool,
+}
+
+/// Unresolved primitive node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnresolvedObjectPlanNode {
+    /// Source node ID.
+    pub node_id: String,
+    /// Product-facing label.
+    pub display_name: String,
+    /// Reason the node was not materialized.
+    pub reason: String,
+}
+
+/// Unresolved attachment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnresolvedObjectPlanAttachment {
+    /// Source attachment ID.
+    pub attachment_id: String,
+    /// Parent node ID.
+    pub parent_node_id: String,
+    /// Child node ID.
+    pub child_node_id: String,
+    /// Reason the attachment was not materialized.
+    pub reason: String,
+}
+
+/// Materialized draft graph produced from an ObjectPlan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializedObjectDraft {
+    /// Stable draft ID.
+    pub draft_id: String,
+    /// Source ObjectPlan ID.
+    pub source_plan_id: String,
+    /// Materialization status.
+    pub status: MaterializationStatus,
+    /// Supported primitive instances.
+    pub primitive_instances: Vec<MaterializedPrimitiveInstance>,
+    /// Supported composition document.
+    pub composition_document: PrimitiveCompositionDocument,
+    /// Nodes that could not be materialized.
+    pub unresolved_nodes: Vec<UnresolvedObjectPlanNode>,
+    /// Attachments that could not be materialized.
+    pub unresolved_attachments: Vec<UnresolvedObjectPlanAttachment>,
+    /// Validation report used for this draft.
+    pub validation_report: ObjectPlanValidationReport,
+    /// Review tier for the draft.
+    pub review_tier: ObjectPlanReviewTier,
+    /// All materialized drafts require review.
+    pub user_review_required: bool,
+    /// Materialization never grants publishing rights.
+    pub publish_allowed: bool,
+}
+
+/// Product-safe materialization summary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializedObjectSummary {
+    /// Product-facing source plan label.
+    pub source_plan_label: String,
+    /// Supported primitive count.
+    pub supported_primitive_count: usize,
+    /// Unresolved primitive count.
+    pub unresolved_primitive_count: usize,
+    /// Supported attachment count.
+    pub supported_attachment_count: usize,
+    /// Unresolved attachment count.
+    pub unresolved_attachment_count: usize,
+    /// Human review is required.
+    pub user_review_required: bool,
+    /// Suggested next action.
+    pub next_action: MaterializedObjectNextAction,
+}
+
+/// Product-safe next action for a materialized draft.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum MaterializedObjectNextAction {
+    /// Review rendered evidence.
+    Review,
+    /// Simplify unsupported structure.
+    Simplify,
+    /// Regenerate from the source request.
+    Regenerate,
+    /// Stop until the blocker is resolved.
+    Blocked,
+}
+
 /// One ObjectPlan validation issue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -301,6 +467,144 @@ pub fn validate_object_plan(plan: &ObjectPlan) -> ObjectPlanValidationReport {
     );
 
     report
+}
+
+/// Materialize an ObjectPlan into an internal draft graph.
+#[must_use]
+pub fn materialize_object_plan(
+    request: ObjectPlanMaterializationRequest,
+) -> MaterializedObjectDraft {
+    let mut validation_report = validate_object_plan(&request.plan);
+    if !request.materialization_policy.forbid_catalog_publish {
+        validation_report.push(
+            "materialization_policy.forbid_catalog_publish",
+            "materialization_catalog_publish_forbidden",
+            "ObjectPlan materialization cannot enable catalog publishing.",
+        );
+    }
+
+    let validation_failed = !validation_report.is_valid();
+    let fail_on_invalid = request.materialization_policy.require_valid_plan && validation_failed;
+    let mut unresolved_nodes = Vec::new();
+    let mut unresolved_attachments = Vec::new();
+    let mut primitive_instances = Vec::new();
+
+    if fail_on_invalid {
+        unresolved_nodes.extend(
+            request
+                .plan
+                .nodes
+                .iter()
+                .map(|node| UnresolvedObjectPlanNode {
+                    node_id: node.node_id.clone(),
+                    display_name: node.display_name.clone(),
+                    reason: "Plan validation failed before materialization.".to_owned(),
+                }),
+        );
+        unresolved_attachments.extend(request.plan.attachments.iter().map(|attachment| {
+            UnresolvedObjectPlanAttachment {
+                attachment_id: attachment.attachment_id.clone(),
+                parent_node_id: attachment.parent_node_id.clone(),
+                child_node_id: attachment.child_node_id.clone(),
+                reason: "Plan validation failed before materialization.".to_owned(),
+            }
+        }));
+    } else {
+        for node in &request.plan.nodes {
+            if object_plan_materialization_supports_primitive(node.primitive_kind) {
+                primitive_instances.push(MaterializedPrimitiveInstance {
+                    node_id: node.node_id.clone(),
+                    primitive_kind: node.primitive_kind,
+                    display_name: if request.materialization_policy.preserve_node_labels {
+                        node.display_name.clone()
+                    } else {
+                        primitive_display_name(node.primitive_kind).to_owned()
+                    },
+                    property_values: node.property_values.clone(),
+                    locked: node.locked,
+                });
+            } else {
+                unresolved_nodes.push(UnresolvedObjectPlanNode {
+                    node_id: node.node_id.clone(),
+                    display_name: node.display_name.clone(),
+                    reason: "Primitive is not supported by ObjectPlan materialization v1."
+                        .to_owned(),
+                });
+            }
+        }
+
+        let supported_node_ids = primitive_instances
+            .iter()
+            .map(|instance| instance.node_id.as_str())
+            .collect::<BTreeSet<_>>();
+        for attachment in &request.plan.attachments {
+            if supported_node_ids.contains(attachment.parent_node_id.as_str())
+                && supported_node_ids.contains(attachment.child_node_id.as_str())
+                && object_plan_materialization_supports_attachment(attachment, &request.plan)
+            {
+                continue;
+            }
+            unresolved_attachments.push(UnresolvedObjectPlanAttachment {
+                attachment_id: attachment.attachment_id.clone(),
+                parent_node_id: attachment.parent_node_id.clone(),
+                child_node_id: attachment.child_node_id.clone(),
+                reason: "Attachment is not supported by ObjectPlan materialization v1.".to_owned(),
+            });
+        }
+    }
+
+    let status = if validation_failed
+        || (!unresolved_nodes.is_empty()
+            && request.materialization_policy.require_supported_primitives)
+        || (!unresolved_attachments.is_empty()
+            && request.materialization_policy.require_supported_attachments)
+    {
+        MaterializationStatus::Failed
+    } else if unresolved_nodes.is_empty() && unresolved_attachments.is_empty() {
+        MaterializationStatus::Passed
+    } else {
+        MaterializationStatus::Partial
+    };
+
+    let composition_document =
+        object_plan_materialized_composition_document(&request.plan, &primitive_instances, status);
+    MaterializedObjectDraft {
+        draft_id: format!("{}_draft", request.plan.plan_id),
+        source_plan_id: request.plan.plan_id,
+        status,
+        primitive_instances,
+        composition_document,
+        unresolved_nodes,
+        unresolved_attachments,
+        validation_report,
+        review_tier: ObjectPlanReviewTier::Draft,
+        user_review_required: true,
+        publish_allowed: false,
+    }
+}
+
+/// Build a product-safe summary for materialized ObjectPlan review.
+#[must_use]
+pub fn materialized_object_summary(
+    plan: &ObjectPlan,
+    draft: &MaterializedObjectDraft,
+) -> MaterializedObjectSummary {
+    MaterializedObjectSummary {
+        source_plan_label: plan.display_name.clone(),
+        supported_primitive_count: draft.primitive_instances.len(),
+        unresolved_primitive_count: draft.unresolved_nodes.len(),
+        supported_attachment_count: draft.composition_document.attachments.len(),
+        unresolved_attachment_count: draft.unresolved_attachments.len(),
+        user_review_required: draft.user_review_required,
+        next_action: match draft.status {
+            MaterializationStatus::Passed => MaterializedObjectNextAction::Review,
+            MaterializationStatus::Partial if !draft.primitive_instances.is_empty() => {
+                MaterializedObjectNextAction::Simplify
+            }
+            MaterializationStatus::Partial => MaterializedObjectNextAction::Regenerate,
+            MaterializationStatus::Failed => MaterializedObjectNextAction::Blocked,
+        },
+    }
 }
 
 /// Build a product-safe summary for review UI or offline reports.
@@ -550,6 +854,98 @@ fn object_plan_composition_document(plan: &ObjectPlan) -> PrimitiveCompositionDo
             .map(|node| node.node_id.clone())
             .unwrap_or_default(),
     }
+}
+
+fn object_plan_materialized_composition_document(
+    plan: &ObjectPlan,
+    primitive_instances: &[MaterializedPrimitiveInstance],
+    status: MaterializationStatus,
+) -> PrimitiveCompositionDocument {
+    let supported_node_ids = primitive_instances
+        .iter()
+        .map(|instance| instance.node_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let attachments =
+        if status == MaterializationStatus::Passed || status == MaterializationStatus::Partial {
+            plan.attachments
+                .iter()
+                .filter(|attachment| {
+                    supported_node_ids.contains(attachment.parent_node_id.as_str())
+                        && supported_node_ids.contains(attachment.child_node_id.as_str())
+                        && object_plan_materialization_supports_attachment(attachment, plan)
+                })
+                .map(|attachment| PrimitiveAttachment {
+                    attachment_id: attachment.attachment_id.clone(),
+                    parent_node_id: attachment.parent_node_id.clone(),
+                    parent_anchor_id: attachment.parent_anchor_id.clone(),
+                    child_node_id: attachment.child_node_id.clone(),
+                    child_anchor_id: attachment.child_anchor_id.clone(),
+                    offset_policy: attachment.offset.clone(),
+                    orientation_policy: attachment.orientation_policy,
+                    scale_policy: attachment.scale_policy,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+    PrimitiveCompositionDocument {
+        schema_version: crate::PRIMITIVE_COMPOSITION_SCHEMA_VERSION,
+        document_id: format!("{}_materialized", plan.plan_id),
+        nodes: primitive_instances
+            .iter()
+            .map(|instance| PrimitiveNode {
+                node_id: instance.node_id.clone(),
+                primitive_kind: instance.primitive_kind,
+                property_values: instance.property_values.clone(),
+                local_label: instance.display_name.clone(),
+                visibility: PrimitiveNodeVisibility::Visible,
+            })
+            .collect(),
+        attachments,
+        root_node_id: primitive_instances
+            .first()
+            .map(|instance| instance.node_id.clone())
+            .unwrap_or_default(),
+    }
+}
+
+fn object_plan_materialization_supports_primitive(primitive_kind: PrimitiveKind) -> bool {
+    matches!(
+        primitive_kind,
+        PrimitiveKind::BoxPrimitive
+            | PrimitiveKind::FlatPanelPrimitive
+            | PrimitiveKind::SpherePrimitive
+    )
+}
+
+fn object_plan_materialization_supports_attachment(
+    attachment: &ObjectPlanAttachment,
+    plan: &ObjectPlan,
+) -> bool {
+    let nodes = plan
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node.primitive_kind))
+        .collect::<BTreeMap<_, _>>();
+    matches!(
+        (
+            nodes.get(attachment.parent_node_id.as_str()).copied(),
+            nodes.get(attachment.child_node_id.as_str()).copied(),
+            attachment.parent_anchor_id.as_str(),
+            attachment.child_anchor_id.as_str(),
+            attachment.orientation_policy,
+            attachment.scale_policy,
+        ),
+        (
+            Some(PrimitiveKind::FlatPanelPrimitive),
+            Some(PrimitiveKind::SpherePrimitive),
+            "right_side_handle_zone",
+            "back_mount_point",
+            PrimitiveAttachmentOrientationPolicy::AlignChildToParentNormal,
+            PrimitiveAttachmentScalePolicy::KeepChildScale,
+        )
+    )
 }
 
 fn extend_property_report(

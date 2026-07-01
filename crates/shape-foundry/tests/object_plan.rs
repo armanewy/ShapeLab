@@ -1,12 +1,14 @@
 use shape_foundry::{
+    MaterializationPolicy, MaterializationStatus, MaterializedObjectNextAction,
     OBJECT_PLAN_SCHEMA_VERSION, ObjectPlan, ObjectPlanAttachment, ObjectPlanCreatedBy,
-    ObjectPlanNode, ObjectPlanProvenance, ObjectPlanRepairRisk, ObjectPlanRepairSuggestion,
-    ObjectPlanReviewTier, ObjectPlanUserSummary, ObjectPlanValidationPolicy,
-    ObjectPlanValidationReport, PrimitiveAttachmentOffsetPolicy,
-    PrimitiveAttachmentOrientationPolicy, PrimitiveAttachmentScalePolicy, PrimitiveKind,
-    PrimitivePropertyValue, flat_panel_primitive_property_schema, object_plan_user_summary,
-    primitive_default_property_values, sphere_primitive_property_schema, validate_object_plan,
-    validate_object_plan_repair_suggestion,
+    ObjectPlanMaterializationOutputMode, ObjectPlanMaterializationRequest, ObjectPlanNode,
+    ObjectPlanProvenance, ObjectPlanRepairRisk, ObjectPlanRepairSuggestion, ObjectPlanReviewTier,
+    ObjectPlanUserSummary, ObjectPlanValidationPolicy, ObjectPlanValidationReport,
+    PrimitiveAttachmentOffsetPolicy, PrimitiveAttachmentOrientationPolicy,
+    PrimitiveAttachmentScalePolicy, PrimitiveKind, PrimitivePropertyValue,
+    box_primitive_property_schema, flat_panel_primitive_property_schema, materialize_object_plan,
+    materialized_object_summary, object_plan_user_summary, primitive_default_property_values,
+    sphere_primitive_property_schema, validate_object_plan, validate_object_plan_repair_suggestion,
 };
 
 const DRAFT_PROMPT_PACK: &str =
@@ -62,6 +64,164 @@ fn object_plan_panel_plus_sphere_attachment_validates() {
         "right_side_handle_zone"
     );
     assert_eq!(plan.attachments[0].child_anchor_id, "back_mount_point");
+}
+
+#[test]
+fn object_plan_materialization_one_box_plan_passes() {
+    let plan = one_box_plan();
+    let draft = materialize_object_plan(materialization_request(plan.clone()));
+
+    assert_eq!(draft.status, MaterializationStatus::Passed);
+    assert_eq!(draft.source_plan_id, plan.plan_id);
+    assert_eq!(draft.primitive_instances.len(), 1);
+    assert_eq!(
+        draft.primitive_instances[0].primitive_kind,
+        PrimitiveKind::BoxPrimitive
+    );
+    assert!(draft.composition_document.attachments.is_empty());
+    assert!(draft.unresolved_nodes.is_empty());
+    assert!(draft.unresolved_attachments.is_empty());
+    assert!(draft.user_review_required);
+    assert!(!draft.publish_allowed);
+    assert_eq!(draft.review_tier, ObjectPlanReviewTier::Draft);
+}
+
+#[test]
+fn object_plan_materialization_flat_panel_plan_passes() {
+    let plan = one_flat_panel_plan();
+    let draft = materialize_object_plan(materialization_request(plan));
+
+    assert_eq!(draft.status, MaterializationStatus::Passed);
+    assert_eq!(draft.primitive_instances.len(), 1);
+    assert_eq!(
+        draft.primitive_instances[0].primitive_kind,
+        PrimitiveKind::FlatPanelPrimitive
+    );
+}
+
+#[test]
+fn object_plan_materialization_sphere_plan_passes() {
+    let plan = one_sphere_plan();
+    let draft = materialize_object_plan(materialization_request(plan));
+
+    assert_eq!(draft.status, MaterializationStatus::Passed);
+    assert_eq!(draft.primitive_instances.len(), 1);
+    assert_eq!(
+        draft.primitive_instances[0].primitive_kind,
+        PrimitiveKind::SpherePrimitive
+    );
+}
+
+#[test]
+fn object_plan_materialization_panel_plus_sphere_attachment_passes() {
+    let plan = panel_with_sphere_plan();
+    let draft = materialize_object_plan(materialization_request(plan));
+
+    assert_eq!(draft.status, MaterializationStatus::Passed);
+    assert_eq!(draft.primitive_instances.len(), 2);
+    assert_eq!(draft.composition_document.attachments.len(), 1);
+    assert_eq!(
+        draft.composition_document.attachments[0].attachment_id,
+        "panel_knob_attachment"
+    );
+    assert!(draft.unresolved_attachments.is_empty());
+}
+
+#[test]
+fn object_plan_materialization_invalid_plan_fails() {
+    let mut plan = one_box_plan();
+    plan.nodes[0]
+        .property_values
+        .insert("width".to_owned(), PrimitivePropertyValue::Length(99.0));
+
+    let draft = materialize_object_plan(materialization_request(plan));
+
+    assert_eq!(draft.status, MaterializationStatus::Failed);
+    assert!(draft.primitive_instances.is_empty());
+    assert_eq!(draft.unresolved_nodes.len(), 1);
+    assert!(
+        draft
+            .validation_report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "invalid_current_property_value" })
+    );
+}
+
+#[test]
+fn object_plan_materialization_raw_mesh_payload_fails_decode() {
+    let plan = one_box_plan();
+    let mut value = serde_json::to_value(&plan).expect("plan serializes");
+    value.as_object_mut().expect("plan is object").insert(
+        "raw_mesh_payload".to_owned(),
+        serde_json::json!({"vertices": [[0, 0, 0]]}),
+    );
+
+    assert!(serde_json::from_value::<ObjectPlan>(value).is_err());
+}
+
+#[test]
+fn object_plan_materialization_public_publish_request_fails() {
+    let mut plan = one_box_plan();
+    plan.validation_policy.allow_public_catalog_publish = true;
+
+    let draft = materialize_object_plan(materialization_request(plan));
+
+    assert_eq!(draft.status, MaterializationStatus::Failed);
+    assert!(!draft.publish_allowed);
+    assert!(
+        draft
+            .validation_report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "public_catalog_publish_rejected" })
+    );
+}
+
+#[test]
+fn object_plan_materialization_policy_cannot_enable_publish() {
+    let plan = one_box_plan();
+    let mut request = materialization_request(plan);
+    request.materialization_policy.forbid_catalog_publish = false;
+
+    let draft = materialize_object_plan(request);
+
+    assert_eq!(draft.status, MaterializationStatus::Failed);
+    assert!(!draft.publish_allowed);
+    assert!(
+        draft
+            .validation_report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "materialization_catalog_publish_forbidden" })
+    );
+}
+
+#[test]
+fn object_plan_materialization_summary_is_product_safe() {
+    let plan = panel_with_sphere_plan();
+    let draft = materialize_object_plan(materialization_request(plan.clone()));
+    let summary = materialized_object_summary(&plan, &draft);
+
+    assert_eq!(summary.source_plan_label, "Panel with knob");
+    assert_eq!(summary.supported_primitive_count, 2);
+    assert_eq!(summary.supported_attachment_count, 1);
+    assert!(summary.user_review_required);
+    assert_eq!(summary.next_action, MaterializedObjectNextAction::Review);
+    assert_materialized_summary_product_safe(&summary);
+}
+
+#[test]
+fn object_plan_materialization_serde_roundtrip_is_deterministic() {
+    let request = materialization_request(panel_with_sphere_plan());
+    let draft = materialize_object_plan(request);
+
+    let first = serde_json::to_string(&draft).expect("draft serializes");
+    let decoded = serde_json::from_str(&first).expect("draft decodes");
+    let second = serde_json::to_string(&decoded).expect("draft serializes again");
+
+    assert_eq!(first, second);
+    assert_eq!(draft, decoded);
 }
 
 #[test]
@@ -384,6 +544,44 @@ fn one_sphere_plan() -> ObjectPlan {
     }
 }
 
+fn one_box_plan() -> ObjectPlan {
+    ObjectPlan {
+        schema_version: OBJECT_PLAN_SCHEMA_VERSION,
+        plan_id: "box_plan".to_owned(),
+        display_name: "Box plan".to_owned(),
+        intent_summary: "One editable box primitive with bounded dimensions.".to_owned(),
+        nodes: vec![box_node()],
+        attachments: Vec::new(),
+        validation_policy: ObjectPlanValidationPolicy::default(),
+        review_tier: ObjectPlanReviewTier::Draft,
+        provenance: ObjectPlanProvenance {
+            created_by: ObjectPlanCreatedBy::Human,
+            source_prompt_hash: Some("box123".to_owned()),
+            source_seed_refs: vec!["seed_box".to_owned()],
+            created_at: "2026-07-01T00:00:00Z".to_owned(),
+        },
+    }
+}
+
+fn one_flat_panel_plan() -> ObjectPlan {
+    ObjectPlan {
+        schema_version: OBJECT_PLAN_SCHEMA_VERSION,
+        plan_id: "flat_panel_plan".to_owned(),
+        display_name: "Flat panel plan".to_owned(),
+        intent_summary: "One editable flat panel primitive with bounded dimensions.".to_owned(),
+        nodes: vec![panel_node()],
+        attachments: Vec::new(),
+        validation_policy: ObjectPlanValidationPolicy::default(),
+        review_tier: ObjectPlanReviewTier::Draft,
+        provenance: ObjectPlanProvenance {
+            created_by: ObjectPlanCreatedBy::Human,
+            source_prompt_hash: Some("panel123".to_owned()),
+            source_seed_refs: vec!["seed_panel".to_owned()],
+            created_at: "2026-07-01T00:00:00Z".to_owned(),
+        },
+    }
+}
+
 fn panel_with_sphere_plan() -> ObjectPlan {
     ObjectPlan {
         schema_version: OBJECT_PLAN_SCHEMA_VERSION,
@@ -431,6 +629,18 @@ fn panel_node() -> ObjectPlanNode {
     }
 }
 
+fn box_node() -> ObjectPlanNode {
+    let schema = box_primitive_property_schema();
+    ObjectPlanNode {
+        node_id: "box".to_owned(),
+        primitive_kind: PrimitiveKind::BoxPrimitive,
+        display_name: "Box".to_owned(),
+        property_values: primitive_default_property_values(&schema),
+        role_hint: "Simple box body".to_owned(),
+        locked: false,
+    }
+}
+
 fn sphere_node() -> ObjectPlanNode {
     let schema = sphere_primitive_property_schema();
     ObjectPlanNode {
@@ -440,6 +650,15 @@ fn sphere_node() -> ObjectPlanNode {
         property_values: primitive_default_property_values(&schema),
         role_hint: "Rounded attached form".to_owned(),
         locked: false,
+    }
+}
+
+fn materialization_request(plan: ObjectPlan) -> ObjectPlanMaterializationRequest {
+    ObjectPlanMaterializationRequest {
+        plan,
+        materialization_policy: MaterializationPolicy::default(),
+        target_preview_profile: "clay-review".to_owned(),
+        output_mode: ObjectPlanMaterializationOutputMode::DraftReview,
     }
 }
 
@@ -484,6 +703,27 @@ fn assert_summary_product_safe(summary: &ObjectPlanUserSummary) {
         assert!(
             !all_text.to_ascii_lowercase().contains(forbidden),
             "summary must not expose {forbidden}: {all_text}"
+        );
+    }
+}
+
+fn assert_materialized_summary_product_safe(summary: &shape_foundry::MaterializedObjectSummary) {
+    let text = serde_json::to_string(summary).expect("summary serializes");
+    let lower = text.to_ascii_lowercase();
+    for forbidden in [
+        "kernel",
+        "module",
+        "provider",
+        "slot",
+        "topology",
+        "fingerprint",
+        "conformance",
+        "artifact",
+        "raw transform",
+    ] {
+        assert!(
+            !lower.contains(forbidden),
+            "materialized summary exposed internal term {forbidden}: {text}"
         );
     }
 }
