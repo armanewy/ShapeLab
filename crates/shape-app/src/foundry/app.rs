@@ -465,7 +465,10 @@ const CONTROL_FILMSTRIP_LIMIT: usize = 5;
 const CONTROL_HEADER_ACTIONS_WIDTH: f32 = 304.0;
 const CONTROL_HEADER_STACK_BREAKPOINT: f32 = 520.0;
 const MAX_CURRENT_PREVIEW_PIXELS: u32 = DEFAULT_PREVIEW_PIXELS;
+const CURRENT_PREVIEW_MODEL_IMAGE_SCALE: f32 = 0.78;
 const CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT: f32 = 0.35;
+const COORDINATE_REFERENCE_GRID_STEPS: i32 = 8;
+const COORDINATE_REFERENCE_GRID_EXTENT: f32 = 1.18;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const OBJECT_PLAN_REVIEW_ENV_VAR: &str = "SHAPE_LAB_OBJECT_PLAN_REVIEW";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
@@ -8981,8 +8984,8 @@ fn draw_coordinate_reference_overlay(ui: &egui::Ui, rect: egui::Rect) {
     let origin = rect.center();
     let x_vector = egui::vec2(rect.width() * 0.50, rect.height() * 0.42);
     let y_vector = egui::vec2(rect.width() * 0.68, -rect.height() * 0.14);
-    let grid_steps = 12;
-    let grid_extent = 1.26;
+    let grid_steps = COORDINATE_REFERENCE_GRID_STEPS;
+    let grid_extent = COORDINATE_REFERENCE_GRID_EXTENT;
 
     for index in -grid_steps..=grid_steps {
         let offset = index as f32 / grid_steps as f32;
@@ -9103,11 +9106,14 @@ fn show_current_rgba_preview(
         preview.height,
     );
     if let Some(size) = scaled_preview_size(preview.width, preview.height, preview.max_edge) {
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let viewport_size = current_preview_viewport_size(ui.available_width(), preview.max_edge);
+        let model_size = current_preview_model_image_size(size);
+        let (rect, response) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
+        let image_rect = egui::Rect::from_center_size(rect.center(), model_size);
         draw_coordinate_reference_overlay(ui, rect);
         ui.painter().image(
             texture.id(),
-            rect,
+            image_rect,
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
@@ -9116,6 +9122,14 @@ fn show_current_rgba_preview(
     }
     let size = egui::vec2(preview.max_edge.max(1.0), preview.max_edge.max(1.0));
     ui.allocate_exact_size(size, egui::Sense::hover()).1
+}
+
+fn current_preview_viewport_size(available_width: f32, max_edge: f32) -> egui::Vec2 {
+    egui::vec2(available_width.max(max_edge).max(1.0), max_edge.max(1.0))
+}
+
+fn current_preview_model_image_size(size: egui::Vec2) -> egui::Vec2 {
+    size * CURRENT_PREVIEW_MODEL_IMAGE_SCALE
 }
 
 fn draw_preview_pending_placeholder(ui: &mut egui::Ui, max_edge: f32) -> egui::Response {
@@ -9495,6 +9509,18 @@ mod tests {
             egui::vec2(320.0, 160.0)
         );
         assert!(scaled_preview_size(0, 128, 256.0).is_none());
+    }
+
+    #[test]
+    fn current_preview_viewport_keeps_model_smaller_than_grid() {
+        assert_eq!(
+            current_preview_viewport_size(960.0, 520.0),
+            egui::vec2(960.0, 520.0)
+        );
+        assert_eq!(
+            current_preview_model_image_size(egui::vec2(520.0, 520.0)),
+            egui::vec2(405.59998, 405.59998)
+        );
     }
 
     #[test]
