@@ -2,10 +2,13 @@ use shape_foundry::{
     DirectKitCreatedFrom, DirectKitDraft, DirectKitEvidenceKind, DirectKitEvidenceRef,
     DirectKitEvidenceStatus, DirectKitPresetRef, DirectKitSourceKind, DirectKitUserSummary,
     DirectKitValidationReport, DirectKitVisibility, KitCapabilityAvailability, KitCapabilityCard,
-    KitCapabilitySourceKind, KitCapabilityValidationReport, ObjectPlanReviewTier, PresetSource,
-    PrimitiveKind, direct_kit_property_exposures_for_primitive, direct_kit_user_summary,
+    KitCapabilitySourceKind, KitCapabilityValidationReport, ObjectPlanReviewTier,
+    PersonalKitStoreValidationReport, PresetSource, PrimitiveKind,
+    direct_kit_property_exposures_for_primitive, direct_kit_user_summary,
     kit_capability_cards_for_panel_with_knob, kit_capability_cards_for_primitive,
+    list_personal_kits, load_direct_kit, personal_kit_store_root, save_direct_kit,
     validate_direct_kit_draft, validate_kit_capability_card, validate_kit_capability_cards,
+    validate_personal_kit_store,
 };
 
 #[test]
@@ -247,6 +250,116 @@ fn direct_kit_capability_serde_roundtrip_is_deterministic() {
     assert_eq!(cards, decoded);
 }
 
+#[test]
+fn direct_kit_personal_storage_saves_valid_draft() {
+    let store = test_store_dir("saves_valid_draft");
+    let kit = primitive_kit(PrimitiveKind::BoxPrimitive, "box_primitive");
+
+    let stored = save_direct_kit(&store, &kit).expect("save direct kit");
+
+    assert_eq!(stored.visibility, DirectKitVisibility::Draft);
+    assert!(!stored.novice_visible);
+    assert!(!stored.public_catalog_visible);
+    assert!(
+        personal_kit_store_root(&store)
+            .join("manifest.json")
+            .exists()
+    );
+    assert!(
+        personal_kit_store_root(&store)
+            .join("kits")
+            .join("box_primitive_kit")
+            .join("kit.json")
+            .exists()
+    );
+    assert_store_valid(&validate_personal_kit_store(&store));
+}
+
+#[test]
+fn direct_kit_personal_storage_saves_valid_personal_only() {
+    let store = test_store_dir("saves_valid_personal_only");
+    let mut kit = primitive_kit(PrimitiveKind::SpherePrimitive, "sphere_primitive");
+    kit.visibility = DirectKitVisibility::PersonalOnly;
+    kit.review_tier = ObjectPlanReviewTier::Personal;
+
+    let stored = save_direct_kit(&store, &kit).expect("save direct kit");
+
+    assert_eq!(stored.visibility, DirectKitVisibility::PersonalOnly);
+    assert!(!stored.public_catalog_visible);
+    assert_store_valid(&validate_personal_kit_store(&store));
+}
+
+#[test]
+fn direct_kit_personal_storage_list_and_load_roundtrip() {
+    let store = test_store_dir("list_and_load_roundtrip");
+    let kit = primitive_kit(PrimitiveKind::FlatPanelPrimitive, "flat_panel_primitive");
+    save_direct_kit(&store, &kit).expect("save direct kit");
+
+    let manifest = list_personal_kits(&store).expect("list personal kits");
+    let loaded = load_direct_kit(&store, "flat_panel_primitive_kit").expect("load direct kit");
+
+    assert_eq!(manifest.kits.len(), 1);
+    assert_eq!(
+        manifest.kits[0].kit_path,
+        "kits/flat_panel_primitive_kit/kit.json"
+    );
+    assert_eq!(loaded.direct_kit, kit);
+}
+
+#[test]
+fn direct_kit_personal_storage_rejects_invalid_public_visibility() {
+    let store = test_store_dir("rejects_invalid_public_visibility");
+    let mut kit = primitive_kit(PrimitiveKind::BoxPrimitive, "box_primitive");
+    kit.visibility = DirectKitVisibility::PublicCatalog;
+
+    let error = save_direct_kit(&store, &kit).expect_err("public visibility rejected");
+    let text = error.to_string();
+
+    assert!(text.contains("validation failed"));
+}
+
+#[test]
+fn direct_kit_personal_storage_rejects_absolute_paths() {
+    let store = test_store_dir("rejects_absolute_paths");
+    let mut kit = primitive_kit(PrimitiveKind::BoxPrimitive, "box_primitive");
+    kit.evidence_refs[0].path = "/tmp/evidence.json".to_owned();
+
+    let error = save_direct_kit(&store, &kit).expect_err("absolute path rejected");
+    let text = error.to_string();
+
+    assert!(text.contains("validation failed"));
+}
+
+#[test]
+fn direct_kit_personal_storage_manifest_is_deterministic() {
+    let first = test_store_dir("manifest_deterministic_first");
+    let second = test_store_dir("manifest_deterministic_second");
+    for store in [&first, &second] {
+        save_direct_kit(
+            store,
+            &primitive_kit(PrimitiveKind::BoxPrimitive, "box_primitive"),
+        )
+        .expect("save box kit");
+        save_direct_kit(
+            store,
+            &primitive_kit(PrimitiveKind::SpherePrimitive, "sphere_primitive"),
+        )
+        .expect("save sphere kit");
+    }
+
+    let first_manifest =
+        std::fs::read(personal_kit_store_root(&first).join("manifest.json")).expect("read first");
+    let second_manifest =
+        std::fs::read(personal_kit_store_root(&second).join("manifest.json")).expect("read second");
+
+    assert_eq!(first_manifest, second_manifest);
+    assert!(
+        !String::from_utf8_lossy(&first_manifest)
+            .to_ascii_lowercase()
+            .contains("public_catalog_visible\": true")
+    );
+}
+
 fn primitive_kit(primitive_kind: PrimitiveKind, source_ref: &str) -> DirectKitDraft {
     let mut exposures = direct_kit_property_exposures_for_primitive(primitive_kind);
     let locked_properties = exposures.split_off(1);
@@ -415,4 +528,21 @@ fn assert_card_copy_safe(card: &KitCapabilityCard) {
             "card should not expose {forbidden}: {text}"
         );
     }
+}
+
+fn assert_store_valid(report: &PersonalKitStoreValidationReport) {
+    assert!(report.is_valid(), "expected valid store, got {report:?}");
+}
+
+fn test_store_dir(name: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root")
+        .join("target")
+        .join("shape-foundry-direct-kit-tests")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("create test store dir");
+    path
 }
