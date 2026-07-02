@@ -1,6 +1,6 @@
-# Shape Lab Agent Rules
+# Object Orchard Agent Rules
 
-Shape Lab is a native, offline desktop application for preference-guided procedural 3D modeling. It must not contain browser code, a server, Blender integration, an LLM integration, or humanoid-specific engine concepts.
+Object Orchard is a native, offline desktop application for preference-guided procedural 3D modeling. It must not contain browser code, a server, Blender integration, an LLM integration, or humanoid-specific engine concepts.
 
 ## Required Commands
 

@@ -168,24 +168,24 @@ fn action_helpers_emit_foundry_app_commands() {
     assert_eq!(history::switch_revision_intent(RevisionId(3), true), None);
     assert_eq!(history::save_command(), FoundryAppCommand::Save);
     assert_eq!(
-        history::load_command("asset.shapelab-foundry.json"),
-        FoundryAppCommand::Load("asset.shapelab-foundry.json".into())
+        history::load_command("asset.object-orchard-foundry.json"),
+        FoundryAppCommand::Load("asset.object-orchard-foundry.json".into())
     );
     assert_eq!(
-        history::save_as_command("asset-copy.shapelab-foundry.json"),
-        FoundryAppCommand::SaveAs("asset-copy.shapelab-foundry.json".into())
+        history::save_as_command("asset-copy.object-orchard-foundry.json"),
+        FoundryAppCommand::SaveAs("asset-copy.object-orchard-foundry.json".into())
     );
     assert_eq!(
-        history::load_intent("asset.shapelab-foundry.json").dispatch,
+        history::load_intent("asset.object-orchard-foundry.json").dispatch,
         Some(history::FoundryHistoryActionDispatch::Command(
-            FoundryAppCommand::Load("asset.shapelab-foundry.json".into())
+            FoundryAppCommand::Load("asset.object-orchard-foundry.json".into())
         ))
     );
 }
 
 #[test]
 fn history_view_is_reachable_from_native_foundry_boundary() {
-    let path = PathBuf::from("history-asset.shapelab-foundry.json");
+    let path = PathBuf::from("history-asset.object-orchard-foundry.json");
     let state = state_with_clean_project(path, false);
 
     let view = foundry::build_foundry_history_view(&state);
@@ -201,7 +201,7 @@ fn history_view_is_reachable_from_native_foundry_boundary() {
 
 #[test]
 fn history_view_actions_include_load_and_enabled_dispatches() {
-    let path = PathBuf::from("history-asset.shapelab-foundry.json");
+    let path = PathBuf::from("history-asset.object-orchard-foundry.json");
     let state = state_with_clean_project(path, true);
 
     let view = history::build_history_view(&state);
@@ -261,7 +261,7 @@ fn state_with_clean_project(path: PathBuf, dirty: bool) -> FoundryAppState {
 #[test]
 fn save_load_status_formats_dirty_unsaved_and_recovery_states() {
     let clean = history::save_load_status(
-        Some(Path::new("asset.shapelab-foundry.json")),
+        Some(Path::new("asset.object-orchard-foundry.json")),
         true,
         false,
         false,
@@ -269,12 +269,12 @@ fn save_load_status_formats_dirty_unsaved_and_recovery_states() {
     assert_eq!(clean.state, history::FoundrySaveLoadState::CleanSaved);
     assert_eq!(
         clean.path_label.as_deref(),
-        Some("asset.shapelab-foundry.json")
+        Some("asset.object-orchard-foundry.json")
     );
     assert!(!clean.can_save);
 
     let dirty = history::save_load_status(
-        Some(Path::new("asset.shapelab-foundry.json")),
+        Some(Path::new("asset.object-orchard-foundry.json")),
         true,
         true,
         false,
@@ -297,7 +297,7 @@ fn save_load_status_formats_dirty_unsaved_and_recovery_states() {
     assert!(clean_without_path.can_save_as);
 
     let recovery = history::save_load_status(
-        Some(Path::new("asset.shapelab-foundry.json")),
+        Some(Path::new("asset.object-orchard-foundry.json")),
         true,
         true,
         true,

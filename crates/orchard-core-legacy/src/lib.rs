@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Low-level legacy document and modeling conventions for Shape Lab.
+//! Low-level legacy document and modeling conventions for Object Orchard.
 //!
 //! Boundary contract:
 //! - `orchard-core-legacy` owns useful low-level geometry conventions and legacy

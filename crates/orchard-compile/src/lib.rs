@@ -751,10 +751,10 @@ def create_scene():
         mesh.from_pydata(part["positions"], [], part["faces"])
         mesh.update(calc_edges=True)
         obj = bpy.data.objects.new(part["name"], mesh)
-        obj["shape_lab_instance_id"] = part["instance_id"]
-        obj["shape_lab_definition_id"] = part["definition_id"]
+        obj["object_orchard_instance_id"] = part["instance_id"]
+        obj["object_orchard_definition_id"] = part["definition_id"]
         if part["generated_by"] is not None:
-            obj["shape_lab_generated_by"] = part["generated_by"]
+            obj["object_orchard_generated_by"] = part["generated_by"]
         obj.data.materials.append(material(index))
         bpy.context.collection.objects.link(obj)
         if len(mesh.polygons) != len(part["faces"]):
@@ -768,7 +768,7 @@ def verify_reopen(path):
         obj = bpy.data.objects.get(part["name"])
         if obj is None:
             raise RuntimeError(f"missing object after reopen: {{part['name']}}")
-        if obj.get("shape_lab_instance_id") != part["instance_id"]:
+        if obj.get("object_orchard_instance_id") != part["instance_id"]:
             raise RuntimeError(f"semantic id mismatch after reopen: {{part['name']}}")
         if len(obj.data.polygons) != len(part["faces"]):
             raise RuntimeError(f"face count mismatch after reopen: {{part['name']}}")
@@ -2323,7 +2323,7 @@ mod tests {
         let script = write_blender_reconstruction_script(&artifact).expect("script");
 
         assert!(script.contains("PARTS ="));
-        assert!(script.contains("shape_lab_instance_id"));
+        assert!(script.contains("object_orchard_instance_id"));
     }
 
     #[test]

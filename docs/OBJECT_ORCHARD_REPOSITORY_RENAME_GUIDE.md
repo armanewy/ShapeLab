@@ -2,8 +2,9 @@
 
 Status: manual GitHub repository setting required
 
-The product, Rust packages, scripts, and local output paths now use Object
-Orchard naming. The GitHub repository host name may still need a manual rename.
+The product, Rust packages, scripts, project suffixes, metadata fields, and
+local output paths now use Object Orchard naming. The GitHub repository host
+name may still need a manual rename.
 
 Manual steps:
 
@@ -20,11 +21,12 @@ Until the GitHub setting is changed, the existing remote URL can continue to
 work through GitHub redirects after rename. Do not claim the repository host
 rename is complete until `git ls-remote origin` succeeds against the new URL.
 
-Remaining technical cleanup belongs to the final legacy-name purge:
+In-repo technical cleanup is complete:
 
-- durable schema and fingerprint IDs that still use legacy namespaces
-- generated DCC metadata fields that still use legacy keys
-- historical migration notes that intentionally mention the old repository name
+- durable schema and fingerprint IDs use Object Orchard namespaces
+- generated DCC metadata fields use Object Orchard keys
+- project file suffixes use Object Orchard names
+- historical migration notes intentionally mention the old repository name
 
 Prompt 10 audit classification:
 
@@ -34,5 +36,5 @@ Prompt 10 audit classification:
   `docs/OBJECT_ORCHARD_NAMING_TRANSITION.md`.
 - Generated artifact paths: target output is not committed.
 - External repository URL: pending the manual GitHub Settings rename above.
-- Deferred by contract: durable schema identifiers, fingerprint namespaces, and
-  DCC metadata field keys.
+- Completed by final purge: durable schema identifiers, fingerprint namespaces,
+  project file suffixes, and DCC metadata field keys.

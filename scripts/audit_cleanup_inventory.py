@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+OLD_PRODUCT_NAME = "Shape " + "Lab"
+OLD_REPOSITORY_NAME = "".join(["Shape", "Lab"])
+OLD_SLUG = "shape" + "-lab"
+
 OBSOLETE_TERMS = (
     "Sci-Fi Crate",
     "Cargo Case",
@@ -17,7 +21,9 @@ OBSOLETE_TERMS = (
     "generated variations",
     "Try ideas",
     "candidate tray",
-    "Object Orchard",
+    OLD_PRODUCT_NAME,
+    OLD_REPOSITORY_NAME,
+    OLD_SLUG,
 )
 
 COMMENT_TERMS = (

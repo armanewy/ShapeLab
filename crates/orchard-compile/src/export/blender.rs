@@ -246,7 +246,7 @@ def validate_created_object(obj, part):
         raise RuntimeError(f"topology mismatch in {obj.name}")
     if len(obj.data.vertices) != len(mesh_payload["positions"]):
         raise RuntimeError(f"vertex count mismatch in {obj.name}")
-    if obj.get("shape_lab_instance_id") != mesh_payload["instance_id"]:
+    if obj.get("object_orchard_instance_id") != mesh_payload["instance_id"]:
         raise RuntimeError(f"semantic ID mismatch in {obj.name}")
 
 
@@ -273,13 +273,13 @@ def create_scene(parts):
                 print(f"split normal assignment skipped for {part_manifest['object_name']}: {exc}")
         obj = bpy.data.objects.new(part_manifest["object_name"], mesh)
         obj.location = pivot
-        obj["shape_lab_instance_id"] = mesh_payload["instance_id"]
-        obj["shape_lab_definition_id"] = mesh_payload["definition_id"]
+        obj["object_orchard_instance_id"] = mesh_payload["instance_id"]
+        obj["object_orchard_definition_id"] = mesh_payload["definition_id"]
         if mesh_payload["prototype_instance_id"] is not None:
-            obj["shape_lab_prototype_instance_id"] = mesh_payload["prototype_instance_id"]
+            obj["object_orchard_prototype_instance_id"] = mesh_payload["prototype_instance_id"]
         if mesh_payload["generated_by"] is not None:
-            obj["shape_lab_generated_by"] = mesh_payload["generated_by"]
-        obj["shape_lab_regions"] = json.dumps(part_manifest.get("regions", []), sort_keys=True)
+            obj["object_orchard_generated_by"] = mesh_payload["generated_by"]
+        obj["object_orchard_regions"] = json.dumps(part_manifest.get("regions", []), sort_keys=True)
         bpy.context.collection.objects.link(obj)
         validate_created_object(obj, part)
         objects_by_id[mesh_payload["instance_id"]] = obj

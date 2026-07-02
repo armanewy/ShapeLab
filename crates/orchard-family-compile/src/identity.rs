@@ -128,7 +128,7 @@ pub fn fingerprint_serializable<T: Serialize>(
 #[must_use]
 pub fn fingerprint_bytes(domain: &str, bytes: &[u8]) -> ContentFingerprint {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"shape-lab.content-fingerprint.v1\0");
+    hasher.update(b"object-orchard.content-fingerprint.v1\0");
     hasher.update(domain.as_bytes());
     hasher.update(b"\0");
     hasher.update(bytes);

@@ -40,7 +40,7 @@ fn check_style_facets(
             continue;
         };
         let Ok(fingerprint) =
-            fingerprint_serializable("shape-lab.foundry-pack-style-facet.v1", member_id, facet)
+            fingerprint_serializable("object-orchard.foundry-pack-style-facet.v1", member_id, facet)
         else {
             issues.push(FoundryPackIssue {
                 subject: format!("members.{member_id}.style_facet"),
@@ -132,7 +132,7 @@ fn provider_semantic_signature(
     let mut semantic_fragment = fragment.clone();
     semantic_fragment.id.clear();
     let fingerprint = fingerprint_serializable(
-        "shape-lab.foundry-pack-provider-vocabulary.v1",
+        "object-orchard.foundry-pack-provider-vocabulary.v1",
         "provider_fragment",
         &semantic_fragment,
     )?;
@@ -312,7 +312,7 @@ fn geometry_fingerprint(
     output: &FoundryCompilationOutput,
 ) -> Result<ContentFingerprint, FingerprintError> {
     fingerprint_serializable(
-        "shape-lab.foundry-pack-geometry.v1",
+        "object-orchard.foundry-pack-geometry.v1",
         "combined_preview_mesh",
         &output.artifact.combined_preview.mesh,
     )

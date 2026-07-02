@@ -32,8 +32,9 @@ work, terrain, collision, motion, or prototype-pack expansion.
 ## Rename Status
 
 Object Orchard is the product name. The Rust crates, folders, command names,
-environment variables, and some repository-local paths still use legacy
-implementation names until the technical rename branches land.
+environment variables, repository-local paths, project suffixes, metadata
+fields, and generated evidence paths use Object Orchard naming. The external
+GitHub repository host setting may still require a manual rename.
 
 ## Documentation Status
 

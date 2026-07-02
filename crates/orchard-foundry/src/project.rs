@@ -15,8 +15,8 @@ use crate::{
     GeneratedRecipeSnapshot,
 };
 
-/// Distinct project kind marker used to reject unrelated Shape Lab project JSON.
-pub const FOUNDRY_PROJECT_KIND: &str = "shape-lab.foundry-project";
+/// Distinct project kind marker used to reject unrelated Object Orchard project JSON.
+pub const FOUNDRY_PROJECT_KIND: &str = "object-orchard.foundry-project";
 
 /// Stored command program that produced a foundry revision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ impl GeneratedRecipeSnapshot {
     pub fn from_recipe(recipe: &AssetRecipe) -> Result<Self, FoundryRecipeSnapshotError> {
         let canonical_json = canonical_json_for_serializable("instantiated_recipe", recipe)?;
         let recipe_fingerprint = RecipeFingerprint(
-            fingerprint_serializable("shape-lab.recipe.v1", "instantiated_recipe", recipe)
+            fingerprint_serializable("object-orchard.recipe.v1", "instantiated_recipe", recipe)
                 .map_err(|error| FoundryRecipeSnapshotError::Serialization {
                     subject: "instantiated_recipe".to_owned(),
                     error: error.to_string(),

@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn save_json_atomically_replaces_existing_file() {
         let temp_dir = tempdir();
-        let path = temp_dir.path().join("project.shapelab.json");
+        let path = temp_dir.path().join("project.object-orchard.json");
         let first = Project::new("First", test_document("Initial", 1.0));
         let second = Project::new("Second", test_document("Updated", 1.4));
 
@@ -839,7 +839,7 @@ mod tests {
     #[test]
     fn interrupted_temp_write_preserves_existing_project_file() {
         let temp_dir = tempdir();
-        let path = temp_dir.path().join("project.shapelab.json");
+        let path = temp_dir.path().join("project.object-orchard.json");
         let original = Project::new("Original", test_document("Initial", 1.0));
         original.save_json(&path).unwrap();
         let original_bytes = fs::read(&path).unwrap();
@@ -861,7 +861,9 @@ mod tests {
     #[test]
     fn failed_replacement_keeps_temporary_file_out_of_target() {
         let temp_dir = tempdir();
-        let path = temp_dir.path().join("project-directory.shapelab.json");
+        let path = temp_dir
+            .path()
+            .join("project-directory.object-orchard.json");
         fs::create_dir(&path).unwrap();
 
         let error = Project::new("Test", test_document("Initial", 1.0))
@@ -908,7 +910,7 @@ mod tests {
     #[test]
     fn future_schema_rejects_before_shape_deserialization() {
         let temp_dir = tempdir();
-        let path = temp_dir.path().join("future.shapelab.json");
+        let path = temp_dir.path().join("future.object-orchard.json");
         fs::write(
             &path,
             br#"{"schema_version":2,"future_payload":{"unknown":true}}"#,
@@ -944,11 +946,13 @@ mod tests {
     #[test]
     fn temp_file_prefix_is_scoped_to_target_name() {
         let temp_dir = tempdir();
-        let path = temp_dir.path().join("Unsafe Project Name!.shapelab.json");
+        let path = temp_dir
+            .path()
+            .join("Unsafe Project Name!.object-orchard.json");
 
         assert_eq!(
             project_temp_prefix(&path),
-            ".object-orchard-project-unsafe-project-name-shapelab-json-"
+            ".object-orchard-project-unsafe-project-name-object-orchard-json-"
         );
     }
 }

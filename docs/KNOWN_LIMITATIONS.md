@@ -22,10 +22,10 @@
 - Cleanup and rename work does not add product capability, product UI,
   materials, UVs, collision, motion, terrain, runtime LLM, public catalog
   publishing, Godot-ready output, or game-ready output.
-- Object Orchard is the product-facing name. Repository settings, crate names,
-  folder names, command names, environment variables, and some internal metadata
-  may still use legacy implementation names until the technical rename branches
-  land.
+- Object Orchard is the product-facing name across product copy, crates,
+  folders, commands, environment variables, project suffixes, metadata fields,
+  and generated evidence paths. The external GitHub repository host setting may
+  still require a manual rename.
 - Phase A-D semantic compiler hardening is integrated. It does not add new
   product-facing feature categories; it establishes that future A-J work should
   target `orchard-asset::AssetRecipe` / Orchard IR as the canonical semantic

@@ -314,8 +314,9 @@ pub fn catalog_content_fingerprint_from_json(
             error: error.to_string(),
         }
     })?;
-    let fingerprint = fingerprint_serializable("shape-lab.catalog-content.v1", subject, &value)
-        .map_err(catalog_fingerprint_error)?;
+    let fingerprint =
+        fingerprint_serializable("object-orchard.catalog-content.v1", subject, &value)
+            .map_err(catalog_fingerprint_error)?;
     Ok(CatalogContentFingerprint(fingerprint))
 }
 

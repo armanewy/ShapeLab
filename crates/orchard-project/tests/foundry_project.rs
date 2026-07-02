@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use orchard_asset::{AssetId, AssetRecipe, RevisionId};
@@ -15,10 +17,14 @@ use orchard_project::foundry::{
 };
 use serde_json::json;
 
+static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 #[test]
 fn save_load_preserves_replayable_branch_history() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("box_primitive.shapelab-foundry.json");
+    let path = temp_dir
+        .path()
+        .join("box_primitive.object-orchard-foundry.json");
     let root_document = document_fixture();
     let root_recipe = recipe("Generated Box Primitive");
     let root_snapshot = GeneratedRecipeSnapshot::from_recipe(&root_recipe).unwrap();
@@ -76,7 +82,9 @@ fn save_load_preserves_replayable_branch_history() {
 #[test]
 fn role_presence_program_replays_as_persisted_toggle_state() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("role-presence.shapelab-foundry.json");
+    let path = temp_dir
+        .path()
+        .join("role-presence.object-orchard-foundry.json");
     let root_document = document_fixture();
     let mut project = FoundryProject::new(
         "Box Primitive Foundry",
@@ -124,7 +132,9 @@ fn role_presence_program_replays_as_persisted_toggle_state() {
 #[test]
 fn load_rejects_revision_when_replay_does_not_match_child_snapshot() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("bad-replay.shapelab-foundry.json");
+    let path = temp_dir
+        .path()
+        .join("bad-replay.object-orchard-foundry.json");
     let root_document = document_fixture();
     let mut project = FoundryProject::new(
         "Box Primitive Foundry",
@@ -166,7 +176,7 @@ fn load_rejects_revision_when_replay_does_not_match_child_snapshot() {
 #[test]
 fn catalog_mismatch_with_embedded_snapshot_loads_read_only_and_marks_stale() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("recovery.shapelab-foundry.json");
+    let path = temp_dir.path().join("recovery.object-orchard-foundry.json");
     let mut root_document = document_fixture();
     let embedded_json = r#"{"style":"embedded"}"#;
     root_document.style_content_ref = catalog_ref_for_json("plain_clay-style", embedded_json);
@@ -284,7 +294,7 @@ fn catalog_mismatch_without_embedded_snapshot_is_rejected() {
     let temp_dir = tempdir();
     let path = temp_dir
         .path()
-        .join("catalog-mismatch.shapelab-foundry.json");
+        .join("catalog-mismatch.object-orchard-foundry.json");
     let root_document = document_fixture();
     let project = FoundryProject::new(
         "Box Primitive Foundry",
@@ -312,7 +322,7 @@ fn catalog_mismatch_without_embedded_snapshot_is_rejected() {
 #[test]
 fn available_recipe_inputs_must_match_exact_stored_snapshot() {
     let temp_dir = tempdir();
-    let path = temp_dir.path().join("recipe.shapelab-foundry.json");
+    let path = temp_dir.path().join("recipe.object-orchard-foundry.json");
     let root_document = document_fixture();
     let recipe = recipe("Generated Box Primitive");
     let project = FoundryProject::new(
@@ -479,7 +489,11 @@ fn tempdir() -> TestTempDir {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("object-orchard-foundry-project-tests-{nonce}"));
+    let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "object-orchard-foundry-project-tests-{}-{nonce}-{sequence}",
+        process::id()
+    ));
     fs::create_dir(&path).unwrap();
     TestTempDir { path }
 }

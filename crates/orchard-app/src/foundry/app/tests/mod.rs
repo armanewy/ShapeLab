@@ -27,7 +27,7 @@ fn save_as_paths_use_loadable_foundry_suffix() {
     let normalized = normalize_foundry_project_path(PathBuf::from("box-primitive.json"));
     assert_eq!(
         normalized,
-        PathBuf::from("box-primitive.shapelab-foundry.json")
+        PathBuf::from("box-primitive.object-orchard-foundry.json")
     );
     ensure_foundry_project_path(&normalized).expect("normalized path is loadable");
 }
@@ -808,12 +808,14 @@ fn product_docs_use_object_orchard_brand_with_one_migration_note() {
         ),
     ];
 
+    let old_spaced_name = "Shape ".to_owned() + "Lab";
+    let old_compact_name = ["Shape", "Lab"].concat();
     for (path, contents) in product_docs {
         assert!(
             contents.contains("Object Orchard"),
             "{path} should use the Object Orchard product name"
         );
-        for old_name in ["Shape Lab", "ShapeLab"] {
+        for old_name in [old_spaced_name.as_str(), old_compact_name.as_str()] {
             assert!(
                 !contents.contains(old_name),
                 "{path} still contains old product name {old_name}"
@@ -827,11 +829,11 @@ fn product_docs_use_object_orchard_brand_with_one_migration_note() {
     ));
     assert!(migration_note.contains("Object Orchard"));
     assert_eq!(
-        migration_note.matches("ShapeLab").count(),
+        migration_note.matches(old_compact_name.as_str()).count(),
         1,
         "only the migration note should mention the old repository name"
     );
-    assert!(!migration_note.contains("Shape Lab"));
+    assert!(!migration_note.contains(old_spaced_name.as_str()));
 }
 
 #[test]
@@ -3561,7 +3563,7 @@ fn launch_save_state_does_not_claim_project_is_saved() {
     app.state.dirty = false;
     assert_eq!(app.save_state_pill(), ("Not saved", StatusTone::Warning));
 
-    app.state.project_path = Some(PathBuf::from("box_primitive.shapelab-foundry.json"));
+    app.state.project_path = Some(PathBuf::from("box_primitive.object-orchard-foundry.json"));
     app.state.dirty = true;
     assert_eq!(app.save_state_pill(), ("Unsaved", StatusTone::Warning));
 
@@ -3572,9 +3574,9 @@ fn launch_save_state_does_not_claim_project_is_saved() {
 #[test]
 fn recent_projects_are_real_load_targets_and_keep_newest_first() {
     let mut app = FoundryDesktopApp::default();
-    let first = PathBuf::from("first.shapelab-foundry.json");
-    let second = PathBuf::from("second.shapelab-foundry.json");
-    let third = PathBuf::from("third.shapelab-foundry.json");
+    let first = PathBuf::from("first.object-orchard-foundry.json");
+    let second = PathBuf::from("second.object-orchard-foundry.json");
+    let third = PathBuf::from("third.object-orchard-foundry.json");
 
     app.remember_recent_project(first.clone());
     app.remember_recent_project(second.clone());
@@ -3805,11 +3807,11 @@ fn workflow_copy_maps_to_foundry_tabs_without_history_as_primary_step() {
 #[test]
 fn product_status_hides_raw_paths_from_status_strip() {
     assert_eq!(
-        product_safe_status("Saved C:\\work\\box.shapelab-foundry.json"),
+        product_safe_status("Saved C:\\work\\box.object-orchard-foundry.json"),
         "Project saved"
     );
     assert_eq!(
-        product_safe_status("Loaded C:\\work\\box.shapelab-foundry.json"),
+        product_safe_status("Loaded C:\\work\\box.object-orchard-foundry.json"),
         "Project loaded"
     );
     assert_eq!(
