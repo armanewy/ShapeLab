@@ -1,3 +1,4 @@
+use shape_asset::{PositionRule, RelationshipType};
 use shape_foundry::{
     MaterializationPolicy, MaterializationStatus, MaterializedObjectNextAction,
     OBJECT_PLAN_SCHEMA_VERSION, ObjectPlan, ObjectPlanAttachment, ObjectPlanCreatedBy,
@@ -87,10 +88,7 @@ fn object_plan_panel_plus_sphere_attachment_validates() {
     let report = validate_object_plan(&plan);
 
     assert_valid(&report);
-    assert_eq!(
-        plan.attachments[0].parent_anchor_id,
-        "right_side_handle_zone"
-    );
+    assert_eq!(plan.attachments[0].parent_anchor_id, "front_handle_zone");
     assert_eq!(plan.attachments[0].child_anchor_id, "back_mount_point");
 }
 
@@ -152,6 +150,26 @@ fn object_plan_materialization_panel_plus_sphere_attachment_passes() {
         draft.composition_document.attachments[0].attachment_id,
         "panel_knob_attachment"
     );
+    assert_eq!(draft.relationship_contracts.len(), 1);
+    let relationship = &draft.relationship_contracts[0];
+    assert_eq!(
+        relationship.relationship_type,
+        RelationshipType::SurfaceMounted
+    );
+    assert_eq!(relationship.parent_node_ref.as_deref(), Some("panel"));
+    assert_eq!(relationship.child_node_ref.as_deref(), Some("knob"));
+    assert_eq!(
+        relationship.parent_anchor_id.as_deref(),
+        Some("front_handle_zone")
+    );
+    assert_eq!(
+        relationship.child_anchor_id.as_deref(),
+        Some("back_mount_point")
+    );
+    assert!(matches!(
+        relationship.placement_policy.position_rule,
+        PositionRule::ProportionalUv { .. }
+    ));
     assert!(draft.unresolved_attachments.is_empty());
 }
 
@@ -733,7 +751,7 @@ fn panel_with_sphere_plan() -> ObjectPlan {
         attachments: vec![ObjectPlanAttachment {
             attachment_id: "panel_knob_attachment".to_owned(),
             parent_node_id: "panel".to_owned(),
-            parent_anchor_id: "right_side_handle_zone".to_owned(),
+            parent_anchor_id: "front_handle_zone".to_owned(),
             child_node_id: "knob".to_owned(),
             child_anchor_id: "back_mount_point".to_owned(),
             offset: PrimitiveAttachmentOffsetPolicy::BoundedNormalized {

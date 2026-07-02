@@ -3,7 +3,7 @@
 use std::{collections::BTreeSet, fs};
 
 use serde::de::DeserializeOwned;
-use shape_asset::PartInstanceId;
+use shape_asset::{ExportRealizationPolicy, PartInstanceId, PositionRule, RelationshipType};
 use shape_compile::{
     CompiledPart,
     export::{verify_model_package, write_model_package},
@@ -322,7 +322,7 @@ fn panel_knob_composition_contract_validates() {
     assert_eq!(document.attachments.len(), 1);
     assert_eq!(
         document.attachments[0].parent_anchor_id,
-        "right_side_handle_zone"
+        "front_handle_zone"
     );
     assert_eq!(document.attachments[0].child_anchor_id, "back_mount_point");
 }
@@ -377,6 +377,44 @@ fn panel_knob_validates_exports_and_attaches_knob_to_panel() {
         knob_bounds.max[2] > panel_bounds.max[2],
         "knob should visibly protrude from the panel front"
     );
+    let relationships = output
+        .recipe
+        .semantic
+        .relationships
+        .values()
+        .collect::<Vec<_>>();
+    assert_eq!(relationships.len(), 1);
+    let relationship = relationships[0];
+    assert_eq!(
+        relationship.relationship_type,
+        RelationshipType::SurfaceMounted
+    );
+    assert_eq!(
+        relationship.parent,
+        Some(role_instances(&output, "panel_body")[0])
+    );
+    assert_eq!(
+        relationship.child,
+        Some(role_instances(&output, "knob_form")[0])
+    );
+    assert_eq!(relationship.parent_node_ref.as_deref(), Some("panel"));
+    assert_eq!(relationship.child_node_ref.as_deref(), Some("knob"));
+    assert_eq!(
+        relationship.parent_anchor_id.as_deref(),
+        Some("front_handle_zone")
+    );
+    assert_eq!(
+        relationship.child_anchor_id.as_deref(),
+        Some("back_mount_point")
+    );
+    assert_eq!(
+        relationship.export_realization,
+        ExportRealizationPolicy::PreserveSemanticSidecar
+    );
+    assert!(matches!(
+        relationship.placement_policy.position_rule,
+        PositionRule::ProportionalUv { .. }
+    ));
 
     let package_dir = std::env::temp_dir().join(format!(
         "shape-lab-panel-knob-export-{}",
@@ -433,6 +471,50 @@ fn panel_knob_stays_attached_when_panel_proportions_change() {
             "knob should remain inside safe panel bounds after {label}"
         );
     }
+}
+
+#[test]
+fn panel_knob_relationship_policies_preserve_fixed_and_proportional_placement() {
+    let fixed = PositionRule::FixedOffsetFromEdge {
+        edge: "right".to_owned(),
+        offset: [0.2, 0.0, 0.0],
+    };
+    let narrow_fixed =
+        panel_knob::relationship_horizontal_position(&fixed, 1.8).expect("fixed placement");
+    let wide_fixed =
+        panel_knob::relationship_horizontal_position(&fixed, 2.8).expect("fixed placement");
+
+    assert_close(
+        1.8 * 0.5 - narrow_fixed,
+        0.2,
+        0.0001,
+        "fixed policy should preserve distance from right edge",
+    );
+    assert_close(
+        2.8 * 0.5 - wide_fixed,
+        0.2,
+        0.0001,
+        "fixed policy should preserve distance from right edge after resize",
+    );
+
+    let proportional = PositionRule::ProportionalUv { u: 0.72, v: 0.5 };
+    let narrow_proportional = panel_knob::relationship_horizontal_position(&proportional, 1.8)
+        .expect("proportional placement");
+    let wide_proportional = panel_knob::relationship_horizontal_position(&proportional, 2.8)
+        .expect("proportional placement");
+
+    assert_close(
+        narrow_proportional / 1.8 + 0.5,
+        0.72,
+        0.0001,
+        "proportional policy should preserve normalized horizontal position",
+    );
+    assert_close(
+        wide_proportional / 2.8 + 0.5,
+        0.72,
+        0.0001,
+        "proportional policy should preserve normalized horizontal position after resize",
+    );
 }
 
 #[test]

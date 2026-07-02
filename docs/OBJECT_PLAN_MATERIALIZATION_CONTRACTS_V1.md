@@ -67,7 +67,7 @@ Supported composition:
 
 - zero attachments
 - Flat Panel Primitive plus Sphere Primitive attached from
-  `right_side_handle_zone` to `back_mount_point`
+  `front_handle_zone` to `back_mount_point`
 
 Unsupported nodes or attachments must be reported honestly in unresolved lists.
 
