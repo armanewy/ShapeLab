@@ -20,7 +20,7 @@ export/proof includes.
 ## Legacy Lane
 
 `shape-core::ShapeDocument` remains the legacy/implicit compatibility lane. It
-is useful and should remain stable, but it is not the target product backbone
+is useful and should remain stable, but it is not the new canonical product IR
 for new Orchard semantics.
 
 ## Active Phase

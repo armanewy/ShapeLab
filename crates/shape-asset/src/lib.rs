@@ -2,10 +2,10 @@
 
 //! Serializable, part-aware asset recipe contracts for the explicit modeling lane.
 //!
-//! These contracts are intentionally separate from the existing implicit
-//! `ShapeDocument` editor and the same-topology deformation decompiler. IDs in
-//! this crate are semantic: part, operation, region, and socket IDs must remain
-//! stable when unrelated scalar parameters change. Generated vertex and face IDs
+//! These contracts are intentionally separate from the legacy implicit
+//! `ShapeDocument` editor. IDs in this crate are semantic: part, operation,
+//! region, and socket IDs must remain stable when unrelated scalar parameters change.
+//! Generated vertex and face IDs
 //! are owned by downstream polygon crates and are deterministic only for a given
 //! topology signature. Generated boundary-loop IDs are semantic and stay stable
 //! across parameter changes that preserve the feature topology.

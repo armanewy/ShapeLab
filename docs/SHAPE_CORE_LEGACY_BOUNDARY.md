@@ -11,7 +11,7 @@ can define shared scalar types, IDs, transforms, bounding boxes, primitive and
 CSG conventions, existing `ShapeDocument` helpers, and compatibility behavior
 for current compile and preview paths.
 
-`shape-core::ShapeDocument` is not the canonical A-J product IR. Future Object
+`shape-core::ShapeDocument` is not the new canonical product IR. Future Object
 Orchard product semantics belong in `shape-asset::AssetRecipe` / Orchard IR or
 in explicit semantic crates built around that lane.
 
