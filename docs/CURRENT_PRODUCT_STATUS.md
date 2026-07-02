@@ -7,8 +7,8 @@ Date: 2026-07-01
 `PHASE_A_D_SEMANTIC_COMPILER_HARDENING_INTEGRATED`
 
 Cleanup baseline freeze is starting. Cleanup does not add product capability;
-it makes the repository physically match the semantic compiler architecture
-before the Object Orchard rename.
+it makes the repository physically match the semantic asset compiler
+architecture before the Object Orchard rename.
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.

@@ -12,6 +12,3 @@ shape-asset.workspace = true
 shape-compile.workspace = true
 shape-family.workspace = true
 shape-family-compile.workspace = true
-
-[dev-dependencies]
-shape-foundry-catalog.workspace = true

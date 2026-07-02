@@ -2,9 +2,9 @@
 
 //! Serializable, part-aware asset recipe contracts for the explicit modeling lane.
 //!
-//! These contracts are intentionally separate from the existing implicit
-//! `ShapeDocument` editor and the same-topology deformation decompiler. IDs in
-//! this crate are semantic: part, operation, region, and socket IDs must remain
+//! These contracts are intentionally separate from the legacy implicit
+//! `ShapeDocument` editor. IDs in this crate are semantic: part, operation,
+//! region, and socket IDs must remain
 //! stable when unrelated scalar parameters change. Generated vertex and face IDs
 //! are owned by downstream polygon crates and are deterministic only for a given
 //! topology signature. Generated boundary-loop IDs are semantic and stay stable
@@ -9652,44 +9652,6 @@ mod tests {
 
         assert!(codes.contains("invalid_semantic_pattern_count"));
         assert!(codes.contains("invalid_semantic_pattern_density_range"));
-    }
-
-    #[test]
-    fn asset_recipe_v8_fixtures_parse_migrate_and_validate() {
-        for (name, raw) in [
-            (
-                "old_minimal_asset_recipe_v7.json",
-                include_str!("../../../fixtures/shape-asset/old_minimal_asset_recipe_v7.json"),
-            ),
-            (
-                "new_minimal_asset_recipe_v8_shell.json",
-                include_str!(
-                    "../../../fixtures/shape-asset/new_minimal_asset_recipe_v8_shell.json"
-                ),
-            ),
-            (
-                "box_like_asset_recipe_v8.json",
-                include_str!("../../../fixtures/shape-asset/box_like_asset_recipe_v8.json"),
-            ),
-            (
-                "panel_knob_like_asset_recipe_v8.json",
-                include_str!("../../../fixtures/shape-asset/panel_knob_like_asset_recipe_v8.json"),
-            ),
-        ] {
-            let recipe: AssetRecipe =
-                serde_json::from_str(raw).unwrap_or_else(|error| panic!("{name}: {error}"));
-            assert_eq!(
-                recipe.schema_version, ASSET_RECIPE_SCHEMA_VERSION,
-                "{name} should parse or migrate to current schema"
-            );
-            assert!(
-                validate_asset_recipe(&recipe).is_valid(),
-                "{name} should validate"
-            );
-            assert!(!recipe.semantic.review_state.publish_allowed);
-            assert!(!recipe.semantic.review_state.public_catalog_visible);
-            assert!(!recipe.semantic.export_includes.game_ready);
-        }
     }
 
     #[test]

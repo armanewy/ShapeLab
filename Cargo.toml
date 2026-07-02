@@ -6,7 +6,6 @@ members = [
     "crates/shape-cli",
     "crates/shape-compile",
     "crates/shape-core",
-    "crates/shape-decompiler",
     "crates/shape-field",
     "crates/shape-family",
     "crates/shape-family-compile",
@@ -16,8 +15,6 @@ members = [
     "crates/shape-modeling",
     "crates/shape-modeling-assets",
     "crates/shape-poly",
-    "crates/shape-program",
-    "crates/shape-program-verify",
     "crates/shape-presets",
     "crates/shape-project",
     "crates/shape-render",
@@ -59,7 +56,6 @@ shape-asset = { path = "crates/shape-asset" }
 shape-authoring = { path = "crates/shape-authoring" }
 shape-compile = { path = "crates/shape-compile" }
 shape-core = { path = "crates/shape-core" }
-shape-decompiler = { path = "crates/shape-decompiler" }
 shape-family = { path = "crates/shape-family" }
 shape-family-compile = { path = "crates/shape-family-compile" }
 shape-field = { path = "crates/shape-field" }
@@ -69,8 +65,6 @@ shape-mesh = { path = "crates/shape-mesh" }
 shape-modeling = { path = "crates/shape-modeling" }
 shape-modeling-assets = { path = "crates/shape-modeling-assets" }
 shape-poly = { path = "crates/shape-poly" }
-shape-program = { path = "crates/shape-program" }
-shape-program-verify = { path = "crates/shape-program-verify" }
 shape-presets = { path = "crates/shape-presets" }
 shape-project = { path = "crates/shape-project" }
 shape-render = { path = "crates/shape-render" }
