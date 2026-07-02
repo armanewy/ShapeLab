@@ -138,8 +138,7 @@ restored as parallel product truth.
   not approved as only a generic mesh primitive.
 - Object Orchard is the product-facing name across product copy, crates,
   folders, commands, environment variables, project suffixes, metadata fields,
-  and generated evidence paths. The external GitHub repository host setting may
-  still require a manual rename.
+  generated evidence paths, and the GitHub repository host.
 
 ## Allowed Product Claims
 

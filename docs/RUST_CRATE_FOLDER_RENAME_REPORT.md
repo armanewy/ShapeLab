@@ -39,8 +39,8 @@ Status: Prompt 9 implementation branch.
 ## Temporary Exceptions
 
 - Repository URLs and local repository path strings are owned by
-  `docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md` and the manual GitHub
-  repository setting step.
+  `docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md`. The GitHub repository host
+  rename is complete as `armanewy/object-orchard`.
 - Environment variables were renamed to `OBJECT_ORCHARD_*` by the repository
   path/script cleanup branch.
 - Persistent schema identifiers, generated metadata keys, and project suffixes
@@ -48,6 +48,7 @@ Status: Prompt 9 implementation branch.
 - Some docs retain historical cleanup branch names or deleted crate names where
   they describe already-completed cleanup work.
 
-## Post-Rename Manual Steps
+## Post-Rename Repository Status
 
-- Rename the GitHub repository manually in repository settings when ready.
+- The GitHub repository is renamed to `armanewy/object-orchard`.
+- Local remotes should use `https://github.com/armanewy/object-orchard.git`.

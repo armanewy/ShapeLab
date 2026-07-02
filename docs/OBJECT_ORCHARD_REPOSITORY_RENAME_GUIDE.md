@@ -1,25 +1,39 @@
-# Object Orchard Repository Rename Guide
+# Object Orchard Repository Rename Status
 
-Status: manual GitHub repository setting required
+Status: GitHub repository rename complete
 
 The product, Rust packages, scripts, project suffixes, metadata fields, and
-local output paths now use Object Orchard naming. The GitHub repository host
-name may still need a manual rename.
+local output paths now use Object Orchard naming. The GitHub repository host is
+now:
 
-Manual steps:
+```text
+https://github.com/armanewy/object-orchard
+```
 
-1. Go to repository Settings.
-2. Rename repository from ShapeLab to ObjectOrchard or object-orchard.
-3. Update local remotes:
-   `git remote set-url origin git@github.com:armanewy/ObjectOrchard.git`
-   or HTTPS equivalent.
-4. Verify:
-   `git remote -v`
-   `git ls-remote origin`
+Workspace package metadata uses the same repository URL:
 
-Until the GitHub setting is changed, the existing remote URL can continue to
-work through GitHub redirects after rename. Do not claim the repository host
-rename is complete until `git ls-remote origin` succeeds against the new URL.
+```text
+https://github.com/armanewy/object-orchard
+```
+
+Local `origin` remotes should point at:
+
+```text
+https://github.com/armanewy/object-orchard.git
+```
+
+Use this command if a checkout still points at the old host name:
+
+```bash
+git remote set-url origin https://github.com/armanewy/object-orchard.git
+```
+
+Verify:
+
+```bash
+git remote -v
+git ls-remote origin
+```
 
 In-repo technical cleanup is complete:
 
@@ -31,10 +45,10 @@ In-repo technical cleanup is complete:
 Prompt 10 audit classification:
 
 - Renamed now: environment variables, package metadata, script copy, packaging
-  icon paths, local temp-file prefixes, and target/evidence path examples.
-- Historical migration notes: this guide and
-  `docs/OBJECT_ORCHARD_NAMING_TRANSITION.md`.
+  icon paths, local temp-file prefixes, target/evidence path examples, and the
+  GitHub repository host.
+- Historical migration notes: `docs/OBJECT_ORCHARD_NAMING_TRANSITION.md` and
+  completed cleanup reports may mention the old repository name.
 - Generated artifact paths: target output is not committed.
-- External repository URL: pending the manual GitHub Settings rename above.
 - Completed by final purge: durable schema identifiers, fingerprint namespaces,
   project file suffixes, and DCC metadata field keys.

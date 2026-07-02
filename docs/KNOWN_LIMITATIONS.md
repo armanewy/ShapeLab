@@ -24,8 +24,7 @@
   publishing, Godot-ready output, or game-ready output.
 - Object Orchard is the product-facing name across product copy, crates,
   folders, commands, environment variables, project suffixes, metadata fields,
-  and generated evidence paths. The external GitHub repository host setting may
-  still require a manual rename.
+  generated evidence paths, and the GitHub repository host.
 - Phase A-D semantic compiler hardening is integrated. It does not add new
   product-facing feature categories; it establishes that future A-J work should
   target `orchard-asset::AssetRecipe` / Orchard IR as the canonical semantic

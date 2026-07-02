@@ -33,8 +33,8 @@ work, terrain, collision, motion, or prototype-pack expansion.
 
 Object Orchard is the product name. The Rust crates, folders, command names,
 environment variables, repository-local paths, project suffixes, metadata
-fields, and generated evidence paths use Object Orchard naming. The external
-GitHub repository host setting may still require a manual rename.
+fields, generated evidence paths, and GitHub repository host use Object Orchard
+naming.
 
 ## Documentation Status
 

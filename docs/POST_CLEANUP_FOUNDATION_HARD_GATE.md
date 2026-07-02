@@ -16,12 +16,11 @@ proof are all checked together.
 
 - Is the repo now Object Orchard everywhere product-facing?
   Pass. Product-facing docs, commands, crate names, generated evidence paths, and
-  metadata use Object Orchard naming. The external GitHub repository host can
-  still be named `ShapeLab` until the manual GitHub rename described in
-  `docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md`.
+  metadata use Object Orchard naming. A later metadata finalization branch
+  completed the GitHub repository host rename to `armanewy/object-orchard`.
 - Are old ShapeLab / Shape Lab names gone except migration notes?
   Pass. Remaining old-name references are historical cleanup records, migration
-  notes, or the current remote URL.
+  notes, or pre-rename remote URL records.
 - Are `shape-core` and legacy systems clearly isolated?
   Pass. The retained crate is `orchard-core-legacy`; docs keep `ShapeDocument`
   in the legacy/implicit compatibility lane and out of future A-J product

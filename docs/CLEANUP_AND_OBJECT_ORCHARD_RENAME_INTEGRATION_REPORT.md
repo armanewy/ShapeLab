@@ -11,19 +11,17 @@ workspace package names, crate folders, command examples, environment variables,
 project suffixes, generated evidence paths, metadata namespaces, and product
 status docs now use Object Orchard naming.
 
-BLOCKED-MANUAL:
-Repository still named ShapeLab on GitHub.
-Manual step required:
-Settings -> Repository name -> ObjectOrchard or object-orchard.
+POST-RUN METADATA UPDATE:
+Repository host rename completed after this cleanup gate. The GitHub repository
+is now `armanewy/object-orchard`.
 
 Current remote:
 
 ```text
-https://github.com/armanewy/ShapeLab.git
+https://github.com/armanewy/object-orchard.git
 ```
 
-`git ls-remote origin` succeeds for `main`, so the remote is reachable, but the
-GitHub repository setting has not been renamed.
+`git ls-remote origin` succeeds for `main` against the renamed repository.
 
 ## Expected Branches
 
@@ -210,27 +208,25 @@ The legacy candidate UI path is not certified as future product direction; it is
 retained only as env-gated internal recovery/evidence code and remains outside
 direct primitive product workflows.
 
-## Manual Steps Still Required
+## Repository Metadata Finalization
 
-1. Rename the GitHub repository in Settings.
-2. Update local remotes after the GitHub rename:
+The GitHub repository has been renamed to `armanewy/object-orchard`. Local
+remotes should use:
 
-   ```bash
-   git remote set-url origin git@github.com:armanewy/ObjectOrchard.git
-   ```
+```bash
+git remote set-url origin https://github.com/armanewy/object-orchard.git
+```
 
-   or the HTTPS equivalent.
+Verify with:
 
-3. Verify:
+```bash
+git remote -v
+git ls-remote origin
+```
 
-   ```bash
-   git remote -v
-   git ls-remote origin
-   ```
-
-4. Rerun the Godot proof on a machine with Godot installed if Godot-ready
-   geometry claims are desired later. Until then, the proof remains Blocked, not
-   Passed.
+The later post-cleanup foundation hard gate reran the Godot geometry proof and
+passed for the supported geometry-only GLBs. Godot-ready and game-ready claims
+remain blocked until later gates cover the full claimed capability.
 
 ## Final Gates
 
