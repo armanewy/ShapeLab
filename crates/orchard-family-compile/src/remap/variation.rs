@@ -109,7 +109,7 @@ pub fn remap_parameter_descriptor(
 
 /// Remap a typed scalar path.
 ///
-/// The parser accepts only scalar paths that Shape Lab knows how to read and
+/// The parser accepts only scalar paths that Object Orchard knows how to read and
 /// write. It remaps semantic IDs in parsed root segments and operation segments
 /// instead of applying arbitrary text replacement.
 pub fn remap_scalar_path(

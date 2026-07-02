@@ -3,7 +3,7 @@
 //! Executable bindings from asset-family/style-kit contracts to concrete recipes.
 //!
 //! This crate keeps executable family binding deterministic: recipe fragments
-//! are Shape Lab recipes, semantic IDs are remapped through typed maps,
+//! are Object Orchard recipes, semantic IDs are remapped through typed maps,
 //! parameter bindings are explicit scalar or presence/prototype choices, and
 //! unsupported binding features fail instead of being ignored.
 
@@ -540,7 +540,7 @@ pub fn instantiate_family(
         return Err(FamilyCompileError::AssetValidationFailed(asset_report));
     }
     let recipe_fingerprint = RecipeFingerprint(
-        fingerprint_serializable("shape-lab.recipe.v1", "instantiated_recipe", &recipe)
+        fingerprint_serializable("object-orchard.recipe.v1", "instantiated_recipe", &recipe)
             .map_err(fingerprint_error)?,
     );
     let artifact = compile_asset(&recipe)?;
@@ -550,7 +550,7 @@ pub fn instantiate_family(
         ));
     }
     let artifact_fingerprint = ArtifactFingerprint(
-        fingerprint_serializable("shape-lab.artifact.v1", "compiled_artifact", &artifact)
+        fingerprint_serializable("object-orchard.artifact.v1", "compiled_artifact", &artifact)
             .map_err(fingerprint_error)?,
     );
 
@@ -858,7 +858,7 @@ fn derive_instantiation_fingerprints(
     };
     let foundry_intent = FoundryIntentFingerprint(
         fingerprint_serializable(
-            "shape-lab.foundry-intent.v1",
+            "object-orchard.foundry-intent.v1",
             "foundry_intent",
             &foundry_payload,
         )
@@ -886,7 +886,7 @@ fn derive_instantiation_fingerprints(
     };
     let geometry_input = GeometryInputFingerprint(
         fingerprint_serializable(
-            "shape-lab.geometry-input.v1",
+            "object-orchard.geometry-input.v1",
             "geometry_input",
             &geometry_payload,
         )
@@ -940,7 +940,7 @@ fn derive_instantiation_fingerprints(
     };
     let conformance_contract = ConformanceContractFingerprint(
         fingerprint_serializable(
-            "shape-lab.conformance-contract.v1",
+            "object-orchard.conformance-contract.v1",
             "conformance_contract",
             &conformance_payload,
         )
@@ -964,7 +964,7 @@ fn derive_instantiation_fingerprints(
         },
     };
     let build = BuildFingerprint(
-        fingerprint_serializable("shape-lab.build.v1", "build", &build_payload)
+        fingerprint_serializable("object-orchard.build.v1", "build", &build_payload)
             .map_err(fingerprint_error)?,
     );
     Ok(InstantiationFingerprints {

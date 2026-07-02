@@ -259,7 +259,7 @@ impl FoundryFixtureCatalog {
     pub fn manifest(&self) -> FoundryCatalogManifest {
         FoundryCatalogManifest {
             schema_version: FOUNDRY_CATALOG_MANIFEST_SCHEMA_VERSION,
-            catalog_id: format!("shape-lab-headless-{}", self.slug),
+            catalog_id: format!("object-orchard-headless-{}", self.slug),
             catalog_version: self.catalog_version,
             entries: self
                 .entries

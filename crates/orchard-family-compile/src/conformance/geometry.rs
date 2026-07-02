@@ -471,7 +471,7 @@ impl SocketConnection {
 pub struct SupportViaAttachment {
     /// Maximum accepted vertical clearance between support top and supported bottom.
     pub max_clearance: f32,
-    /// Vertical axis index. Shape Lab conventions use Y (`1`).
+    /// Vertical axis index. Object Orchard conventions use Y (`1`).
     pub vertical_axis: usize,
 }
 

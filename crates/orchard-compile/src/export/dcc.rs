@@ -320,18 +320,18 @@ def metadata_field(key, value):
 
 def semantic_part(part):
     metadata = [
-        metadata_field("shape_lab_part_id", part["part_id"]),
-        metadata_field("shape_lab_instance_id", part["instance_id"]),
-        metadata_field("shape_lab_definition_id", part["definition_id"]),
-        metadata_field("shape_lab_topology_signature", part["topology_signature"]),
-        metadata_field("shape_lab_source_recipe_instance", str(part["source_recipe_instance"]).lower()),
+        metadata_field("object_orchard_part_id", part["part_id"]),
+        metadata_field("object_orchard_instance_id", part["instance_id"]),
+        metadata_field("object_orchard_definition_id", part["definition_id"]),
+        metadata_field("object_orchard_topology_signature", part["topology_signature"]),
+        metadata_field("object_orchard_source_recipe_instance", str(part["source_recipe_instance"]).lower()),
     ]
     if part.get("parent_instance_id") is not None:
-        metadata.append(metadata_field("shape_lab_parent_instance_id", part["parent_instance_id"]))
+        metadata.append(metadata_field("object_orchard_parent_instance_id", part["parent_instance_id"]))
     if part.get("prototype_instance_id") is not None:
-        metadata.append(metadata_field("shape_lab_prototype_instance_id", part["prototype_instance_id"]))
+        metadata.append(metadata_field("object_orchard_prototype_instance_id", part["prototype_instance_id"]))
     if part.get("generated_by") is not None:
-        metadata.append(metadata_field("shape_lab_generated_by", part["generated_by"]))
+        metadata.append(metadata_field("object_orchard_generated_by", part["generated_by"]))
     return {
         "part_id": part["part_id"],
         "object_name": part["object_name"],
@@ -351,7 +351,7 @@ def semantic_parts(parts):
 def collections(parts):
     rows = [
         {
-            "id": "shape_lab_asset",
+            "id": "object_orchard_asset",
             "label": "Object Orchard Asset",
             "part_ids": [part["part_id"] for part in parts],
         }
@@ -399,33 +399,36 @@ if __name__ == "__main__":
 
 fn dcc_semantic_part(part: &PartManifest) -> DccSemanticPart {
     let mut metadata = vec![
-        metadata_field("shape_lab_part_id", &part.part_id),
-        metadata_field("shape_lab_instance_id", part.instance_id.to_string()),
-        metadata_field("shape_lab_definition_id", part.definition_id.to_string()),
+        metadata_field("object_orchard_part_id", &part.part_id),
+        metadata_field("object_orchard_instance_id", part.instance_id.to_string()),
         metadata_field(
-            "shape_lab_topology_signature",
+            "object_orchard_definition_id",
+            part.definition_id.to_string(),
+        ),
+        metadata_field(
+            "object_orchard_topology_signature",
             part.topology_signature.to_string(),
         ),
         metadata_field(
-            "shape_lab_source_recipe_instance",
+            "object_orchard_source_recipe_instance",
             part.source_recipe_instance.to_string(),
         ),
     ];
     if let Some(parent) = part.parent_instance_id {
         metadata.push(metadata_field(
-            "shape_lab_parent_instance_id",
+            "object_orchard_parent_instance_id",
             parent.to_string(),
         ));
     }
     if let Some(prototype) = part.prototype_instance_id {
         metadata.push(metadata_field(
-            "shape_lab_prototype_instance_id",
+            "object_orchard_prototype_instance_id",
             prototype.to_string(),
         ));
     }
     if let Some(operation) = part.generated_by {
         metadata.push(metadata_field(
-            "shape_lab_generated_by",
+            "object_orchard_generated_by",
             operation.to_string(),
         ));
     }
@@ -447,7 +450,7 @@ fn dcc_semantic_part(part: &PartManifest) -> DccSemanticPart {
 
 fn dcc_collections(parts: &[PartManifest]) -> Vec<DccCollection> {
     let mut collections = vec![DccCollection {
-        id: "shape_lab_asset".to_owned(),
+        id: "object_orchard_asset".to_owned(),
         label: "Object Orchard Asset".to_owned(),
         part_ids: parts.iter().map(|part| part.part_id.clone()).collect(),
     }];

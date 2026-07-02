@@ -261,10 +261,10 @@ fn dcc_adapter_sidecars_project_package_outward_not_source_of_truth() {
             && part
                 .metadata
                 .iter()
-                .any(|field| field.key == "shape_lab_instance_id" && field.value == "1")
+                .any(|field| field.key == "object_orchard_instance_id" && field.value == "1")
     }));
     assert!(package.dcc_adapter.collections.iter().any(|collection| {
-        collection.id == "shape_lab_asset"
+        collection.id == "object_orchard_asset"
             && collection.part_ids == vec!["part-001".to_owned(), "part-002".to_owned()]
     }));
     assert!(package.dcc_verification.canonical_package_verified);

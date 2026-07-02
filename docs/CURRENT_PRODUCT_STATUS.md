@@ -130,9 +130,10 @@ restored as parallel product truth.
 - Terrain remains blocked as product-facing work until explicit terrain patch,
   placement, validation, collision/readiness, and export contracts pass. It is
   not approved as only a generic mesh primitive.
-- Object Orchard is the product-facing name. Current repository settings,
-  crate names, folder names, command names, and some internal metadata may still
-  use legacy implementation naming until the technical rename branches land.
+- Object Orchard is the product-facing name across product copy, crates,
+  folders, commands, environment variables, project suffixes, metadata fields,
+  and generated evidence paths. The external GitHub repository host setting may
+  still require a manual rename.
 
 ## Allowed Product Claims
 

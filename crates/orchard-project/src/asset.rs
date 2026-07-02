@@ -20,12 +20,12 @@ use orchard_compile::{CompileError, CompileValidationReport, compile_asset};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Current schema version for `.shapelab-asset.json` project files.
+/// Current schema version for `.object-orchard-asset.json` project files.
 pub const ASSET_PROJECT_SCHEMA_VERSION: u32 = 1;
 /// Distinct project kind marker used to reject legacy `ShapeDocument` project JSON.
-pub const ASSET_PROJECT_KIND: &str = "shape-lab.asset-project";
+pub const ASSET_PROJECT_KIND: &str = "object-orchard.asset-project";
 /// Required filename suffix for user-facing asset project files.
-pub const ASSET_PROJECT_FILE_SUFFIX: &str = ".shapelab-asset.json";
+pub const ASSET_PROJECT_FILE_SUFFIX: &str = ".object-orchard-asset.json";
 
 /// Export package paths returned by asset project package export.
 pub type AssetModelExportPackagePaths = ModelExportPackagePaths;
@@ -793,7 +793,7 @@ fn asset_project_json_bytes(project: &AssetProject) -> Result<Vec<u8>, AssetProj
     Ok(bytes)
 }
 
-/// Return true when `path` uses the `.shapelab-asset.json` filename suffix.
+/// Return true when `path` uses the `.object-orchard-asset.json` filename suffix.
 #[must_use]
 pub fn has_asset_project_suffix(path: impl AsRef<Path>) -> bool {
     path.as_ref()
@@ -802,7 +802,7 @@ pub fn has_asset_project_suffix(path: impl AsRef<Path>) -> bool {
         .is_some_and(|name| name.ends_with(ASSET_PROJECT_FILE_SUFFIX))
 }
 
-/// Ensure a path uses the `.shapelab-asset.json` filename suffix.
+/// Ensure a path uses the `.object-orchard-asset.json` filename suffix.
 pub fn ensure_asset_project_path(path: impl AsRef<Path>) -> Result<(), AssetProjectError> {
     let path = path.as_ref();
     if has_asset_project_suffix(path) {
@@ -822,7 +822,7 @@ pub fn autosave_snapshot_path(path: impl AsRef<Path>) -> PathBuf {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("untitled.shapelab-asset.json");
+        .unwrap_or("untitled.object-orchard-asset.json");
     parent.join(format!(".{name}.autosave"))
 }
 

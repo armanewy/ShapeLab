@@ -4,7 +4,7 @@ pub(super) fn project_file_title(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .map(|stem| {
-            stem.trim_end_matches(".shapelab-foundry")
+            stem.trim_end_matches(".object-orchard-foundry")
                 .replace(['-', '_'], " ")
         })
         .filter(|title| !title.trim().is_empty())
@@ -51,7 +51,7 @@ pub(super) fn open_foundry_project_file() -> Option<PathBuf> {
 pub(super) fn save_foundry_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Object Orchard Foundry", &["json"])
-        .set_file_name("foundry-project.shapelab-foundry.json")
+        .set_file_name("foundry-project.object-orchard-foundry.json")
         .save_file()
         .map(normalize_foundry_project_path)
 }

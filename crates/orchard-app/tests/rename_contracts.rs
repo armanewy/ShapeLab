@@ -39,14 +39,16 @@ fn cargo_packages_and_workspace_members_use_orchard_names() {
 
     for manifest in manifests {
         let contents = fs::read_to_string(&manifest).expect("manifest text");
+        let old_package_prefix = format!("name = \"{}-", "shape");
+        let old_workspace_prefix = format!("\"crates/{}-", "shape");
         assert!(
-            !contents.contains("name = \"shape-"),
-            "{} still declares a shape-* package",
+            !contents.contains(old_package_prefix.as_str()),
+            "{} still declares a legacy package",
             manifest.display()
         );
         assert!(
-            !contents.contains("\"crates/shape-"),
-            "{} still points at a shape-* workspace member",
+            !contents.contains(old_workspace_prefix.as_str()),
+            "{} still points at a legacy workspace member",
             manifest.display()
         );
     }
@@ -69,18 +71,20 @@ fn rust_source_does_not_import_old_shape_crates() {
 
     for path in rust_files {
         let contents = fs::read_to_string(&path).expect("rust source");
+        let old_use_prefix = format!("use {}_", "shape");
+        let old_extern_prefix = format!("extern crate {}_", "shape");
         for (line_number, line) in contents.lines().enumerate() {
             let trimmed = line.trim_start();
             assert!(
-                !trimmed.starts_with("use shape_"),
-                "{}:{} still imports an old shape_* crate: {}",
+                !trimmed.starts_with(old_use_prefix.as_str()),
+                "{}:{} still imports an old crate: {}",
                 path.display(),
                 line_number + 1,
                 line
             );
             assert!(
-                !trimmed.starts_with("extern crate shape_"),
-                "{}:{} still declares an old shape_* crate: {}",
+                !trimmed.starts_with(old_extern_prefix.as_str()),
+                "{}:{} still declares an old crate: {}",
                 path.display(),
                 line_number + 1,
                 line
@@ -105,8 +109,9 @@ fn docs_command_examples_use_orchard_cli() {
             continue;
         }
         let contents = fs::read_to_string(&path).expect("doc text");
+        let old_cli_name = format!("{}-cli", "shape");
         assert!(
-            !contents.contains("shape-cli"),
+            !contents.contains(old_cli_name.as_str()),
             "{} still uses the old CLI command name",
             path.display()
         );
@@ -159,25 +164,29 @@ fn repository_docs_scripts_and_packaging_use_object_orchard_names() {
             .to_string_lossy()
             .replace('\\', "/");
         let contents = fs::read_to_string(&path).expect("repo text");
+        let old_env_prefix = ["SHAPE", "LAB_"].join("_");
+        let old_slug = ["shape", "lab"].join("-");
         assert!(
-            !contents.contains("SHAPE_LAB_"),
-            "{} still documents or uses an old SHAPE_LAB_* env var",
+            !contents.contains(old_env_prefix.as_str()),
+            "{} still documents or uses a legacy env var",
             path.display()
         );
         assert!(
-            !contents.contains("shape-lab"),
-            "{} still uses an old local shape-lab path or slug",
+            !contents.contains(old_slug.as_str()),
+            "{} still uses a legacy local path or slug",
             path.display()
         );
 
         if !allowed_old_name_docs.contains(&relative.as_str()) {
+            let old_spaced_name = "Shape ".to_owned() + "Lab";
+            let old_compact_name = ["Shape", "Lab"].concat();
             assert!(
-                !contents.contains("Shape Lab"),
+                !contents.contains(old_spaced_name.as_str()),
                 "{} still contains the old spaced product name",
                 path.display()
             );
             assert!(
-                !contents.contains("ShapeLab"),
+                !contents.contains(old_compact_name.as_str()),
                 "{} still contains the old compact repository name",
                 path.display()
             );

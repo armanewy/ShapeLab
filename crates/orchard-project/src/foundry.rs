@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Required filename suffix for user-facing foundry project files.
-pub const FOUNDRY_PROJECT_FILE_SUFFIX: &str = ".shapelab-foundry.json";
+pub const FOUNDRY_PROJECT_FILE_SUFFIX: &str = ".object-orchard-foundry.json";
 
 const ROOT_REVISION_ID: RevisionId = RevisionId(0);
 const FOUNDRY_PROJECT_TEMP_PREFIX: &str = ".object-orchard-foundry-project-";
@@ -1259,7 +1259,7 @@ fn foundry_project_json_bytes(project: &FoundryProject) -> Result<Vec<u8>, Found
     Ok(bytes)
 }
 
-/// Return true when `path` uses the `.shapelab-foundry.json` filename suffix.
+/// Return true when `path` uses the `.object-orchard-foundry.json` filename suffix.
 #[must_use]
 pub fn has_foundry_project_suffix(path: impl AsRef<Path>) -> bool {
     path.as_ref()
@@ -1268,7 +1268,7 @@ pub fn has_foundry_project_suffix(path: impl AsRef<Path>) -> bool {
         .is_some_and(|name| name.ends_with(FOUNDRY_PROJECT_FILE_SUFFIX))
 }
 
-/// Ensure a path uses the `.shapelab-foundry.json` filename suffix.
+/// Ensure a path uses the `.object-orchard-foundry.json` filename suffix.
 pub fn ensure_foundry_project_path(path: impl AsRef<Path>) -> Result<(), FoundryProjectError> {
     let path = path.as_ref();
     if has_foundry_project_suffix(path) {
@@ -1288,7 +1288,7 @@ pub fn recovery_snapshot_path(path: impl AsRef<Path>) -> PathBuf {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("untitled.shapelab-foundry.json");
+        .unwrap_or("untitled.object-orchard-foundry.json");
     parent.join(format!(".{name}.autosave"))
 }
 

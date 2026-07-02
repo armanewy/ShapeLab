@@ -3,7 +3,7 @@ fn base_geometry_fingerprint(
     recipe: &AssetRecipe,
 ) -> Result<GeometryInputFingerprint, FoundryCompilationError> {
     Ok(GeometryInputFingerprint(
-        fingerprint_serializable("shape-lab.foundry-base-geometry.v1", "base_recipe", recipe)
+        fingerprint_serializable("object-orchard.foundry-base-geometry.v1", "base_recipe", recipe)
             .map_err(foundry_fingerprint_error)?,
     ))
 }
@@ -23,7 +23,7 @@ fn final_geometry_input_fingerprint(
     }
     Ok(GeometryInputFingerprint(
         fingerprint_serializable(
-            "shape-lab.foundry-final-geometry-input.v1",
+            "object-orchard.foundry-final-geometry-input.v1",
             "final_geometry_input",
             &Payload {
                 base_geometry_fingerprint,
@@ -56,7 +56,7 @@ fn artifact_fingerprint(
     artifact: &AssetArtifact,
 ) -> Result<ArtifactFingerprint, FoundryCompilationError> {
     Ok(ArtifactFingerprint(
-        fingerprint_serializable("shape-lab.artifact.v1", "compiled_artifact", artifact)
+        fingerprint_serializable("object-orchard.artifact.v1", "compiled_artifact", artifact)
             .map_err(foundry_fingerprint_error)?,
     ))
 }
@@ -80,7 +80,7 @@ fn build_fingerprint(
     }
     Ok(BuildFingerprint(
         fingerprint_serializable(
-            "shape-lab.foundry-build.v1",
+            "object-orchard.foundry-build.v1",
             "foundry_build",
             &Payload {
                 geometry_input_fingerprint,

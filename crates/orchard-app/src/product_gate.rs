@@ -380,7 +380,9 @@ mod tests {
         );
 
         let joined = strings.join("\n");
-        for old_name in ["Shape Lab", "ShapeLab"] {
+        let old_spaced_name = "Shape ".to_owned() + "Lab";
+        let old_compact_name = ["Shape", "Lab"].concat();
+        for old_name in [old_spaced_name.as_str(), old_compact_name.as_str()] {
             assert!(
                 !joined.contains(old_name),
                 "default product strings still expose old product name {old_name}: {joined}"

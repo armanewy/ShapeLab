@@ -189,7 +189,7 @@ fn branching_after_undo_preserves_sibling_revisions() {
 #[test]
 fn save_load_preserves_revision_graph_and_current_revision() {
     let temp = tempdir("roundtrip");
-    let path = temp.path().join("fixture.shapelab-asset.json");
+    let path = temp.path().join("fixture.object-orchard-asset.json");
     let mut project = AssetProject::from_template(recipe()).unwrap();
     project
         .accept_candidate(thickness_edit("thin", 0.2))
@@ -213,14 +213,14 @@ fn save_load_preserves_revision_graph_and_current_revision() {
 #[test]
 fn malformed_legacy_and_future_project_files_are_rejected() {
     let temp = tempdir("bad-files");
-    let malformed = temp.path().join("malformed.shapelab-asset.json");
+    let malformed = temp.path().join("malformed.object-orchard-asset.json");
     fs::write(&malformed, b"{not valid json").unwrap();
     assert!(matches!(
         AssetProject::load_json(&malformed),
         Err(AssetProjectError::JsonAtPath { .. })
     ));
 
-    let legacy = temp.path().join("legacy.shapelab-asset.json");
+    let legacy = temp.path().join("legacy.object-orchard-asset.json");
     fs::write(
         &legacy,
         br#"{"schema_version":1,"title":"legacy","current_revision":0,"next_revision_id":1,"revisions":{}}"#,
@@ -231,10 +231,10 @@ fn malformed_legacy_and_future_project_files_are_rejected() {
         Err(AssetProjectError::UnsupportedProjectKind { .. })
     ));
 
-    let future = temp.path().join("future.shapelab-asset.json");
+    let future = temp.path().join("future.object-orchard-asset.json");
     fs::write(
         &future,
-        br#"{"project_kind":"shape-lab.asset-project","schema_version":2,"future_payload":true}"#,
+        br#"{"project_kind":"object-orchard.asset-project","schema_version":2,"future_payload":true}"#,
     )
     .unwrap();
     assert!(matches!(
@@ -249,8 +249,8 @@ fn malformed_legacy_and_future_project_files_are_rejected() {
 #[test]
 fn save_as_validates_asset_project_suffix_and_updates_dirty_marker() {
     let temp = tempdir("dirty");
-    let bad_path = temp.path().join("fixture.shapelab.json");
-    let good_path = temp.path().join("fixture.shapelab-asset.json");
+    let bad_path = temp.path().join("fixture.object-orchard.json");
+    let good_path = temp.path().join("fixture.object-orchard-asset.json");
     let mut file = AssetProjectFile::new_from_template("Fixture", recipe()).unwrap();
 
     assert!(file.is_dirty());
@@ -270,13 +270,13 @@ fn save_as_validates_asset_project_suffix_and_updates_dirty_marker() {
 #[test]
 fn atomic_save_failure_preserves_existing_project_file() {
     let temp = tempdir("atomic");
-    let path = temp.path().join("fixture.shapelab-asset.json");
+    let path = temp.path().join("fixture.object-orchard-asset.json");
     let original = AssetProject::from_template(recipe()).unwrap();
     original.save_json(&path).unwrap();
     let original_bytes = fs::read(&path).unwrap();
 
     let error = orchard_project::asset::test_support::atomic_replace_for_test(&path, |file| {
-        file.write_all(b"{\"project_kind\":\"shape-lab.asset-project\"")?;
+        file.write_all(b"{\"project_kind\":\"object-orchard.asset-project\"")?;
         Err(io::Error::new(
             io::ErrorKind::Interrupted,
             "simulated interrupted write",
@@ -292,7 +292,7 @@ fn atomic_save_failure_preserves_existing_project_file() {
 #[test]
 fn autosave_recovery_snapshot_is_loadable_and_separate_from_project_path() {
     let temp = tempdir("autosave");
-    let path = temp.path().join("fixture.shapelab-asset.json");
+    let path = temp.path().join("fixture.object-orchard-asset.json");
     let autosave = autosave_snapshot_path(&path);
     let mut file = AssetProjectFile::new_from_template("Fixture", recipe()).unwrap();
     file.accept_candidate(thickness_edit("thin", 0.2)).unwrap();
@@ -308,7 +308,7 @@ fn autosave_recovery_snapshot_is_loadable_and_separate_from_project_path() {
 #[test]
 fn export_current_obj_failure_does_not_clear_dirty_state() {
     let temp = tempdir("export-failure");
-    let project_path = temp.path().join("fixture.shapelab-asset.json");
+    let project_path = temp.path().join("fixture.object-orchard-asset.json");
     let obj_path = temp.path().join("missing").join("out.obj");
     let mut file = AssetProjectFile::new_from_template("Fixture", recipe()).unwrap();
 
@@ -345,7 +345,7 @@ fn export_current_model_package_and_obj_write_current_revision() {
 #[test]
 fn current_revision_switch_is_dirty_and_survives_reload() {
     let temp = tempdir("switch");
-    let path = temp.path().join("fixture.shapelab-asset.json");
+    let path = temp.path().join("fixture.object-orchard-asset.json");
     let mut file = AssetProjectFile::new_from_template("Fixture", recipe()).unwrap();
     let first = file.accept_candidate(thickness_edit("thin", 0.2)).unwrap();
     file.undo().unwrap();
@@ -364,9 +364,9 @@ fn current_revision_switch_is_dirty_and_survives_reload() {
 
 #[test]
 fn asset_project_suffix_helper_rejects_legacy_project_names() {
-    assert!(ensure_asset_project_path("asset.shapelab-asset.json").is_ok());
+    assert!(ensure_asset_project_path("asset.object-orchard-asset.json").is_ok());
     assert!(matches!(
-        ensure_asset_project_path("legacy.shapelab.json"),
+        ensure_asset_project_path("legacy.object-orchard.json"),
         Err(AssetProjectError::InvalidProjectPath { .. })
     ));
 }

@@ -78,7 +78,7 @@ fn build_pack_report(
         conformance_status: &conformance_status,
     };
     let report_fingerprint = fingerprint_serializable(
-        "shape-lab.foundry-pack-report.v1",
+        "object-orchard.foundry-pack-report.v1",
         "foundry_pack_report",
         &payload,
     )
