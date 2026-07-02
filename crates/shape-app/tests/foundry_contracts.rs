@@ -292,6 +292,72 @@ fn phase_a_contract_boundary_docs_are_authoritative() {
     );
 }
 
+#[test]
+fn foundry_active_docs_index_links_existing_docs_only() {
+    let root = repo_root();
+    let index = doc_text("docs/README.md");
+    let links = active_doc_links(&index);
+
+    assert!(!links.is_empty(), "docs README should link active docs");
+
+    for link in links {
+        let path = root.join("docs").join(&link);
+        assert!(
+            path.is_file(),
+            "docs/README.md references missing active doc: {link}"
+        );
+    }
+}
+
+#[test]
+fn foundry_active_docs_do_not_reactivate_obsolete_pivots() {
+    let mut active_docs = vec!["README.md".to_owned(), "docs/README.md".to_owned()];
+    active_docs.extend(
+        active_doc_links(&doc_text("docs/README.md"))
+            .into_iter()
+            .map(|path| format!("docs/{path}")),
+    );
+    active_docs.sort();
+    active_docs.dedup();
+
+    let joined = active_docs
+        .iter()
+        .map(|path| doc_text(path))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+
+    for forbidden in [
+        "sci-fi crate is the flagship",
+        "sci-fi crate remains the flagship",
+        "flagship sci-fi crate",
+        "cargo case is the active direction",
+        "cargo case remains the active direction",
+        "active direction is cargo case",
+        "generated variation ui is active",
+        "generated variations are active",
+        "generated variation tray is active",
+        "try ideas is active",
+        "material support is approved",
+        "material editor is supported",
+        "uv support is approved",
+        "uv editor is supported",
+        "collision support is approved",
+        "collision-enabled output is available",
+        "rigging is supported",
+        "animation is supported",
+        "godot-ready output is available",
+        "game-ready output is supported",
+        "game-ready output is available without proof",
+        "full game-ready support",
+    ] {
+        assert!(
+            !joined.contains(forbidden),
+            "active docs must not reactivate obsolete claim: {forbidden}"
+        );
+    }
+}
+
 fn minimal_foundry_document() -> FoundryAssetDocument {
     FoundryAssetDocument::new(
         FoundryDocumentId("doc".to_string()),
@@ -301,6 +367,23 @@ fn minimal_foundry_document() -> FoundryAssetDocument {
         content_ref("style_impl", 4),
         content_ref("profile", 5),
     )
+}
+
+fn active_doc_links(index: &str) -> Vec<String> {
+    index
+        .lines()
+        .filter_map(|line| {
+            let start = line.find("](")?;
+            let after_start = &line[start + 2..];
+            let end = after_start.find(')')?;
+            let link = &after_start[..end];
+            if link.ends_with(".md") {
+                Some(link.to_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn doc_text(relative_path: &str) -> String {

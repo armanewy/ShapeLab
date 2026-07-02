@@ -20,8 +20,8 @@ Examples:
 
 ```bash
 cargo check -p shape-app
-cargo test -p shape-search foundry --jobs 1
-cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1
+cargo test -p shape-app foundry_direct_make_status_docs_agree --jobs 1
+cargo test -p shape-foundry object_plan --jobs 1
 ```
 
 ## Tier 1: Branch Handoff
@@ -64,17 +64,10 @@ Use after merging related branches. Target: 8-15 minutes.
 Run merged slice tests and workspace clippy. Add a release build when product
 code changed; skip it for docs-only and policy-only integrations.
 
-```bash
-cargo fmt --all --check
-cargo test -p shape-app --lib foundry --jobs 1
-cargo test -p shape-search foundry --jobs 1
-cargo test -p shape-render foundry --jobs 1
-cargo test -p shape-foundry-catalog --test scifi_crate --jobs 1
-cargo test -p shape-foundry-catalog --test roman_bridge --jobs 1
-cargo test -p shape-foundry-catalog --test stylized_lamp --jobs 1
-cargo clippy --workspace --all-targets -- -D warnings
-cargo build --release --workspace  # only when product code changed
-```
+Integration wave prompts own the exact workspace command list. Docs-only
+integration branches normally run formatting, source hygiene, docs inventory,
+the relevant docs-as-strings tests, and no release build unless product code
+changed.
 
 ## Tier 3: Main/Release Gate
 
@@ -95,11 +88,9 @@ require it. It is not a normal unit-test gate.
 
 These checks are necessary, but should be explicit and rare:
 
-- screenshot/video dogfood
-- starter-template full benchmark
-- HQ contact sheet generation
+- screenshot/video review gates
+- ObjectPlan contact-sheet generation
 - release readiness
-- game-ready static package generation
 - inverse/recovery corpus
 - strict external import/reconstruction
 - slow render/contact-sheet tests
@@ -110,21 +101,16 @@ Tier 1 work.
 
 ## Path Mapping
 
-`scripts/dev_gate.py` encodes the first gate map:
+`scripts/dev_gate.py` encodes the current first gate map. Treat old catalog
+family, candidate, dogfood, and game-ready package entries as obsolete unless a
+current integration wave explicitly revalidates them.
 
 - `crates/shape-app/**`: app check, foundry library tests, direction-board test, app clippy
-- `crates/shape-search/**`: shape-search foundry tests, shape-render foundry adjacency
-- `crates/shape-render/**`: shape-render foundry tests, surface filter when surface files change
-- `crates/shape-foundry-catalog/src/simple_crate.rs`: Simple Crate test plus search/render foundry adjacency
-- `crates/shape-foundry-catalog/src/utility_crate.rs`: Utility Crate test plus search/render foundry adjacency
-- `crates/shape-foundry-catalog/src/cargo_case.rs`: Cargo Case test plus search/render foundry adjacency
-- `crates/shape-foundry-catalog/src/scifi_crate.rs`: Sci-Fi Crate test plus search foundry adjacency; add
-  `shape-cli game_ready_static` only when the static surface package path also changed
-- `crates/shape-foundry-catalog/src/roman_bridge.rs`: Roman Bridge test
-- `crates/shape-foundry-catalog/src/stylized_lamp.rs`: Stylized Lamp test
-- `crates/shape-gamekit/**`: surface, rig, and motion filters
-- `crates/shape-cli/src/game_ready_static.rs`: game-ready static filter
-- `docs/**`: formatting and doc/status tests only; no release build by default
+- `crates/shape-foundry/**`: ObjectPlan and geometry export tests
+- `crates/shape-authoring/**`: authoring-op tests
+- `crates/shape-asset/**`: semantic shell tests
+- `docs/**`: formatting, source hygiene, cleanup inventory, and doc/status
+  tests only; no release build by default
 
 Full workspace test, clippy, and release build are required for main/release.
 They are not required for every prompt lane.
