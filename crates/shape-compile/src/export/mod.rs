@@ -4,7 +4,10 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use shape_asset::{AssetRecipe, RegionId};
+use shape_asset::{
+    AssetRecipe, ExportRealizationPolicy, RegionId, RelationshipContract, RelationshipId,
+    RelationshipType,
+};
 use thiserror::Error;
 
 use crate::{AssetArtifact, CompiledPart};
@@ -64,6 +67,40 @@ pub struct ExportCounts {
     pub polygon_index_count: u64,
     /// Number of split-normal loop entries.
     pub split_normal_count: u64,
+}
+
+/// How an authored relationship's child appeared in the exported geometry.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelationshipChildOutput {
+    /// The child is preserved as its own exported node.
+    PreservedNode,
+    /// The child is preserved as a distinct submesh.
+    PreservedSubmesh,
+    /// The child is part of the current combined geometry mesh.
+    CombinedMesh,
+    /// The child was baked into a union by an evidence-backed exporter.
+    BakedUnion,
+}
+
+/// Truthful export realization summary for one authored relationship.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationshipRealizationSummary {
+    /// Authored relationship ID.
+    pub relationship_id: RelationshipId,
+    /// Authored relationship semantic kind.
+    pub relationship_type: RelationshipType,
+    /// Requested or authored export realization policy.
+    pub realization_policy: ExportRealizationPolicy,
+    /// Exported child node reference, if the child is preserved as a node.
+    pub output_node: Option<String>,
+    /// Exported mesh reference, if geometry is present in a mesh.
+    pub output_mesh: Option<String>,
+    /// Actual V0 child output shape.
+    pub child_output: RelationshipChildOutput,
+    /// Whether this export actually baked the relationship into geometry.
+    pub baked: bool,
+    /// Whether relationship semantics remain available in report/sidecar data.
+    pub semantics_preserved_in_sidecar: bool,
 }
 
 impl ExportCounts {
@@ -137,6 +174,31 @@ pub fn export_counts(artifact: &AssetArtifact) -> ExportCounts {
         counts.add_part(part);
     }
     counts
+}
+
+/// Summarize how relationship contracts are realized by V0 geometry export.
+///
+/// Geometry export V0 writes one geometry-only GLB. It may report authored
+/// relationships, but it does not claim node hierarchy, submesh separation,
+/// collision, or baked union output unless a later exporter proves that path.
+#[must_use]
+pub fn relationship_realization_summaries_for_geometry_export(
+    relationships: &[RelationshipContract],
+    output_mesh: &str,
+) -> Vec<RelationshipRealizationSummary> {
+    relationships
+        .iter()
+        .map(|relationship| RelationshipRealizationSummary {
+            relationship_id: relationship.id,
+            relationship_type: relationship.relationship_type.clone(),
+            realization_policy: relationship.export_realization.clone(),
+            output_node: None,
+            output_mesh: Some(output_mesh.to_owned()),
+            child_output: RelationshipChildOutput::CombinedMesh,
+            baked: false,
+            semantics_preserved_in_sidecar: true,
+        })
+        .collect()
 }
 
 /// Stable non-cryptographic hash used for package checksums and recipe identity.

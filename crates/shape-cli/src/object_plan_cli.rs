@@ -7,6 +7,9 @@ use anyhow::Context;
 use clap::{Subcommand, ValueEnum};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
+use shape_compile::export::{
+    RelationshipChildOutput, relationship_realization_summaries_for_geometry_export,
+};
 use shape_core::Aabb;
 use shape_foundry::{
     GeometryExportFormat, GeometryExportPolicy, GeometryExportReport, GeometryExportRequest,
@@ -449,6 +452,10 @@ fn write_geometry_export_outputs(
 
     let asset_path = out_dir.join("asset.glb");
     write_geometry_only_glb(&mesh, &asset_path)?;
+    let relationship_realizations = relationship_realization_summaries_for_geometry_export(
+        &outcome.draft.relationship_contracts,
+        "asset.glb#mesh0",
+    );
     let report = GeometryExportReport {
         status: GeometryExportStatus::Passed,
         output_files: vec!["asset.glb".to_owned()],
@@ -458,6 +465,7 @@ fn write_geometry_export_outputs(
         triangle_count: mesh.indices.len() / 3,
         warning_count: 0,
         blockers: Vec::new(),
+        relationship_realizations,
         includes_uvs: false,
         includes_textures: false,
         includes_material_looks: false,
@@ -515,6 +523,7 @@ fn blocked_geometry_export_report(
         triangle_count: 0,
         warning_count: 0,
         blockers,
+        relationship_realizations: Vec::new(),
         includes_uvs: false,
         includes_textures: false,
         includes_material_looks: false,
@@ -1246,8 +1255,35 @@ fn geometry_export_user_summary_markdown(
             markdown.push('\n');
         }
     }
+    if !report.relationship_realizations.is_empty() {
+        markdown.push_str("\n## Relationship Realization\n\n");
+        for realization in &report.relationship_realizations {
+            markdown.push_str("- Relationship ");
+            markdown.push_str(&realization.relationship_id.0.to_string());
+            markdown.push_str(": ");
+            markdown.push_str(relationship_child_output_label(realization.child_output));
+            markdown.push_str("; baked: ");
+            markdown.push_str(if realization.baked { "true" } else { "false" });
+            markdown.push_str("; semantics preserved in sidecar: ");
+            markdown.push_str(if realization.semantics_preserved_in_sidecar {
+                "true"
+            } else {
+                "false"
+            });
+            markdown.push('\n');
+        }
+    }
     markdown.push_str("\nHuman review required: true\n");
     markdown
+}
+
+fn relationship_child_output_label(output: RelationshipChildOutput) -> &'static str {
+    match output {
+        RelationshipChildOutput::PreservedNode => "child preserved as node",
+        RelationshipChildOutput::PreservedSubmesh => "child preserved as submesh",
+        RelationshipChildOutput::CombinedMesh => "child included in combined mesh",
+        RelationshipChildOutput::BakedUnion => "child baked as union",
+    }
 }
 
 fn write_render_evidence_outputs(

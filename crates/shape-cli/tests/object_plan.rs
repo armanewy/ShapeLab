@@ -455,6 +455,13 @@ fn object_plan_cli_export_geometry_valid_box_plan() {
         "triangle count should be positive"
     );
     assert_geometry_export_report_excludes_non_geometry_features(&report);
+    assert_eq!(
+        report["relationship_realizations"]
+            .as_array()
+            .expect("relationship realizations")
+            .len(),
+        0
+    );
     let summary = fs::read_to_string(out_dir.join("geometry-export-user-summary.md"))
         .expect("read geometry summary");
     assert!(summary.contains("Geometry-only GLB exported."));
@@ -534,6 +541,23 @@ fn object_plan_cli_export_geometry_valid_panel_knob_plan() {
     assert_eq!(report["source_plan_id"], "panel_with_knob_plan");
     assert_eq!(report["primitive_count"], 2);
     assert_geometry_export_report_excludes_non_geometry_features(&report);
+    let relationship_realizations = report["relationship_realizations"]
+        .as_array()
+        .expect("relationship realizations");
+    assert_eq!(relationship_realizations.len(), 1);
+    let realization = &relationship_realizations[0];
+    assert_eq!(realization["relationship_id"], 1);
+    assert_eq!(realization["relationship_type"], "SurfaceMounted");
+    assert_eq!(realization["realization_policy"], "PreserveSemanticSidecar");
+    assert_eq!(realization["output_node"], serde_json::Value::Null);
+    assert_eq!(realization["output_mesh"], "asset.glb#mesh0");
+    assert_eq!(realization["child_output"], "CombinedMesh");
+    assert_eq!(realization["baked"], false);
+    assert_eq!(realization["semantics_preserved_in_sidecar"], true);
+    let summary = fs::read_to_string(out_dir.join("geometry-export-user-summary.md"))
+        .expect("read geometry summary");
+    assert!(summary.contains("child included in combined mesh"));
+    assert!(summary.contains("baked: false"));
 }
 
 #[test]

@@ -1,3 +1,5 @@
+use shape_asset::{ExportRealizationPolicy, RelationshipId, RelationshipType};
+use shape_compile::export::{RelationshipChildOutput, RelationshipRealizationSummary};
 use shape_foundry::{
     GeometryExportFormat, GeometryExportPolicy, GeometryExportReport, GeometryExportRequest,
     GeometryExportSourceKind, GeometryExportStatus, GeometryExportValidationReport,
@@ -107,6 +109,27 @@ fn geometry_export_report_blocks_non_geometry_features() {
 }
 
 #[test]
+fn geometry_export_report_rejects_unproven_relationship_bake() {
+    let mut export_report = passed_report();
+    export_report
+        .relationship_realizations
+        .push(RelationshipRealizationSummary {
+            relationship_id: RelationshipId(1),
+            relationship_type: RelationshipType::SurfaceMounted,
+            realization_policy: ExportRealizationPolicy::BakedUnion,
+            output_node: None,
+            output_mesh: Some("asset.glb#mesh0".to_owned()),
+            child_output: RelationshipChildOutput::BakedUnion,
+            baked: true,
+            semantics_preserved_in_sidecar: true,
+        });
+
+    let report = validate_geometry_export_report(&export_report);
+
+    assert_issue(&report, "geometry_export_relationship_bake_unproven");
+}
+
+#[test]
 fn geometry_export_user_summary_is_product_safe() {
     let summary = geometry_export_user_summary(&passed_report());
 
@@ -154,6 +177,7 @@ fn passed_report() -> GeometryExportReport {
         triangle_count: 12,
         warning_count: 0,
         blockers: Vec::new(),
+        relationship_realizations: Vec::new(),
         includes_uvs: false,
         includes_textures: false,
         includes_material_looks: false,

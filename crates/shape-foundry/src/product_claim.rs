@@ -294,6 +294,7 @@ mod tests {
             triangle_count: 12,
             warning_count: 0,
             blockers: Vec::new(),
+            relationship_realizations: Vec::new(),
             includes_uvs: false,
             includes_textures: false,
             includes_material_looks: false,
