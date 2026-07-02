@@ -48,7 +48,7 @@ anchors, and validated attachments between those anchors.
 Flat Panel anchors:
 
 - `front_center`
-- `right_side_handle_zone`
+- `front_handle_zone`
 - `left_side_handle_zone`
 - `hinge_edge_zone`
 

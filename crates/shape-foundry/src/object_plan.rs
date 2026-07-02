@@ -7,6 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use shape_asset::{
+    ContactPolicy, ExportRealizationPolicy, OrientationPolicy, PlacementPolicy, PositionRule,
+    RelationshipContract, RelationshipId, RelationshipType, ScalePolicy,
+};
 
 use crate::{
     PrimitiveAttachment, PrimitiveAttachmentOffsetPolicy, PrimitiveAttachmentOrientationPolicy,
@@ -319,6 +323,9 @@ pub struct MaterializedObjectDraft {
     pub primitive_instances: Vec<MaterializedPrimitiveInstance>,
     /// Supported composition document.
     pub composition_document: PrimitiveCompositionDocument,
+    /// Relationship contracts derived from supported safe-anchor attachments.
+    #[serde(default)]
+    pub relationship_contracts: Vec<RelationshipContract>,
     /// Nodes that could not be materialized.
     pub unresolved_nodes: Vec<UnresolvedObjectPlanNode>,
     /// Attachments that could not be materialized.
@@ -568,12 +575,15 @@ pub fn materialize_object_plan(
 
     let composition_document =
         object_plan_materialized_composition_document(&request.plan, &primitive_instances, status);
+    let relationship_contracts =
+        object_plan_materialized_relationship_contracts(&request.plan, status);
     MaterializedObjectDraft {
         draft_id: format!("{}_draft", request.plan.plan_id),
         source_plan_id: request.plan.plan_id,
         status,
         primitive_instances,
         composition_document,
+        relationship_contracts,
         unresolved_nodes,
         unresolved_attachments,
         validation_report,
@@ -910,6 +920,92 @@ fn object_plan_materialized_composition_document(
     }
 }
 
+fn object_plan_materialized_relationship_contracts(
+    plan: &ObjectPlan,
+    status: MaterializationStatus,
+) -> Vec<RelationshipContract> {
+    if !matches!(
+        status,
+        MaterializationStatus::Passed | MaterializationStatus::Partial
+    ) {
+        return Vec::new();
+    }
+
+    plan.attachments
+        .iter()
+        .filter(|attachment| object_plan_materialization_supports_attachment(attachment, plan))
+        .enumerate()
+        .map(|(index, attachment)| object_plan_attachment_relationship(index, attachment))
+        .collect()
+}
+
+fn object_plan_attachment_relationship(
+    index: usize,
+    attachment: &ObjectPlanAttachment,
+) -> RelationshipContract {
+    let id = RelationshipId(index as u64 + 1);
+    RelationshipContract {
+        id,
+        relationship_type: RelationshipType::SurfaceMounted,
+        parent: None,
+        child: None,
+        parent_node_ref: Some(attachment.parent_node_id.clone()),
+        child_node_ref: Some(attachment.child_node_id.clone()),
+        parent_anchor_id: Some(attachment.parent_anchor_id.clone()),
+        child_anchor_id: Some(attachment.child_anchor_id.clone()),
+        label: "Panel with Knob surface mount".to_owned(),
+        export_profile: None,
+        placement_policy: PlacementPolicy {
+            position_rule: attachment_position_rule(attachment),
+        },
+        orientation_policy: match attachment.orientation_policy {
+            PrimitiveAttachmentOrientationPolicy::AlignChildToParentNormal => {
+                OrientationPolicy::AlignToSurfaceNormal {
+                    max_angle_degrees: 0.0,
+                }
+            }
+            PrimitiveAttachmentOrientationPolicy::PreserveChildForward => {
+                OrientationPolicy::PreserveChild
+            }
+        },
+        scale_policy: match attachment.scale_policy {
+            PrimitiveAttachmentScalePolicy::KeepChildScale => ScalePolicy::PreserveChild,
+        },
+        contact_policy: ContactPolicy::SurfaceContact { clearance: 0.0 },
+        edit_policy: Default::default(),
+        selection_policy: Default::default(),
+        reset_policy: Default::default(),
+        export_realization: ExportRealizationPolicy::PreserveSemanticSidecar,
+    }
+}
+
+fn attachment_position_rule(attachment: &ObjectPlanAttachment) -> PositionRule {
+    match &attachment.offset {
+        PrimitiveAttachmentOffsetPolicy::Fixed => PositionRule::CenteredInZone {
+            zone: attachment.parent_anchor_id.clone(),
+        },
+        PrimitiveAttachmentOffsetPolicy::BoundedNormalized {
+            x,
+            y,
+            minimum_x,
+            maximum_x,
+            minimum_y,
+            maximum_y,
+        } => PositionRule::ProportionalUv {
+            u: normalize_bounded_offset(*x, *minimum_x, *maximum_x),
+            v: normalize_bounded_offset(*y, *minimum_y, *maximum_y),
+        },
+    }
+}
+
+fn normalize_bounded_offset(value: f32, minimum: f32, maximum: f32) -> f32 {
+    if (maximum - minimum).abs() <= f32::EPSILON {
+        0.5
+    } else {
+        ((value - minimum) / (maximum - minimum)).clamp(0.0, 1.0)
+    }
+}
+
 fn object_plan_materialization_supports_primitive(primitive_kind: PrimitiveKind) -> bool {
     matches!(
         primitive_kind,
@@ -940,7 +1036,7 @@ fn object_plan_materialization_supports_attachment(
         (
             Some(PrimitiveKind::FlatPanelPrimitive),
             Some(PrimitiveKind::SpherePrimitive),
-            "right_side_handle_zone",
+            "front_handle_zone" | "right_side_handle_zone",
             "back_mount_point",
             PrimitiveAttachmentOrientationPolicy::AlignChildToParentNormal,
             PrimitiveAttachmentScalePolicy::KeepChildScale,

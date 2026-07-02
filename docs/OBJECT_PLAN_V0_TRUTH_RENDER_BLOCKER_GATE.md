@@ -30,7 +30,7 @@ yet a broadly renderable asset-generation milestone.
 - Sphere Primitive plans validate.
 - Panel with Knob-style plans validate when represented as a Flat Panel
   Primitive plus a Sphere Primitive attached through the approved
-  `right_side_handle_zone` to `back_mount_point` anchor path.
+  `front_handle_zone` to `back_mount_point` anchor path.
 
 ## What Renders
 

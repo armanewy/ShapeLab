@@ -26,7 +26,7 @@ fn primitive_composition_sphere_can_attach_to_flat_panel_handle_zone() {
     assert_valid(&report);
     assert_eq!(
         document.attachments[0].parent_anchor_id,
-        "right_side_handle_zone"
+        "front_handle_zone"
     );
     assert_eq!(document.attachments[0].child_anchor_id, "back_mount_point");
 }
@@ -68,7 +68,7 @@ fn primitive_composition_raw_free_transform_rejected() {
 
 #[test]
 fn primitive_composition_invalid_normalized_location_rejected() {
-    let mut anchor = flat_panel_anchor("right_side_handle_zone");
+    let mut anchor = flat_panel_anchor("front_handle_zone");
     anchor.normalized_location = [1.25, 0.0, -1.0];
 
     let report = validate_primitive_anchor(&anchor);
@@ -117,7 +117,7 @@ fn panel_with_sphere_document() -> PrimitiveCompositionDocument {
         attachments: vec![PrimitiveAttachment {
             attachment_id: "panel_knob_mount".to_owned(),
             parent_node_id: "panel".to_owned(),
-            parent_anchor_id: "right_side_handle_zone".to_owned(),
+            parent_anchor_id: "front_handle_zone".to_owned(),
             child_node_id: "knob".to_owned(),
             child_anchor_id: "back_mount_point".to_owned(),
             offset_policy: PrimitiveAttachmentOffsetPolicy::BoundedNormalized {

@@ -591,6 +591,19 @@ fn flat_panel_anchors(node_id: &str) -> Vec<PrimitiveAnchor> {
         anchor(
             node_id,
             AnchorSpec {
+                anchor_id: "front_handle_zone",
+                display_name: "Front handle zone",
+                anchor_kind: PrimitiveAnchorKind::SurfacePoint,
+                normalized_location: [0.0, 0.0, -1.0],
+                normal: [0.0, 0.0, -1.0],
+                tangent: [1.0, 0.0, 0.0],
+                allowed_child_kinds: vec![PrimitiveKind::SpherePrimitive],
+                product_safe_description: "Attach a small rounded primitive on the panel front.",
+            },
+        ),
+        anchor(
+            node_id,
+            AnchorSpec {
                 anchor_id: "right_side_handle_zone",
                 display_name: "Right handle zone",
                 anchor_kind: PrimitiveAnchorKind::SurfacePoint,

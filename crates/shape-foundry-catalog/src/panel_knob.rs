@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use shape_asset::{PartDefinitionId, PartInstanceId, definition_scalar_path, instance_scalar_path};
+use shape_asset::{
+    PartDefinitionId, PartInstanceId, PositionRule, definition_scalar_path, instance_scalar_path,
+};
 use shape_family::{AllowedOperationKind, RoleMultiplicity};
 use shape_family_compile::{ParameterBinding, RecipeFragment, ScalarTransform};
 use shape_foundry::{
@@ -125,7 +127,7 @@ pub fn composition_document() -> PrimitiveCompositionDocument {
         attachments: vec![PrimitiveAttachment {
             attachment_id: "panel_knob_attachment".to_owned(),
             parent_node_id: "panel".to_owned(),
-            parent_anchor_id: "right_side_handle_zone".to_owned(),
+            parent_anchor_id: "front_handle_zone".to_owned(),
             child_node_id: "knob".to_owned(),
             child_anchor_id: "back_mount_point".to_owned(),
             offset_policy: PrimitiveAttachmentOffsetPolicy::BoundedNormalized {
@@ -140,6 +142,31 @@ pub fn composition_document() -> PrimitiveCompositionDocument {
             scale_policy: PrimitiveAttachmentScalePolicy::KeepChildScale,
         }],
         root_node_id: "panel".to_owned(),
+    }
+}
+
+/// Resolve a relationship placement policy to a horizontal panel-space position.
+///
+/// This is a policy proof helper for the Panel with Knob migration. It does
+/// not introduce raw transforms or a product-facing free-placement lane.
+#[must_use]
+pub fn relationship_horizontal_position(
+    position_rule: &PositionRule,
+    panel_width: f32,
+) -> Option<f32> {
+    if !panel_width.is_finite() || panel_width <= 0.0 {
+        return None;
+    }
+    match position_rule {
+        PositionRule::FixedOffsetFromEdge { edge, offset } if edge == "right" => {
+            Some(panel_width * 0.5 - offset[0])
+        }
+        PositionRule::FixedOffsetFromEdge { edge, offset } if edge == "left" => {
+            Some(-panel_width * 0.5 + offset[0])
+        }
+        PositionRule::ProportionalUv { u, .. } => Some((*u - 0.5) * panel_width),
+        PositionRule::CenteredInZone { .. } | PositionRule::PreserveCurrentOnDetach => Some(0.0),
+        PositionRule::FixedOffsetFromEdge { .. } => None,
     }
 }
 

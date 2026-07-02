@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use shape_asset::{
-    AssetEditProgram, AssetRecipe, AssetValidationReport, ParameterId, validate_asset_recipe,
+    AssetEditProgram, AssetRecipe, AssetValidationReport, ContactPolicy, ExportRealizationPolicy,
+    OrientationPolicy, ParameterId, PartInstanceId, PlacementPolicy, PositionRule,
+    RelationshipContract, RelationshipType, ScalePolicy, validate_asset_recipe,
 };
 use shape_compile::{AssetArtifact, CompileError, compile_asset};
 use shape_family::{
@@ -385,6 +387,7 @@ fn compile_foundry_document_inner(
         &document.local_recipe_overrides,
         base_geometry_fingerprint,
     )?;
+    annotate_panel_knob_relationship(&mut final_recipe, &catalog.family.id, document);
     let final_recipe_validation = validate_asset_recipe(&final_recipe);
     if !final_recipe_validation.is_valid() {
         return Err(FoundryCompilationError::AssetValidationFailed(
@@ -862,6 +865,86 @@ fn apply_local_recipe_overrides(
         }
     }
     Ok(reports)
+}
+
+fn annotate_panel_knob_relationship(
+    recipe: &mut AssetRecipe,
+    family_id: &str,
+    document: &crate::FoundryAssetDocument,
+) {
+    if family_id != "panel_with_knob" {
+        return;
+    }
+    if recipe
+        .semantic
+        .relationships
+        .values()
+        .any(|relationship| relationship.label == "Panel with Knob surface mount")
+    {
+        return;
+    }
+
+    let Some(parent) = single_role_instance(recipe, "panel_body") else {
+        return;
+    };
+    let Some(child) = single_role_instance(recipe, "knob_form") else {
+        return;
+    };
+    let u = scalar_control_value(document, "knob_x_offset").unwrap_or(0.5);
+    let v = scalar_control_value(document, "knob_y_offset").unwrap_or(0.5);
+    let relationship_id = recipe.allocate_relationship_id();
+    recipe.semantic.relationships.insert(
+        relationship_id,
+        RelationshipContract {
+            id: relationship_id,
+            relationship_type: RelationshipType::SurfaceMounted,
+            parent: Some(parent),
+            child: Some(child),
+            parent_node_ref: Some("panel".to_owned()),
+            child_node_ref: Some("knob".to_owned()),
+            parent_anchor_id: Some("front_handle_zone".to_owned()),
+            child_anchor_id: Some("back_mount_point".to_owned()),
+            label: "Panel with Knob surface mount".to_owned(),
+            export_profile: None,
+            placement_policy: PlacementPolicy {
+                position_rule: PositionRule::ProportionalUv {
+                    u: u.clamp(0.0, 1.0),
+                    v: v.clamp(0.0, 1.0),
+                },
+            },
+            orientation_policy: OrientationPolicy::AlignToSurfaceNormal {
+                max_angle_degrees: 0.0,
+            },
+            scale_policy: ScalePolicy::PreserveChild,
+            contact_policy: ContactPolicy::SurfaceContact { clearance: 0.0 },
+            edit_policy: Default::default(),
+            selection_policy: Default::default(),
+            reset_policy: Default::default(),
+            export_realization: ExportRealizationPolicy::PreserveSemanticSidecar,
+        },
+    );
+}
+
+fn single_role_instance(recipe: &AssetRecipe, role: &str) -> Option<PartInstanceId> {
+    let tag = format!("role:{role}");
+    let mut instances = recipe
+        .instances
+        .iter()
+        .filter(|(_, instance)| instance.tags.contains(&tag))
+        .map(|(id, _)| *id);
+    let first = instances.next()?;
+    if instances.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
+}
+
+fn scalar_control_value(document: &crate::FoundryAssetDocument, control_id: &str) -> Option<f32> {
+    match document.control_state.get(control_id) {
+        Some(ControlValue::Scalar(value)) if value.is_finite() => Some(*value),
+        _ => None,
+    }
 }
 
 fn compute_local_override_divergence_reports(

@@ -1424,7 +1424,10 @@ fn materialized_node_placements(draft: &MaterializedObjectDraft) -> BTreeMap<Str
         };
         if parent.primitive_kind != PrimitiveKind::FlatPanelPrimitive
             || child.primitive_kind != PrimitiveKind::SpherePrimitive
-            || attachment.parent_anchor_id != "right_side_handle_zone"
+            || !matches!(
+                attachment.parent_anchor_id.as_str(),
+                "front_handle_zone" | "right_side_handle_zone"
+            )
             || attachment.child_anchor_id != "back_mount_point"
         {
             continue;
@@ -1436,7 +1439,12 @@ fn materialized_node_placements(draft: &MaterializedObjectDraft) -> BTreeMap<Str
             PrimitiveAttachmentOffsetPolicy::Fixed => (0.0, 0.0),
             PrimitiveAttachmentOffsetPolicy::BoundedNormalized { x, y, .. } => (x, y),
         };
-        let x = (0.45 + offset_x) * parent_dimensions.width * 0.5;
+        let anchor_x = if attachment.parent_anchor_id == "right_side_handle_zone" {
+            0.45
+        } else {
+            0.0
+        };
+        let x = (anchor_x + offset_x) * parent_dimensions.width * 0.5;
         let y = offset_y * parent_dimensions.height * 0.5;
         let z = -parent_dimensions.depth * 0.5 - child_dimensions.depth * 0.5;
         placements.insert(child.node_id.clone(), Vec3::new(x, y, z));

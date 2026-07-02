@@ -520,6 +520,13 @@ impl AssetRecipe {
     pub fn allocate_revision_id(&mut self) -> RevisionId {
         allocate_revision_id(self)
     }
+
+    /// Allocate the next relationship ID.
+    pub fn allocate_relationship_id(&mut self) -> RelationshipId {
+        let id = RelationshipId(self.next_ids.relationship);
+        self.next_ids.relationship = self.next_ids.relationship.saturating_add(1);
+        id
+    }
 }
 
 /// Next-ID counters stored in an asset recipe.
@@ -666,6 +673,18 @@ pub struct RelationshipContract {
     /// Optional child endpoint for validation once populated.
     #[serde(default)]
     pub child: Option<PartInstanceId>,
+    /// Source parent node reference before concrete instance IDs are assigned.
+    #[serde(default)]
+    pub parent_node_ref: Option<String>,
+    /// Source child node reference before concrete instance IDs are assigned.
+    #[serde(default)]
+    pub child_node_ref: Option<String>,
+    /// Parent anchor ID from an anchor-based composition lane.
+    #[serde(default)]
+    pub parent_anchor_id: Option<String>,
+    /// Child anchor ID from an anchor-based composition lane.
+    #[serde(default)]
+    pub child_anchor_id: Option<String>,
     /// Product-safe label for future UI/reports.
     #[serde(default)]
     pub label: String,
@@ -5266,6 +5285,31 @@ fn validate_relationship_contract_policy(
     id: RelationshipId,
     relationship: &RelationshipContract,
 ) {
+    validate_optional_semantic_identifier(
+        report,
+        Some(format!("semantic.relationships.{}.parent_node_ref", id.0)),
+        relationship.parent_node_ref.as_deref(),
+        "invalid_semantic_relationship_parent_node_ref",
+    );
+    validate_optional_semantic_identifier(
+        report,
+        Some(format!("semantic.relationships.{}.child_node_ref", id.0)),
+        relationship.child_node_ref.as_deref(),
+        "invalid_semantic_relationship_child_node_ref",
+    );
+    validate_optional_semantic_identifier(
+        report,
+        Some(format!("semantic.relationships.{}.parent_anchor_id", id.0)),
+        relationship.parent_anchor_id.as_deref(),
+        "invalid_semantic_relationship_parent_anchor",
+    );
+    validate_optional_semantic_identifier(
+        report,
+        Some(format!("semantic.relationships.{}.child_anchor_id", id.0)),
+        relationship.child_anchor_id.as_deref(),
+        "invalid_semantic_relationship_child_anchor",
+    );
+
     match &relationship.placement_policy.position_rule {
         PositionRule::FixedOffsetFromEdge { edge, offset } => {
             if edge.trim().is_empty() {
@@ -5459,6 +5503,29 @@ fn validate_pattern_count(report: &mut AssetValidationReport, id: PatternId, cou
             Some(format!("semantic.patterns.{}.count_policy", id.0)),
             "invalid_semantic_pattern_count",
             "Pattern count must be between 1 and 10000.",
+        );
+    }
+}
+
+fn validate_optional_semantic_identifier(
+    report: &mut AssetValidationReport,
+    subject: Option<String>,
+    value: Option<&str>,
+    code: &'static str,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    if value.is_empty()
+        || value
+            .chars()
+            .any(|ch| !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-'))
+    {
+        push_issue(
+            report,
+            subject,
+            code,
+            "Semantic relationship references must use stable lowercase identifiers.",
         );
     }
 }
@@ -9253,6 +9320,10 @@ mod tests {
             relationship_type: RelationshipType::SurfaceMounted,
             parent: Some(parent),
             child: Some(child),
+            parent_node_ref: None,
+            child_node_ref: None,
+            parent_anchor_id: None,
+            child_anchor_id: None,
             label: "mounted child".to_owned(),
             export_profile: None,
             placement_policy: PlacementPolicy::default(),
@@ -9447,6 +9518,10 @@ mod tests {
         let mut recipe = multipart_recipe();
         let mut fixed =
             relationship_contract(RelationshipId(1), PartInstanceId(1), PartInstanceId(2));
+        fixed.parent_node_ref = Some("panel".to_owned());
+        fixed.child_node_ref = Some("knob".to_owned());
+        fixed.parent_anchor_id = Some("front_handle_zone".to_owned());
+        fixed.child_anchor_id = Some("back_mount_point".to_owned());
         fixed.placement_policy = PlacementPolicy {
             position_rule: PositionRule::FixedOffsetFromEdge {
                 edge: "right".to_owned(),
@@ -9481,6 +9556,7 @@ mod tests {
         let mut recipe = multipart_recipe();
         let mut first =
             relationship_contract(RelationshipId(1), PartInstanceId(1), PartInstanceId(2));
+        first.parent_anchor_id = Some("Front Handle Zone".to_owned());
         first.placement_policy = PlacementPolicy {
             position_rule: PositionRule::ProportionalUv { u: 2.0, v: 0.5 },
         };
@@ -9506,6 +9582,7 @@ mod tests {
         assert!(codes.contains("invalid_relationship_scale_range"));
         assert!(codes.contains("negative_value"));
         assert!(codes.contains("semantic_relationship_cycle"));
+        assert!(codes.contains("invalid_semantic_relationship_parent_anchor"));
     }
 
     #[test]

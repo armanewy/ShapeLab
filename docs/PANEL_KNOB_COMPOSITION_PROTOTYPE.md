@@ -19,7 +19,7 @@ The prototype is represented by a validated `PrimitiveCompositionDocument`:
 
 - root node: Flat Panel Primitive
 - child node: Sphere Primitive knob-like form
-- parent anchor: `right_side_handle_zone`
+- parent anchor: `front_handle_zone`
 - child anchor: `back_mount_point`
 - offset policy: bounded normalized handle-zone position
 - orientation policy: derived from the parent anchor

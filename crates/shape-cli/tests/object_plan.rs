@@ -1100,7 +1100,7 @@ fn panel_with_sphere_plan() -> ObjectPlan {
         attachments: vec![ObjectPlanAttachment {
             attachment_id: "panel_knob_attachment".to_owned(),
             parent_node_id: "panel".to_owned(),
-            parent_anchor_id: "right_side_handle_zone".to_owned(),
+            parent_anchor_id: "front_handle_zone".to_owned(),
             child_node_id: "knob".to_owned(),
             child_anchor_id: "back_mount_point".to_owned(),
             offset: PrimitiveAttachmentOffsetPolicy::BoundedNormalized {

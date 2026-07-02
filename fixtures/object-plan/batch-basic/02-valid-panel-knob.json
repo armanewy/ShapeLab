@@ -36,7 +36,7 @@
     {
       "attachment_id": "panel_knob_attachment",
       "parent_node_id": "panel",
-      "parent_anchor_id": "right_side_handle_zone",
+      "parent_anchor_id": "front_handle_zone",
       "child_node_id": "knob",
       "child_anchor_id": "back_mount_point",
       "offset": {
