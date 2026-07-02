@@ -5,7 +5,7 @@ ObjectPlan Batch Review v1 runs a directory or batch file of ObjectPlans through
 The CLI command is:
 
 ```bash
-shape-cli object-plan batch-run \
+orchard-cli object-plan batch-run \
   --input fixtures/object-plan/batch-basic \
   --out-dir target/object-plan-batch-review
 ```

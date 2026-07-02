@@ -7,9 +7,9 @@ the original facade file.
 
 ## Shape Asset
 
-`crates/shape-asset/src/lib.rs` remains the crate root for schema constants,
+`crates/orchard-asset/src/lib.rs` remains the crate root for schema constants,
 public modules, and crate-root re-exports. Its implementation is now split under
-`crates/shape-asset/src/asset_core/`:
+`crates/orchard-asset/src/asset_core/`:
 
 | Shard | Responsibility |
 | --- | --- |
@@ -35,7 +35,7 @@ public modules, and crate-root re-exports. Its implementation is now split under
 
 ## Shape Foundry
 
-The public modules in `crates/shape-foundry/src/lib.rs` are unchanged. The
+The public modules in `crates/orchard-foundry/src/lib.rs` are unchanged. The
 oversized foundry modules now delegate to same-namespace shard directories:
 
 | Module | Shards |
@@ -65,7 +65,7 @@ are split into same-namespace shards:
 
 ## Shape Authoring
 
-`shape-authoring` exists in this baseline but had no oversized source file in
+`orchard-authoring` exists in this baseline but had no oversized source file in
 this wave, so no source split was required.
 
 ## Remaining Exceptions

@@ -65,12 +65,12 @@ save. Saved kits remain local/private and review-required.
 | --- | --- |
 | `cargo fmt --all --check` | Pass |
 | `python3 scripts/check_source_hygiene.py` | Pass |
-| `cargo test -p shape-foundry direct_kit --jobs 1` | Pass |
-| `cargo test -p shape-cli direct_kit --jobs 1` | Pass |
-| `cargo test -p shape-cli personal_kit --jobs 1` | Pass |
-| `cargo test -p shape-app family_studio_lite --jobs 1` | Pass |
-| `cargo test -p shape-app foundry --jobs 1` | Pass |
-| `cargo test -p shape-cli prototype_pack --jobs 1` | Pass |
+| `cargo test -p orchard-foundry direct_kit --jobs 1` | Pass |
+| `cargo test -p orchard-cli direct_kit --jobs 1` | Pass |
+| `cargo test -p orchard-cli personal_kit --jobs 1` | Pass |
+| `cargo test -p orchard-app family_studio_lite --jobs 1` | Pass |
+| `cargo test -p orchard-app foundry --jobs 1` | Pass |
+| `cargo test -p orchard-cli prototype_pack --jobs 1` | Pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass |
 | `cargo build --release --workspace` | Pass |
 

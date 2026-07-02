@@ -10,13 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-APP_SOURCE = "crates/shape-app/src/foundry/app.rs"
+APP_SOURCE = "crates/orchard-app/src/foundry/app.rs"
 
 DEFAULT_FILES = (
     APP_SOURCE,
-    "crates/shape-foundry-catalog/src/box_primitive.rs",
-    "crates/shape-foundry-catalog/src/lib.rs",
-    "crates/shape-foundry-catalog/src/kits.rs",
+    "crates/orchard-foundry-catalog/src/box_primitive.rs",
+    "crates/orchard-foundry-catalog/src/lib.rs",
+    "crates/orchard-foundry-catalog/src/kits.rs",
     "README.md",
     "docs/README.md",
     "docs/CURRENT_PRODUCT_STATUS.md",

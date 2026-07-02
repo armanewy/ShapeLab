@@ -11,11 +11,11 @@ Beginner-facing controls must become typed semantic operations over an
 `AssetRecipe` / Orchard asset graph. The UI, ObjectPlan tooling, export tools,
 and future review flows must not mutate separate ad hoc product state.
 
-`shape-asset::AssetRecipe` is the canonical semantic asset lane for future
-A-J product work. A future `shape-orchard-ir` crate may refine that lane, but
+`orchard-asset::AssetRecipe` is the canonical semantic asset lane for future
+A-J product work. A future `orchard-ir` crate may refine that lane, but
 new product semantics should still flow through explicit semantic contracts.
 
-`shape-core::ShapeDocument` remains useful for low-level conventions, legacy
+`orchard-core-legacy::ShapeDocument` remains useful for low-level conventions, legacy
 implicit/SDF compatibility, geometry helpers, and existing compile paths. It is
 not the new canonical product IR for Orchard asset authoring.
 
@@ -47,7 +47,7 @@ Integrated first-stack proofs:
 Blocked Phase A targets:
 
 - new app UI behavior;
-- expanding `shape-core::ShapeDocument` into the product backbone;
+- expanding `orchard-core-legacy::ShapeDocument` into the product backbone;
 - material/surface, UV, collision, terrain, rigging, animation, or motion
   implementation;
 - runtime LLM integration;

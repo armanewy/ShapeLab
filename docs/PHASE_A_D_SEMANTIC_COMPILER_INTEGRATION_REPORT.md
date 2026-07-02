@@ -9,7 +9,7 @@ Status: Passed.
 | Order | Branch | Tip |
 | --- | --- | --- |
 | 1 | `codex/phase-a-contract-boundaries-docs` | `158730b` |
-| 2 | `codex/shape-core-legacy-boundary-guard` | `aea042f` |
+| 2 | `codex/orchard-core-legacy-boundary-guard` | `aea042f` |
 | 3 | `codex/asset-recipe-v8-semantic-shells` | `2fab6b0` |
 | 4 | `codex/authoring-op-log-v0` | `0955800` |
 | 5 | `codex/relationship-pattern-contract-shells-v0` | `86c7239` |
@@ -24,10 +24,10 @@ Status: Passed.
 
 | Question | Answer |
 | --- | --- |
-| Is `shape-asset` / `AssetRecipe` documented as canonical? | Yes. `docs/CONTRACT_BOUNDARIES.md`, `docs/CURRENT_PRODUCT_STATUS.md`, and `README.md` describe `AssetRecipe` / Orchard IR as the canonical future semantic lane. |
-| Is `shape-core` documented as legacy/implicit for A-J work? | Yes. `docs/SHAPE_CORE_LEGACY_BOUNDARY.md` and crate-level docs keep `ShapeDocument` in the legacy/implicit compatibility lane. |
+| Is `orchard-asset` / `AssetRecipe` documented as canonical? | Yes. `docs/CONTRACT_BOUNDARIES.md`, `docs/CURRENT_PRODUCT_STATUS.md`, and `README.md` describe `AssetRecipe` / Orchard IR as the canonical future semantic lane. |
+| Is `orchard-core-legacy` documented as legacy/implicit for A-J work? | Yes. `docs/ORCHARD_CORE_LEGACY_BOUNDARY.md` and crate-level docs keep `ShapeDocument` in the legacy/implicit compatibility lane. |
 | Can `AssetRecipe` carry relationship/pattern/surface/collision/motion/terrain/export/authoring shells? | Yes. AssetRecipe v8 shells carry these semantic placeholders and validation boundaries without making them product-facing features. |
-| Does `AuthoringOpLog` exist and replay? | Yes. `shape-authoring` provides typed operation logs and replay tests. |
+| Does `AuthoringOpLog` exist and replay? | Yes. `orchard-authoring` provides typed operation logs and replay tests. |
 | Does at least one product-visible primitive edit use `AuthoringOp`? | Yes. Box Primitive width is bridged through `AuthoringOp::SetProperty` while preserving current Direct Make behavior. |
 | Can Panel with Knob be represented via `RelationshipContract`? | Yes. Panel with Knob materialization produces a `SurfaceMounted` relationship from `front_handle_zone` to `back_mount_point`. |
 | Are fixed-distance and proportional placement tested? | Yes. Panel-with-Knob relationship tests cover fixed edge distance and proportional placement behavior. |
@@ -54,13 +54,13 @@ Native screenshots are not required for this integration gate. If a visual gate 
 | --- | --- |
 | `cargo fmt --all --check` | Passed |
 | `python3 scripts/check_source_hygiene.py` | Passed |
-| `cargo test -p shape-asset --jobs 1` | Passed |
-| `cargo test -p shape-authoring --jobs 1` | Passed |
-| `cargo test -p shape-modeling --jobs 1` | Passed |
-| `cargo test -p shape-compile --jobs 1` | Passed |
-| `cargo test -p shape-cli object_plan --jobs 1` | Passed |
-| `cargo test -p shape-cli godot --jobs 1` | Passed |
-| `cargo test -p shape-app foundry --jobs 1` | Passed |
+| `cargo test -p orchard-asset --jobs 1` | Passed |
+| `cargo test -p orchard-authoring --jobs 1` | Passed |
+| `cargo test -p orchard-modeling --jobs 1` | Passed |
+| `cargo test -p orchard-compile --jobs 1` | Passed |
+| `cargo test -p orchard-cli object_plan --jobs 1` | Passed |
+| `cargo test -p orchard-cli godot --jobs 1` | Passed |
+| `cargo test -p orchard-app foundry --jobs 1` | Passed |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
 | `cargo build --release --workspace` | Passed |
 

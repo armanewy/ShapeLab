@@ -10,7 +10,7 @@ The implicit MVP graph is useful for field-based exploration, but explicit produ
 
 ## Consequences
 
-- Asset recipes are additive and do not replace `shape-core::ShapeDocument`.
+- Asset recipes are additive and do not replace `orchard-core-legacy::ShapeDocument`.
 - IDs for parts, operations, regions, sockets, parameters, and revisions are strongly typed and ordered.
 - Recipe validation can catch dangling definitions, parent cycles, invalid attachments, stale locks, and unresolved parameter paths before compilation.
 - Wave 0 stores generic surface roles instead of material names, so later material assignment can remain separate.

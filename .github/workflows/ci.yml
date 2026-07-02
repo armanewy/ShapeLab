@@ -117,7 +117,7 @@ jobs:
         with:
           toolchain: stable
           cache: true
-      - run: cargo build -p shape-app --release
+      - run: cargo build -p orchard-app --release
 
   demo-assets:
     name: headless CLI demo assets
@@ -140,7 +140,7 @@ jobs:
       - name: Upload contact sheets
         uses: actions/upload-artifact@v4
         with:
-          name: shape-cli-contact-sheets
+          name: orchard-cli-contact-sheets
           path: |
             target/demo-assets/*/contact-sheet.png
             target/demo-assets/*/summary.json

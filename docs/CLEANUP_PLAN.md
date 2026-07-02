@@ -11,8 +11,8 @@ passed and was pushed. This baseline includes:
 
 - `docs/PHASE_A_D_SEMANTIC_COMPILER_INTEGRATION_REPORT.md`
 - `docs/CONTRACT_BOUNDARIES.md`
-- AssetRecipe semantic shells in `shape-asset`
-- `shape-authoring::AuthoringOpLog`
+- AssetRecipe semantic shells in `orchard-asset`
+- `orchard-authoring::AuthoringOpLog`
 - `RelationshipContract` and `PatternContract`
 - product claim gates and report include checks
 - Direct Make Box width bridge through `AuthoringOp::SetProperty`
@@ -27,12 +27,12 @@ baseline is restored.
 No backward compatibility is required because Object Orchard has not shipped.
 Obsolete pivots should be deleted, not preserved through compatibility shims.
 
-`shape-core` is legacy/implicit unless active code still requires a low-level
+`orchard-core-legacy` is legacy/implicit unless active code still requires a low-level
 type or compatibility convention. New product semantics belong in the explicit
 semantic asset lane:
 
-- `shape-asset::AssetRecipe` / Orchard IR
-- `shape-authoring::AuthoringOpLog`
+- `orchard-asset::AssetRecipe` / Orchard IR
+- `orchard-authoring::AuthoringOpLog`
 - `RelationshipContract`
 - `PatternContract`
 - export/proof includes and realization reports
@@ -59,7 +59,7 @@ preserved.
 3. Remove legacy candidate/search product paths.
 4. Split oversized app and semantic core modules.
 5. Purge dead code, fixtures, dependencies, and stale scripts.
-6. Retire shape-core product dependencies where safe.
+6. Retire orchard-core-legacy product dependencies where safe.
 7. Integrate cleanup before any rename.
 8. Rename product-facing strings to Object Orchard.
 9. Rename Rust crates/folders and command examples.

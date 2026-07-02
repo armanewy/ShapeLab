@@ -1,0 +1,29 @@
+[package]
+name = "orchard-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crossbeam-channel.workspace = true
+eframe.workspace = true
+egui.workspace = true
+env_logger.workspace = true
+image.workspace = true
+rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+orchard-asset.workspace = true
+orchard-authoring.workspace = true
+orchard-compile.workspace = true
+orchard-foundry.workspace = true
+orchard-foundry-catalog.workspace = true
+orchard-mesh.workspace = true
+orchard-project.workspace = true
+orchard-render.workspace = true
+orchard-search-internal.workspace = true
+
+[dev-dependencies]
+orchard-family.workspace = true
+orchard-family-compile.workspace = true

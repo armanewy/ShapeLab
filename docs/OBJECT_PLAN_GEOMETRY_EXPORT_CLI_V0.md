@@ -2,7 +2,7 @@
 
 Status: implemented for supported ObjectPlan drafts.
 
-`shape-cli object-plan export-geometry` converts supported ObjectPlans into a
+`orchard-cli object-plan export-geometry` converts supported ObjectPlans into a
 geometry-only GLB draft package. The command materializes the ObjectPlan first,
 writes the usual review artifacts, and exports GLB only when the draft has no
 unresolved nodes or attachments.
@@ -10,7 +10,7 @@ unresolved nodes or attachments.
 ## Command
 
 ```bash
-shape-cli object-plan export-geometry \
+orchard-cli object-plan export-geometry \
   --plan fixtures/object-plan/valid_box_plan.json \
   --out-dir target/object-plan-geometry-export/box \
   --format glb

@@ -42,16 +42,16 @@ csg.smoothness
 
 ## Crate Contracts
 
-`shape-core` defines `Scalar`, IDs, `Transform3`, `Aabb`, primitive and CSG node kinds, `ShapeDocument`, parameter descriptors, edit programs, validation reports, and document helper functions.
+`orchard-core-legacy` defines `Scalar`, IDs, `Transform3`, `Aabb`, primitive and CSG node kinds, `ShapeDocument`, parameter descriptors, edit programs, validation reports, and document helper functions.
 
-`shape-field` defines `ScalarField`, `CompiledField`, `compile_document`, `GridSpec`, and `sample_grid`.
+`orchard-field` defines `ScalarField`, `CompiledField`, `compile_document`, `GridSpec`, and `sample_grid`.
 
-`shape-mesh` defines `TriangleMesh`, `MeshSettings`, `mesh_field`, `write_obj`, and `write_obj_to_path`.
+`orchard-mesh` defines `TriangleMesh`, `MeshSettings`, `mesh_field`, `write_obj`, and `write_obj_to_path`.
 
-`shape-search` defines exploration modes, target scopes, `SearchRequest`, `ShapeDescriptor`, `Candidate`, and `generate_candidates`.
+`orchard-search-internal` defines exploration modes, target scopes, `SearchRequest`, `ShapeDescriptor`, `Candidate`, and `generate_candidates`.
 
-`shape-project` defines `Revision`, `Project`, and history/persistence methods.
+`orchard-project` defines `Revision`, `Project`, and history/persistence methods.
 
-`shape-presets` defines `PresetId`, `PresetMetadata`, `list_presets`, and `build_preset`.
+`orchard-presets` defines `PresetId`, `PresetMetadata`, `list_presets`, and `build_preset`.
 
-`shape-render` defines `OrbitCamera`, `RenderSettings`, `RenderedImage`, `fit_camera_to_bounds`, and `render_mesh`.
+`orchard-render` defines `OrbitCamera`, `RenderSettings`, `RenderedImage`, `fit_camera_to_bounds`, and `render_mesh`.

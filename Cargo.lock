@@ -2854,6 +2854,260 @@ dependencies = [
 ]
 
 [[package]]
+name = "orchard-app"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "eframe",
+ "egui",
+ "env_logger",
+ "image",
+ "orchard-asset",
+ "orchard-authoring",
+ "orchard-compile",
+ "orchard-family",
+ "orchard-family-compile",
+ "orchard-foundry",
+ "orchard-foundry-catalog",
+ "orchard-mesh",
+ "orchard-project",
+ "orchard-render",
+ "orchard-search-internal",
+ "rfd",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "orchard-asset"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-authoring"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "orchard-asset",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "glam",
+ "image",
+ "log",
+ "orchard-app",
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-core-legacy",
+ "orchard-field",
+ "orchard-foundry",
+ "orchard-foundry-catalog",
+ "orchard-mesh",
+ "orchard-modeling-assets",
+ "orchard-poly",
+ "orchard-presets",
+ "orchard-project",
+ "orchard-render",
+ "orchard-search-internal",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "orchard-compile"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-modeling",
+ "orchard-poly",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-core-legacy"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-family"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "orchard-family-compile"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "glam",
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-family",
+ "orchard-modeling",
+ "orchard-poly",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-field"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "glam",
+ "orchard-core-legacy",
+ "rayon",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-foundry"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-family",
+ "orchard-family-compile",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "orchard-foundry-catalog"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-family",
+ "orchard-family-compile",
+ "orchard-foundry",
+ "orchard-search-internal",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "orchard-mesh"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "glam",
+ "orchard-core-legacy",
+ "orchard-field",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-modeling"
+version = "0.1.0"
+dependencies = [
+ "earcutr",
+ "orchard-asset",
+ "orchard-poly",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-modeling-assets"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-compile",
+]
+
+[[package]]
+name = "orchard-poly"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "orchard-asset",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-presets"
+version = "0.1.0"
+dependencies = [
+ "orchard-core-legacy",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-project"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-core-legacy",
+ "orchard-foundry",
+ "orchard-search-internal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-render"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "orchard-core-legacy",
+ "orchard-foundry",
+ "orchard-mesh",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "orchard-search-internal"
+version = "0.1.0"
+dependencies = [
+ "orchard-asset",
+ "orchard-compile",
+ "orchard-core-legacy",
+ "orchard-foundry",
+ "orchard-foundry-catalog",
+ "rand 0.10.1",
+ "rand_chacha 0.10.0",
+ "rand_distr",
+ "rayon",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ordered-float"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3657,260 +3911,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "shape-app"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "eframe",
- "egui",
- "env_logger",
- "image",
- "rfd",
- "serde",
- "serde_json",
- "shape-asset",
- "shape-authoring",
- "shape-compile",
- "shape-family",
- "shape-family-compile",
- "shape-foundry",
- "shape-foundry-catalog",
- "shape-mesh",
- "shape-project",
- "shape-render",
- "shape-search",
-]
-
-[[package]]
-name = "shape-asset"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-authoring"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "serde",
- "serde_json",
- "shape-asset",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "glam",
- "image",
- "log",
- "rayon",
- "serde",
- "serde_json",
- "shape-app",
- "shape-asset",
- "shape-compile",
- "shape-core",
- "shape-field",
- "shape-foundry",
- "shape-foundry-catalog",
- "shape-mesh",
- "shape-modeling-assets",
- "shape-poly",
- "shape-presets",
- "shape-project",
- "shape-render",
- "shape-search",
- "tempfile",
-]
-
-[[package]]
-name = "shape-compile"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "shape-asset",
- "shape-modeling",
- "shape-poly",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-core"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-family"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "shape-family-compile"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "glam",
- "serde",
- "serde_json",
- "shape-asset",
- "shape-compile",
- "shape-family",
- "shape-modeling",
- "shape-poly",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-field"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "glam",
- "rayon",
- "shape-core",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-foundry"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "shape-asset",
- "shape-compile",
- "shape-family",
- "shape-family-compile",
-]
-
-[[package]]
-name = "shape-foundry-catalog"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "shape-asset",
- "shape-compile",
- "shape-family",
- "shape-family-compile",
- "shape-foundry",
- "shape-search",
- "tempfile",
-]
-
-[[package]]
-name = "shape-mesh"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "glam",
- "shape-core",
- "shape-field",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-modeling"
-version = "0.1.0"
-dependencies = [
- "earcutr",
- "serde",
- "serde_json",
- "shape-asset",
- "shape-poly",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-modeling-assets"
-version = "0.1.0"
-dependencies = [
- "shape-asset",
- "shape-compile",
-]
-
-[[package]]
-name = "shape-poly"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "serde_json",
- "shape-asset",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-presets"
-version = "0.1.0"
-dependencies = [
- "serde",
- "shape-core",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-project"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "shape-asset",
- "shape-compile",
- "shape-core",
- "shape-foundry",
- "shape-search",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-render"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "shape-core",
- "shape-foundry",
- "shape-mesh",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "shape-search"
-version = "0.1.0"
-dependencies = [
- "rand 0.10.1",
- "rand_chacha 0.10.0",
- "rand_distr",
- "rayon",
- "serde",
- "shape-asset",
- "shape-compile",
- "shape-core",
- "shape-foundry",
- "shape-foundry-catalog",
- "thiserror 2.0.18",
 ]
 
 [[package]]

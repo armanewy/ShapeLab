@@ -53,16 +53,16 @@ Run these from the repository root:
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo build -p shape-app --release
-cargo run -p shape-cli -- --help
-cargo run -p shape-cli -- release-readiness --out target/release-readiness.json
-cargo run -p shape-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
+cargo build -p orchard-app --release
+cargo run -p orchard-cli -- --help
+cargo run -p orchard-cli -- release-readiness --out target/release-readiness.json
+cargo run -p orchard-cli -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 pwsh -File scripts/generate_demo_assets.ps1 -OutDir target/demo-assets -ProposalCount 12 -ResultCount 3 -MeshResolution 12
 ```
 
-The release desktop binary is written under `target/release/` as `shape-app` on Unix-like systems and `shape-app.exe` on Windows.
+The release desktop binary is written under `target/release/` as `orchard-app` on Unix-like systems and `orchard-app.exe` on Windows.
 
-`shape-cli release-readiness` writes the Wave 30 machine-readable status report
+`orchard-cli release-readiness` writes the Wave 30 machine-readable status report
 for performance bounds, CPU/GPU rendering status, persistence support,
 packaging/signing state, and window-regression coverage. Add
 `--verify-visual-gate` when preparing a release-readiness artifact that must
@@ -70,7 +70,7 @@ include computed all-profile option-thumbnail evidence.
 
 ## Demo Assets
 
-The demo asset script is a thin wrapper around `shape-cli demo`. It generates deterministic project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON for each selected preset.
+The demo asset script is a thin wrapper around `orchard-cli demo`. It generates deterministic project JSON, OBJ meshes, PNG previews, a contact sheet, and a summary JSON for each selected preset.
 
 ```bash
 pwsh -File scripts/generate_demo_assets.ps1 -Help

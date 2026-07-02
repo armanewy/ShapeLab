@@ -10,18 +10,18 @@ Branch: `codex/cleanup-wave-1-integration`
 | ---: | --- | --- |
 | 1 | `codex/obsolete-documentation-purge` | Merged. Obsolete docs were removed and active docs index tests were preserved. |
 | 2 | `codex/remove-legacy-candidate-search-paths` | Merged. Direct primitive Make remains candidate-tray free by default. |
-| 3 | `codex/split-shape-app-foundry-modules` | Merged. `foundry/app.rs` was split into focused app modules. |
+| 3 | `codex/split-orchard-app-foundry-modules` | Merged. `foundry/app.rs` was split into focused app modules. |
 | 4 | `codex/split-semantic-core-crates` | Merged. Oversized semantic backend files were split into focused modules. |
 | 5 | `codex/workspace-dead-code-dependency-purge` | Merged. Obsolete program/decompiler crates and stale fixtures were removed. |
-| 6 | `codex/shape-core-legacy-retirement-pass` | Merged. `shape-app` no longer depends directly on `shape-core`. |
+| 6 | `codex/orchard-core-legacy-retirement-pass` | Merged. `orchard-app` no longer depends directly on `orchard-core-legacy`. |
 
 ## Integration Fixes
 
-- Resolved the `shape-app` split plus candidate-removal merge by preserving the
+- Resolved the `orchard-app` split plus candidate-removal merge by preserving the
   split app layout and porting the legacy candidate UI gate into the new modules.
 - Updated moved app tests so stale candidate-result recovery is exercised only
   through the explicitly gated non-direct candidate workflow.
-- Resolved the `shape-asset` split plus dead-code purge by keeping the
+- Resolved the `orchard-asset` split plus dead-code purge by keeping the
   `asset_core/*` split modules and removing old JSON fixture dependencies from
   the moved tests.
 - Updated `docs/RUST_FILE_SIZE_EXCEPTIONS.md` to the post-integration exception
@@ -39,9 +39,9 @@ Branch: `codex/cleanup-wave-1-integration`
 ## Dependency Result
 
 - Workspace manifests and `Cargo.lock` were reconciled by the dead-code purge and
-  shape-core retirement branches.
-- `shape-app` no longer lists `shape-core` as a direct dependency.
-- `shape-render` re-exports `Aabb` for app/render consumers that still need the
+  orchard-core-legacy retirement branches.
+- `orchard-app` no longer lists `orchard-core-legacy` as a direct dependency.
+- `orchard-render` re-exports `Aabb` for app/render consumers that still need the
   low-level bounds type.
 
 ## Oversized Files
@@ -51,8 +51,8 @@ are documented in `docs/RUST_FILE_SIZE_EXCEPTIONS.md`.
 
 Notable resolved exceptions:
 
-- `crates/shape-app/src/foundry/app.rs` is now below the threshold.
-- `crates/shape-asset/src/lib.rs` is now below the threshold.
+- `crates/orchard-app/src/foundry/app.rs` is now below the threshold.
+- `crates/orchard-asset/src/lib.rs` is now below the threshold.
 - Deleted `shape-decompiler`, `shape-program`, and `shape-program-verify` files
   are no longer exceptions.
 
@@ -85,7 +85,7 @@ integration.
 
 - Split the remaining large app state, job, and panel files.
 - Split CLI command dispatch by subsystem.
-- Continue retiring or isolating legacy `shape-core::ShapeDocument` users.
+- Continue retiring or isolating legacy `orchard-core-legacy::ShapeDocument` users.
 - Split retained family/search/render/project compatibility files.
 - Keep legacy candidate/search UI explicitly gated and out of direct primitive
   Make by default.

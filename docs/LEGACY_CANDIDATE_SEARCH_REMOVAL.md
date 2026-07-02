@@ -13,7 +13,7 @@ drafts, and contact-sheet evidence are the replacement paths. These keep the
 asset source and review evidence explicit instead of asking users to choose from
 opaque generated candidates.
 
-`shape-search` remains in the workspace as an internal legacy/search crate. It
+`orchard-search-internal` remains in the workspace as an internal legacy/search crate. It
 is still used by internal CLI, project-history, catalog tests, and evidence
 pipelines, so this branch does not remove the crate or workspace dependency.
 Those internal uses must not reintroduce product-visible candidate generation in

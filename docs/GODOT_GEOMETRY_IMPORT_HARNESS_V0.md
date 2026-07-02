@@ -10,7 +10,7 @@ publishing, or game-ready status.
 ## Command
 
 ```bash
-shape-cli godot-proof geometry-import \
+orchard-cli godot-proof geometry-import \
   --glb target/object-plan-geometry-export/box/asset.glb \
   --out-dir target/godot-geometry-proof/box
 ```

@@ -6,7 +6,7 @@ Status: contracts/replay only.
 
 ## Goal
 
-`shape-authoring` defines the semantic authoring operation log for Object
+`orchard-authoring` defines the semantic authoring operation log for Object
 Orchard. Product-visible edits should move toward typed `AuthoringOp`s over an
 `AssetRecipe` clone instead of UI-local mutation or direct recipe edits.
 
@@ -24,7 +24,7 @@ Orchard. Product-visible edits should move toward typed `AuthoringOp`s over an
 - drag sample/coalescing DTOs
 
 `AuthoringOp::SetProperty` is the first meaningful operation. It validates the
-target parameter descriptor, calls `shape_asset::set_scalar`, validates the
+target parameter descriptor, calls `orchard_asset::set_scalar`, validates the
 edited recipe, records before/after hashes, and adds an authoring shell entry to
 the recipe.
 

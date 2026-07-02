@@ -9,7 +9,7 @@ publishing.
 ## CLI
 
 ```bash
-shape-cli object-plan batch-run \
+orchard-cli object-plan batch-run \
   --input target/object-plan-inputs/basic-batch \
   --out-dir target/object-plan-batches/basic-batch
 ```

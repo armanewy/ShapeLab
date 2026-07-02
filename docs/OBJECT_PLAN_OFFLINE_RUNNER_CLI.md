@@ -7,7 +7,7 @@ or raw mesh generation.
 Validate one plan:
 
 ```bash
-shape-cli object-plan validate object-plan.json
+orchard-cli object-plan validate object-plan.json
 ```
 
 The command prints an `ObjectPlanValidationReport` as JSON and exits non-zero
@@ -16,7 +16,7 @@ when the plan is invalid.
 Prepare deterministic runner artifacts:
 
 ```bash
-shape-cli object-plan run \
+orchard-cli object-plan run \
   --plan object-plan.json \
   --out-dir target/object-plan-runs/example-plan
 ```
@@ -38,7 +38,7 @@ The runner output is validation and review preparation. It must not be
 described as generated asset geometry until materialization and real render
 evidence are wired for the plan.
 
-The legacy `shape-cli object-plan render --plan ... --out-dir ...` command is
+The legacy `orchard-cli object-plan render --plan ... --out-dir ...` command is
 kept as a compatibility alias for the same validation and preparation flow.
 
 The runner uses the ObjectPlan validator, so it rejects unsupported primitives,

@@ -9,7 +9,7 @@ trusted local review workflow keeps it.
 ## CLI
 
 ```bash
-shape-cli object-plan run \
+orchard-cli object-plan run \
   --plan object-plan.json \
   --out-dir target/object-plan-runs/example-plan \
   --contact-sheet

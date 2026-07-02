@@ -120,7 +120,7 @@ def workspace_crate_usage(root: Path) -> list[str]:
             name = dependency.get("rename") or dependency.get("name")
             if name in members:
                 referenced.add(name)
-    roots = {"shape-app", "shape-cli"}
+    roots = {"orchard-app", "orchard-cli"}
     unused = sorted(members - referenced - roots)
     return unused
 

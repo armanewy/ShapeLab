@@ -11,12 +11,12 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 $profileDir = if ($Profile -eq "release") { "release" } else { "debug" }
-$binaryPath = Join-Path $repoRoot "target\$profileDir\shape-app.exe"
+$binaryPath = Join-Path $repoRoot "target\$profileDir\orchard-app.exe"
 
 Push-Location $repoRoot
 try {
     if (-not $NoBuild) {
-        $cargoArgs = @("build", "-p", "shape-app")
+        $cargoArgs = @("build", "-p", "orchard-app")
         if ($Profile -eq "release") {
             $cargoArgs += "--release"
         }
@@ -34,7 +34,7 @@ try {
 
     if (-not $NoStopExisting) {
         $targetRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "target"))
-        Get-Process shape-app -ErrorAction SilentlyContinue |
+        Get-Process orchard-app -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith(
                     $targetRoot,

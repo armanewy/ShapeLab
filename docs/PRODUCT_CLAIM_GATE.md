@@ -41,7 +41,7 @@ Negative statements are allowed and encouraged when they clarify scope, such as
 
 ## Validation Helper
 
-`shape-foundry` exposes a reusable product claim helper with an includes
+`orchard-foundry` exposes a reusable product claim helper with an includes
 contract and a text scanner. It validates report include flags and scans
 product-facing copy for blocked terms while allowing truthful negative
 statements.
