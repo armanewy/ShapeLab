@@ -748,6 +748,15 @@ pub struct PatternContract {
     /// Export instancing policy shell.
     #[serde(default)]
     pub export_instancing: PatternExportInstancingPolicy,
+    /// Linear axis for V0 deterministic evaluation.
+    #[serde(default)]
+    pub linear_axis: Option<PatternAxis>,
+    /// Linear spacing for V0 deterministic evaluation.
+    #[serde(default)]
+    pub spacing: Option<f32>,
+    /// Generated occurrence ID policy.
+    #[serde(default)]
+    pub generated_id_policy: GeneratedIdPolicy,
 }
 
 /// Pattern semantic kind reserved for repetition work.
@@ -5448,6 +5457,14 @@ fn validate_pattern_contract_policy(
             }
         }
     }
+
+    if let Some(spacing) = pattern.spacing {
+        validate_non_negative(
+            report,
+            Some(format!("semantic.patterns.{}.spacing", id.0)),
+            spacing,
+        );
+    }
 }
 
 fn validate_pattern_count(report: &mut AssetValidationReport, id: PatternId, count: u32) {
@@ -9274,6 +9291,9 @@ mod tests {
             count_policy: PatternCountPolicy::Exact(3),
             density_policy: None,
             export_instancing: PatternExportInstancingPolicy::default(),
+            linear_axis: Some(PatternAxis::X),
+            spacing: Some(0.25),
+            generated_id_policy: GeneratedIdPolicy::PatternOccurrenceIndex,
         }
     }
 

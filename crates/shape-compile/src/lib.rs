@@ -13,9 +13,10 @@ pub const SHAPE_COMPILE_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetRecipe, BoundaryLoopDependencyMode, BoundaryLoopId, ModelingOperationSpec, OperationId,
-    PartDefinitionId, PartInstanceId, RegionId, SocketId, SocketSpec, validate_asset_recipe,
+    PartDefinitionId, PartInstanceId, PatternEvaluationReport, PatternId, RegionId, SocketId,
+    SocketSpec, validate_asset_recipe,
 };
-use shape_modeling::assembly::{AssemblyError, evaluate_assembly};
+use shape_modeling::assembly::{AssemblyError, evaluate_assembly, evaluate_pattern_contract};
 use shape_poly::{
     BoundaryRole, EdgeKey, ElementId, MeshAdjacency, PolyError, PolygonMesh, TriangleMesh,
     TriangulatedPolygonMesh, build_adjacency, triangulate_polygon_mesh, validate_polygon_mesh,
@@ -123,6 +124,40 @@ pub struct CompileStatistics {
     pub triangle_count: u64,
     /// Whether any reserved SDF/remeshing path was used.
     pub used_sdf_or_remeshing: bool,
+}
+
+/// Compile-layer report for semantic pattern evaluation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipePatternEvaluationReport {
+    /// Per-pattern successful evaluation reports.
+    pub pattern_reports: Vec<PatternEvaluationReport>,
+    /// Per-pattern blockers.
+    pub blockers: Vec<PatternEvaluationBlocker>,
+}
+
+/// Blocker reported when a semantic pattern cannot be evaluated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternEvaluationBlocker {
+    /// Source pattern ID.
+    pub pattern_id: PatternId,
+    /// Stable reason.
+    pub reason: String,
+}
+
+/// Evaluate semantic patterns in a recipe without changing geometry.
+#[must_use]
+pub fn evaluate_recipe_patterns(recipe: &AssetRecipe) -> RecipePatternEvaluationReport {
+    let mut report = RecipePatternEvaluationReport::default();
+    for (pattern_id, pattern) in &recipe.semantic.patterns {
+        match evaluate_pattern_contract(pattern) {
+            Ok(evaluation) => report.pattern_reports.push(evaluation.report),
+            Err(error) => report.blockers.push(PatternEvaluationBlocker {
+                pattern_id: *pattern_id,
+                reason: error.to_string(),
+            }),
+        }
+    }
+    report
 }
 
 /// Deterministic user-facing construction timeline for a compiled asset.
