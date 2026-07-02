@@ -28,7 +28,7 @@ Status: Passed.
 | Is `orchard-core-legacy` documented as legacy/implicit for A-J work? | Yes. `docs/ORCHARD_CORE_LEGACY_BOUNDARY.md` and crate-level docs keep `ShapeDocument` in the legacy/implicit compatibility lane. |
 | Can `AssetRecipe` carry relationship/pattern/surface/collision/motion/terrain/export/authoring shells? | Yes. AssetRecipe v8 shells carry these semantic placeholders and validation boundaries without making them product-facing features. |
 | Does `AuthoringOpLog` exist and replay? | Yes. `orchard-authoring` provides typed operation logs and replay tests. |
-| Does at least one product-visible primitive edit use `AuthoringOp`? | Yes. Box Primitive width is bridged through `AuthoringOp::SetProperty` while preserving current Direct Make behavior. |
+| Does at least one product-visible primitive edit use `AuthoringOp`? | Yes. This Phase A-D slice proved Box Primitive width through `AuthoringOp::SetProperty` while preserving current Direct Make behavior. Post-cleanup hard-gate coverage now extends this to active Direct Make scalar controls for Box Primitive, Flat Panel Primitive, Sphere Primitive, and Panel with Knob. |
 | Can Panel with Knob be represented via `RelationshipContract`? | Yes. Panel with Knob materialization produces a `SurfaceMounted` relationship from `front_handle_zone` to `back_mount_point`. |
 | Are fixed-distance and proportional placement tested? | Yes. Panel-with-Knob relationship tests cover fixed edge distance and proportional placement behavior. |
 | Does `PatternContract` evaluate deterministically for a minimal pattern? | Yes. A minimal linear pattern evaluator emits deterministic occurrence IDs and reports invalid count/spacing blockers. |

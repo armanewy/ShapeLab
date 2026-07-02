@@ -35,8 +35,9 @@ Choose Primitive
   supported primitive and safe-anchor composition plans.
 - Geometry-only GLB reports keep UVs, textures, material looks, collision,
   rigging, animation, and game-ready status excluded.
-- Godot import proof is required before claiming Godot-ready geometry; the
-  current local proof is blocked when no Godot binary is available.
+- Godot import proof is required before claiming Godot-ready geometry. The
+  post-cleanup local proof passed mesh import for Box, Flat Panel, Sphere, and
+  Panel with Knob using Godot 4.7, while keeping game-ready status false.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but every plan is
   validated by Object Orchard before review.
 - ObjectPlan batch review is available as offline review infrastructure; broad
@@ -52,10 +53,10 @@ Choose Primitive
 - Active primitive workflows keep generated candidate trays blocked.
 - Phase A-D semantic compiler hardening is integrated: `AssetRecipe` is the
   canonical future semantic lane, `ShapeDocument` remains legacy/implicit
-  compatibility for A-J work, the first Direct Make edit emits an
-  `AuthoringOp`, Panel with Knob has relationship semantics, PatternContract has
-  a deterministic evaluation proof, and geometry exports report relationship
-  realization.
+  compatibility for A-J work, active Direct Make scalar controls emit
+  replayable `AuthoringOp` breadcrumbs, Panel with Knob has relationship
+  semantics, PatternContract has a deterministic evaluation proof, and geometry
+  exports report relationship realization.
 - Surface/material work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
 

@@ -36,7 +36,9 @@ Allowed Phase A targets:
 Integrated first-stack proofs:
 
 - `AuthoringOpLog` exists and can replay semantic edit breadcrumbs;
-- Box Primitive width is bridged through `AuthoringOp::SetProperty`;
+- active Direct Make scalar controls for Box Primitive, Flat Panel Primitive,
+  Sphere Primitive, and Panel with Knob are bridged through replayable
+  `AuthoringOp::SetProperty` breadcrumbs;
 - Panel with Knob can be described as a `SurfaceMounted`
   `RelationshipContract`;
 - fixed-distance and proportional relationship placement have tests;

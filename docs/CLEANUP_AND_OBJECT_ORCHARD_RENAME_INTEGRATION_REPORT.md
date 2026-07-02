@@ -78,7 +78,7 @@ The smoke includes deterministic coverage for:
 | --- | --- |
 | ObjectPlan materialization | Pass. `orchard-cli` and `orchard-foundry` tests cover supported plans, invalid plans, raw mesh rejection, publish rejection, and deterministic outputs. |
 | Geometry-only GLB export | Pass. CLI tests cover box, flat panel, sphere, panel with knob, blocked texture requests, blocked game-ready requests, unresolved plans, and deterministic GLB output. |
-| Godot proof harness | Pass for V0 contract. CLI tests cover missing Godot binary as `Blocked`, invalid GLB as `Failed`, deterministic unavailable output, and unit classification for `Passed` / `Blocked` / `Failed`. Local import proof remains blocked until a Godot binary is available. |
+| Godot proof harness | Pass. CLI tests cover missing Godot binary as `Blocked`, invalid GLB as `Failed`, deterministic unavailable output, and unit classification for `Passed` / `Blocked` / `Failed`. Post-cleanup rerun with `/Applications/Godot.app/Contents/MacOS/Godot` passed mesh import for Box, Flat Panel, Sphere, and Panel with Knob geometry-only GLBs. |
 | Export realization report | Pass. Tests cover combined mesh reporting without false relationship-bake claims. |
 | Product claim tests | Pass. Foundry/product tests and foundry product-claim tests keep later capabilities explicitly blocked. |
 

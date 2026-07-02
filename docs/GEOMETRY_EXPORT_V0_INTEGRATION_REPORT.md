@@ -4,12 +4,14 @@ Date: 2026-07-01
 
 ## Verdict
 
-`GEOMETRY_EXPORT_V0_PASSED_GODOT_PROOF_BLOCKED`
+`GEOMETRY_EXPORT_V0_PASSED_GODOT_PROOF_RERUN_PASSED`
 
 Supported ObjectPlans can export geometry-only GLB packages. Export reports
 truthfully exclude UVs, textures, material looks, collision, rigging,
 animation, and game-ready status. Godot import proof is available as a harness,
-but the local proof is `Blocked` because no Godot binary was available.
+and the post-cleanup local proof rerun passed mesh import with Godot 4.7. The
+original July 1 integration run was blocked because no Godot binary was
+available in that environment.
 
 ## Integrated Work
 
@@ -49,7 +51,7 @@ All export reports keep:
 
 ## Godot Proof
 
-Godot proof path: `target/geometry-export-v0`
+Original Godot proof path: `target/geometry-export-v0`
 
 | Asset | Proof report | Result | Reason |
 | --- | --- | --- | --- |
@@ -67,6 +69,24 @@ The blocked Godot proof reports keep:
 - `animation_imported: false`
 - `game_ready: false`
 
+Post-cleanup rerun path: `target/post-cleanup-foundation-hard-gate`
+
+| Asset | Proof report | Result | Godot |
+| --- | --- | --- | --- |
+| Box Primitive | `godot-box/godot-import-proof-report.json` | Passed | `4.7.stable.official.5b4e0cb0f` |
+| Flat Panel Primitive | `godot-flat-panel/godot-import-proof-report.json` | Passed | `4.7.stable.official.5b4e0cb0f` |
+| Sphere Primitive | `godot-sphere/godot-import-proof-report.json` | Passed | `4.7.stable.official.5b4e0cb0f` |
+| Panel with Knob | `godot-panel-knob/godot-import-proof-report.json` | Passed | `4.7.stable.official.5b4e0cb0f` |
+
+The passed post-cleanup proof reports keep:
+
+- `mesh_imported: true`
+- `material_imported: false`
+- `collision_imported: false`
+- `rig_imported: false`
+- `animation_imported: false`
+- `game_ready: false`
+
 ## Proof Questions
 
 | Question | Result |
@@ -74,8 +94,8 @@ The blocked Godot proof reports keep:
 | Can supported ObjectPlans export geometry-only GLB? | Pass. Box, Flat Panel, and Panel with Knob emitted non-empty `asset.glb` files. |
 | Do export reports truthfully say no textures/material looks/collision/rig/animation? | Pass. Reports keep all unsupported feature flags false. |
 | Does export report keep `game_ready: false`? | Pass. All export reports keep `game_ready: false`. |
-| Did Godot import proof pass, block, or fail? | Blocked. Godot was unavailable locally. |
-| If blocked, why? | The harness could not find `GODOT_BIN`, `godot`, or `godot4`. |
+| Did Godot import proof pass, block, or fail? | Passed in the post-cleanup rerun. The original July 1 run was blocked because Godot was unavailable locally. |
+| If blocked, why? | Not blocked in the post-cleanup rerun. |
 | Are any docs overclaiming Godot-ready or game-ready? | Pass. Docs keep Godot-ready claims blocked until a passed import proof and keep game-ready claims blocked. |
 
 ## Automated Gates
@@ -95,8 +115,9 @@ The blocked Godot proof reports keep:
 
 - ObjectPlan can export geometry-only GLB for supported plans.
 - Geometry-only GLB is not game-ready.
-- Godot import proof is available and is currently blocked in this environment
-  because no Godot binary is installed.
+- Godot import proof passed in the post-cleanup rerun for Box, Flat Panel,
+  Sphere, and Panel with Knob geometry-only GLBs. This is still not a
+  game-ready package claim.
 - No materials/surface workflow, UV/texturing, collision, rigging, or animation
   is included.
 - No runtime LLM integration exists.
@@ -107,7 +128,7 @@ The blocked Godot proof reports keep:
 - Primitive Surface V0 contracts
 - Personal Kit persistence UI
 - Prototype Pack brief contracts
-- Godot import proof rerun on a machine with Godot installed
+- future material/surface proof must run separately if Phase E begins
 
 ## Still Blocked
 

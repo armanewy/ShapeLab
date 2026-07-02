@@ -1,14 +1,15 @@
 # Current Product Status
 
-Date: 2026-07-01
+Date: 2026-07-02
 
 ## Verdict
 
-`PRODUCT_FACING_OBJECT_ORCHARD_RENAME`
+`POST_CLEANUP_FOUNDATION_HARD_GATE`
 
-Cleanup Wave 1 has landed. The product-facing name is now Object Orchard.
-This rename does not add product capability; it only updates user-visible
-product naming before the technical crate, folder, command, and path rename.
+Cleanup and rename have landed. The product-facing name is Object Orchard, and
+the post-cleanup foundation hard gate is validating that active Direct Make
+editing, ObjectPlan materialization/export, and Godot geometry proof remain
+truthful before Phase E.
 
 Object Orchard has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -17,8 +18,9 @@ infrastructure for supported primitive and safe-anchor composition plans.
 Supported ObjectPlans can now be materialized into Draft internal asset graphs
 and rendered into contact-sheet evidence for human review.
 Geometry Export v0 now exports geometry-only GLB packages for supported
-ObjectPlan drafts. Godot import proof exists as a harness, but local proof is
-blocked when no Godot binary is available.
+ObjectPlan drafts. Godot import proof exists as a harness, and the local
+post-cleanup proof passed with Godot 4.7 for Box, Flat Panel, Sphere, and Panel
+with Knob geometry-only GLB imports.
 Family Studio Lite v0 now has an internal preview UI for local reusable Direct
 Kits. That flow remains developer-gated and produces Draft / Personal Kits
 only.
@@ -71,7 +73,10 @@ restored as parallel product truth.
   combined mesh, keeps `baked: false`, and preserves semantics in report/sidecar
   data for review.
 - Godot import proof is required before claiming Godot-ready geometry. The
-  current local Godot proof is `Blocked` because no Godot binary was available.
+  post-cleanup local proof passed mesh import for Box, Flat Panel, Sphere, and
+  Panel with Knob using `/Applications/Godot.app/Contents/MacOS/Godot`; the
+  reports still keep `game_ready: false` and exclude materials, collision,
+  rigging, and animation.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
   validates every plan and LLM drafts remain Draft until reviewed.
 - ObjectPlan review UI is internal-only and dev-gated; it is not part of the
@@ -120,9 +125,10 @@ restored as parallel product truth.
 - `orchard-core-legacy::ShapeDocument` remains the legacy/implicit compatibility lane
   and must not receive new canonical product semantics for terrain, material,
   collision, motion, ObjectPlan approval, export readiness, or kit publishing.
-- `orchard-authoring::AuthoringOpLog` exists with replay support, and Box
-  Primitive width is the first product-visible Direct Make edit bridged through
-  `AuthoringOp::SetProperty`.
+- `orchard-authoring::AuthoringOpLog` exists with replay support. Active Direct
+  Make scalar controls for Box Primitive, Flat Panel Primitive, Sphere
+  Primitive, and Panel with Knob now emit replayable
+  `AuthoringOp::SetProperty` breadcrumbs.
 - Panel with Knob can be represented through `RelationshipContract`, including
   fixed-distance and proportional placement tests.
 - `PatternContract` has a deterministic linear evaluation proof for internal
