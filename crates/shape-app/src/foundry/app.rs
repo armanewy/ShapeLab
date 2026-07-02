@@ -79,6 +79,7 @@ pub(crate) struct FoundryDesktopApp {
     material_looks: MakeMaterialLookState,
     object_plan_review_enabled: bool,
     family_studio_lite_enabled: bool,
+    legacy_candidate_ui_enabled: bool,
     family_studio_lite: FamilyStudioLiteState,
     screenshot_scenario: Option<ScreenshotScenario>,
     screenshot_scenario_step: u8,
@@ -244,10 +245,8 @@ struct MakeCanvasViewState {
     material_look_tray_visible: bool,
     candidate_tray_state: MakeCandidateTrayState,
     candidate_count: usize,
-    candidate_search_finished_empty: bool,
     focused_no_candidates_recovery_visible: bool,
     rejected_candidate_summary: Option<String>,
-    selected_candidate_present: bool,
     selected_comparison_visible: bool,
     pack_drawer_visible: bool,
     export_drawer_visible: bool,
@@ -265,8 +264,6 @@ struct MakeCanvasViewState {
     hinged_panel_baseline: bool,
     handled_panel_baseline: bool,
     panel_knob_baseline: bool,
-    try_ideas_action_label: &'static str,
-    use_candidate_action_label: &'static str,
     adjust_heading_label: &'static str,
 }
 
@@ -667,6 +664,7 @@ const COORDINATE_REFERENCE_GRID_EXTENT: f32 = 1.18;
 const PREVIEW_CATALOG_ENV_VAR: &str = "SHAPE_LAB_PREVIEW_CATALOG";
 const OBJECT_PLAN_REVIEW_ENV_VAR: &str = "SHAPE_LAB_OBJECT_PLAN_REVIEW";
 const FAMILY_STUDIO_LITE_ENV_VAR: &str = "SHAPE_LAB_FAMILY_STUDIO_LITE";
+const LEGACY_CANDIDATE_UI_ENV_VAR: &str = "SHAPE_LAB_LEGACY_CANDIDATE_UI";
 const BOX_PRIMITIVE_PROFILE_ID: &str = "box-primitive";
 const LIDDED_BOX_PROFILE_ID: &str = "lidded-box";
 const FLAT_PANEL_PRIMITIVE_PROFILE_ID: &str = "flat-panel-primitive";
@@ -866,6 +864,7 @@ impl Default for FoundryDesktopApp {
             material_looks: MakeMaterialLookState::default(),
             object_plan_review_enabled: object_plan_review_enabled(),
             family_studio_lite_enabled: family_studio_lite_enabled(),
+            legacy_candidate_ui_enabled: legacy_candidate_ui_enabled(),
             family_studio_lite: FamilyStudioLiteState::default(),
             screenshot_scenario: read_screenshot_scenario(),
             screenshot_scenario_step: 0,
@@ -1476,6 +1475,9 @@ impl FoundryDesktopApp {
     }
 
     fn active_make_part_group(&self) -> Option<directions::DirectionPartGroup> {
+        if !self.legacy_candidate_ui_available() {
+            return None;
+        }
         let document = self.state.document.as_ref()?;
         let active_group_id = document
             .variation_state
@@ -1487,45 +1489,37 @@ impl FoundryDesktopApp {
             .find(|group| group.group_id == active_group_id)
     }
 
+    fn legacy_candidate_ui_available(&self) -> bool {
+        self.legacy_candidate_ui_enabled
+            && !self.active_make_profile_kind().direct_primitive_workflow()
+    }
+
     fn make_canvas_view_state(&self) -> MakeCanvasViewState {
         let active_group = self.active_make_part_group();
-        let selected_candidate = self
-            .state
-            .selected_candidate
-            .as_ref()
-            .and_then(|selected| {
-                self.state
-                    .candidates
-                    .iter()
-                    .find(|candidate| &candidate.id == selected)
-            })
-            .or_else(|| self.state.candidates.first());
         let asset_name = self.current_project_title();
         let active_profile_kind = self.active_make_profile_kind();
         let direct_primitive_workflow = active_profile_kind.direct_primitive_workflow();
+        let candidate_ui_enabled = self.legacy_candidate_ui_enabled && !direct_primitive_workflow;
+        let selected_candidate = candidate_ui_enabled
+            .then(|| {
+                self.state
+                    .selected_candidate
+                    .as_ref()
+                    .and_then(|selected| {
+                        self.state
+                            .candidates
+                            .iter()
+                            .find(|candidate| &candidate.id == selected)
+                    })
+                    .or_else(|| self.state.candidates.first())
+            })
+            .flatten();
         let simple_box_make_baseline = active_profile_kind.simple_clay_make_baseline();
         let lidded_box_baseline = active_profile_kind.is_lidded_box();
         let flat_panel_baseline = active_profile_kind.is_flat_panel_primitive();
         let hinged_panel_baseline = active_profile_kind.is_hinged_panel();
         let handled_panel_baseline = active_profile_kind.is_handled_panel();
         let panel_knob_baseline = active_profile_kind.is_panel_with_knob();
-        let try_ideas_action_label = match active_profile_kind {
-            MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
-            MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
-            MakeProfileKind::FlatPanelPrimitive => ACTION_TRY_PANEL_IDEAS,
-            MakeProfileKind::SpherePrimitive => ACTION_TRY_WHOLE_ASSET_IDEAS,
-            MakeProfileKind::HingedPanel => ACTION_TRY_HINGED_PANEL_IDEAS,
-            MakeProfileKind::HandledPanel => ACTION_TRY_HANDLED_PANEL_IDEAS,
-            MakeProfileKind::PanelWithKnob => ACTION_TRY_HANDLED_PANEL_IDEAS,
-            MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
-        };
-        let use_candidate_action_label = if lidded_box_baseline {
-            ACTION_USE_THIS_BOX
-        } else if active_profile_kind.is_panel_like() {
-            ACTION_USE_THIS_PANEL
-        } else {
-            ACTION_CHOOSE_DIRECTION
-        };
         let adjust_heading_label = match active_profile_kind {
             MakeProfileKind::BoxPrimitive => ACTION_EDIT_BOX_PRIMITIVE,
             MakeProfileKind::LiddedBox => ACTION_EDIT_LIDDED_BOX,
@@ -1545,7 +1539,7 @@ impl FoundryDesktopApp {
         });
         let candidate_previews_pending = candidate_previews_are_pending(&self.state.candidates);
         let generating =
-            !direct_primitive_workflow && (active_candidate_job || candidate_previews_pending);
+            candidate_ui_enabled && (active_candidate_job || candidate_previews_pending);
         let compiling_or_editing = self.state.active_jobs.values().any(|request| {
             matches!(
                 request.slot(),
@@ -1600,17 +1594,17 @@ impl FoundryDesktopApp {
                 .make_preparation_started_at
                 .is_some_and(|started| started.elapsed() >= PREPARATION_TIMEOUT);
         let preparation_fallback_visible = preparation_timed_out;
-        let idea_generation_timed_out = !direct_primitive_workflow
+        let idea_generation_timed_out = candidate_ui_enabled
             && generating
             && self
                 .make_generation_started_at
                 .is_some_and(|started| started.elapsed() >= IDEA_GENERATION_TIMEOUT);
         let idea_generation_fallback_visible = idea_generation_timed_out;
         let local_warning_message = self.make_canvas_local_warning().filter(|message| {
-            !direct_primitive_workflow || message.as_str() != CANCELED_IDEA_SEARCH_WARNING
+            candidate_ui_enabled && message.as_str() != CANCELED_IDEA_SEARCH_WARNING
         });
         let local_error_message = self.make_canvas_local_error();
-        let candidate_search_finished_empty = !direct_primitive_workflow
+        let candidate_search_finished_empty = candidate_ui_enabled
             && self.state.candidate_output.is_some()
             && self.state.candidates.is_empty()
             && !generating;
@@ -1624,7 +1618,7 @@ impl FoundryDesktopApp {
             MakeCanvasMode::NoAsset
         } else if preparing {
             MakeCanvasMode::PreparingAsset
-        } else if !direct_primitive_workflow && !self.state.candidates.is_empty() {
+        } else if candidate_ui_enabled && !self.state.candidates.is_empty() {
             MakeCanvasMode::ReviewingIdeas
         } else if generating && focused_part_label.is_some() {
             MakeCanvasMode::GeneratingFocusedPartIdeas
@@ -1654,7 +1648,7 @@ impl FoundryDesktopApp {
             _ => None,
         };
         let local_busy_visible = local_busy_label.is_some();
-        let candidate_tray_state = if direct_primitive_workflow {
+        let candidate_tray_state = if !candidate_ui_enabled {
             MakeCandidateTrayState::EmptyReady
         } else if local_error_message.is_some() {
             MakeCandidateTrayState::ErrorWithRecovery
@@ -1685,6 +1679,7 @@ impl FoundryDesktopApp {
                 local_warning_message: local_warning_message.as_deref(),
                 local_error_message: local_error_message.as_deref(),
                 direct_primitive_workflow,
+                candidate_ui_enabled,
                 simple_box_make_baseline,
                 lidded_box_baseline,
                 flat_panel_baseline,
@@ -1704,21 +1699,24 @@ impl FoundryDesktopApp {
             (MakeCanvasMode::GeneratingWholeAssetIdeas, _)
             | (MakeCanvasMode::GeneratingFocusedPartIdeas, _) => ACTION_GENERATING_IDEAS.to_owned(),
             (MakeCanvasMode::NoAsset, _) => ACTION_CHOOSE_TEMPLATE.to_owned(),
-            (MakeCanvasMode::ReviewingIdeas, _) => use_candidate_action_label.to_owned(),
+            (MakeCanvasMode::ReviewingIdeas, _) => {
+                use_candidate_action_label(active_profile_kind).to_owned()
+            }
             _ if focused_no_candidates_recovery_visible => {
                 ACTION_TRY_WHOLE_ASSET_RECOVERY.to_owned()
             }
-            (_, Some(label)) => format!(
+            (_, Some(label)) if candidate_ui_enabled => format!(
                 "Try {} ideas",
                 singular_part_copy(label).to_ascii_lowercase()
             ),
             _ if direct_primitive_workflow => ACTION_ADJUST_DIMENSIONS.to_owned(),
-            _ => try_ideas_action_label.to_owned(),
+            _ => ACTION_ADJUST_DIMENSIONS.to_owned(),
         };
         let primary_action_enabled = match mode {
             MakeCanvasMode::NoAsset => true,
             MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart => {
-                direct_primitive_workflow || (model_ready && preview_ready && !generating)
+                direct_primitive_workflow
+                    || (candidate_ui_enabled && model_ready && preview_ready && !generating)
             }
             MakeCanvasMode::ReviewingIdeas => {
                 model_ready
@@ -1745,12 +1743,12 @@ impl FoundryDesktopApp {
                 NEED_PROJECT_REASON.to_owned()
             }
         });
-        let candidate_tray_visible = self.state.document.is_some() && !direct_primitive_workflow;
+        let candidate_tray_visible = self.state.document.is_some() && candidate_ui_enabled;
         let material_look_tray_visible = self.material_looks.tray_open && !simple_box_make_baseline;
-        let rejected_candidate_summary = (!direct_primitive_workflow)
+        let rejected_candidate_summary = candidate_ui_enabled
             .then(|| self.make_canvas_rejected_candidate_summary())
             .flatten();
-        let selected_comparison_visible = !direct_primitive_workflow
+        let selected_comparison_visible = candidate_ui_enabled
             && selected_candidate.is_some_and(|candidate| {
                 preview_ready
                     && !candidate.rgba8.is_empty()
@@ -1765,6 +1763,7 @@ impl FoundryDesktopApp {
             focused_part_label.as_deref(),
             selected_comparison_visible,
             active_profile_kind,
+            candidate_ui_enabled,
         );
         if preparation_fallback_visible {
             next_action_hint = PREPARATION_TIMEOUT_MESSAGE.to_owned();
@@ -1802,16 +1801,13 @@ impl FoundryDesktopApp {
             candidate_tray_visible,
             material_look_tray_visible,
             candidate_tray_state,
-            candidate_count: if direct_primitive_workflow {
-                0
-            } else {
+            candidate_count: if candidate_ui_enabled {
                 self.state.candidates.len()
+            } else {
+                0
             },
-            candidate_search_finished_empty,
             focused_no_candidates_recovery_visible,
             rejected_candidate_summary,
-            selected_candidate_present: !direct_primitive_workflow
-                && self.state.selected_candidate.is_some(),
             selected_comparison_visible,
             pack_drawer_visible: self.drawer == Some(FoundryDrawer::Pack),
             export_drawer_visible: self.drawer == Some(FoundryDrawer::Export),
@@ -1829,8 +1825,6 @@ impl FoundryDesktopApp {
             hinged_panel_baseline,
             handled_panel_baseline,
             panel_knob_baseline,
-            try_ideas_action_label,
-            use_candidate_action_label,
             adjust_heading_label,
         }
     }
@@ -1854,7 +1848,8 @@ impl FoundryDesktopApp {
             return false;
         }
 
-        self.active_make_profile_kind().direct_primitive_workflow()
+        !self.legacy_candidate_ui_enabled
+            || self.active_make_profile_kind().direct_primitive_workflow()
             || (self.drawer == Some(FoundryDrawer::FamilyStudioLite)
                 && self.family_studio_lite_enabled)
     }
@@ -2014,13 +2009,14 @@ impl FoundryDesktopApp {
     }
 
     fn directions_are_generating(&self) -> bool {
-        self.state.active_jobs.values().any(|request| {
-            matches!(
-                request,
-                FoundryJobRequest::GenerateCandidates { .. }
-                    | FoundryJobRequest::RenderCandidatePreviews { .. }
-            )
-        }) || candidate_previews_are_pending(&self.state.candidates)
+        self.legacy_candidate_ui_available()
+            && (self.state.active_jobs.values().any(|request| {
+                matches!(
+                    request,
+                    FoundryJobRequest::GenerateCandidates { .. }
+                        | FoundryJobRequest::RenderCandidatePreviews { .. }
+                )
+            }) || candidate_previews_are_pending(&self.state.candidates))
     }
 
     fn active_profile_matches(&self, profile_id: &str) -> bool {
@@ -2328,12 +2324,15 @@ impl FoundryDesktopApp {
     ) -> Vec<FoundryAppCommand> {
         let mut commands = Vec::new();
         let colors = VisualFoundryTokens::dark().colors;
-        let part_groups = self
-            .state
-            .document
-            .as_ref()
-            .map(directions::direction_part_groups_for_document)
-            .unwrap_or_default();
+        let part_groups = if self.legacy_candidate_ui_available() {
+            self.state
+                .document
+                .as_ref()
+                .map(directions::direction_part_groups_for_document)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let active_group_id = self
             .state
             .document
@@ -2609,7 +2608,7 @@ impl FoundryDesktopApp {
                                         ui,
                                         &action_spec(
                                             make_canvas_candidate_actions_enabled(view_state),
-                                            view_state.try_ideas_action_label,
+                                            try_ideas_action_label(self.active_make_profile_kind()),
                                             ButtonTone::Secondary,
                                             build_actions_reason,
                                         ),
@@ -3390,7 +3389,7 @@ impl FoundryDesktopApp {
     }
 
     fn make_primary_candidate_command(&self) -> Option<FoundryAppCommand> {
-        if self.active_make_profile_kind().direct_primitive_workflow() {
+        if !self.legacy_candidate_ui_available() {
             return None;
         }
         let document = self.state.document.as_ref()?;
@@ -3418,6 +3417,9 @@ impl FoundryDesktopApp {
     }
 
     fn make_whole_asset_candidate_command(&self) -> Option<FoundryAppCommand> {
+        if !self.legacy_candidate_ui_available() {
+            return None;
+        }
         self.state.document.as_ref().map(|_| {
             make_whole_asset_candidate_request(&self.state, false, FoundryCandidateMode::Explore)
         })
@@ -3450,7 +3452,7 @@ impl FoundryDesktopApp {
     }
 
     fn accept_visible_candidate_command(&self) -> Option<FoundryAppCommand> {
-        if self.active_make_profile_kind().direct_primitive_workflow() {
+        if !self.legacy_candidate_ui_available() {
             return None;
         }
         let candidate = self.visible_review_candidate()?;
@@ -3493,6 +3495,9 @@ impl FoundryDesktopApp {
         if view_state.material_look_tray_visible {
             self.show_material_looks_panel(ui);
             ui.add_space(12.0);
+        }
+        if !view_state.candidate_tray_visible {
+            return commands;
         }
         let generating = matches!(
             view_state.mode,
@@ -3572,13 +3577,6 @@ impl FoundryDesktopApp {
                 },
             );
             ui.add_space(8.0);
-        } else if !view_state.candidate_tray_visible {
-            ui.label(
-                RichText::new("Try ideas when the asset is ready.")
-                    .color(VisualFoundryTokens::dark().colors.text_muted)
-                    .small(),
-            );
-            ui.add_space(8.0);
         }
         if let Some(message) = &view_state.local_error_message {
             status_banner(
@@ -3618,6 +3616,7 @@ impl FoundryDesktopApp {
 
         let current_preview = self.state.current_preview.as_ref();
         let current_build = self.state.current_build.as_ref();
+        let use_candidate_label = use_candidate_action_label(self.active_make_profile_kind());
         let texture_cache = &mut self.texture_cache;
         commands.extend(show_visible_direction_ideas_board(
             ui,
@@ -3631,7 +3630,7 @@ impl FoundryDesktopApp {
                     .primary_action_disabled_reason
                     .as_deref()
                     .unwrap_or(ACTIVE_IDEA_JOB_REASON),
-                use_candidate_label: view_state.use_candidate_action_label,
+                use_candidate_label,
             },
         ));
         commands
@@ -5557,7 +5556,8 @@ fn make_canvas_controls_enabled(view_state: &MakeCanvasViewState) -> bool {
 }
 
 fn make_canvas_candidate_actions_enabled(view_state: &MakeCanvasViewState) -> bool {
-    !view_state.direct_primitive_workflow
+    view_state.candidate_tray_visible
+        && !view_state.direct_primitive_workflow
         && view_state.model_ready
         && view_state.preview_ready
         && !matches!(
@@ -6295,6 +6295,15 @@ fn family_studio_lite_enabled() -> bool {
     })
 }
 
+fn legacy_candidate_ui_enabled() -> bool {
+    env::var(LEGACY_CANDIDATE_UI_ENV_VAR).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 fn family_studio_lite_store_base_dir() -> PathBuf {
     env::temp_dir().join("shape-lab-family-studio-lite")
 }
@@ -6610,6 +6619,7 @@ struct MakeCanvasBannerContext<'a> {
     local_warning_message: Option<&'a str>,
     local_error_message: Option<&'a str>,
     direct_primitive_workflow: bool,
+    candidate_ui_enabled: bool,
     simple_box_make_baseline: bool,
     lidded_box_baseline: bool,
     flat_panel_baseline: bool,
@@ -6633,6 +6643,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
         local_warning_message,
         local_error_message,
         direct_primitive_workflow,
+        candidate_ui_enabled,
         simple_box_make_baseline,
         lidded_box_baseline,
         flat_panel_baseline,
@@ -6654,7 +6665,7 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
             BannerTone::Error,
         );
     }
-    if !direct_primitive_workflow
+    if candidate_ui_enabled
         && matches!(mode, MakeCanvasMode::Ready | MakeCanvasMode::FocusedPart)
         && candidate_output.is_some_and(|output| output.candidates.is_empty())
     {
@@ -6746,6 +6757,12 @@ fn make_canvas_local_banner(context: MakeCanvasBannerContext<'_>) -> (String, St
                     "Adjust dimensions, Add to Pack, or Export current primitive."
                 };
                 ("Ready".to_owned(), message.to_owned(), BannerTone::Success)
+            } else if !candidate_ui_enabled {
+                (
+                    "Ready".to_owned(),
+                    "Adjust controls, Add to Pack, or Export.".to_owned(),
+                    BannerTone::Success,
+                )
             } else if lidded_box_baseline && matches!(mode, MakeCanvasMode::Ready) {
                 (
                     "Ready".to_owned(),
@@ -6804,6 +6821,9 @@ fn empty_candidate_tray_copy(view_state: &MakeCanvasViewState) -> (&'static str,
             "Adjust dimensions, Add to Pack, or Export current primitive.",
         );
     }
+    if !view_state.candidate_tray_visible {
+        return ("Make ready", "Adjust controls, Add to Pack, or Export.");
+    }
     if view_state.mode == MakeCanvasMode::PreparingAsset {
         (
             "Ideas unlock when ready",
@@ -6845,6 +6865,30 @@ fn no_candidates_recovery_copy(
         "No clear ideas survived".to_owned(),
         format!("{reason} Try again or adjust the current asset."),
     )
+}
+
+fn try_ideas_action_label(profile_kind: MakeProfileKind) -> &'static str {
+    match profile_kind {
+        MakeProfileKind::BoxPrimitive => ACTION_TRY_BOX_IDEAS,
+        MakeProfileKind::LiddedBox => ACTION_TRY_LIDDED_BOX_IDEAS,
+        MakeProfileKind::FlatPanelPrimitive => ACTION_TRY_PANEL_IDEAS,
+        MakeProfileKind::SpherePrimitive => ACTION_TRY_WHOLE_ASSET_IDEAS,
+        MakeProfileKind::HingedPanel => ACTION_TRY_HINGED_PANEL_IDEAS,
+        MakeProfileKind::HandledPanel | MakeProfileKind::PanelWithKnob => {
+            ACTION_TRY_HANDLED_PANEL_IDEAS
+        }
+        MakeProfileKind::Other => ACTION_TRY_WHOLE_ASSET_IDEAS,
+    }
+}
+
+fn use_candidate_action_label(profile_kind: MakeProfileKind) -> &'static str {
+    if profile_kind.is_lidded_box() {
+        ACTION_USE_THIS_BOX
+    } else if profile_kind.is_panel_like() {
+        ACTION_USE_THIS_PANEL
+    } else {
+        ACTION_CHOOSE_DIRECTION
+    }
 }
 
 fn direct_property_panel_title(profile_kind: MakeProfileKind) -> &'static str {
@@ -6962,6 +7006,9 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
         MakeCanvasMode::FocusedPart if view_state.direct_primitive_workflow => {
             "Adjust bounded properties for this primitive."
         }
+        MakeCanvasMode::FocusedPart if !view_state.candidate_tray_visible => {
+            "Adjust available controls for this asset."
+        }
         MakeCanvasMode::FocusedPart => "This part is focused. Try ideas, lock it, or clear focus.",
         MakeCanvasMode::PackDrawerOpen => "The pack drawer is open.",
         MakeCanvasMode::ExportDrawerOpen => "The export drawer is open.",
@@ -6971,6 +7018,9 @@ fn make_canvas_mode_summary(view_state: &MakeCanvasViewState) -> &'static str {
             } else {
                 "Adjust dimensions directly."
             }
+        }
+        MakeCanvasMode::Ready if !view_state.candidate_tray_visible => {
+            "Adjust available controls directly."
         }
         MakeCanvasMode::Ready if view_state.lidded_box_baseline => {
             "Try lidded box ideas or adjust lid seam."
@@ -6997,6 +7047,7 @@ fn make_canvas_next_action_hint(
     focused_part_label: Option<&str>,
     selected_comparison_visible: bool,
     profile_kind: MakeProfileKind,
+    candidate_ui_enabled: bool,
 ) -> String {
     match (mode, focused_part_label, selected_comparison_visible) {
         (MakeCanvasMode::NoAsset, _, _) => {
@@ -7046,6 +7097,9 @@ fn make_canvas_next_action_hint(
                 "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
             }
         }
+        (MakeCanvasMode::FocusedPart, _, _) if !candidate_ui_enabled => {
+            "Adjust controls, Add to Pack, or Export.".to_owned()
+        }
         (MakeCanvasMode::FocusedPart, Some(part), _) => {
             format!(
                 "Try {} ideas, lock this part, or clear focus.",
@@ -7068,6 +7122,9 @@ fn make_canvas_next_action_hint(
             } else {
                 "Adjust dimensions, Add to Pack, or Export current primitive.".to_owned()
             }
+        }
+        (MakeCanvasMode::Ready, _, _) if !candidate_ui_enabled => {
+            "Adjust controls, Add to Pack, or Export.".to_owned()
         }
         (MakeCanvasMode::Ready, _, _) if profile_kind.is_lidded_box() => {
             "Try lidded box ideas, adjust lid seam or proportions, Add to Pack, or Export."
@@ -11846,6 +11903,19 @@ mod tests {
     }
 
     #[test]
+    fn product_visible_strings_hide_legacy_candidate_search_terms() {
+        let strings = product_visible_strings_for_default_shell();
+        let joined = strings.join("\n").to_ascii_lowercase();
+
+        for forbidden in ["try ideas", "candidate"] {
+            assert!(
+                !joined.contains(forbidden),
+                "product-visible strings should not expose {forbidden}: {joined}"
+            );
+        }
+    }
+
+    #[test]
     fn direct_make_ignores_generated_candidates_and_comparison() {
         let mut app = visible_state_test_app();
         app.state.current_preview = Some(test_preview_image("current"));
@@ -11865,13 +11935,67 @@ mod tests {
         assert_eq!(visible.mode, MakeCanvasMode::Ready);
         assert_eq!(visible.candidate_count, 0);
         assert!(!visible.candidate_tray_visible);
-        assert!(!visible.selected_candidate_present);
         assert!(!visible.selected_comparison_visible);
         assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
         assert_eq!(
             visible.next_action_hint,
             "Adjust dimensions, Add to Pack, or Export current primitive."
         );
+    }
+
+    #[test]
+    fn direct_make_primary_action_does_not_dispatch_candidate_requests() {
+        let mut app = ready_visible_state_test_app();
+        app.legacy_candidate_ui_enabled = true;
+        app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
+        app.state.selected_candidate = app.state.candidates.first().map(|card| card.id.clone());
+        let visible = app.make_canvas_view_state();
+        let mut commands = Vec::new();
+
+        app.push_make_primary_action_commands(&mut commands, &visible);
+
+        assert_eq!(visible.mode, MakeCanvasMode::Ready);
+        assert!(!visible.candidate_tray_visible);
+        assert!(!visible.selected_comparison_visible);
+        assert!(app.make_primary_candidate_command().is_none());
+        assert!(
+            commands
+                .iter()
+                .all(|command| !matches!(command, FoundryAppCommand::RequestCandidates(_))),
+            "direct Make primary action must not request generated candidates"
+        );
+    }
+
+    #[test]
+    fn legacy_candidate_board_is_default_off_and_explicitly_gated() {
+        let mut app = ready_visible_state_test_app();
+        app.legacy_candidate_ui_enabled = false;
+        force_other_profile(&mut app);
+        app.state.candidates = vec![test_candidate_card("candidate-a", true, None)];
+        app.state.selected_candidate = app.state.candidates.first().map(|card| card.id.clone());
+
+        let hidden = app.make_canvas_view_state();
+
+        assert_eq!(app.active_make_profile_kind(), MakeProfileKind::Other);
+        assert!(!app.legacy_candidate_ui_available());
+        assert_eq!(hidden.mode, MakeCanvasMode::Ready);
+        assert!(!hidden.candidate_tray_visible);
+        assert_eq!(hidden.candidate_count, 0);
+        assert!(!hidden.selected_comparison_visible);
+        assert!(app.make_primary_candidate_command().is_none());
+
+        app.legacy_candidate_ui_enabled = true;
+        let visible = app.make_canvas_view_state();
+
+        assert!(app.legacy_candidate_ui_available());
+        assert_eq!(visible.mode, MakeCanvasMode::ReviewingIdeas);
+        assert!(visible.candidate_tray_visible);
+        assert_eq!(visible.candidate_count, 1);
+        assert!(visible.selected_comparison_visible);
+        assert!(matches!(
+            app.make_primary_candidate_command(),
+            Some(FoundryAppCommand::RequestCandidates(_))
+        ));
     }
 
     #[test]
@@ -11892,7 +12016,6 @@ mod tests {
         assert_eq!(visible.mode, MakeCanvasMode::Ready);
         assert_eq!(visible.candidate_count, 0);
         assert!(!visible.candidate_tray_visible);
-        assert!(!visible.selected_candidate_present);
         assert!(!visible.selected_comparison_visible);
         assert_eq!(visible.primary_action_label, ACTION_ADJUST_DIMENSIONS);
         assert_eq!(
@@ -12072,7 +12195,6 @@ mod tests {
         assert_eq!(visible.primary_title, "Box Primitive");
         assert_eq!(visible.candidate_count, 0);
         assert!(!visible.candidate_tray_visible);
-        assert!(!visible.selected_candidate_present);
         assert!(!visible.selected_comparison_visible);
         assert_ne!(visible.primary_title, "Whole asset");
     }
@@ -12826,7 +12948,6 @@ mod tests {
             visible.candidate_tray_state,
             MakeCandidateTrayState::EmptyReady
         );
-        assert!(!visible.candidate_search_finished_empty);
         assert_eq!(visible.local_banner_title, "Ready");
         assert_eq!(
             visible.local_banner_message,
@@ -12887,10 +13008,9 @@ mod tests {
 
     #[test]
     fn stale_result_warning_is_local_and_recoverable_with_try_again() {
-        let mut app = FoundryDesktopApp {
-            tab: FoundryTab::Make,
-            ..FoundryDesktopApp::default()
-        };
+        let mut app = ready_visible_state_test_app();
+        app.legacy_candidate_ui_enabled = true;
+        force_other_profile(&mut app);
         app.state.status =
             Some("Ignored a background result because newer work is active.".to_owned());
 
@@ -14133,10 +14253,9 @@ mod tests {
 
     #[test]
     fn stale_result_status_becomes_local_make_warning() {
-        let mut app = FoundryDesktopApp {
-            tab: FoundryTab::Make,
-            ..FoundryDesktopApp::default()
-        };
+        let mut app = ready_visible_state_test_app();
+        app.legacy_candidate_ui_enabled = true;
+        force_other_profile(&mut app);
         app.state.status =
             Some("Ignored a background result because newer work is active.".to_owned());
 
@@ -14806,6 +14925,13 @@ mod tests {
             human_label: format!("Focused: {display_name}"),
             human_summary: format!("Try {display_name} ideas."),
         };
+    }
+
+    fn force_other_profile(app: &mut FoundryDesktopApp) {
+        let document = app.state.document.as_mut().expect("fixture document");
+        document.document_id.0 = "custom-test-asset".to_owned();
+        document.family_content_ref.stable_id = "custom-test-family".to_owned();
+        document.customizer_profile_ref.stable_id = "custom-test-profile".to_owned();
     }
 
     fn test_control_view(id: &str, label: &str) -> crate::foundry::view_model::FoundryControlView {
