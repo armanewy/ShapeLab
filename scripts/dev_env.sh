@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cache_root="${SHAPE_LAB_CACHE_DIR:-"$HOME/Library/Caches/ShapeLab"}"
+cache_root="${OBJECT_ORCHARD_CACHE_DIR:-"$HOME/Library/Caches/ObjectOrchard"}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-"$cache_root/cargo-target"}"
 export SCCACHE_DIR="${SCCACHE_DIR:-"$cache_root/sccache"}"
 export SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-50G}"
@@ -17,7 +17,7 @@ else
 fi
 
 cat <<EOF
-Shape Lab development environment
+Object Orchard development environment
   CARGO_TARGET_DIR=$CARGO_TARGET_DIR
   SCCACHE_DIR=$SCCACHE_DIR
   SCCACHE_CACHE_SIZE=$SCCACHE_CACHE_SIZE

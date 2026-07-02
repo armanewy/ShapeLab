@@ -119,7 +119,7 @@ fn sphere_primitive_validates_exports_and_has_only_round_body_role() {
     }
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-sphere-primitive-export-{}",
+        "object-orchard-sphere-primitive-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);

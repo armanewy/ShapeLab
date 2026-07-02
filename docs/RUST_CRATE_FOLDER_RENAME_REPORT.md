@@ -38,19 +38,18 @@ Status: Prompt 9 implementation branch.
 
 ## Temporary Exceptions
 
-- Repository URLs and local repository path strings are left for the repository
+- Repository URLs and local repository path strings are owned by
+  `docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md` and the manual GitHub
+  repository setting step.
+- Environment variables were renamed to `OBJECT_ORCHARD_*` by the repository
   path/script cleanup branch.
-- `SHAPE_LAB_*` environment variables are left for the environment variable
-  cleanup branch.
 - Persistent schema identifiers and existing serialized project kind values
-  with `shape-lab` prefixes are left for the repository path/script cleanup and
-  final legacy-name purge branches.
+  with legacy namespace prefixes are left for the final legacy-name purge
+  branch.
 - Some docs retain historical cleanup branch names or deleted crate names where
   they describe already-completed cleanup work.
 
 ## Post-Rename Manual Steps
 
-- Re-run the repository path/script cleanup branch to rename remaining
-  environment variables, target output paths, and repository-local path strings.
 - Run the final legacy-name purge after repository settings are updated.
 - Rename the GitHub repository manually in repository settings when ready.

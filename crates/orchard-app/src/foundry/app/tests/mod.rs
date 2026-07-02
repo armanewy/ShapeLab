@@ -3970,7 +3970,7 @@ fn family_studio_lite_strings(state: &FamilyStudioLiteUiState) -> Vec<String> {
 
 fn isolated_family_studio_lite_store(name: &str) -> PathBuf {
     env::temp_dir().join(format!(
-        "shape-lab-family-studio-lite-test-{name}-{}",
+        "object-orchard-family-studio-lite-test-{name}-{}",
         std::process::id()
     ))
 }
@@ -4333,7 +4333,10 @@ fn temp_material_look_package_root(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time after unix epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!("shape-lab-{name}-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "object-orchard-{name}-{}-{nanos}",
+        std::process::id()
+    ))
 }
 
 fn temp_foundry_project_path(name: &str) -> PathBuf {
@@ -4342,7 +4345,7 @@ fn temp_foundry_project_path(name: &str) -> PathBuf {
         .expect("system time after unix epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "shape-lab-{name}-{}-{nanos}{FOUNDRY_PROJECT_FILE_SUFFIX}",
+        "object-orchard-{name}-{}-{nanos}{FOUNDRY_PROJECT_FILE_SUFFIX}",
         std::process::id()
     ))
 }

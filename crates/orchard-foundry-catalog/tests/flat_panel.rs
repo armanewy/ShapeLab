@@ -148,7 +148,7 @@ fn flat_panel_validates_exports_and_has_only_panel_body_role() {
     }
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-flat-panel-export-{}",
+        "object-orchard-flat-panel-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -212,7 +212,7 @@ fn hinged_panel_validates_exports_and_adds_only_hinge_edge() {
     );
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-hinged-panel-export-{}",
+        "object-orchard-hinged-panel-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -293,7 +293,7 @@ fn handled_panel_validates_exports_and_adds_only_handle_knob_to_hinged_panel() {
     );
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-handled-panel-export-{}",
+        "object-orchard-handled-panel-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -417,7 +417,7 @@ fn panel_knob_validates_exports_and_attaches_knob_to_panel() {
     ));
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-panel-knob-export-{}",
+        "object-orchard-panel-knob-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);

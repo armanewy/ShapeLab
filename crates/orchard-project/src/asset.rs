@@ -33,7 +33,7 @@ pub type AssetModelExportPackagePaths = ModelExportPackagePaths;
 pub type AssetGroupedObjReport = GroupedObjReport;
 
 const ROOT_REVISION_ID: RevisionId = RevisionId(0);
-const ASSET_PROJECT_TEMP_PREFIX: &str = ".shape-lab-asset-project-";
+const ASSET_PROJECT_TEMP_PREFIX: &str = ".object-orchard-asset-project-";
 const TEMP_FILE_SUFFIX: &str = ".tmp";
 const OBSOLETE_TEMP_MIN_AGE: Duration = Duration::from_secs(60 * 60);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);

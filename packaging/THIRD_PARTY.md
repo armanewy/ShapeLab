@@ -1,6 +1,6 @@
 # Third-Party Dependencies
 
-Shape Lab uses Rust crates from crates.io plus first-party workspace crates. The resolved dependency graph is pinned by `Cargo.lock`; root dependency versions are not changed by the release-infrastructure branch.
+Object Orchard uses Rust crates from crates.io plus first-party workspace crates. The resolved dependency graph is pinned by `Cargo.lock`; root dependency versions are not changed by the release-infrastructure branch.
 
 ## Inventory Commands
 

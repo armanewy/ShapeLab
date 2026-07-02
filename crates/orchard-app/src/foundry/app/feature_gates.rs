@@ -37,5 +37,5 @@ pub(super) fn legacy_candidate_ui_enabled() -> bool {
 }
 
 pub(super) fn family_studio_lite_store_base_dir() -> PathBuf {
-    env::temp_dir().join("shape-lab-family-studio-lite")
+    env::temp_dir().join("object-orchard-family-studio-lite")
 }

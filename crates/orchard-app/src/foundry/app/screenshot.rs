@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn read_screenshot_scenario() -> Option<ScreenshotScenario> {
-    let path = env::temp_dir().join("shape-lab-screenshot-scenario.txt");
+    let path = env::temp_dir().join("object-orchard-screenshot-scenario.txt");
     let value = fs::read_to_string(path).ok()?;
     match value.trim() {
         "choose_grouped_primitives" => Some(ScreenshotScenario::ChooseGroupedPrimitives),
@@ -177,7 +177,7 @@ pub(super) fn record_screenshot_state_assertion(
     view_state: &MakeCanvasViewState,
     failure: Option<&str>,
 ) {
-    let path = env::temp_dir().join("shape-lab-screenshot-state-assertions.txt");
+    let path = env::temp_dir().join("object-orchard-screenshot-state-assertions.txt");
     let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) else {
         return;
     };

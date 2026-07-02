@@ -1,6 +1,6 @@
 # Packaging Notes
 
-Shape Lab packaging is currently manual and conservative. This directory records what should be included in platform artifacts without adding untested installer frameworks, automatic publishing, code-signing secrets, notarization, or app-store flows.
+Object Orchard packaging is currently manual and conservative. This directory records what should be included in platform artifacts without adding untested installer frameworks, automatic publishing, code-signing secrets, notarization, or app-store flows.
 
 ## Common Contents
 
@@ -43,14 +43,14 @@ cargo build -p orchard-cli --release
 cargo run -p orchard-cli --release -- release-readiness --verify-visual-gate --out target/release-readiness-verified.json
 ```
 
-For local macOS app-bundle smoke tests, create `target/release/Shape Lab.app`:
+For local macOS app-bundle smoke tests, create `target/release/Object Orchard.app`:
 
 ```bash
 scripts/package_macos_app.sh
 ```
 
 The script wraps the release `orchard-app` binary with
-`packaging/macos/Info.plist`, giving Shape Lab a stable LaunchServices identity
+`packaging/macos/Info.plist`, giving Object Orchard a stable LaunchServices identity
 for local launch, screenshot, and Computer Use checks.
 
 This branch does not claim notarized or signed macOS output. Public
@@ -75,4 +75,4 @@ Runtime systems need working graphics drivers and either X11 or Wayland support.
 
 ## Icons
 
-`packaging/icons/shape-lab-icon.svg` and `packaging/icons/shape-lab-icon-monochrome.svg` are original placeholders. They can be converted into platform-specific icon formats later, but they are not wired into the app binary by this branch.
+`packaging/icons/object-orchard-icon.svg` and `packaging/icons/object-orchard-icon-monochrome.svg` are original placeholders. They can be converted into platform-specific icon formats later, but they are not wired into the app binary by this branch.

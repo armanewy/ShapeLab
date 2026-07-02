@@ -479,7 +479,7 @@ fn tempdir() -> TestTempDir {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("shape-lab-foundry-project-tests-{nonce}"));
+    let path = std::env::temp_dir().join(format!("object-orchard-foundry-project-tests-{nonce}"));
     fs::create_dir(&path).unwrap();
     TestTempDir { path }
 }

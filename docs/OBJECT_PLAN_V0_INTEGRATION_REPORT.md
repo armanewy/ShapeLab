@@ -78,7 +78,7 @@ rendered, 4 unsupported for rendering, `human_review_required: true`, and
 ## UI Evidence
 
 ObjectPlan review UI is internal-only and gated by
-`SHAPE_LAB_OBJECT_PLAN_REVIEW`.
+`OBJECT_ORCHARD_OBJECT_PLAN_REVIEW`.
 
 - `target/object-plan-review-ui/default-hidden.png`: review entry hidden by default.
 - `target/object-plan-review-ui/dev-entry-visible.png`: review entry visible under the dev flag.

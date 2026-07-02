@@ -17,7 +17,7 @@ OBSOLETE_TERMS = (
     "generated variations",
     "Try ideas",
     "candidate tray",
-    "Shape Lab",
+    "Object Orchard",
 )
 
 COMMENT_TERMS = (

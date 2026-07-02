@@ -58,7 +58,8 @@ pub fn write_grouped_obj_export(
     recipe: Option<&AssetRecipe>,
 ) -> Result<GroupedObjExport, ExportError> {
     let mut obj = String::new();
-    writeln!(&mut obj, "# Shape Lab explicit model export").map_err(|_| ExportError::Format)?;
+    writeln!(&mut obj, "# Object Orchard explicit model export")
+        .map_err(|_| ExportError::Format)?;
     writeln!(
         &mut obj,
         "# source_recipe_hash {}",

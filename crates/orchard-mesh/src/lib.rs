@@ -18,7 +18,7 @@ const MAX_GRID_SAMPLES: usize = 16_777_216;
 const MIN_GRADIENT_STEP: f32 = 1.0e-4;
 const MIN_NORMAL_LENGTH: f32 = 1.0e-6;
 const MIN_TRIANGLE_AREA_NORMAL: f32 = 1.0e-8;
-const OBJ_TEMP_PREFIX: &str = ".shape-lab-obj-";
+const OBJ_TEMP_PREFIX: &str = ".object-orchard-obj-";
 const TEMP_FILE_SUFFIX: &str = ".tmp";
 const OBSOLETE_TEMP_MIN_AGE: Duration = Duration::from_secs(60 * 60);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -178,7 +178,7 @@ pub fn mesh_field(
 pub fn write_obj(mesh: &TriangleMesh, mut writer: impl Write) -> Result<(), MeshError> {
     validate_mesh(mesh)?;
 
-    writeln!(writer, "# Shape Lab generated OBJ")?;
+    writeln!(writer, "# Object Orchard generated OBJ")?;
     writeln!(writer, "# format wavefront-obj")?;
     writeln!(writer, "# vertex_count {}", mesh.positions.len())?;
     writeln!(writer, "# normal_count {}", mesh.normals.len())?;
@@ -1074,7 +1074,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("shape-lab-mesh-tests-{nonce}"));
+        let path = std::env::temp_dir().join(format!("object-orchard-mesh-tests-{nonce}"));
         fs::create_dir(&path).unwrap();
         TestTempDir { path }
     }
@@ -1161,7 +1161,7 @@ mod tests {
         let mesh = sphere_mesh(8);
         let obj = obj_string(&mesh);
 
-        assert!(obj.starts_with("# Shape Lab generated OBJ\n"));
+        assert!(obj.starts_with("# Object Orchard generated OBJ\n"));
         assert!(obj.lines().any(|line| line == "# format wavefront-obj"));
         assert!(obj.lines().any(|line| line.starts_with("# vertex_count ")));
         assert!(obj.lines().any(|line| line.starts_with("# normal_count ")));
@@ -1313,7 +1313,7 @@ f {token} 2 3
         write_obj_to_path(&mesh, &path).unwrap();
         let saved = fs::read_to_string(&path).unwrap();
 
-        assert!(saved.starts_with("# Shape Lab generated OBJ\n"));
+        assert!(saved.starts_with("# Object Orchard generated OBJ\n"));
         assert_ne!(saved, "old obj\n");
     }
 
@@ -1361,7 +1361,7 @@ f {token} 2 3
 
         assert_eq!(
             obj_temp_prefix(&path),
-            ".shape-lab-obj-unsafe-mesh-name-obj-"
+            ".object-orchard-obj-unsafe-mesh-name-obj-"
         );
     }
 

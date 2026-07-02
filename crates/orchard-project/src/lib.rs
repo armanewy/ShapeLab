@@ -23,7 +23,7 @@ use thiserror::Error;
 const PROJECT_SCHEMA_VERSION: u32 = 1;
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const ROOT_REVISION_ID: RevisionId = RevisionId(0);
-const PROJECT_TEMP_PREFIX: &str = ".shape-lab-project-";
+const PROJECT_TEMP_PREFIX: &str = ".object-orchard-project-";
 const TEMP_FILE_SUFFIX: &str = ".tmp";
 const OBSOLETE_TEMP_MIN_AGE: Duration = Duration::from_secs(60 * 60);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -43,7 +43,7 @@ pub struct Revision {
     pub document: ShapeDocument,
 }
 
-/// Shape Lab project file.
+/// Object Orchard project file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     /// Project schema version.
@@ -657,7 +657,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("shape-lab-{name}-{nonce}.json"))
+        std::env::temp_dir().join(format!("object-orchard-{name}-{nonce}.json"))
     }
 
     struct TestTempDir {
@@ -681,7 +681,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("shape-lab-project-tests-{nonce}"));
+        let path = std::env::temp_dir().join(format!("object-orchard-project-tests-{nonce}"));
         fs::create_dir(&path).unwrap();
         TestTempDir { path }
     }
@@ -948,7 +948,7 @@ mod tests {
 
         assert_eq!(
             project_temp_prefix(&path),
-            ".shape-lab-project-unsafe-project-name-shapelab-json-"
+            ".object-orchard-project-unsafe-project-name-shapelab-json-"
         );
     }
 }

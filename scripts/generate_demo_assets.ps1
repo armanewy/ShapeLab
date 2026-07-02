@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 
 function Write-Usage {
     $usage = @"
-Generate deterministic Shape Lab demo assets with the headless CLI.
+Generate deterministic Object Orchard demo assets with the headless CLI.
 
 Usage:
   pwsh -File scripts/generate_demo_assets.ps1 [options]
@@ -101,4 +101,4 @@ try {
     Pop-Location
 }
 
-Write-Host "Generated Shape Lab demo assets in $outRoot"
+Write-Host "Generated Object Orchard demo assets in $outRoot"
