@@ -105,7 +105,9 @@ fn docs_command_examples_use_orchard_cli() {
     docs.push(root.join("README.md"));
 
     for path in docs {
-        if path.ends_with("docs/RUST_CRATE_FOLDER_RENAME_REPORT.md") {
+        if path.ends_with("docs/CLEANUP_AND_OBJECT_ORCHARD_RENAME_INTEGRATION_REPORT.md")
+            || path.ends_with("docs/RUST_CRATE_FOLDER_RENAME_REPORT.md")
+        {
             continue;
         }
         let contents = fs::read_to_string(&path).expect("doc text");
@@ -153,6 +155,7 @@ fn repository_docs_scripts_and_packaging_use_object_orchard_names() {
     files.push(root.join("Cargo.toml"));
 
     let allowed_old_name_docs = [
+        "docs/CLEANUP_AND_OBJECT_ORCHARD_RENAME_INTEGRATION_REPORT.md",
         "docs/OBJECT_ORCHARD_NAMING_TRANSITION.md",
         "docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md",
     ];

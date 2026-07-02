@@ -14,11 +14,11 @@ or retirements.
 
 | Path | Current non-test line count | Owner | Split plan | Deadline |
 | --- | ---: | --- | --- | --- |
-| `crates/orchard-app/src/foundry/jobs.rs` | 1353 | App cleanup | Split job orchestration from preview, candidate, pack export, and trace helpers. | Cleanup Wave 2 |
+| `crates/orchard-app/src/foundry/jobs.rs` | 1349 | App cleanup | Split job orchestration from preview, candidate, pack export, and trace helpers. | Cleanup Wave 2 |
 | `crates/orchard-app/src/foundry/panels/directions.rs` | 1105 | App cleanup | Split direction board model, validation, intent mapping, and rendering helpers. | Cleanup Wave 2 |
 | `crates/orchard-app/src/foundry/panels/history.rs` | 1207 | App cleanup | Split history model, status copy, rendering, and command helpers. | Cleanup Wave 2 |
 | `crates/orchard-app/src/foundry/state.rs` | 2319 | App cleanup | Split Foundry state into workflow, build readiness, pack, project, warning, and persistence modules. | Cleanup Wave 2 |
-| `crates/orchard-cli/src/main.rs` | 3293 | CLI cleanup | Split command registration and dispatch by subsystem; keep implementation details in subsystem modules. | Cleanup Wave 2 |
+| `crates/orchard-cli/src/main.rs` | 3295 | CLI cleanup | Split command registration and dispatch by subsystem; keep implementation details in subsystem modules. | Cleanup Wave 2 |
 | `crates/orchard-cli/src/object_plan_cli.rs` | 2378 | CLI cleanup | Split ObjectPlan validation, materialization, render evidence, geometry export, and batch review commands. | Cleanup Wave 2 |
 | `crates/orchard-compile/src/export/package.rs` | 1045 | Compile cleanup | Split export package writing, reading, validation, and DCC sidecar helpers. | Cleanup Wave 2 |
 | `crates/orchard-compile/src/lib.rs` | 1485 | Compile cleanup | Split compiler reports, compile pipeline, pattern evaluation, and tests. | Cleanup Wave 2 |
