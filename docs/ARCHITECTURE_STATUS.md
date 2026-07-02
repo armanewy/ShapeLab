@@ -25,9 +25,19 @@ for new Orchard semantics.
 
 ## Active Phase
 
-Phase A contract hardening is in progress. This phase is not a feature wave. It
-exists to make boundary decisions durable before adding more UI handles,
-surface work, terrain, collision, motion, or prototype-pack expansion.
+Phase A-D semantic compiler hardening has passed. The active phase is now
+cleanup baseline freeze and hygiene enforcement before the Object Orchard
+rename. Cleanup is not a feature wave. It exists to remove obsolete pivots,
+split oversized files, retire unreleased compatibility code, and keep boundary
+decisions durable before adding more UI handles, surface work, terrain,
+collision, motion, or prototype-pack expansion.
+
+## Rename Status
+
+Object Orchard is the planned product name, but the repository, Rust crates, and
+many internal paths still use Shape Lab / ShapeLab naming until the rename wave
+lands. Cleanup must happen before the rename to avoid hiding architectural
+mistakes inside noisy path diffs.
 
 ## Blocked Product Claims
 

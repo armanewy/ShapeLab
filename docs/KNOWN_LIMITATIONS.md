@@ -17,6 +17,12 @@
 
 ## Unsupported Workflows
 
+- Cleanup baseline freeze is starting. Cleanup does not add product capability,
+  product UI, materials, UVs, collision, motion, terrain, runtime LLM, public
+  catalog publishing, Godot-ready output, or game-ready output.
+- Object Orchard rename is planned but not yet applied. Shape Lab / ShapeLab
+  names may remain in repository, crate, app metadata, and historical docs until
+  the rename wave lands.
 - Phase A-D semantic compiler hardening is integrated. It does not add new
   product-facing feature categories; it establishes that future A-J work should
   target `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic

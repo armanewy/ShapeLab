@@ -6,6 +6,10 @@ Date: 2026-07-01
 
 `PHASE_A_D_SEMANTIC_COMPILER_HARDENING_INTEGRATED`
 
+Cleanup baseline freeze is starting. Cleanup does not add product capability;
+it makes the repository physically match the semantic compiler architecture
+before the Object Orchard rename.
+
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
 ObjectPlan Materialization v1 now exists as offline validation and review
@@ -122,6 +126,9 @@ legacy/implicit compatibility lane rather than the new product backbone.
 - Terrain remains blocked as product-facing work until explicit terrain patch,
   placement, validation, collision/readiness, and export contracts pass. It is
   not approved as only a generic mesh primitive.
+- Rename to Object Orchard is planned but not yet applied. Current repository,
+  crate, and app metadata may still use Shape Lab / ShapeLab naming until the
+  rename wave lands.
 
 ## Allowed Product Claims
 
