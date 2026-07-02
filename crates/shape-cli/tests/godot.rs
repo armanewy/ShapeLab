@@ -117,9 +117,23 @@ fn stderr(output: &std::process::Output) -> String {
 
 fn assert_godot_report_excludes_later_features(report: &serde_json::Value) {
     assert_eq!(report["mesh_imported"], false);
+    assert_eq!(report["hierarchy_checked"], false);
+    assert_eq!(report["imported_node_count"], 0);
+    assert_eq!(report["imported_mesh_count"], 0);
+    assert_eq!(report["relationship_hierarchy_preserved"], false);
     assert_eq!(report["material_imported"], false);
     assert_eq!(report["collision_imported"], false);
     assert_eq!(report["rig_imported"], false);
     assert_eq!(report["animation_imported"], false);
     assert_eq!(report["game_ready"], false);
+    assert!(
+        report["hierarchy_notes"]
+            .as_array()
+            .expect("hierarchy notes")
+            .iter()
+            .any(|note| note
+                .as_str()
+                .unwrap_or_default()
+                .contains("hierarchy inspection"))
+    );
 }

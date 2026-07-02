@@ -5,6 +5,7 @@
 //! animation, public publishing, and game-ready status.
 
 use serde::{Deserialize, Serialize};
+use shape_compile::export::RelationshipRealizationSummary;
 
 use crate::{MaterializationStatus, MaterializedObjectDraft, PrimitiveKind};
 
@@ -120,6 +121,8 @@ pub struct GeometryExportReport {
     pub warning_count: usize,
     /// Blockers that prevented export.
     pub blockers: Vec<String>,
+    /// How authored relationships were realized in this geometry export.
+    pub relationship_realizations: Vec<RelationshipRealizationSummary>,
     /// Whether UV data is included.
     pub includes_uvs: bool,
     /// Whether textures are included.
@@ -321,6 +324,15 @@ pub fn validate_geometry_export_report(
             "geometry_export_blocked_without_reason",
             "Blocked or failed geometry exports must report blockers.",
         );
+    }
+    for (index, realization) in export_report.relationship_realizations.iter().enumerate() {
+        if realization.baked {
+            report.push(
+                format!("relationship_realizations.{index}.baked"),
+                "geometry_export_relationship_bake_unproven",
+                "V0 geometry export cannot claim a baked relationship realization.",
+            );
+        }
     }
     if export_report.includes_uvs {
         report.push(

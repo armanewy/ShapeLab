@@ -112,11 +112,16 @@ fn run_geometry_import(
         source_glb: persisted_glb_ref(glb_path),
         imported_files,
         mesh_imported,
+        hierarchy_checked: false,
+        imported_node_count: 0,
+        imported_mesh_count: if mesh_imported { 1 } else { 0 },
+        relationship_hierarchy_preserved: false,
         material_imported: false,
         collision_imported: false,
         rig_imported: false,
         animation_imported: false,
         game_ready: false,
+        hierarchy_notes: vec!["Godot hierarchy inspection is not implemented in V0.".to_owned()],
     };
     write_json(
         out_dir.join("imported-asset-report.json"),
@@ -143,6 +148,10 @@ fn run_geometry_import(
         godot_version: version,
         source_glb: persisted_glb_ref(glb_path),
         mesh_imported,
+        hierarchy_checked: false,
+        imported_node_count: 0,
+        imported_mesh_count: if mesh_imported { 1 } else { 0 },
+        relationship_hierarchy_preserved: false,
         material_imported: false,
         collision_imported: false,
         rig_imported: false,
@@ -150,6 +159,7 @@ fn run_geometry_import(
         game_ready: false,
         blockers,
         logs: vec!["stdout.log".to_owned(), "stderr.log".to_owned()],
+        hierarchy_notes: vec!["Godot hierarchy inspection is not implemented in V0.".to_owned()],
     };
     write_json(out_dir.join("godot-import-proof-report.json"), &report)?;
 
@@ -269,6 +279,10 @@ fn base_report(
         godot_version,
         source_glb: persisted_glb_ref(glb_path),
         mesh_imported: false,
+        hierarchy_checked: false,
+        imported_node_count: 0,
+        imported_mesh_count: 0,
+        relationship_hierarchy_preserved: false,
         material_imported: false,
         collision_imported: false,
         rig_imported: false,
@@ -276,6 +290,7 @@ fn base_report(
         game_ready: false,
         blockers,
         logs,
+        hierarchy_notes: vec!["Godot hierarchy inspection was not run.".to_owned()],
     }
 }
 
@@ -310,6 +325,10 @@ struct GodotImportProofReport {
     godot_version: Option<String>,
     source_glb: String,
     mesh_imported: bool,
+    hierarchy_checked: bool,
+    imported_node_count: usize,
+    imported_mesh_count: usize,
+    relationship_hierarchy_preserved: bool,
     material_imported: bool,
     collision_imported: bool,
     rig_imported: bool,
@@ -317,6 +336,7 @@ struct GodotImportProofReport {
     game_ready: bool,
     blockers: Vec<String>,
     logs: Vec<String>,
+    hierarchy_notes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -324,9 +344,14 @@ struct ImportedAssetReport {
     source_glb: String,
     imported_files: Vec<String>,
     mesh_imported: bool,
+    hierarchy_checked: bool,
+    imported_node_count: usize,
+    imported_mesh_count: usize,
+    relationship_hierarchy_preserved: bool,
     material_imported: bool,
     collision_imported: bool,
     rig_imported: bool,
     animation_imported: bool,
     game_ready: bool,
+    hierarchy_notes: Vec<String>,
 }
