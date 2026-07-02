@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use shape_asset::{
     AssetRecipe, AttachmentMode, Frame3, ModelingOperationSpec, OperationId, PartDefinition,
-    PartDefinitionId, PartInstance, PartInstanceId, RegionId, SocketId, SocketSpec, Transform3,
+    PartDefinitionId, PartInstance, PartInstanceId, PatternContract, PatternEvaluation,
+    PatternEvaluationError, RegionId, SocketId, SocketSpec, Transform3,
 };
 use shape_poly::{
     ElementId, FaceMetadata, MeshBounds, PolyError, PolygonMesh, TriangulatedPolygonMesh,
@@ -17,6 +18,16 @@ use thiserror::Error;
 use crate::{GeneratedPart, GeneratorContext, GeometryGenerator, ModelingError, generate_geometry};
 
 const EPSILON: f32 = 1.0e-6;
+
+/// Evaluate a deterministic pattern contract in the assembly layer.
+///
+/// V0 delegates to the canonical pattern evaluator and does not expose any
+/// product UI or export instancing claim.
+pub fn evaluate_pattern_contract(
+    pattern: &PatternContract,
+) -> Result<PatternEvaluation, PatternEvaluationError> {
+    shape_asset::evaluate_linear_pattern_contract(pattern)
+}
 
 /// Deterministic assembly operation plan layered on top of an [`AssetRecipe`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

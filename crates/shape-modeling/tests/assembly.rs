@@ -2,20 +2,47 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use shape_asset::{
-    AssetId, AssetRecipe, AttachmentMode, AttachmentSpec, Frame3, GeometryRecipe, GeometrySource,
-    OperationId, PartDefinition, PartDefinitionId, PartInstance, PartInstanceId, RegionId,
-    SocketId, SocketSpec, Transform3,
+    AssetId, AssetRecipe, AttachmentMode, AttachmentSpec, Frame3, GeneratedIdPolicy,
+    GeometryRecipe, GeometrySource, OperationId, PartDefinition, PartDefinitionId, PartInstance,
+    PartInstanceId, PatternAxis, PatternContract, PatternCountPolicy,
+    PatternExportInstancingPolicy, PatternId, PatternType, RegionId, SocketId, SocketSpec,
+    Transform3,
 };
 use shape_modeling::assembly::{
     AssemblyError, AssemblyOperation, AssemblyPlan, LinearArrayOperation, MirrorOperation,
     MirrorPlane, RadialArrayOperation, evaluate_assembly_plan_with_generator,
-    evaluate_assembly_with_generator,
+    evaluate_assembly_with_generator, evaluate_pattern_contract,
 };
 use shape_modeling::{GeneratedPart, GeneratorContext, GeometryGenerator, ModelingError};
 use shape_poly::{FaceMetadata, MeshBounds, PolygonMesh, polygon_mesh_from_faces};
 
 const FACE_OPERATION: OperationId = OperationId(77);
 const FACE_REGION: RegionId = RegionId(5);
+
+#[test]
+fn pattern_contract_evaluates_deterministically_in_assembly_layer() {
+    let pattern = PatternContract {
+        id: PatternId(4),
+        pattern_type: PatternType::Linear,
+        source_instance: Some(PartInstanceId(3)),
+        count: Some(3),
+        label: "Assembly repeat proof".to_owned(),
+        count_policy: PatternCountPolicy::Exact(3),
+        density_policy: None,
+        export_instancing: PatternExportInstancingPolicy::Pending,
+        linear_axis: Some(PatternAxis::Y),
+        spacing: Some(0.4),
+        generated_id_policy: GeneratedIdPolicy::PatternOccurrenceIndex,
+    };
+
+    let first = evaluate_pattern_contract(&pattern).expect("evaluates");
+    let second = evaluate_pattern_contract(&pattern).expect("evaluates");
+
+    assert_eq!(first, second);
+    assert_eq!(first.report.generated_occurrence_count, 3);
+    assert_eq!(first.occurrences[2].offset, [0.0, 0.8, 0.0]);
+    assert!(!first.report.export_instancing_enabled);
+}
 
 #[derive(Default)]
 struct FixtureGenerator {

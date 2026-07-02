@@ -1,0 +1,13 @@
+{
+  "id": 2,
+  "pattern_type": "Linear",
+  "source_instance": 1,
+  "count": 0,
+  "label": "Invalid count proof",
+  "count_policy": { "Exact": 0 },
+  "density_policy": null,
+  "export_instancing": "Pending",
+  "linear_axis": "X",
+  "spacing": 0.25,
+  "generated_id_policy": "PatternOccurrenceIndex"
+}
