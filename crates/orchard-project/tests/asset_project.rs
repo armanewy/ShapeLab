@@ -20,7 +20,7 @@ fn tempdir(name: &str) -> TestTempDir {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("shape-lab-asset-project-{name}-{nonce}"));
+    let path = std::env::temp_dir().join(format!("object-orchard-asset-project-{name}-{nonce}"));
     fs::create_dir(&path).unwrap();
     TestTempDir { path }
 }

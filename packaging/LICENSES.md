@@ -6,7 +6,7 @@ The Rust workspace declares:
 license = "MIT OR Apache-2.0"
 ```
 
-This means Shape Lab source crates are intended to be usable under either the MIT License or the Apache License, Version 2.0. Reference texts are included in `packaging/licenses/MIT.txt` and `packaging/licenses/APACHE-2.0.txt` for manual release archives.
+This means Object Orchard source crates are intended to be usable under either the MIT License or the Apache License, Version 2.0. Reference texts are included in `packaging/licenses/MIT.txt` and `packaging/licenses/APACHE-2.0.txt` for manual release archives.
 
 ## Packaging Checklist
 

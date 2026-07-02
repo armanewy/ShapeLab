@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
-$cacheRoot = if ($env:SHAPE_LAB_CACHE_DIR) {
-    $env:SHAPE_LAB_CACHE_DIR
+$cacheRoot = if ($env:OBJECT_ORCHARD_CACHE_DIR) {
+    $env:OBJECT_ORCHARD_CACHE_DIR
 } else {
-    Join-Path $HOME "AppData\Local\ShapeLab"
+    Join-Path $HOME "AppData\Local\ObjectOrchard"
 }
 
 if (-not $env:CARGO_TARGET_DIR) {
@@ -30,7 +30,7 @@ if ($sccache) {
     $sccacheStatus = "not found: install sccache to enable compiler caching"
 }
 
-Write-Host "Shape Lab development environment"
+Write-Host "Object Orchard development environment"
 Write-Host "  CARGO_TARGET_DIR=$env:CARGO_TARGET_DIR"
 Write-Host "  SCCACHE_DIR=$env:SCCACHE_DIR"
 Write-Host "  SCCACHE_CACHE_SIZE=$env:SCCACHE_CACHE_SIZE"

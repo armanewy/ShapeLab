@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select fast Shape Lab development gates from changed paths."""
+"""Select fast Object Orchard development gates from changed paths."""
 
 from __future__ import annotations
 

@@ -81,7 +81,7 @@ class CleanTargetsTests(unittest.TestCase):
     def test_collect_targets_marks_active_worktree_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            worktree = root / "ShapeLab"
+            worktree = root / "ObjectOrchard"
             target = worktree / "target"
             target.mkdir(parents=True)
             (target / "artifact").write_text("x", encoding="utf-8")

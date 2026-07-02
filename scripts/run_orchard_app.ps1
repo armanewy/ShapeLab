@@ -21,15 +21,15 @@ try {
             $cargoArgs += "--release"
         }
 
-        Write-Host "Building Shape Lab $Profile binary..."
+        Write-Host "Building Object Orchard $Profile binary..."
         & cargo @cargoArgs
         if ($LASTEXITCODE -ne 0) {
-            throw "cargo exited with code $LASTEXITCODE while building Shape Lab"
+            throw "cargo exited with code $LASTEXITCODE while building Object Orchard"
         }
     }
 
     if (-not (Test-Path -LiteralPath $binaryPath)) {
-        throw "Shape Lab binary was not found after build: $binaryPath"
+        throw "Object Orchard binary was not found after build: $binaryPath"
     }
 
     if (-not $NoStopExisting) {
@@ -45,7 +45,7 @@ try {
     }
 
     if ($PreviewCatalog) {
-        $env:SHAPE_LAB_PREVIEW_CATALOG = "1"
+        $env:OBJECT_ORCHARD_PREVIEW_CATALOG = "1"
     }
 
     Write-Host "Launching $binaryPath"

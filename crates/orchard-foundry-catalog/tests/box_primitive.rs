@@ -92,7 +92,7 @@ fn box_primitive_validates_exports_and_has_only_body_role() {
     }
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-box-primitive-export-{}",
+        "object-orchard-box-primitive-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -262,7 +262,7 @@ fn lidded_box_validates_exports_and_has_only_lid_seam_feature_role() {
     }
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-lidded-box-export-{}",
+        "object-orchard-lidded-box-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);
@@ -406,7 +406,7 @@ fn trimmed_box_validates_exports_and_has_only_lid_seam_and_trim_band_roles() {
     }
 
     let package_dir = std::env::temp_dir().join(format!(
-        "shape-lab-trimmed-box-export-{}",
+        "object-orchard-trimmed-box-export-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&package_dir);

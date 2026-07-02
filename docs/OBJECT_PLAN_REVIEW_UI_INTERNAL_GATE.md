@@ -3,7 +3,7 @@
 Date: 2026-07-01
 
 The ObjectPlan review UI is an internal-only review surface. It is hidden in
-the default novice UI and appears only when `SHAPE_LAB_OBJECT_PLAN_REVIEW` is
+the default novice UI and appears only when `OBJECT_ORCHARD_OBJECT_PLAN_REVIEW` is
 enabled.
 
 ## Scope
@@ -36,7 +36,7 @@ Manual screenshots captured from the rebuilt macOS app bundle:
 - `target/object-plan-review-ui/default-hidden.png`
   - review entry hidden in default UI
 - `target/object-plan-review-ui/dev-entry-visible.png`
-  - review entry visible when `SHAPE_LAB_OBJECT_PLAN_REVIEW=1`
+  - review entry visible when `OBJECT_ORCHARD_OBJECT_PLAN_REVIEW=1`
 - `target/object-plan-review-ui/review-drawer.png`
   - batch report target visible
   - contact-sheet review area visible

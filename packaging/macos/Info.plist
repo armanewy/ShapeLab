@@ -5,15 +5,15 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Shape Lab</string>
+  <string>Object Orchard</string>
   <key>CFBundleExecutable</key>
-  <string>shape-app</string>
+  <string>orchard-app</string>
   <key>CFBundleIdentifier</key>
-  <string>com.shapelab.ShapeLab</string>
+  <string>com.objectorchard.ObjectOrchard</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Shape Lab</string>
+  <string>Object Orchard</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

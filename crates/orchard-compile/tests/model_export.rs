@@ -612,7 +612,7 @@ fn temp_dir(label: &str) -> PathBuf {
         .expect("system time")
         .as_nanos();
     let path = std::env::temp_dir().join(format!(
-        "shape-lab-model-export-{label}-{}-{stamp}",
+        "object-orchard-model-export-{label}-{}-{stamp}",
         std::process::id()
     ));
     fs::create_dir_all(&path).expect("create temp dir");

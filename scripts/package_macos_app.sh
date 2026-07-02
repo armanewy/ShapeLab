@@ -23,7 +23,7 @@ fi
 
 binary="$repo_root/target/release/orchard-app"
 plist="$repo_root/packaging/macos/Info.plist"
-app="$repo_root/target/release/Shape Lab.app"
+app="$repo_root/target/release/Object Orchard.app"
 contents="$app/Contents"
 macos="$contents/MacOS"
 resources="$contents/Resources"

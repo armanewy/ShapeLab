@@ -21,7 +21,7 @@ yet a broadly renderable asset-generation milestone.
 - The CLI can emit honest renderability and visual-evidence reports.
 - Batch reports keep `human_review_required: true` and `approved: false`.
 - The ObjectPlan review drawer is internal-only and hidden unless
-  `SHAPE_LAB_OBJECT_PLAN_REVIEW` is enabled.
+  `OBJECT_ORCHARD_OBJECT_PLAN_REVIEW` is enabled.
 
 ## What Validates
 

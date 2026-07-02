@@ -112,3 +112,75 @@ fn docs_command_examples_use_orchard_cli() {
         );
     }
 }
+
+#[test]
+fn repository_docs_scripts_and_packaging_use_object_orchard_names() {
+    let root = repo_root();
+    let mut files = Vec::new();
+    for relative_root in ["docs", "scripts", "packaging", ".github"] {
+        let path = root.join(relative_root);
+        if path.exists() {
+            collect_files(
+                &path,
+                |path| {
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| {
+                            matches!(
+                                ext,
+                                "md" | "sh"
+                                    | "ps1"
+                                    | "py"
+                                    | "yml"
+                                    | "yaml"
+                                    | "toml"
+                                    | "plist"
+                                    | "svg"
+                                    | "txt"
+                            )
+                        })
+                },
+                &mut files,
+            );
+        }
+    }
+    files.push(root.join("README.md"));
+    files.push(root.join("Cargo.toml"));
+
+    let allowed_old_name_docs = [
+        "docs/OBJECT_ORCHARD_NAMING_TRANSITION.md",
+        "docs/OBJECT_ORCHARD_REPOSITORY_RENAME_GUIDE.md",
+    ];
+
+    for path in files {
+        let relative = path
+            .strip_prefix(&root)
+            .expect("repo-relative path")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let contents = fs::read_to_string(&path).expect("repo text");
+        assert!(
+            !contents.contains("SHAPE_LAB_"),
+            "{} still documents or uses an old SHAPE_LAB_* env var",
+            path.display()
+        );
+        assert!(
+            !contents.contains("shape-lab"),
+            "{} still uses an old local shape-lab path or slug",
+            path.display()
+        );
+
+        if !allowed_old_name_docs.contains(&relative.as_str()) {
+            assert!(
+                !contents.contains("Shape Lab"),
+                "{} still contains the old spaced product name",
+                path.display()
+            );
+            assert!(
+                !contents.contains("ShapeLab"),
+                "{} still contains the old compact repository name",
+                path.display()
+            );
+        }
+    }
+}
