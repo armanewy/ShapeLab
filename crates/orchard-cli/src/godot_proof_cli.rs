@@ -128,13 +128,7 @@ fn run_geometry_import(
         &imported_asset_report,
     )?;
 
-    let status = if mesh_imported {
-        GodotImportProofStatus::Passed
-    } else if import_output.status.success() {
-        GodotImportProofStatus::Blocked
-    } else {
-        GodotImportProofStatus::Failed
-    };
+    let status = classify_import_result(import_output.status.success(), mesh_imported);
     let blockers = match status {
         GodotImportProofStatus::Passed => Vec::new(),
         GodotImportProofStatus::Blocked => {
@@ -310,6 +304,16 @@ fn relative_path_string(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
+fn classify_import_result(command_succeeded: bool, mesh_imported: bool) -> GodotImportProofStatus {
+    if mesh_imported {
+        GodotImportProofStatus::Passed
+    } else if command_succeeded {
+        GodotImportProofStatus::Blocked
+    } else {
+        GodotImportProofStatus::Failed
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 enum GodotImportProofStatus {
@@ -354,4 +358,25 @@ struct ImportedAssetReport {
     animation_imported: bool,
     game_ready: bool,
     hierarchy_notes: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GodotImportProofStatus, classify_import_result};
+
+    #[test]
+    fn godot_import_status_classifies_pass_blocked_and_failed() {
+        assert_eq!(
+            classify_import_result(true, true),
+            GodotImportProofStatus::Passed
+        );
+        assert_eq!(
+            classify_import_result(true, false),
+            GodotImportProofStatus::Blocked
+        );
+        assert_eq!(
+            classify_import_result(false, false),
+            GodotImportProofStatus::Failed
+        );
+    }
 }
