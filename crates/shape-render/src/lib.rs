@@ -14,9 +14,10 @@ pub mod surface_preview;
 
 use glam::{Mat4, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
-use shape_core::Aabb;
 use shape_mesh::TriangleMesh;
 use thiserror::Error;
+
+pub use shape_core::Aabb;
 
 const MIN_PITCH_DEGREES: f32 = -89.0;
 const MAX_PITCH_DEGREES: f32 = 89.0;

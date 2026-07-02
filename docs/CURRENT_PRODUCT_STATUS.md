@@ -4,11 +4,11 @@ Date: 2026-07-01
 
 ## Verdict
 
-`PHASE_A_D_SEMANTIC_COMPILER_HARDENING_INTEGRATED`
+`CLEANUP_BASELINE_FREEZE`
 
 Cleanup baseline freeze is starting. Cleanup does not add product capability;
-it makes the repository physically match the semantic compiler architecture
-before the Object Orchard rename.
+it makes the repository physically match the semantic asset compiler
+architecture before the Object Orchard rename.
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -26,6 +26,10 @@ The current architecture phase has integrated the first semantic compiler
 hardening stack: future A-J work targets `shape-asset::AssetRecipe` / Orchard
 IR as the canonical semantic lane, while `shape-core::ShapeDocument` remains a
 legacy/implicit compatibility lane rather than the new product backbone.
+Cleanup Wave 1 is purging obsolete docs from old Sci-Fi Crate, Cargo Case,
+crate-family, generated-variation, candidate, dogfood, showcase, and
+game-ready package pivots. Those docs are not active status and must not be
+restored as parallel product truth.
 
 ## Current Truth
 

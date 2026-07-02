@@ -18,18 +18,20 @@ DEFAULT_FILES = (
     "crates/shape-foundry-catalog/src/lib.rs",
     "crates/shape-foundry-catalog/src/kits.rs",
     "README.md",
-    "docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md",
+    "docs/README.md",
     "docs/CURRENT_PRODUCT_STATUS.md",
-    "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
     "docs/KNOWN_LIMITATIONS.md",
+    "docs/ARCHITECTURE_STATUS.md",
+    "docs/CLEANUP_PLAN.md",
 )
 
 DEFAULT_MARKDOWN_REPORTS = frozenset(
     {
-        "docs/BOX_PRIMITIVE_DOGFOOD_GATE_RESULTS.md",
+        "docs/README.md",
         "docs/CURRENT_PRODUCT_STATUS.md",
-        "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
         "docs/KNOWN_LIMITATIONS.md",
+        "docs/ARCHITECTURE_STATUS.md",
+        "docs/CLEANUP_PLAN.md",
     }
 )
 

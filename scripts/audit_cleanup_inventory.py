@@ -136,6 +136,8 @@ def find_terms(root: Path) -> list[Finding]:
         rel = path.relative_to(root).as_posix()
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            continue
         except UnicodeDecodeError:
             continue
         for line_number, line in enumerate(lines, start=1):

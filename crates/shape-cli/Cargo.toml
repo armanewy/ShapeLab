@@ -19,9 +19,7 @@ shape-app = { path = "../shape-app" }
 shape-asset.workspace = true
 shape-core.workspace = true
 shape-compile.workspace = true
-shape-decompiler.workspace = true
 shape-field.workspace = true
-shape-family-compile.workspace = true
 shape-foundry.workspace = true
 shape-foundry-catalog.workspace = true
 shape-mesh.workspace = true

@@ -53,7 +53,7 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 | Can ObjectPlan materialize supported primitive plans? | Pass. Supported primitive nodes become Draft primitive instances. |
 | Can ObjectPlan produce real render/contact-sheet evidence for supported plans? | Pass. Supported plans emit PNG previews and contact sheets. |
 | Do unsupported plans produce honest blocked reports? | Pass. Unsupported primitives and unsupported attachments do not fake contact sheets. |
-| Can batch review classify Keep / Regenerate / Simplify / Blocked? | Pass. Batch policy supports all four labels; the integration batch observes Keep, Simplify, and Blocked, while Regenerate remains the valid-but-incomplete-evidence path. |
+| Can batch review classify Keep / Regenerate / Simplify / Blocked? | Pass. Batch policy supports all labels; the integration batch observes Keep, Simplify, and Blocked. |
 | Are plans automatically approved? | Pass. Reports keep `approved: false`. |
 | Are plans published to catalog? | Pass. Reports keep `publish_allowed: false`. |
 | Is runtime LLM still absent? | Pass. No runtime LLM dependency or app-side LLM drafting was added. |

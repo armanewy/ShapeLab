@@ -20,7 +20,7 @@ export/proof includes.
 ## Legacy Lane
 
 `shape-core::ShapeDocument` remains the legacy/implicit compatibility lane. It
-is useful and should remain stable, but it is not the target product backbone
+is useful and should remain stable, but it is not the new canonical product IR
 for new Orchard semantics.
 
 ## Active Phase
@@ -38,6 +38,12 @@ Object Orchard is the planned product name, but the repository, Rust crates, and
 many internal paths still use Shape Lab / ShapeLab naming until the rename wave
 lands. Cleanup must happen before the rename to avoid hiding architectural
 mistakes inside noisy path diffs.
+
+## Documentation Status
+
+Active docs are indexed by `docs/README.md`. Old pivot reports are not
+architecture truth unless that index names them and a current test or contract
+still validates them.
 
 ## Blocked Product Claims
 

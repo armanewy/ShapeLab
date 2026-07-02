@@ -34,7 +34,7 @@ use glam::{EulerRot, Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Scalar type used by MVP geometry code.
+/// Scalar type used by legacy low-level geometry code.
 pub type Scalar = f32;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -269,12 +269,12 @@ pub struct ShapeNode {
     pub kind: NodeKind,
 }
 
-/// Canonical scalar parameter path.
+/// Stable scalar parameter path for the legacy implicit document.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ParamPath {
     /// Node owning the parameter.
     pub node: NodeId,
-    /// Canonical key, such as `primitive.radius`.
+    /// Stable key, such as `primitive.radius`.
     pub key: String,
 }
 
@@ -312,7 +312,7 @@ pub struct ParamDescriptor {
     pub mutation_sigma: Scalar,
 }
 
-/// Authoritative shape document.
+/// Legacy implicit shape document retained for compatibility.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapeDocument {
     /// Schema version for project compatibility.
@@ -384,7 +384,7 @@ pub struct SetScalarEdit {
     pub after: Scalar,
 }
 
-/// Replayable semantic edit program.
+/// Replayable legacy scalar edit program.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EditProgram {
     /// Human-facing label.

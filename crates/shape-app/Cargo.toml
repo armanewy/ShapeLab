@@ -6,7 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 crossbeam-channel.workspace = true
 eframe.workspace = true
 egui.workspace = true
@@ -18,7 +17,6 @@ serde_json.workspace = true
 shape-asset.workspace = true
 shape-authoring.workspace = true
 shape-compile.workspace = true
-shape-core.workspace = true
 shape-foundry.workspace = true
 shape-foundry-catalog.workspace = true
 shape-mesh.workspace = true

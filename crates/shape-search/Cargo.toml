@@ -18,9 +18,6 @@ shape-foundry.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
-shape-family.workspace = true
-shape-family-compile.workspace = true
 shape-foundry-catalog.workspace = true
 
 [[bench]]
