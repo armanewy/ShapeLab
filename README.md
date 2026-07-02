@@ -47,7 +47,15 @@ Choose Primitive
   from supported direct primitives, safe-anchor compositions, and supported
   ObjectPlan Draft evidence.
 - Family Studio Lite v0 uses deterministic property endpoint, preset,
-  ObjectPlan evidence, and export-report checks. It will not restore generated candidate trays.
+  ObjectPlan evidence, and export-report checks. It will not restore generated
+  candidate trays.
+- Active primitive workflows keep generated candidate trays blocked.
+- Phase A-D semantic compiler hardening is integrated: `AssetRecipe` is the
+  canonical future semantic lane, `ShapeDocument` remains legacy/implicit
+  compatibility for A-J work, the first Direct Make edit emits an
+  `AuthoringOp`, Panel with Knob has relationship semantics, PatternContract has
+  a deterministic evaluation proof, and geometry exports report relationship
+  realization.
 - Surface/material work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
 
@@ -117,6 +125,8 @@ python scripts/clean_targets.py --list --root ..
 - [`docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md`](docs/OBJECT_PLAN_GEOMETRY_EXPORT_CLI_V0.md)
 - [`docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md`](docs/GODOT_GEOMETRY_IMPORT_HARNESS_V0.md)
 - [`docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md`](docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md)
+- [`docs/PHASE_A_D_SEMANTIC_COMPILER_INTEGRATION_REPORT.md`](docs/PHASE_A_D_SEMANTIC_COMPILER_INTEGRATION_REPORT.md)
+- [`docs/EXPORT_REALIZATION_REPORT_V0.md`](docs/EXPORT_REALIZATION_REPORT_V0.md)
 - [`docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md`](docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md)
 - [`docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md`](docs/FAMILY_STUDIO_DIRECT_KIT_READINESS_GATE.md)
 - [`docs/FAMILY_STUDIO_LITE_DIRECT_KIT_UI_V0.md`](docs/FAMILY_STUDIO_LITE_DIRECT_KIT_UI_V0.md)

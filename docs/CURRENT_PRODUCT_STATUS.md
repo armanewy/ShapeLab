@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 ## Verdict
 
-`PHASE_A_CONTRACT_HARDENING_IN_PROGRESS`
+`PHASE_A_D_SEMANTIC_COMPILER_HARDENING_INTEGRATED`
 
 Shape Lab has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
@@ -18,9 +18,9 @@ blocked when no Godot binary is available.
 Family Studio Lite v0 now has an internal preview UI for local reusable Direct
 Kits. That flow remains developer-gated and produces Draft / Personal Kits
 only.
-The next architecture phase is contract hardening toward a semantic asset
-compiler: future A-J work targets `shape-asset::AssetRecipe` / Orchard IR as
-the canonical semantic lane, while `shape-core::ShapeDocument` remains a
+The current architecture phase has integrated the first semantic compiler
+hardening stack: future A-J work targets `shape-asset::AssetRecipe` / Orchard
+IR as the canonical semantic lane, while `shape-core::ShapeDocument` remains a
 legacy/implicit compatibility lane rather than the new product backbone.
 
 ## Current Truth
@@ -58,6 +58,10 @@ legacy/implicit compatibility lane rather than the new product backbone.
 - Geometry-only export is scoped to mesh data only and does not include UVs,
   textures, material looks, collision, rigging, animation, or game-ready
   status.
+- Geometry export reports now include relationship realization summaries. A
+  relationship-backed Panel with Knob export reports the child as part of the
+  combined mesh, keeps `baked: false`, and preserves semantics in report/sidecar
+  data for review.
 - Godot import proof is required before claiming Godot-ready geometry. The
   current local Godot proof is `Blocked` because no Godot binary was available.
 - Offline LLMs may draft ObjectPlan JSON outside the app, but Object Orchard
@@ -99,15 +103,22 @@ legacy/implicit compatibility lane rather than the new product backbone.
   zones, not arbitrary free transforms.
 - Material/surface work, UV/texturing, rigging, animation, runtime LLM
   integration, public catalog publishing, and game-ready UI remain blocked.
-- Phase A contract hardening is in progress. It does not add product-facing
-  features; it documents and tests that future controls, ObjectPlan work,
-  export reports, terrain, surface, collision, and motion work must route
-  through canonical semantic contracts.
+- Phase A-D semantic compiler hardening is integrated. It does not add new
+  product-facing feature categories; it documents and tests that future
+  controls, ObjectPlan work, export reports, terrain, surface, collision, and
+  motion work must route through canonical semantic contracts.
 - `shape-asset::AssetRecipe` / Orchard IR is the target canonical semantic
   asset lane for future A-J work.
 - `shape-core::ShapeDocument` remains the legacy/implicit compatibility lane
   and must not receive new canonical product semantics for terrain, material,
   collision, motion, ObjectPlan approval, export readiness, or kit publishing.
+- `shape-authoring::AuthoringOpLog` exists with replay support, and Box
+  Primitive width is the first product-visible Direct Make edit bridged through
+  `AuthoringOp::SetProperty`.
+- Panel with Knob can be represented through `RelationshipContract`, including
+  fixed-distance and proportional placement tests.
+- `PatternContract` has a deterministic linear evaluation proof for internal
+  compile/evaluation. It is not exposed as product-visible pattern handles.
 - Terrain remains blocked as product-facing work until explicit terrain patch,
   placement, validation, collision/readiness, and export contracts pass. It is
   not approved as only a generic mesh primitive.
@@ -162,8 +173,8 @@ legacy/implicit compatibility lane rather than the new product backbone.
 - Offline LLM drafting may be referenced only as external draft JSON
   production. The app does not call LLMs at runtime.
 - Semantic asset compiler architecture may be described only as the target
-  contract lane. Phase A does not mean new UI handles, terrain, materials,
-  collision, motion, or game-ready output exists.
+  contract lane. Phase A-D hardening does not mean new UI handles, terrain,
+  materials, collision, motion, or game-ready output exists.
 
 ## Current Milestone Sequence
 

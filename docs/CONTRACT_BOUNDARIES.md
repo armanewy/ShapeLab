@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: Phase A contract hardening.
+Status: Phase A-D semantic compiler hardening integrated.
 
 ## Decision
 
@@ -32,6 +32,17 @@ Allowed Phase A targets:
 - relationship and pattern contracts;
 - export/proof report includes and realization summaries;
 - product-claim gates that make unsupported claims fail tests.
+
+Integrated first-stack proofs:
+
+- `AuthoringOpLog` exists and can replay semantic edit breadcrumbs;
+- Box Primitive width is bridged through `AuthoringOp::SetProperty`;
+- Panel with Knob can be described as a `SurfaceMounted`
+  `RelationshipContract`;
+- fixed-distance and proportional relationship placement have tests;
+- `PatternContract` can deterministically evaluate a minimal linear pattern;
+- geometry export reports relationship realization while keeping excluded
+  capabilities explicit.
 
 Blocked Phase A targets:
 
@@ -94,7 +105,7 @@ present and tested:
 - runtime LLM;
 - public catalog publishing.
 
-## Definition Of Done For Phase A
+## Definition Of Done For Phase A-D Hardening
 
 Phase A is done when the repository documents and tests that:
 
@@ -106,3 +117,7 @@ Phase A is done when the repository documents and tests that:
 - relationship and pattern contracts exist before new handles or composition
   UI;
 - export/proof reports state included and excluded capabilities truthfully.
+
+The first hardening stack satisfies these boundary proofs. It does not approve
+new product-facing material, collision, motion, terrain, UV, rigging,
+animation, runtime LLM, public publishing, Godot-ready, or game-ready work.

@@ -17,9 +17,10 @@
 
 ## Unsupported Workflows
 
-- Phase A contract hardening is in progress. It does not add product-facing
-  features; it establishes that future A-J work should target
-  `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic lane.
+- Phase A-D semantic compiler hardening is integrated. It does not add new
+  product-facing feature categories; it establishes that future A-J work should
+  target `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic
+  lane.
 - `shape-core::ShapeDocument` remains a legacy/implicit compatibility lane and
   is not the new canonical product IR for Object Orchard.
 - Active primitive Make must not rely on generated variation trays.
@@ -39,6 +40,10 @@
 - Geometry-only GLB export exists only for supported ObjectPlan drafts and does
   not include UVs, textures, material looks, collision, rigging, animation, or
   game-ready status.
+- Geometry export relationship realization reports are review evidence only.
+  Current V0 combined-mesh GLB output does not prove separate Godot node
+  hierarchy, submesh preservation, collision, materials, motion, or game-ready
+  behavior.
 - Godot import proof is required before any Godot-ready geometry claim. A
   blocked proof report is not a Godot-ready result.
 - ObjectPlan review UI is internal-only and dev-gated.
@@ -91,7 +96,7 @@
 - Family Studio Lite v0 does not approve public catalog publishing,
   reviewed/showcase promotion, runtime LLM generation, broad family generation,
   material editor UI, UV editing UI, rigging, animation, or game-ready claims.
-- Phase A contract hardening does not approve material/surface implementation,
-  UV/texturing, collision/gameplay metadata, terrain implementation, motion,
-  rigging, animation, runtime LLM integration, public catalog publishing,
-  Godot-ready claims, or game-ready claims.
+- Phase A-D semantic compiler hardening does not approve material/surface
+  implementation, UV/texturing, collision/gameplay metadata, terrain
+  implementation, motion, rigging, animation, runtime LLM integration, public
+  catalog publishing, Godot-ready claims, or game-ready claims.
