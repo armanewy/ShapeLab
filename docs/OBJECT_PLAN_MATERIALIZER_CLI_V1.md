@@ -5,7 +5,7 @@ Date: 2026-07-01
 ## Command
 
 ```bash
-shape-cli object-plan materialize \
+orchard-cli object-plan materialize \
   --plan object-plan.json \
   --out-dir target/object-plan-materialized/example-plan
 ```

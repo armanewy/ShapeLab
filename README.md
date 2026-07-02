@@ -89,8 +89,8 @@ evidence reports, and human review gates.
 
 ```bash
 cargo check --workspace
-cargo build -p shape-app --release
-cargo run -p shape-app --release
+cargo build -p orchard-app --release
+cargo run -p orchard-app --release
 ```
 
 ## Fast Local Development

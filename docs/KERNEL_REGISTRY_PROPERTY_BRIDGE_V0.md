@@ -9,7 +9,7 @@ terrain.
 
 ## Contracts
 
-Shared descriptor contracts live in `shape-asset`:
+Shared descriptor contracts live in `orchard-asset`:
 
 - `KernelKind`
 - `KernelDescriptor`
@@ -18,7 +18,7 @@ Shared descriptor contracts live in `shape-asset`:
 - `PropertyAuthoringEffect`
 - `PropertyAffect`
 
-`shape-modeling` owns the current kernel registry. `shape-foundry` owns the
+`orchard-modeling` owns the current kernel registry. `orchard-foundry` owns the
 bridge from existing primitive schemas into shared property descriptors.
 
 ## Current Kernel Entries

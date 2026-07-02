@@ -5,7 +5,7 @@ ObjectPlan Render Evidence v1 makes supported materialized ObjectPlans visibly r
 The supported CLI path is:
 
 ```bash
-shape-cli object-plan materialize \
+orchard-cli object-plan materialize \
   --plan fixtures/object-plan/valid_box_plan.json \
   --out-dir target/object-plan-render-evidence/box \
   --render-evidence

@@ -18,7 +18,7 @@ UV editing, rigging, or animation.
 ## CLI
 
 ```bash
-shape-cli direct-kit test \
+orchard-cli direct-kit test \
   --kit direct-kit.json \
   --out-dir target/direct-kit-test/<kit-id>
 ```

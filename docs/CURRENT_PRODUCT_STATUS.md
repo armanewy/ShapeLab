@@ -22,9 +22,9 @@ blocked when no Godot binary is available.
 Family Studio Lite v0 now has an internal preview UI for local reusable Direct
 Kits. That flow remains developer-gated and produces Draft / Personal Kits
 only.
-The current architecture phase has integrated the first semantic compiler
-hardening stack: future A-J work targets `shape-asset::AssetRecipe` / Orchard
-IR as the canonical semantic lane, while `shape-core::ShapeDocument` remains a
+The current architecture phase has integrated the first semantic asset compiler
+hardening stack: future A-J work targets `orchard-asset::AssetRecipe` / Orchard
+IR as the canonical semantic lane, while `orchard-core-legacy::ShapeDocument` remains a
 legacy/implicit compatibility lane rather than the new product backbone.
 Cleanup Wave 1 is purging obsolete docs from old Sci-Fi Crate, Cargo Case,
 crate-family, generated-variation, candidate, dogfood, showcase, and
@@ -115,12 +115,12 @@ restored as parallel product truth.
   product-facing feature categories; it documents and tests that future
   controls, ObjectPlan work, export reports, terrain, surface, collision, and
   motion work must route through canonical semantic contracts.
-- `shape-asset::AssetRecipe` / Orchard IR is the target canonical semantic
+- `orchard-asset::AssetRecipe` / Orchard IR is the target canonical semantic
   asset lane for future A-J work.
-- `shape-core::ShapeDocument` remains the legacy/implicit compatibility lane
+- `orchard-core-legacy::ShapeDocument` remains the legacy/implicit compatibility lane
   and must not receive new canonical product semantics for terrain, material,
   collision, motion, ObjectPlan approval, export readiness, or kit publishing.
-- `shape-authoring::AuthoringOpLog` exists with replay support, and Box
+- `orchard-authoring::AuthoringOpLog` exists with replay support, and Box
   Primitive width is the first product-visible Direct Make edit bridged through
   `AuthoringOp::SetProperty`.
 - Panel with Knob can be represented through `RelationshipContract`, including
@@ -216,7 +216,7 @@ Use one visible operation per milestone:
   and any automatic ObjectPlan approval flow.
 - Public catalog publishing.
 - Full game-ready or marketplace-ready claims.
-- Treating `shape-core::ShapeDocument` as the new canonical product IR.
+- Treating `orchard-core-legacy::ShapeDocument` as the new canonical product IR.
 - Representing product-facing terrain as only a generic mesh primitive.
 - Family Studio Lite public authoring, broad family generation, generated candidate trays,
   reviewed/showcase promotion, and public kit publishing.

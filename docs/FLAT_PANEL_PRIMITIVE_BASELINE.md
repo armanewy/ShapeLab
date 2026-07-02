@@ -80,7 +80,7 @@ target/flat-panel-primitive-baseline/
 
 The manual gate caught and fixed one issue: whole-asset Flat Panel ideas were
 initially named with box labels. The generator now emits panel labels for Flat
-Panel profiles, and `shape-search` has a regression test for this.
+Panel profiles, and `orchard-search-internal` has a regression test for this.
 
 ## Next Allowed Work
 

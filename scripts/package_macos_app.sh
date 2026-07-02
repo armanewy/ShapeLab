@@ -18,10 +18,10 @@ for arg in "$@"; do
 done
 
 if [[ "$skip_build" -eq 0 ]]; then
-  cargo build -p shape-app --release
+  cargo build -p orchard-app --release
 fi
 
-binary="$repo_root/target/release/shape-app"
+binary="$repo_root/target/release/orchard-app"
 plist="$repo_root/packaging/macos/Info.plist"
 app="$repo_root/target/release/Shape Lab.app"
 contents="$app/Contents"
@@ -30,14 +30,14 @@ resources="$contents/Resources"
 
 if [[ ! -x "$binary" ]]; then
   echo "missing release binary: $binary" >&2
-  echo "run cargo build -p shape-app --release first, or omit --skip-build" >&2
+  echo "run cargo build -p orchard-app --release first, or omit --skip-build" >&2
   exit 1
 fi
 
 rm -rf "$app"
 mkdir -p "$macos" "$resources"
-cp "$binary" "$macos/shape-app"
-chmod 755 "$macos/shape-app"
+cp "$binary" "$macos/orchard-app"
+chmod 755 "$macos/orchard-app"
 cp "$plist" "$contents/Info.plist"
 printf 'APPL????' > "$contents/PkgInfo"
 

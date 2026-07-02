@@ -28,9 +28,9 @@
   land.
 - Phase A-D semantic compiler hardening is integrated. It does not add new
   product-facing feature categories; it establishes that future A-J work should
-  target `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic
+  target `orchard-asset::AssetRecipe` / Orchard IR as the canonical semantic
   lane.
-- `shape-core::ShapeDocument` remains a legacy/implicit compatibility lane and
+- `orchard-core-legacy::ShapeDocument` remains a legacy/implicit compatibility lane and
   is not the new canonical product IR for Object Orchard.
 - Active primitive Make must not rely on generated variation trays.
 - Active primitive Make must not expose random candidate generation.

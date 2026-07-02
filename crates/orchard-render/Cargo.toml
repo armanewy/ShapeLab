@@ -1,0 +1,14 @@
+[package]
+name = "orchard-render"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+orchard-core-legacy.workspace = true
+orchard-foundry.workspace = true
+orchard-mesh.workspace = true
+thiserror.workspace = true

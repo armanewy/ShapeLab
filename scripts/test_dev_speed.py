@@ -17,23 +17,23 @@ class DevGateTests(unittest.TestCase):
         plan = dev_gate.select_plan(tier, paths)
         return [" ".join(command) for command in plan.commands]
 
-    def test_shape_app_branch_gate_includes_adjacent_app_checks(self) -> None:
-        commands = self.command_strings(["crates/shape-app/src/foundry/app.rs"])
-        self.assertIn("cargo check -p shape-app", commands)
-        self.assertIn("cargo test -p shape-app --lib foundry --jobs 1", commands)
+    def test_orchard_app_branch_gate_includes_adjacent_app_checks(self) -> None:
+        commands = self.command_strings(["crates/orchard-app/src/foundry/app.rs"])
+        self.assertIn("cargo check -p orchard-app", commands)
+        self.assertIn("cargo test -p orchard-app --lib foundry --jobs 1", commands)
         self.assertIn(
-            "cargo test -p shape-app --test foundry_direction_board --jobs 1 -- --skip foundry::",
+            "cargo test -p orchard-app --test foundry_direction_board --jobs 1 -- --skip foundry::",
             commands,
         )
-        self.assertIn("cargo clippy -p shape-app --all-targets -- -D warnings", commands)
+        self.assertIn("cargo clippy -p orchard-app --all-targets -- -D warnings", commands)
 
     def test_box_catalog_gate_includes_foundry_adjacency(self) -> None:
-        commands = self.command_strings(["crates/shape-foundry-catalog/src/box_primitive.rs"])
+        commands = self.command_strings(["crates/orchard-foundry-catalog/src/box_primitive.rs"])
         self.assertIn(
-            "cargo test -p shape-foundry-catalog --test box_primitive --jobs 1",
+            "cargo test -p orchard-foundry-catalog --test box_primitive --jobs 1",
             commands,
         )
-        self.assertIn("cargo test -p shape-foundry --test contracts --jobs 1", commands)
+        self.assertIn("cargo test -p orchard-foundry --test contracts --jobs 1", commands)
 
     def test_docs_gate_avoids_release_build(self) -> None:
         commands = self.command_strings(["docs/CURRENT_PRODUCT_STATUS.md"])

@@ -32,7 +32,7 @@ Options:
   -DescriptorResolution <num>   Descriptor sampling resolution. Default: 8
   -MeshResolution <number>      Mesh resolution. Default: 16
   -AcceptIndex <number>         Candidate accepted into project-after.json. Default: 0
-  -ReleaseCli                   Run shape-cli in release mode.
+  -ReleaseCli                   Run orchard-cli in release mode.
   -Help                         Print this help.
 
 Outputs per preset:
@@ -63,7 +63,7 @@ try {
         $presetOut = Join-Path $outRoot $presetId
         New-Item -ItemType Directory -Force -Path $presetOut | Out-Null
 
-        $cargoArgs = @("run", "-p", "shape-cli")
+        $cargoArgs = @("run", "-p", "orchard-cli")
         if ($ReleaseCli) {
             $cargoArgs += "--release"
         }

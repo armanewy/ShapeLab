@@ -1,24 +1,24 @@
 [workspace]
 members = [
-    "crates/shape-asset",
-    "crates/shape-authoring",
-    "crates/shape-app",
-    "crates/shape-cli",
-    "crates/shape-compile",
-    "crates/shape-core",
-    "crates/shape-field",
-    "crates/shape-family",
-    "crates/shape-family-compile",
-    "crates/shape-foundry",
-    "crates/shape-foundry-catalog",
-    "crates/shape-mesh",
-    "crates/shape-modeling",
-    "crates/shape-modeling-assets",
-    "crates/shape-poly",
-    "crates/shape-presets",
-    "crates/shape-project",
-    "crates/shape-render",
-    "crates/shape-search",
+    "crates/orchard-asset",
+    "crates/orchard-authoring",
+    "crates/orchard-app",
+    "crates/orchard-cli",
+    "crates/orchard-compile",
+    "crates/orchard-core-legacy",
+    "crates/orchard-field",
+    "crates/orchard-family",
+    "crates/orchard-family-compile",
+    "crates/orchard-foundry",
+    "crates/orchard-foundry-catalog",
+    "crates/orchard-mesh",
+    "crates/orchard-modeling",
+    "crates/orchard-modeling-assets",
+    "crates/orchard-poly",
+    "crates/orchard-presets",
+    "crates/orchard-project",
+    "crates/orchard-render",
+    "crates/orchard-search-internal",
 ]
 resolver = "3"
 
@@ -52,23 +52,23 @@ serde_json = "1.0.150"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 
-shape-asset = { path = "crates/shape-asset" }
-shape-authoring = { path = "crates/shape-authoring" }
-shape-compile = { path = "crates/shape-compile" }
-shape-core = { path = "crates/shape-core" }
-shape-family = { path = "crates/shape-family" }
-shape-family-compile = { path = "crates/shape-family-compile" }
-shape-field = { path = "crates/shape-field" }
-shape-foundry = { path = "crates/shape-foundry" }
-shape-foundry-catalog = { path = "crates/shape-foundry-catalog" }
-shape-mesh = { path = "crates/shape-mesh" }
-shape-modeling = { path = "crates/shape-modeling" }
-shape-modeling-assets = { path = "crates/shape-modeling-assets" }
-shape-poly = { path = "crates/shape-poly" }
-shape-presets = { path = "crates/shape-presets" }
-shape-project = { path = "crates/shape-project" }
-shape-render = { path = "crates/shape-render" }
-shape-search = { path = "crates/shape-search" }
+orchard-asset = { path = "crates/orchard-asset" }
+orchard-authoring = { path = "crates/orchard-authoring" }
+orchard-compile = { path = "crates/orchard-compile" }
+orchard-core-legacy = { path = "crates/orchard-core-legacy" }
+orchard-family = { path = "crates/orchard-family" }
+orchard-family-compile = { path = "crates/orchard-family-compile" }
+orchard-field = { path = "crates/orchard-field" }
+orchard-foundry = { path = "crates/orchard-foundry" }
+orchard-foundry-catalog = { path = "crates/orchard-foundry-catalog" }
+orchard-mesh = { path = "crates/orchard-mesh" }
+orchard-modeling = { path = "crates/orchard-modeling" }
+orchard-modeling-assets = { path = "crates/orchard-modeling-assets" }
+orchard-poly = { path = "crates/orchard-poly" }
+orchard-presets = { path = "crates/orchard-presets" }
+orchard-project = { path = "crates/orchard-project" }
+orchard-render = { path = "crates/orchard-render" }
+orchard-search-internal = { path = "crates/orchard-search-internal" }
 
 [profile.dev]
 debug = "line-tables-only"

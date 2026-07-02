@@ -11,14 +11,14 @@ target is that those flows converge on one canonical semantic asset lane.
 
 ## Canonical Lane
 
-The canonical lane for future A-J product work is `shape-asset::AssetRecipe` /
+The canonical lane for future A-J product work is `orchard-asset::AssetRecipe` /
 Orchard IR. This lane should carry semantic asset state, authoring operation
 logs, relationships, patterns, review status, validation reports, and
 export/proof includes.
 
 ## Legacy Lane
 
-`shape-core::ShapeDocument` remains the legacy/implicit compatibility lane. It
+`orchard-core-legacy::ShapeDocument` remains the legacy/implicit compatibility lane. It
 is useful and should remain stable, but it is not the new canonical product IR
 for new Orchard semantics.
 

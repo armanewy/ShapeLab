@@ -8,7 +8,7 @@ Status: schema/contracts only.
 
 AssetRecipe v8 adds empty semantic shells for the canonical Object Orchard
 asset lane. The shells let future branches converge on `AssetRecipe` / Orchard
-IR without expanding `shape-core::ShapeDocument` or adding product-facing
+IR without expanding `orchard-core-legacy::ShapeDocument` or adding product-facing
 features prematurely.
 
 ## Added Shells

@@ -14,8 +14,8 @@ intent and make later style/provider changes ambiguous.
 
 ## Decision
 
-Add `shape-foundry` as the semantic source layer and
-`shape-foundry-catalog` as the catalog manifest layer.
+Add `orchard-foundry` as the semantic source layer and
+`orchard-foundry-catalog` as the catalog manifest layer.
 
 `FoundryAssetDocument` stores exact content references for family, style, family
 implementation, style implementation, and customizer profile. It also stores

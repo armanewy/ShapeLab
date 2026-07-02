@@ -65,11 +65,11 @@ No evidence report may contain `approved: true` or `publish_allowed: true`.
 | --- | --- |
 | `cargo fmt --all --check` | Pass |
 | `python3 scripts/check_source_hygiene.py` | Pass |
-| `cargo test -p shape-foundry object_plan --jobs 1` | Pass |
-| `cargo test -p shape-foundry primitive_preset --jobs 1` | Pass |
-| `cargo test -p shape-cli object_plan --jobs 1` | Pass |
-| `cargo test -p shape-render foundry --jobs 1` | Pass |
-| `cargo test -p shape-app foundry --jobs 1` | Pass |
+| `cargo test -p orchard-foundry object_plan --jobs 1` | Pass |
+| `cargo test -p orchard-foundry primitive_preset --jobs 1` | Pass |
+| `cargo test -p orchard-cli object_plan --jobs 1` | Pass |
+| `cargo test -p orchard-render foundry --jobs 1` | Pass |
+| `cargo test -p orchard-app foundry --jobs 1` | Pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass |
 | `cargo build --release --workspace` | Pass |
 

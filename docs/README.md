@@ -21,7 +21,7 @@
 
 - [Public Contracts](contracts.md)
 - [Contract Boundaries](CONTRACT_BOUNDARIES.md)
-- [Shape Core Legacy Boundary](SHAPE_CORE_LEGACY_BOUNDARY.md)
+- [Orchard Core Legacy Boundary](ORCHARD_CORE_LEGACY_BOUNDARY.md)
 - [AssetRecipe v8 Semantic Shells](ASSET_RECIPE_V8_SEMANTIC_SHELLS.md)
 - [AuthoringOp Log v0](AUTHORING_OP_LOG_V0.md)
 - [Relationship Contract v0](RELATIONSHIP_CONTRACT_V0.md)

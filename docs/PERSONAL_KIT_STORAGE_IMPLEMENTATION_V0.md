@@ -41,14 +41,14 @@ Persisted JSON must not contain absolute paths.
 ## CLI
 
 ```bash
-shape-cli personal-kit save \
+orchard-cli personal-kit save \
   --kit direct-kit.json \
   --out-dir target/personal-kits-demo
 
-shape-cli personal-kit list \
+orchard-cli personal-kit list \
   --store target/personal-kits-demo
 
-shape-cli personal-kit validate \
+orchard-cli personal-kit validate \
   --store target/personal-kits-demo
 ```
 

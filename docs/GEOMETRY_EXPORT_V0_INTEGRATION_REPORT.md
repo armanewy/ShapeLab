@@ -84,10 +84,10 @@ The blocked Godot proof reports keep:
 | --- | --- |
 | `cargo fmt --all --check` | Pass |
 | `python3 scripts/check_source_hygiene.py` | Pass |
-| `cargo test -p shape-foundry geometry_export --jobs 1` | Pass |
-| `cargo test -p shape-cli object_plan --jobs 1` | Pass |
-| `cargo test -p shape-cli godot --jobs 1` | Pass |
-| `cargo test -p shape-app foundry --jobs 1` | Pass |
+| `cargo test -p orchard-foundry geometry_export --jobs 1` | Pass |
+| `cargo test -p orchard-cli object_plan --jobs 1` | Pass |
+| `cargo test -p orchard-cli godot --jobs 1` | Pass |
+| `cargo test -p orchard-app foundry --jobs 1` | Pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass |
 | `cargo build --release --workspace` | Pass |
 

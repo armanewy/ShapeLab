@@ -20,8 +20,8 @@ Date: 2026-07-01
 | Can a structured ObjectPlan describe a supported primitive? | Pass | `fixtures/object-plan/valid_box_plan.json`, `fixtures/object-plan/valid_sphere_plan.json` |
 | Can a structured ObjectPlan describe a supported composition? | Pass | `fixtures/object-plan/valid_panel_knob_plan.json` |
 | Are invalid primitives/properties/attachments rejected? | Pass | ObjectPlan validators and `fixtures/object-plan/invalid_unknown_primitive_plan.json` in the batch evidence |
-| Are raw mesh payloads rejected? | Pass | `cargo test -p shape-foundry object_plan --jobs 1` and `cargo test -p shape-cli object_plan --jobs 1` |
-| Can plans be validated offline? | Pass | `shape-cli object-plan run --plan fixtures/object-plan/valid_panel_knob_plan.json --out-dir target/object-plan-v0/valid-panel-knob --contact-sheet` |
+| Are raw mesh payloads rejected? | Pass | `cargo test -p orchard-foundry object_plan --jobs 1` and `cargo test -p orchard-cli object_plan --jobs 1` |
+| Can plans be validated offline? | Pass | `orchard-cli object-plan run --plan fixtures/object-plan/valid_panel_knob_plan.json --out-dir target/object-plan-v0/valid-panel-knob --contact-sheet` |
 | Can plans produce honest render/contact-sheet evidence or honest render-blocked reports? | Pass | `target/object-plan-v0/valid-panel-knob/renderability-report.json` reports `renderable: false`; no fake contact sheet is written |
 | Can batches be run without catalog publication? | Pass | `target/object-plan-v0/batch-basic/batch-validation-report.json` reports `approved: false` |
 | Can an offline LLM be instructed to output only draft JSON? | Pass | `docs/OFFLINE_LLM_DRAFT_POLICY_V0.md` and `docs/llm_prompt_packs/object_plan_draft_v0.md` |
@@ -33,7 +33,7 @@ Date: 2026-07-01
 Single plan run:
 
 ```bash
-shape-cli object-plan run \
+orchard-cli object-plan run \
   --plan fixtures/object-plan/valid_panel_knob_plan.json \
   --out-dir target/object-plan-v0/valid-panel-knob \
   --contact-sheet
@@ -59,7 +59,7 @@ yet prove reusable prototype geometry for every supported plan.
 Batch run:
 
 ```bash
-shape-cli object-plan batch-run \
+orchard-cli object-plan batch-run \
   --input fixtures/object-plan/batch-basic \
   --out-dir target/object-plan-v0/batch-basic
 ```
@@ -95,12 +95,12 @@ Passed in this integration branch:
 
 - `cargo fmt --all --check`
 - `python3 scripts/check_source_hygiene.py`
-- `cargo test -p shape-foundry object_plan --jobs 1`
-- `cargo test -p shape-foundry primitive_preset --jobs 1`
-- `cargo test -p shape-foundry primitive_composition --jobs 1`
-- `cargo test -p shape-cli object_plan --jobs 1`
-- `cargo test -p shape-app object_plan --jobs 1`
-- `cargo test -p shape-app foundry --jobs 1`
+- `cargo test -p orchard-foundry object_plan --jobs 1`
+- `cargo test -p orchard-foundry primitive_preset --jobs 1`
+- `cargo test -p orchard-foundry primitive_composition --jobs 1`
+- `cargo test -p orchard-cli object_plan --jobs 1`
+- `cargo test -p orchard-app object_plan --jobs 1`
+- `cargo test -p orchard-app foundry --jobs 1`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo build --release --workspace`
 

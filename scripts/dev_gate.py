@@ -24,22 +24,22 @@ def cargo(*args: str) -> Command:
 
 
 CATALOG_FOUNDRY_ADJACENCY_TESTS: tuple[Command, ...] = (
-    cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
-    cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"),
+    cargo("test", "-p", "orchard-search-internal", "foundry", "--jobs", "1"),
+    cargo("test", "-p", "orchard-render", "foundry", "--jobs", "1"),
 )
 
 BUILD_PROFILE_RELEASE_EXPORT_PATHS: tuple[str, ...] = (
     ".cargo/",
     "packaging/",
-    "crates/shape-app/Cargo.toml",
-    "crates/shape-cli/Cargo.toml",
-    "crates/shape-compile/src/export/",
+    "crates/orchard-app/Cargo.toml",
+    "crates/orchard-cli/Cargo.toml",
+    "crates/orchard-compile/src/export/",
     "scripts/package_macos_app.sh",
-    "scripts/run_shape_app.ps1",
+    "scripts/run_orchard_app.ps1",
 )
 
 STATIC_SURFACE_PACKAGE_PATHS: tuple[str, ...] = (
-    "crates/shape-render/src/surface_preview.rs",
+    "crates/orchard-render/src/surface_preview.rs",
 )
 
 PRODUCT_CODE_PATHS: tuple[str, ...] = (
@@ -123,7 +123,7 @@ def docs_status_commands() -> list[Command]:
         cargo(
             "test",
             "-p",
-            "shape-app",
+            "orchard-app",
             "product_truth_docs_agree_on_no_go_status_and_roman_preview_only",
             "--lib",
             "--jobs",
@@ -132,7 +132,7 @@ def docs_status_commands() -> list[Command]:
         cargo(
             "test",
             "-p",
-            "shape-app",
+            "orchard-app",
             "source_and_markdown_hygiene_targets_are_audit_friendly",
             "--lib",
             "--jobs",
@@ -143,8 +143,8 @@ def docs_status_commands() -> list[Command]:
 
 def is_catalog_test_path(path: str, test_name: str) -> bool:
     return path in {
-        f"crates/shape-foundry-catalog/src/{test_name}.rs",
-        f"crates/shape-foundry-catalog/tests/{test_name}.rs",
+        f"crates/orchard-foundry-catalog/src/{test_name}.rs",
+        f"crates/orchard-foundry-catalog/tests/{test_name}.rs",
     }
 
 
@@ -184,11 +184,11 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
         if path.startswith("scripts/"):
             commands.append((PYTHON, "scripts/test_dev_speed.py"))
 
-        if path.startswith("crates/shape-app/"):
+        if path.startswith("crates/orchard-app/"):
             commands.extend(
                 [
-                    cargo("check", "-p", "shape-app"),
-                    cargo("test", "-p", "shape-app", "--lib", "foundry", "--jobs", "1"),
+                    cargo("check", "-p", "orchard-app"),
+                    cargo("test", "-p", "orchard-app", "--lib", "foundry", "--jobs", "1"),
                 ]
             )
             if tier != "inner":
@@ -197,7 +197,7 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                         cargo(
                             "test",
                             "-p",
-                            "shape-app",
+                            "orchard-app",
                             "--test",
                             "foundry_direction_board",
                             "--jobs",
@@ -209,7 +209,7 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                         cargo(
                             "clippy",
                             "-p",
-                            "shape-app",
+                            "orchard-app",
                             "--all-targets",
                             "--",
                             "-D",
@@ -218,15 +218,15 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                     ]
                 )
 
-        if path.startswith("crates/shape-search/"):
-            commands.append(cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"))
+        if path.startswith("crates/orchard-search-internal/"):
+            commands.append(cargo("test", "-p", "orchard-search-internal", "foundry", "--jobs", "1"))
             if tier != "inner":
-                commands.append(cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"))
+                commands.append(cargo("test", "-p", "orchard-render", "foundry", "--jobs", "1"))
 
-        if path.startswith("crates/shape-render/"):
-            commands.append(cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"))
+        if path.startswith("crates/orchard-render/"):
+            commands.append(cargo("test", "-p", "orchard-render", "foundry", "--jobs", "1"))
             if "surface" in path:
-                commands.append(cargo("test", "-p", "shape-render", "surface", "--jobs", "1"))
+                commands.append(cargo("test", "-p", "orchard-render", "surface", "--jobs", "1"))
 
         if is_catalog_test_path(path, "box_primitive"):
             commands.extend(
@@ -234,7 +234,7 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
                     cargo(
                         "test",
                         "-p",
-                        "shape-foundry-catalog",
+                        "orchard-foundry-catalog",
                         "--test",
                         "box_primitive",
                         "--jobs",
@@ -245,11 +245,11 @@ def commands_for_paths(paths: Iterable[str], tier: str) -> tuple[Command, ...]:
             )
 
         if crate and crate not in {
-            "shape-app",
-            "shape-search",
-            "shape-render",
-            "shape-foundry-catalog",
-            "shape-cli",
+            "orchard-app",
+            "orchard-search-internal",
+            "orchard-render",
+            "orchard-foundry-catalog",
+            "orchard-cli",
         }:
             commands.append(cargo("check", "-p", crate))
 
@@ -263,13 +263,13 @@ def integration_commands(paths: Iterable[str]) -> tuple[Command, ...]:
     path_tuple = tuple(paths)
     commands: list[Command] = [
         FMT,
-        cargo("test", "-p", "shape-app", "--lib", "foundry", "--jobs", "1"),
-        cargo("test", "-p", "shape-search", "foundry", "--jobs", "1"),
-        cargo("test", "-p", "shape-render", "foundry", "--jobs", "1"),
+        cargo("test", "-p", "orchard-app", "--lib", "foundry", "--jobs", "1"),
+        cargo("test", "-p", "orchard-search-internal", "foundry", "--jobs", "1"),
+        cargo("test", "-p", "orchard-render", "foundry", "--jobs", "1"),
         cargo(
             "test",
             "-p",
-            "shape-foundry-catalog",
+            "orchard-foundry-catalog",
             "--test",
             "box_primitive",
             "--jobs",

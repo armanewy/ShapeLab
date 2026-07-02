@@ -1,0 +1,12 @@
+[package]
+name = "orchard-modeling-assets"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+orchard-asset.workspace = true
+
+[dev-dependencies]
+orchard-compile.workspace = true

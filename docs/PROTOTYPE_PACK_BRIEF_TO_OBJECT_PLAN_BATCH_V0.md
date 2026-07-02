@@ -9,7 +9,7 @@ composition.
 ## CLI
 
 ```bash
-shape-cli prototype-pack plan \
+orchard-cli prototype-pack plan \
   --brief fixtures/prototype-pack/simple-room-primitives-v0.json \
   --out-dir target/prototype-pack-brief-v0/simple-room-primitives
 ```
