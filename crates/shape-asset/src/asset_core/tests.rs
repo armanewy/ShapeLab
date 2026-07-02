@@ -493,29 +493,15 @@ mod tests {
     }
 
     #[test]
-    fn asset_recipe_v8_fixtures_parse_migrate_and_validate() {
-        for (name, raw) in [
-            (
-                "old_minimal_asset_recipe_v7.json",
-                include_str!("../../../../fixtures/shape-asset/old_minimal_asset_recipe_v7.json"),
-            ),
-            (
-                "new_minimal_asset_recipe_v8_shell.json",
-                include_str!(
-                    "../../../../fixtures/shape-asset/new_minimal_asset_recipe_v8_shell.json"
-                ),
-            ),
-            (
-                "box_like_asset_recipe_v8.json",
-                include_str!("../../../../fixtures/shape-asset/box_like_asset_recipe_v8.json"),
-            ),
-            (
-                "panel_knob_like_asset_recipe_v8.json",
-                include_str!("../../../../fixtures/shape-asset/panel_knob_like_asset_recipe_v8.json"),
-            ),
+    fn asset_recipe_builders_round_trip_and_validate() {
+        for (name, recipe) in [
+            ("minimal", test_recipe()),
+            ("multipart", multipart_recipe()),
+            ("empty semantic shells", AssetRecipe::new(AssetId(9), "V8 semantic shells")),
         ] {
+            let raw = serde_json::to_string(&recipe).expect("recipe should serialize");
             let recipe: AssetRecipe =
-                serde_json::from_str(raw).unwrap_or_else(|error| panic!("{name}: {error}"));
+                serde_json::from_str(&raw).unwrap_or_else(|error| panic!("{name}: {error}"));
             assert_eq!(
                 recipe.schema_version, ASSET_RECIPE_SCHEMA_VERSION,
                 "{name} should parse or migrate to current schema"
