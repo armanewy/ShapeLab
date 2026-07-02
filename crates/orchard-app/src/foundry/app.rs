@@ -283,7 +283,11 @@ fn current_preview_stage_status_message(
     has_output: bool,
     preview_is_stale: bool,
     rendering_preview: bool,
+    direct_primitive_workflow: bool,
 ) -> Option<&'static str> {
+    if direct_primitive_workflow && has_output {
+        return None;
+    }
     if has_preview {
         return preview_is_stale.then_some(PREVIEW_UPDATING_REASON);
     }
@@ -308,6 +312,7 @@ struct MakeCanvasViewState {
     idea_generation_fallback_visible: bool,
     preview_updating: bool,
     preview_update_required: bool,
+    blocking_work_active: bool,
     local_banner_title: String,
     local_banner_message: String,
     local_banner_tone: BannerTone,

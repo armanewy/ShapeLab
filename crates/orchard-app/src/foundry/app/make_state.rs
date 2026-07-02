@@ -116,18 +116,21 @@ impl FoundryDesktopApp {
         let current_asset_job_active =
             !preview_image_ready && (compiling_or_editing || preview_rendering);
         let preview_ready = model_ready && preview_image_ready;
-        let preview_updating = model_ready
+        let preview_updating = !direct_primitive_workflow
+            && model_ready
             && preview_image_ready
             && (stale_preview
                 || compiling_or_editing
                 || (preview_rendering && !preview_matches_current_build));
-        let preview_update_required = model_ready
+        let preview_update_required = !direct_primitive_workflow
+            && model_ready
             && (!preview_image_ready || stale_preview)
             && !preview_rendering
             && !compiling_or_editing;
+        let blocking_work_active = compiling_or_editing;
         let preparation_phase = if !model_ready {
             MakePreparationPhase::PreparingModel
-        } else if !preview_image_ready {
+        } else if !direct_primitive_workflow && !preview_image_ready {
             MakePreparationPhase::RenderingPreview
         } else {
             MakePreparationPhase::Ready
@@ -136,7 +139,11 @@ impl FoundryDesktopApp {
         let focused_part_visible = focused_part_label.is_some();
         let focused_part_actions_visible = focused_part_visible && model_ready && preview_ready;
         let preparing = self.state.document.is_some()
-            && (!model_ready || !preview_image_ready || current_asset_job_active);
+            && if direct_primitive_workflow {
+                !model_ready || compiling_or_editing
+            } else {
+                !model_ready || !preview_image_ready || current_asset_job_active
+            };
         let preparation_timed_out = preparing
             && self
                 .make_preparation_started_at
@@ -331,6 +338,7 @@ impl FoundryDesktopApp {
             idea_generation_fallback_visible,
             preview_updating,
             preview_update_required,
+            blocking_work_active,
             local_banner_title,
             local_banner_message,
             local_banner_tone,
@@ -457,6 +465,10 @@ impl FoundryDesktopApp {
             .current_preview
             .as_ref()
             .is_some_and(|preview| !preview.rgba8.is_empty());
+        if self.active_make_profile_kind().direct_primitive_workflow() {
+            return !model_ready || compiling_or_editing;
+        }
+
         let preview_ready = model_ready && preview_image_ready;
 
         !model_ready

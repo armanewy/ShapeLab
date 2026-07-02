@@ -3,6 +3,12 @@ use super::*;
 pub(super) fn make_canvas_build_dependent_actions_enabled(
     view_state: &MakeCanvasViewState,
 ) -> bool {
+    if view_state.direct_primitive_workflow {
+        return view_state.model_ready
+            && !view_state.blocking_work_active
+            && view_state.mode != MakeCanvasMode::Error;
+    }
+
     view_state.model_ready
         && view_state.preview_ready
         && !view_state.preview_updating
@@ -20,6 +26,8 @@ pub(super) fn make_canvas_build_dependent_disabled_reason(
         MakeCanvasMode::GeneratingWholeAssetIdeas | MakeCanvasMode::GeneratingFocusedPartIdeas
     ) {
         ACTIVE_IDEA_JOB_REASON
+    } else if view_state.blocking_work_active {
+        ASSET_PREPARING_REASON
     } else if view_state.preview_updating {
         PREVIEW_UPDATING_REASON
     } else {
@@ -28,6 +36,12 @@ pub(super) fn make_canvas_build_dependent_disabled_reason(
 }
 
 pub(super) fn make_canvas_controls_enabled(view_state: &MakeCanvasViewState) -> bool {
+    if view_state.direct_primitive_workflow {
+        return view_state.model_ready
+            && !view_state.blocking_work_active
+            && view_state.mode != MakeCanvasMode::Error;
+    }
+
     view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible
 }
 
@@ -175,7 +189,8 @@ pub(super) fn make_stage_preview_edge(available_width: f32, available_height: f3
 pub(super) fn make_canvas_inspector_build_actions_visible(
     view_state: &MakeCanvasViewState,
 ) -> bool {
-    view_state.preview_ready
+    (view_state.direct_primitive_workflow && view_state.model_ready)
+        || view_state.preview_ready
         || view_state.preview_update_required
         || matches!(
             view_state.mode,

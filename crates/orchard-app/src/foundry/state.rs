@@ -718,6 +718,9 @@ impl FoundryAppState {
                 self.add_current_to_pack(pack_id, member_id)
             }
             command => {
+                if self.foundry_command_is_noop(&command) {
+                    return Ok(Vec::new());
+                }
                 if let FoundryCommand::SetControl { control_id, .. } = &command {
                     self.active_control = Some(control_id.clone());
                 }
@@ -773,6 +776,18 @@ impl FoundryAppState {
             document: Box::new(document),
             edit: Box::new(edit),
         }))
+    }
+
+    fn foundry_command_is_noop(&self, command: &FoundryCommand) -> bool {
+        match command {
+            FoundryCommand::SetControl { control_id, value } => self
+                .controls
+                .iter()
+                .find(|control| control.id == *control_id)
+                .and_then(|control| control.value.as_ref())
+                .is_some_and(|current| current == value),
+            _ => false,
+        }
     }
 
     fn accept_candidate(

@@ -418,20 +418,24 @@ fn current_preview_defaults_to_studio_stage_without_axis_view() {
 #[test]
 fn current_preview_stage_hides_refresh_status_when_image_is_available() {
     assert_eq!(
-        current_preview_stage_status_message(true, true, false, true),
+        current_preview_stage_status_message(true, true, false, true, false),
         None
     );
     assert_eq!(
-        current_preview_stage_status_message(true, true, true, true),
+        current_preview_stage_status_message(true, true, true, true, false),
         Some(PREVIEW_UPDATING_REASON)
     );
     assert_eq!(
-        current_preview_stage_status_message(false, true, false, true),
+        current_preview_stage_status_message(false, true, false, true, false),
         Some(PREVIEW_UPDATING_REASON)
     );
     assert_eq!(
-        current_preview_stage_status_message(false, true, false, false),
+        current_preview_stage_status_message(false, true, false, false, false),
         Some(PREVIEW_PREPARING_REASON)
+    );
+    assert_eq!(
+        current_preview_stage_status_message(false, true, false, true, true),
+        None
     );
 }
 
@@ -493,14 +497,19 @@ fn current_preview_orbit_drag_accumulates_vertical_motion_from_drag_start() {
     preview.camera.pitch_degrees = 20.0;
     let mut orbit = CurrentPreviewOrbitState::default();
 
-    let first = orbit
-        .camera_for_drag_delta(&preview, true, egui::vec2(0.0, 6.0))
-        .expect("vertical drag should orbit the preview camera");
-    let mut updated_preview = preview.clone();
-    updated_preview.camera = first;
+    assert!(
+        orbit
+            .camera_for_drag_state(&preview, true, false, egui::vec2(0.0, 6.0))
+            .is_none()
+    );
+    assert!(
+        orbit
+            .camera_for_drag_state(&preview, true, false, egui::vec2(0.0, 18.0))
+            .is_none()
+    );
     let second = orbit
-        .camera_for_drag_delta(&updated_preview, true, egui::vec2(0.0, 18.0))
-        .expect("continued vertical drag should keep orbiting from drag start");
+        .camera_for_drag_state(&preview, false, true, egui::Vec2::ZERO)
+        .expect("released vertical drag should orbit the preview camera");
 
     let expected_pitch =
         preview.camera.pitch_degrees - 18.0 * CURRENT_PREVIEW_ORBIT_DEGREES_PER_POINT;
@@ -510,7 +519,7 @@ fn current_preview_orbit_drag_accumulates_vertical_motion_from_drag_start() {
     assert_eq!(second.distance, preview.camera.distance);
     assert!(
         orbit
-            .camera_for_drag_delta(&updated_preview, false, egui::Vec2::ZERO)
+            .camera_for_drag_state(&preview, false, false, egui::Vec2::ZERO)
             .is_none()
     );
 }
@@ -1944,13 +1953,11 @@ fn preparation_phases_timeout_and_recovery_actions_are_visible() {
     app.state.current_build = Some(output.build_stamp.clone());
     app.state.current_output = Some(Box::new(output));
     let visible = app.make_canvas_view_state();
-    assert_eq!(
-        visible.preparation_phase,
-        MakePreparationPhase::RenderingPreview
-    );
+    assert_eq!(visible.mode, MakeCanvasMode::Ready);
+    assert_eq!(visible.preparation_phase, MakePreparationPhase::Ready);
     assert!(!visible.quick_template_preview_visible);
-    assert!(visible.preview_update_required);
-    assert_eq!(visible.local_banner_message, "Rendering preview");
+    assert!(!visible.preview_update_required);
+    assert_eq!(visible.local_banner_title, "Ready");
 
     app.state.current_preview = Some(test_preview_image_for_build(
         "current",
@@ -1979,7 +1986,7 @@ fn preparation_phases_timeout_and_recovery_actions_are_visible() {
 }
 
 #[test]
-fn stale_preview_uses_update_preview_copy_and_no_legacy_make_actions() {
+fn stale_preview_does_not_block_direct_primitive_make_actions() {
     let mut app = visible_state_test_app();
     let output = compile_foundry_document(
         app.state.document.as_ref().expect("document"),
@@ -1993,16 +2000,17 @@ fn stale_preview_uses_update_preview_copy_and_no_legacy_make_actions() {
     let visible = app.make_canvas_view_state();
 
     assert_eq!(visible.mode, MakeCanvasMode::Ready);
-    assert!(visible.preview_updating);
-    assert!(visible.preview_update_required);
+    assert!(!visible.preview_updating);
+    assert!(!visible.preview_update_required);
     assert!(visible.primary_action_enabled);
     assert_eq!(visible.local_banner_title, "Ready");
     assert!(visible.local_busy_label.is_none());
     assert!(!visible.local_busy_visible);
     assert_eq!(
         visible.next_action_hint,
-        "Update preview to keep making changes."
+        "Adjust dimensions, Add to Pack, or Export current primitive."
     );
+    assert!(make_canvas_build_dependent_actions_enabled(&visible));
 
     let strings = product_visible_strings_for_default_shell();
     assert!(strings.contains(&ACTION_UPDATE_PREVIEW));
@@ -2035,6 +2043,7 @@ fn camera_preview_refresh_stays_ready_without_busy_overlay() {
     );
     assert!(!app.make_is_preparing_now());
     assert_eq!(app.preview_status(), "Ready");
+    assert_eq!(app.status_summary(), "Ready");
 
     let visible = app.make_canvas_view_state();
 
@@ -3442,7 +3451,7 @@ fn rejected_candidate_summary_is_local_make_state() {
 }
 
 #[test]
-fn active_edit_job_marks_current_build_stale_for_pack_and_export() {
+fn active_edit_job_blocks_direct_pack_and_export_until_model_rebuild_finishes() {
     let mut app = ready_visible_state_test_app();
 
     app.state
@@ -3454,17 +3463,40 @@ fn active_edit_job_marks_current_build_stale_for_pack_and_export() {
 
     let visible = app.make_canvas_view_state();
 
-    assert_eq!(visible.mode, MakeCanvasMode::Ready);
+    assert_eq!(visible.mode, MakeCanvasMode::PreparingAsset);
     assert!(visible.model_ready);
     assert!(visible.preview_ready);
-    assert!(visible.preview_updating);
-    assert!(visible.local_busy_label.is_none());
-    assert!(!visible.local_busy_visible);
+    assert!(!visible.preview_updating);
+    assert!(visible.blocking_work_active);
+    assert_eq!(
+        visible.local_busy_label.as_deref(),
+        Some("Preparing Box Primitive...")
+    );
+    assert!(visible.local_busy_visible);
     assert!(!make_canvas_build_dependent_actions_enabled(&visible));
     assert_eq!(
         make_canvas_build_dependent_disabled_reason(&visible),
-        PREVIEW_UPDATING_REASON
+        ASSET_PREPARING_REASON
     );
+}
+
+#[test]
+fn direct_make_noop_exact_value_does_not_schedule_rebuild() {
+    let mut app = ready_visible_state_test_app();
+    assert!(direct_numeric_value_changed(2.06, 2.0, 0.1));
+    assert!(!direct_numeric_value_changed(2.0, 2.0, 0.1));
+
+    let effects = app
+        .state
+        .handle_command(FoundryAppCommand::run(FoundryCommand::SetControl {
+            control_id: "width".to_owned(),
+            value: orchard_foundry::ControlValue::Scalar(2.0),
+        }))
+        .expect("same value is accepted as a no-op");
+
+    assert!(effects.is_empty());
+    assert!(app.state.active_jobs.is_empty());
+    assert_eq!(app.make_canvas_view_state().mode, MakeCanvasMode::Ready);
 }
 
 #[test]

@@ -278,10 +278,13 @@ pub(super) fn show_compact_direct_numeric_control(
     if !action_state.enabled {
         response.on_disabled_hover_text(action_state.disabled_reason);
     } else if response.changed() {
-        commands.extend(customize::release_control_value_intents(
-            control,
-            orchard_foundry::ControlValue::Scalar(snap_direct_numeric_value(adjusted, range, step)),
-        ));
+        let snapped = snap_direct_numeric_value(adjusted, range, step);
+        if direct_numeric_value_changed(snapped, current, step) {
+            commands.extend(customize::release_control_value_intents(
+                control,
+                orchard_foundry::ControlValue::Scalar(snapped),
+            ));
+        }
     }
     if !action_state.enabled {
         ui.label(
@@ -325,10 +328,13 @@ pub(super) fn show_direct_numeric_control(
     if !action_state.enabled {
         response.on_disabled_hover_text(action_state.disabled_reason);
     } else if response.changed() {
-        commands.extend(customize::release_control_value_intents(
-            control,
-            orchard_foundry::ControlValue::Scalar(snap_direct_numeric_value(adjusted, range, step)),
-        ));
+        let snapped = snap_direct_numeric_value(adjusted, range, step);
+        if direct_numeric_value_changed(snapped, current, step) {
+            commands.extend(customize::release_control_value_intents(
+                control,
+                orchard_foundry::ControlValue::Scalar(snapped),
+            ));
+        }
     }
     ui.horizontal(|ui| {
         ui.label(
@@ -376,6 +382,10 @@ pub(super) fn direct_numeric_value(
         _ => range.minimum,
     };
     value.clamp(range.minimum, range.maximum)
+}
+
+pub(super) fn direct_numeric_value_changed(next: f32, current: f32, step: f32) -> bool {
+    (next - current).abs() >= step.max(0.01) * 0.5
 }
 
 pub(super) fn show_customize_control_header_actions(

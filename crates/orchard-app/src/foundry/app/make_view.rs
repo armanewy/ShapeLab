@@ -129,8 +129,7 @@ impl FoundryDesktopApp {
         let active_group = active_group_id
             .as_deref()
             .and_then(|group_id| part_groups.iter().find(|group| group.group_id == group_id));
-        let interactions_enabled =
-            view_state.model_ready && view_state.preview_ready && !view_state.local_busy_visible;
+        let interactions_enabled = make_canvas_controls_enabled(view_state);
 
         let response = product_stage(ui, |ui| {
             ui.set_min_height(ui.available_height().max(220.0));
@@ -145,14 +144,22 @@ impl FoundryDesktopApp {
                     MakeCanvasMode::PreparingAsset => view_state.preparation_phase.label(),
                     MakeCanvasMode::GeneratingWholeAssetIdeas
                     | MakeCanvasMode::GeneratingFocusedPartIdeas => "Trying ideas",
-                    _ if view_state.preview_ready => "Ready",
+                    _ if view_state.preview_ready
+                        || (view_state.direct_primitive_workflow && view_state.model_ready) =>
+                    {
+                        "Ready"
+                    }
                     _ => "Preparing",
                 };
                 let tone = match view_state.mode {
                     MakeCanvasMode::PreparingAsset
                     | MakeCanvasMode::GeneratingWholeAssetIdeas
                     | MakeCanvasMode::GeneratingFocusedPartIdeas => StatusTone::Working,
-                    _ if view_state.preview_ready => StatusTone::Ready,
+                    _ if view_state.preview_ready
+                        || (view_state.direct_primitive_workflow && view_state.model_ready) =>
+                    {
+                        StatusTone::Ready
+                    }
                     _ => StatusTone::Neutral,
                 };
                 let _ = status_pill(ui, StatusPillSpec::new(state_label, tone));

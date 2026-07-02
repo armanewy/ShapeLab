@@ -383,10 +383,20 @@ impl FoundryDesktopApp {
     }
 
     pub(super) fn status_summary(&self) -> &'static str {
+        let direct_preview_only_work = self.active_make_profile_kind().direct_primitive_workflow()
+            && self.state.current_output.is_some()
+            && !self.state.active_jobs.is_empty()
+            && self
+                .state
+                .active_jobs
+                .values()
+                .all(|request| request.slot() == crate::foundry::FoundryJobSlot::RenderPreview);
+
         if self.drawer == Some(FoundryDrawer::FamilyStudioLite)
             && self.family_studio_lite_enabled
             && self.state.current_output.is_some()
             && self.state.current_preview.is_some()
+            || direct_preview_only_work
         {
             "Ready"
         } else if !self.state.active_jobs.is_empty() {

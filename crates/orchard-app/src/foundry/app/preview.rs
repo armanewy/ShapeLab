@@ -172,6 +172,7 @@ pub(super) fn current_preview_stage_style_for_axis_view(
 #[derive(Default)]
 pub(super) struct CurrentPreviewOrbitState {
     drag_start_camera: Option<OrbitCamera>,
+    pending_camera: Option<OrbitCamera>,
 }
 
 impl CurrentPreviewOrbitState {
@@ -180,10 +181,14 @@ impl CurrentPreviewOrbitState {
         preview: &FoundryPreviewImage,
         response: &egui::Response,
     ) -> Option<OrbitCamera> {
-        self.camera_for_drag_delta(
+        let drag_delta = response
+            .total_drag_delta()
+            .unwrap_or_else(|| response.drag_delta());
+        self.camera_for_drag_state(
             preview,
             response.dragged_by(current_preview_orbit_button()),
-            response.drag_delta(),
+            response.drag_stopped_by(current_preview_orbit_button()),
+            drag_delta,
         )
     }
 
@@ -193,15 +198,33 @@ impl CurrentPreviewOrbitState {
         dragging_secondary: bool,
         drag_delta: egui::Vec2,
     ) -> Option<OrbitCamera> {
+        self.camera_for_drag_state(preview, dragging_secondary, false, drag_delta)
+    }
+
+    pub(super) fn camera_for_drag_state(
+        &mut self,
+        preview: &FoundryPreviewImage,
+        dragging_secondary: bool,
+        drag_stopped_secondary: bool,
+        drag_delta: egui::Vec2,
+    ) -> Option<OrbitCamera> {
+        if drag_stopped_secondary {
+            self.drag_start_camera = None;
+            let camera = self.pending_camera.take();
+            return camera.filter(|camera| camera != &preview.camera);
+        }
+
         if !dragging_secondary {
             self.drag_start_camera = None;
+            self.pending_camera = None;
             return None;
         }
 
         let drag_start_camera = self
             .drag_start_camera
             .get_or_insert_with(|| preview.camera.clone());
-        current_preview_orbit_camera_from_base(drag_start_camera, drag_delta)
+        self.pending_camera = current_preview_orbit_camera_from_base(drag_start_camera, drag_delta);
+        None
     }
 }
 
@@ -532,6 +555,7 @@ impl FoundryDesktopApp {
                     has_output,
                     preview_is_stale,
                     rendering_preview,
+                    self.active_make_profile_kind().direct_primitive_workflow(),
                 ) {
                     ui.label(
                         RichText::new(message)
@@ -545,6 +569,7 @@ impl FoundryDesktopApp {
                     has_output,
                     preview_is_stale,
                     rendering_preview,
+                    self.active_make_profile_kind().direct_primitive_workflow(),
                 ) {
                     ui.weak(message);
                 }
