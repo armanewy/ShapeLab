@@ -14,6 +14,8 @@
 - Flat Panel Primitive is intentionally one upright clay panel.
 - Lidded Box must not be described as a crate.
 - Flat Panel, Hinged Panel, and Handled Panel must not be described as Door.
+- Sci-Fi Crate, Cargo Case, crate-family, generated-variation, candidate-tray,
+  and old dogfood reports are not active product directions.
 
 ## Unsupported Workflows
 
@@ -31,9 +33,9 @@
   is not the new canonical product IR for Object Orchard.
 - Active primitive Make must not rely on generated variation trays.
 - Active primitive Make must not expose random candidate generation.
-- General Visual Foundry assets do not have material/surface work,
-  UV/texturing, rigging, skinning, animation, runtime LLM behavior, or full
-  game-ready export support.
+- Shape Lab does not have material/surface product work, UV/texturing,
+  collision/gameplay metadata, rigging, skinning, animation, runtime LLM
+  behavior, or full game-ready export support.
 - Surface/material preview workflows are not part of the active primitive
   baseline.
 - ObjectPlan Materialization v1 is offline review infrastructure. It can

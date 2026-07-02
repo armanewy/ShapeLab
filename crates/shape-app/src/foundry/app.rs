@@ -11333,59 +11333,56 @@ mod tests {
                 )),
             ),
             (
-                "docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md",
+                "docs/README.md",
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/README.md")),
+            ),
+            (
+                "docs/KNOWN_LIMITATIONS.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/SURFACE_CANDIDATE_V0_INTEGRATION_REPORT.md"
+                    "/../../docs/KNOWN_LIMITATIONS.md"
                 )),
             ),
             (
-                "docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md",
+                "docs/ARCHITECTURE_STATUS.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/SCIFI_CRATE_VISUAL_SURFACE_CANDIDATES_V0.md"
+                    "/../../docs/ARCHITECTURE_STATUS.md"
                 )),
             ),
             (
-                "docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md",
+                "docs/CONTRACT_BOUNDARIES.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/SURFACE_MODE_DOGFOOD_V0_RESULTS.md"
+                    "/../../docs/CONTRACT_BOUNDARIES.md"
                 )),
             ),
             (
-                "docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md",
+                "docs/CLEANUP_PLAN.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/NEXT_PRODUCT_STEP_AFTER_DOGFOOD_V4.md"
+                    "/../../docs/CLEANUP_PLAN.md"
                 )),
             ),
             (
-                "docs/FAMILY_FOUNDATION_PIVOT.md",
+                "docs/PRIMITIVE_DIRECT_MAKE_VISION.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/FAMILY_FOUNDATION_PIVOT.md"
+                    "/../../docs/PRIMITIVE_DIRECT_MAKE_VISION.md"
                 )),
             ),
             (
-                "docs/FAMILY_MATURITY_LADDER.md",
+                "docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/FAMILY_MATURITY_LADDER.md"
+                    "/../../docs/OBJECT_PLAN_MATERIALIZATION_V1_INTEGRATION_REPORT.md"
                 )),
             ),
             (
-                "docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md",
+                "docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md",
                 include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/NEXT_WORK_AFTER_FAMILY_PIVOT.md"
-                )),
-            ),
-            (
-                "docs/SOURCE_FORMAT_HYGIENE_REPORT.md",
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../docs/SOURCE_FORMAT_HYGIENE_REPORT.md"
+                    "/../../docs/GEOMETRY_EXPORT_V0_INTEGRATION_REPORT.md"
                 )),
             ),
         ];
@@ -11421,17 +11418,14 @@ mod tests {
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../docs/CURRENT_PRODUCT_STATUS.md"
             )),
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/README.md")),
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/PRODUCT_RECOVERY_INTEGRATION_V2_REPORT.md"
+                "/../../docs/KNOWN_LIMITATIONS.md"
             )),
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/RELEASE_CANDIDATE_MANUAL_GATE.md"
-            )),
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/FOUNDRY_UI_MANUAL_GATE.md"
+                "/../../docs/PRODUCT_CLAIM_GATE.md"
             )),
         ];
         let joined = docs.join("\n").to_ascii_lowercase();
@@ -11465,51 +11459,37 @@ mod tests {
     }
 
     #[test]
-    fn make_pipeline_reliability_docs_cover_recovery_contract() {
+    fn direct_make_docs_cover_current_recovery_contract() {
         let docs = [
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/MAKE_PIPELINE_RELIABILITY.md"
+                "/../../docs/PRIMITIVE_DIRECT_MAKE_VISION.md"
             )),
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/MAKE_NO_DEAD_END_STATES.md"
+                "/../../docs/ACTIVE_VARIATION_UI_RETIREMENT.md"
             )),
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/MAKE_CANVAS_STATE_MACHINE.md"
-            )),
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/FOUNDRY_UI_MANUAL_GATE.md"
+                "/../../docs/CURRENT_PRODUCT_STATUS.md"
             )),
         ];
         let joined = docs.join("\n");
 
         for required in [
-            "Preparing model",
-            "Rendering preview",
-            "Ready",
-            PREPARATION_TIMEOUT_MESSAGE,
-            ACTION_RETRY_PREPARATION,
-            ACTION_CHOOSE_ANOTHER_TEMPLATE,
-            ACTION_OPEN_PROJECT,
-            PREVIEW_UPDATING_REASON,
-            ACTION_UPDATE_PREVIEW,
-            "Ready to try ideas",
-            "Trying ideas",
-            "No clear ideas survived",
-            "EmptyReady",
-            "GeneratingSkeletons",
-            "HasCandidates",
-            "NoCandidatesWithRecovery",
-            "ErrorWithRecovery",
-            STALE_RESULT_WARNING,
-            ACTION_TRY_AGAIN,
+            "Choose Primitive",
+            "edit bounded primitive properties",
+            "Add to Pack",
+            "Export",
+            "Candidate generation is inactive in the current primitive product flow",
+            "previous valid preview remains visible",
+            "Invalid values cannot become current primitive state",
+            "Future suggestions may return only as deterministic property presets",
+            "generated candidate trays",
         ] {
             assert!(
                 joined.contains(required),
-                "Make reliability docs missing {required}"
+                "Direct Make docs missing {required}"
             );
         }
     }

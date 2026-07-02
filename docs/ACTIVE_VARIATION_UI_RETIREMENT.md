@@ -3,10 +3,10 @@
 Date: 2026-06-30
 
 The active primitive Make workflow is direct-edit only. Box Primitive, Flat
-Panel Primitive, Lidded Box, and Hinged Panel show model preview, view controls,
-property controls, Add to Pack, and Export. They do not show Try ideas,
-generated idea trays, selected-candidate comparisons, candidate acceptance, or
-candidate survivor/rejected copy.
+Panel Primitive, Sphere Primitive, and Panel with Knob show model preview, view
+controls, property controls, Add to Pack, and Export. They do not show Try
+ideas, generated idea trays, selected-candidate comparisons, candidate
+acceptance, or candidate survivor/rejected copy.
 
 ## Active Make Contract
 
@@ -16,8 +16,8 @@ Current primitive Make screens expose direct property panels:
 
 - Box Primitive: Width, Depth, Height, Edge Softness.
 - Flat Panel Primitive: Width, Height, Thickness, Edge Softness.
-- Lidded Box: direct box properties plus the existing Lid Seam proof.
-- Hinged Panel: direct panel properties plus the existing Hinge Edge proof.
+- Sphere Primitive: Width, Height, Depth, Front Flatten, Back Flatten.
+- Panel with Knob: bounded panel, knob form, and knob position properties.
 
 The approved action copy is direct:
 
