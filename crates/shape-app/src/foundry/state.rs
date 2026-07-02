@@ -6,7 +6,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use shape_asset::RevisionId;
-use shape_core::Aabb;
 use shape_foundry::{
     CatalogContentRef, ControlEvaluationContext, ControlKind, ControlValue, FeasibleControlDomain,
     FoundryAssetDocument, FoundryBuildStamp, FoundryCandidateId, FoundryCatalogError,
@@ -21,7 +20,7 @@ use shape_foundry::{
 };
 use shape_mesh::TriangleMesh;
 use shape_project::foundry::{FoundryProjectFile, FoundryProjectLoadReport};
-use shape_render::{clay_readability_render_settings, fit_camera_to_bounds, render_mesh};
+use shape_render::{Aabb, clay_readability_render_settings, fit_camera_to_bounds, render_mesh};
 use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
 };

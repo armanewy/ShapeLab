@@ -14,6 +14,18 @@ fn doc_text(relative_path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {relative_path}: {error}"))
 }
 
+fn markdown_section<'a>(text: &'a str, heading: &str, next_heading: &str) -> &'a str {
+    let start = text
+        .find(heading)
+        .unwrap_or_else(|| panic!("missing markdown heading {heading}"));
+    let after_start = start + heading.len();
+    let end = text[after_start..]
+        .find(next_heading)
+        .map(|offset| after_start + offset)
+        .unwrap_or(text.len());
+    &text[after_start..end]
+}
+
 #[test]
 fn crate_level_docs_state_legacy_boundary() {
     let lib = include_str!("../src/lib.rs");
@@ -37,6 +49,95 @@ fn crate_level_docs_state_legacy_boundary() {
             && lib.contains("export readiness"),
         "crate docs should name blocked product semantics explicitly"
     );
+}
+
+#[test]
+fn shape_core_docs_do_not_claim_canonical_a_j_ir() {
+    let lib = include_str!("../src/lib.rs");
+    let boundary = doc_text("docs/SHAPE_CORE_LEGACY_BOUNDARY.md");
+    let contracts = doc_text("docs/CONTRACT_BOUNDARIES.md");
+    let joined = format!("{lib}\n{boundary}\n{contracts}").to_ascii_lowercase();
+
+    assert!(
+        joined.contains("shapedocument` is not the canonical a-j product ir")
+            || joined.contains("shapedocument is not the canonical a-j product ir")
+            || joined.contains("not the new canonical product ir"),
+        "shape-core docs should explicitly reject ShapeDocument as canonical A-J IR"
+    );
+
+    for forbidden in [
+        "shapedocument is the canonical a-j product ir",
+        "shape-core::shapedocument is the canonical a-j product ir",
+        "shape-core is the canonical a-j product ir",
+        "shape-core owns the canonical a-j product ir",
+        "canonical a-j product ir is shapedocument",
+    ] {
+        assert!(
+            !joined.contains(forbidden),
+            "shape-core docs must not claim canonical A-J ownership: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn shape_asset_canonical_lane_remains_documented() {
+    let status = doc_text("docs/CURRENT_PRODUCT_STATUS.md");
+    let contracts = doc_text("docs/CONTRACT_BOUNDARIES.md");
+    let architecture = doc_text("docs/ARCHITECTURE_STATUS.md");
+
+    for (name, text) in [
+        ("CURRENT_PRODUCT_STATUS", status.as_str()),
+        ("CONTRACT_BOUNDARIES", contracts.as_str()),
+        ("ARCHITECTURE_STATUS", architecture.as_str()),
+    ] {
+        assert!(
+            text.contains("shape-asset::AssetRecipe") && text.contains("Orchard IR"),
+            "{name} should name shape-asset::AssetRecipe / Orchard IR as the semantic lane"
+        );
+        assert!(
+            text.to_ascii_lowercase().contains("canonical semantic")
+                || text.to_ascii_lowercase().contains("canonical lane"),
+            "{name} should keep the shape-asset lane canonical"
+        );
+    }
+}
+
+#[test]
+fn product_status_allowed_claims_do_not_point_users_to_shape_document() {
+    let status = doc_text("docs/CURRENT_PRODUCT_STATUS.md");
+    let allowed_claims = markdown_section(
+        &status,
+        "## Allowed Product Claims",
+        "## Current Milestone Sequence",
+    )
+    .to_ascii_lowercase();
+
+    for forbidden in [
+        "shape-core",
+        "shapedocument",
+        "legacy/implicit",
+        "implicit/sdf",
+        "raw document mutation",
+    ] {
+        assert!(
+            !allowed_claims.contains(forbidden),
+            "product-facing allowed claims must not point users to ShapeDocument: {forbidden}"
+        );
+    }
+
+    let status_lower = status.to_ascii_lowercase();
+    for forbidden in [
+        "users should use shapedocument",
+        "start from shapedocument",
+        "make workflow uses shapedocument",
+        "shape-core is the product backbone",
+        "shape-core::shapedocument is the product backbone",
+    ] {
+        assert!(
+            !status_lower.contains(forbidden),
+            "product status must not route users to shape-core ShapeDocument: {forbidden}"
+        );
+    }
 }
 
 #[test]

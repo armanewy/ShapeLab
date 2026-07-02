@@ -7,7 +7,6 @@ use shape_compile::{
     export::write_model_package,
     validation::{ValidationLimits, validate_model, validation_config_from_recipe_with_limits},
 };
-use shape_core::Aabb;
 use shape_foundry::{
     CandidateLegibilityClass, CandidateVariationMetadata, CandidateVisibleDeltaReport,
     ControlValue, FoundryAssetDocument, FoundryBuildStamp, FoundryCatalogResolver, FoundryCommand,
@@ -24,7 +23,7 @@ use shape_render::foundry::{
     compare_foundry_rendered_visible_delta,
 };
 use shape_render::{
-    OrbitCamera, RenderSettings, RenderedImage, clay_readability_render_settings,
+    Aabb, OrbitCamera, RenderSettings, RenderedImage, clay_readability_render_settings,
     fit_camera_to_bounds, fit_camera_to_bounds_from_angles_around_origin, render_mesh,
 };
 use shape_search::foundry::{

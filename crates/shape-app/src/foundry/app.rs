@@ -13,7 +13,6 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use egui::{ColorImage, RichText, TextureOptions};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use shape_core::Aabb;
 use shape_foundry::{
     CatalogContentRef, DirectKitCreatedFrom, DirectKitDraft, DirectKitPresetRef,
     DirectKitSourceKind, DirectKitVisibility, FoundryAssetDocument, FoundryBuildStamp,
@@ -32,7 +31,7 @@ use shape_project::foundry::{
     FOUNDRY_PROJECT_FILE_SUFFIX, FoundryProject, FoundryProjectFile, ensure_foundry_project_path,
 };
 use shape_render::{
-    OrbitCamera, clay_readability_render_settings, fit_camera_to_bounds,
+    Aabb, OrbitCamera, clay_readability_render_settings, fit_camera_to_bounds,
     foundry::FoundryPreviewCache, render_mesh,
 };
 use shape_search::foundry::{

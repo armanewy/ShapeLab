@@ -6,7 +6,6 @@ use std::thread;
 
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use shape_core::Aabb;
 use shape_foundry::{
     CandidateLegibilityClass, FoundryPreviewDisplayMode, SemanticClayRoleAssignment,
     VariationChannel, VariationScope,
@@ -15,8 +14,8 @@ use shape_mesh::TriangleMesh;
 use thiserror::Error;
 
 use crate::{
-    OrbitCamera, RenderError, RenderSettings, RenderedImage, clay_readability_render_settings,
-    fit_camera_to_bounds_with_aspect, render_mesh,
+    Aabb, OrbitCamera, RenderError, RenderSettings, RenderedImage,
+    clay_readability_render_settings, fit_camera_to_bounds_with_aspect, render_mesh,
 };
 
 const OVERLAY_HASH_OFFSET: u64 = 14_695_981_039_346_656_037;
