@@ -13593,6 +13593,17 @@ mod tests {
                 value: shape_foundry::ControlValue::Scalar(2.2),
             }))
             .expect("valid width edit schedules");
+        assert_eq!(app.state.authoring_breadcrumbs.len(), 1);
+        let breadcrumb = &app.state.authoring_breadcrumbs[0];
+        assert_eq!(breadcrumb.control_id, "width");
+        assert_eq!(breadcrumb.property_id, "box.width");
+        assert_eq!(
+            breadcrumb.entry.effect,
+            shape_authoring::AuthoringEffect::SetProperty
+        );
+        assert_eq!(breadcrumb.requested_control_value, 2.2);
+        assert_eq!(breadcrumb.authored_recipe_value, 1.1);
+        assert!(breadcrumb.validation_report.accepted);
         let set_event = run_fixture_effect(set_effects, &fixture);
         assert!(app.state.handle_job_event(set_event));
         assert_eq!(

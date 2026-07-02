@@ -26,6 +26,7 @@ use shape_search::foundry::{
     FoundryCandidateMode, FoundryCandidateOutput, FoundryCandidateRequest,
 };
 
+use super::authoring_bridge::{DirectMakeAuthoringBreadcrumb, direct_make_authoring_breadcrumb};
 use super::commands::{FoundryAppCommand, FoundryAppEffect};
 use super::jobs::{
     FoundryJobEvent, FoundryJobRequest, FoundryJobSlot, candidate_cards_from_output,
@@ -101,6 +102,8 @@ pub(crate) struct FoundryAppState {
     pub candidate_edits: BTreeMap<FoundryCandidateId, FoundryEdit>,
     /// Local-only preference signals from explicit candidate choices.
     pub local_preferences: FoundryPreferenceLog,
+    /// Replayable authoring breadcrumbs emitted by bridged direct Make controls.
+    pub authoring_breadcrumbs: Vec<DirectMakeAuthoringBreadcrumb>,
     /// Current rendered whole-model preview.
     pub current_preview: Option<FoundryPreviewImage>,
     /// Family-pack workspace view.
@@ -143,6 +146,7 @@ impl Default for FoundryAppState {
             candidate_output: None,
             candidate_edits: BTreeMap::new(),
             local_preferences: FoundryPreferenceLog::new(),
+            authoring_breadcrumbs: Vec::new(),
             current_preview: None,
             pack: FoundryPackView::default(),
             active_jobs: BTreeMap::new(),
@@ -719,10 +723,17 @@ impl FoundryAppState {
                     self.active_control = Some(control_id.clone());
                 }
                 let preference_event = self.preference_event_for_command(&command);
+                let authoring_breadcrumb = self
+                    .current_output
+                    .as_deref()
+                    .and_then(|output| direct_make_authoring_breadcrumb(output, &command));
                 let effects = self.schedule_apply_edit(FoundryEdit {
                     label: foundry_command_label(&command).to_owned(),
                     commands: vec![command],
                 })?;
+                if let Some(breadcrumb) = authoring_breadcrumb {
+                    self.authoring_breadcrumbs.push(breadcrumb);
+                }
                 if let Some(event) = preference_event {
                     self.local_preferences.record(event);
                 }

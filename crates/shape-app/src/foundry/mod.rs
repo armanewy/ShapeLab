@@ -7,6 +7,7 @@
 
 pub(crate) mod app;
 pub(crate) mod author_studio;
+pub(crate) mod authoring_bridge;
 pub(crate) mod commands;
 pub(crate) mod jobs;
 pub(crate) mod kit_view;
