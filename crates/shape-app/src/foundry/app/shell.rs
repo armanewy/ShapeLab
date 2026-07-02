@@ -133,7 +133,7 @@ impl FoundryDesktopApp {
             let has_document = self.state.document.is_some();
             let build_dependent_actions_enabled =
                 make_canvas_build_dependent_actions_enabled(&view_state);
-            ui.label(RichText::new("Shape Lab").size(16.0).strong());
+            ui.label(RichText::new("Object Orchard").size(16.0).strong());
             ui.separator();
             ui.label(
                 RichText::new(self.current_project_title())

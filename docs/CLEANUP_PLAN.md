@@ -24,9 +24,8 @@ baseline is restored.
 
 ## Cleanup Rules
 
-No backward compatibility is required because Shape Lab / Object Orchard has not
-shipped. Obsolete pivots should be deleted, not preserved through compatibility
-shims.
+No backward compatibility is required because Object Orchard has not shipped.
+Obsolete pivots should be deleted, not preserved through compatibility shims.
 
 `shape-core` is legacy/implicit unless active code still requires a low-level
 type or compatibility convention. New product semantics belong in the explicit

@@ -105,4 +105,4 @@ The command exits nonzero when export is blocked or failed.
 ## Godot Boundary
 
 This CLI does not prove Godot import. Godot import proof is a separate gate.
-Until that harness passes, Shape Lab must not claim Godot-ready geometry.
+Until that harness passes, Object Orchard must not claim Godot-ready geometry.

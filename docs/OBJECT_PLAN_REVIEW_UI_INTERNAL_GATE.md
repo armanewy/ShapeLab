@@ -46,7 +46,7 @@ Manual screenshots captured from the rebuilt macOS app bundle:
 The drawer screenshot was taken after the app's screenshot scenario assertion
 reported `ObjectPlanReviewDrawer: PASS`.
 
-Computer Use validation note: `list_apps` confirmed the rebuilt Shape Lab app
-was frontmost and running as `com.shapelab.ShapeLab`. The accessibility state
+Computer Use validation note: `list_apps` confirmed the rebuilt Object Orchard app
+was frontmost. The accessibility state
 read timed out, so the manual gate used screenshots plus the app's internal
 screenshot-state assertion instead of an accessibility tree.

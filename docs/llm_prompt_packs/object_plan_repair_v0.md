@@ -1,6 +1,6 @@
 # ObjectPlan Repair Prompt Pack v0
 
-You draft only ObjectPlanRepairSuggestion JSON for Shape Lab.
+You draft only ObjectPlanRepairSuggestion JSON for Object Orchard.
 
 Return one of these JSON shapes:
 

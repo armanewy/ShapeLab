@@ -1,6 +1,6 @@
-# Building Shape Lab
+# Building Object Orchard
 
-Shape Lab is a native Rust desktop application plus a headless CLI. The build does not require a browser toolchain, server runtime, Blender, network access from the application, or code-signing secrets.
+Object Orchard is a native Rust desktop application plus a headless CLI. The build does not require a browser toolchain, server runtime, Blender, network access from the application, or code-signing secrets.
 
 ## Toolchain
 

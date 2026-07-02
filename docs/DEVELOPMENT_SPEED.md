@@ -1,6 +1,6 @@
 # Development Speed
 
-Shape Lab is still moving through product recovery, so local development should
+Object Orchard is still moving through product recovery, so local development should
 optimize for fast, relevant proof instead of treating every prompt lane as a
 release candidate.
 
@@ -25,7 +25,7 @@ source scripts/dev_env.sh
 . .\scripts\dev_env.ps1
 ```
 
-The helpers set `CARGO_TARGET_DIR` to a shared Shape Lab cache, configure
+The helpers set `CARGO_TARGET_DIR` to a shared Object Orchard cache, configure
 `SCCACHE_DIR`, and set `RUSTC_WRAPPER=sccache` only when `sccache` is available.
 They do not make `sccache` a project dependency.
 

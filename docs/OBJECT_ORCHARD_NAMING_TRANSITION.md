@@ -1,24 +1,24 @@
 # Object Orchard Naming Transition
 
-Status: naming scaffold
+Status: product-facing rename active
 
-Shape Lab is the current repository name and implementation code name.
-Object Orchard is the intended product name.
+Object Orchard is the product name.
 
-The full rename is deferred because `shape-*` appears throughout crates, docs,
-CLI surfaces, app code, package names, and supporting scripts. Renaming those
-surfaces opportunistically would create unnecessary review noise and branch
-conflicts.
+Migration note: the GitHub repository may still be named `ShapeLab` until the
+manual repository setting is changed.
 
-Future rename work requires a dedicated migration plan that covers at least:
+The remaining technical rename is deferred because `shape-*` appears throughout
+crates, package names, internal module paths, scripts, and supporting tooling.
+Renaming those surfaces opportunistically would create unnecessary review noise
+and branch conflicts.
+
+Follow-up rename work requires dedicated migration branches that cover:
 
 - crate/package names
 - executable and CLI names
-- app-facing labels
-- documentation references
 - scripts and build tooling
 - release and packaging metadata
 
 Feature branches must not opportunistically rename files, crates, packages,
-executables, modules, commands, or user-visible behavior. Keep `shape-*`
-implementation names in place until an explicit rename migration owns them.
+executables, modules, or commands. Keep `shape-*` implementation names in place
+until an explicit technical rename migration owns them.

@@ -8,7 +8,7 @@ pub(super) fn project_file_title(path: &Path) -> String {
                 .replace(['-', '_'], " ")
         })
         .filter(|title| !title.trim().is_empty())
-        .unwrap_or_else(|| "Shape Lab Project".to_owned())
+        .unwrap_or_else(|| "Object Orchard Project".to_owned())
 }
 
 pub(super) fn asset_title_from_id(document_id: &str) -> &'static str {
@@ -20,7 +20,7 @@ pub(super) fn asset_title_from_id(document_id: &str) -> &'static str {
         id if id.contains("hinged-panel") => "Hinged Panel",
         id if id.contains("flat-panel-primitive") => "Flat Panel Primitive",
         id if id.contains("sphere-primitive") => "Sphere Primitive",
-        _ => "Shape Lab Project",
+        _ => "Object Orchard Project",
     }
 }
 
@@ -44,13 +44,13 @@ pub(super) fn product_safe_status(status: &str) -> String {
 
 pub(super) fn open_foundry_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("Shape Lab Foundry", &["json"])
+        .add_filter("Object Orchard Foundry", &["json"])
         .pick_file()
 }
 
 pub(super) fn save_foundry_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("Shape Lab Foundry", &["json"])
+        .add_filter("Object Orchard Foundry", &["json"])
         .set_file_name("foundry-project.shapelab-foundry.json")
         .save_file()
         .map(normalize_foundry_project_path)

@@ -370,4 +370,21 @@ mod tests {
         );
         assert!(report.manual_gate_required);
     }
+
+    #[test]
+    fn product_visible_strings_use_object_orchard_brand() {
+        let strings = product_visible_strings_for_default_shell();
+        assert!(
+            strings.contains(&"Object Orchard"),
+            "default product strings should expose the Object Orchard product name"
+        );
+
+        let joined = strings.join("\n");
+        for old_name in ["Shape Lab", "ShapeLab"] {
+            assert!(
+                !joined.contains(old_name),
+                "default product strings still expose old product name {old_name}: {joined}"
+            );
+        }
+    }
 }

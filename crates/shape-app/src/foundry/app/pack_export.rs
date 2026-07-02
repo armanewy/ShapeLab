@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn pack_member_display_name(member: &pack::PackMemberRow) -> String {
     let title = asset_title_from_id(&member.document_id);
-    if title == "Shape Lab Project" {
+    if title == "Object Orchard Project" {
         "Pack asset".to_owned()
     } else {
         title.to_owned()
@@ -11,7 +11,7 @@ pub(super) fn pack_member_display_name(member: &pack::PackMemberRow) -> String {
 
 pub(super) fn pack_cell_display_name(cell: &pack::PackContactSheetCell) -> String {
     let title = asset_title_from_id(&cell.document_id);
-    if title == "Shape Lab Project" {
+    if title == "Object Orchard Project" {
         "Pack asset".to_owned()
     } else {
         title.to_owned()

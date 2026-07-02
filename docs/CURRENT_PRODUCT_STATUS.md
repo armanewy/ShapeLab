@@ -4,13 +4,13 @@ Date: 2026-07-01
 
 ## Verdict
 
-`CLEANUP_BASELINE_FREEZE`
+`PRODUCT_FACING_OBJECT_ORCHARD_RENAME`
 
-Cleanup baseline freeze is starting. Cleanup does not add product capability;
-it makes the repository physically match the semantic asset compiler
-architecture before the Object Orchard rename.
+Cleanup Wave 1 has landed. The product-facing name is now Object Orchard.
+This rename does not add product capability; it only updates user-visible
+product naming before the technical crate, folder, command, and path rename.
 
-Shape Lab has retired active variation UI for current primitives and is moving
+Object Orchard has retired active variation UI for current primitives and is moving
 the active product surface toward direct primitive property editing.
 ObjectPlan Materialization v1 now exists as offline validation and review
 infrastructure for supported primitive and safe-anchor composition plans.
@@ -130,17 +130,17 @@ restored as parallel product truth.
 - Terrain remains blocked as product-facing work until explicit terrain patch,
   placement, validation, collision/readiness, and export contracts pass. It is
   not approved as only a generic mesh primitive.
-- Rename to Object Orchard is planned but not yet applied. Current repository,
-  crate, and app metadata may still use Shape Lab / ShapeLab naming until the
-  rename wave lands.
+- Object Orchard is the product-facing name. Current repository settings,
+  crate names, folder names, command names, and some internal metadata may still
+  use legacy implementation naming until the technical rename branches land.
 
 ## Allowed Product Claims
 
-- Shape Lab can start from a Box Primitive profile.
-- Shape Lab can start from a Flat Panel Primitive profile.
-- Shape Lab can start from a Sphere Primitive profile.
-- Shape Lab can compile clay primitive previews and exports.
-- Shape Lab can expose bounded primitive properties through direct controls.
+- Object Orchard can start from a Box Primitive profile.
+- Object Orchard can start from a Flat Panel Primitive profile.
+- Object Orchard can start from a Sphere Primitive profile.
+- Object Orchard can compile clay primitive previews and exports.
+- Object Orchard can expose bounded primitive properties through direct controls.
 - Lidded Box may be referenced as Box Primitive plus one visible Lid Seam proof.
 - Hinged Panel may be referenced as Flat Panel Primitive plus one visible Hinge
   Edge proof.

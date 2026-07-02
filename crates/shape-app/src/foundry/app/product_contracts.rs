@@ -14,7 +14,7 @@ pub(crate) fn installed_product_kit_count() -> usize {
 
 pub(crate) fn product_visible_strings_for_default_shell() -> Vec<&'static str> {
     let mut strings = vec![
-        "Shape Lab",
+        "Object Orchard",
         "Visual Foundry",
         "Choose",
         "Make",

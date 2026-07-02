@@ -65,7 +65,7 @@ collision import, rig import, or animation import.
 - `Failed`: the source GLB path is invalid or the Godot import command failed.
 
 If Godot is unavailable, the harness writes a `Blocked` report saying import
-proof was not run. Shape Lab must not claim Godot-ready geometry from a blocked
+proof was not run. Object Orchard must not claim Godot-ready geometry from a blocked
 report.
 
 ## Product Boundary

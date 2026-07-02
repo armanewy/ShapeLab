@@ -1781,7 +1781,7 @@ fn write_geometry_only_glb(mesh: &TriangleMesh, path: &Path) -> anyhow::Result<(
     let json = serde_json::json!({
         "asset": {
             "version": "2.0",
-            "generator": "Shape Lab ObjectPlan geometry export v0"
+            "generator": "Object Orchard ObjectPlan geometry export v0"
         },
         "scene": 0,
         "scenes": [

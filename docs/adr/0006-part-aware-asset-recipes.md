@@ -2,7 +2,7 @@
 
 ## Decision
 
-Shape Lab will represent the forward-modeling lane with serializable `AssetRecipe` documents composed of reusable part definitions and concrete part instances.
+Object Orchard will represent the forward-modeling lane with serializable `AssetRecipe` documents composed of reusable part definitions and concrete part instances.
 
 ## Rationale
 
