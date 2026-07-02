@@ -87,7 +87,7 @@ fn run_geometry_import(
         .with_context(|| format!("creating {}", project_dir.display()))?;
     fs::write(
         project_dir.join("project.godot"),
-        "; Engine configuration file.\nconfig_version=5\n\n[application]\nconfig/name=\"Shape Lab Geometry Import Proof\"\n",
+        "; Engine configuration file.\nconfig_version=5\n\n[application]\nconfig/name=\"Object Orchard Geometry Import Proof\"\n",
     )
     .with_context(|| format!("writing {}", project_dir.join("project.godot").display()))?;
     fs::copy(glb_path, project_dir.join("asset.glb"))

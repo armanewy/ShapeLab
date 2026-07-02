@@ -1,6 +1,6 @@
-# Shape Lab
+# Object Orchard
 
-Shape Lab is a native, offline desktop MVP for preference-guided procedural 3D
+Object Orchard is a native, offline desktop MVP for preference-guided procedural 3D
 modeling.
 
 The current product direction is direct primitive editing. Object Orchard starts

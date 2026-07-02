@@ -2,7 +2,7 @@
 
 ## Decision
 
-Shape Lab uses right-handed coordinates, positive Y up, and negative Z as primitive local forward.
+Object Orchard uses right-handed coordinates, positive Y up, and negative Z as primitive local forward.
 
 ## Rationale
 

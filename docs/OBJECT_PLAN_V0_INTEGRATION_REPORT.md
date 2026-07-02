@@ -85,7 +85,7 @@ ObjectPlan review UI is internal-only and gated by
 - `target/object-plan-review-ui/review-drawer.png`: review drawer shows Draft only, Not catalog published, Human review required, batch target, contact-sheet area, and Keep / Regenerate / Simplify / Blocked labels.
 
 Computer Use note: the app state accessibility read timed out during the gate.
-`list_apps` confirmed the rebuilt Shape Lab app was frontmost and running, and
+`list_apps` confirmed the rebuilt Object Orchard app was frontmost and running, and
 the drawer screenshot was captured after the app's internal screenshot scenario
 reported `ObjectPlanReviewDrawer: PASS`.
 

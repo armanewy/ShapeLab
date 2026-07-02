@@ -21,7 +21,7 @@ pub fn run_native_app() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "Shape Lab",
+        "Object Orchard",
         options,
         Box::new(|_cc| Ok(Box::<FoundryDesktopApp>::default())),
     )

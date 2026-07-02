@@ -3,7 +3,7 @@
 Date: 2026-06-30
 
 Safe primitive attachment lets users combine primitives through named places
-without turning Shape Lab into a freeform modeling tool.
+without turning Object Orchard into a freeform modeling tool.
 
 ## Allowed
 

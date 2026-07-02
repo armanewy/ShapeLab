@@ -2,7 +2,7 @@
 
 ## Decision
 
-Shape Lab starts as a native Rust desktop application using `eframe`/`egui`.
+Object Orchard starts as a native Rust desktop application using `eframe`/`egui`.
 
 ## Rationale
 

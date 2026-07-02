@@ -2,7 +2,7 @@
 
 Status: Phase A contract, active.
 
-The product claim gate is the repo-wide rule that Shape Lab must describe only
+The product claim gate is the repo-wide rule that Object Orchard must describe only
 capabilities that have passed their current proof gates. It exists so contracts,
 reports, docs, and user summaries cannot quietly imply features that are still
 blocked.

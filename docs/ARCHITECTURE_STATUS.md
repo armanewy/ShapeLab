@@ -4,11 +4,10 @@ Date: 2026-07-01
 
 ## Current Architecture Direction
 
-Shape Lab / Object Orchard is moving toward a semantic asset compiler. The
-active user experience remains direct primitive editing, safe-anchor
-composition, offline ObjectPlan drafting/review, and geometry-only export
-proofs. The architecture target is that those flows converge on one canonical
-semantic asset lane.
+Object Orchard is moving toward a semantic asset compiler. The active user
+experience remains direct primitive editing, safe-anchor composition, offline
+ObjectPlan drafting/review, and geometry-only export proofs. The architecture
+target is that those flows converge on one canonical semantic asset lane.
 
 ## Canonical Lane
 
@@ -25,19 +24,16 @@ for new Orchard semantics.
 
 ## Active Phase
 
-Phase A-D semantic compiler hardening has passed. The active phase is now
-cleanup baseline freeze and hygiene enforcement before the Object Orchard
-rename. Cleanup is not a feature wave. It exists to remove obsolete pivots,
-split oversized files, retire unreleased compatibility code, and keep boundary
-decisions durable before adding more UI handles, surface work, terrain,
-collision, motion, or prototype-pack expansion.
+Phase A-D semantic compiler hardening has passed. Cleanup Wave 1 has removed
+obsolete pivots, split oversized files, retired unreleased compatibility code,
+and kept boundary decisions durable before adding more UI handles, surface
+work, terrain, collision, motion, or prototype-pack expansion.
 
 ## Rename Status
 
-Object Orchard is the planned product name, but the repository, Rust crates, and
-many internal paths still use Shape Lab / ShapeLab naming until the rename wave
-lands. Cleanup must happen before the rename to avoid hiding architectural
-mistakes inside noisy path diffs.
+Object Orchard is the product name. The Rust crates, folders, command names,
+environment variables, and some repository-local paths still use legacy
+implementation names until the technical rename branches land.
 
 ## Documentation Status
 
@@ -47,6 +43,6 @@ still validates them.
 
 ## Blocked Product Claims
 
-Shape Lab must not claim Godot-ready, game-ready, textured, UV-unwrapped,
+Object Orchard must not claim Godot-ready, game-ready, textured, UV-unwrapped,
 collision-enabled, rigged, animated, terrain-ready, public catalog publishing,
 or runtime LLM support unless a later phase gate produces tested evidence.

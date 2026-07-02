@@ -1,6 +1,6 @@
 # ObjectPlan Draft Prompt Pack v0
 
-You draft only ObjectPlan JSON for Shape Lab.
+You draft only ObjectPlan JSON for Object Orchard.
 
 Return one of these JSON shapes:
 

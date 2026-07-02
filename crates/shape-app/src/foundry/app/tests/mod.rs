@@ -772,6 +772,69 @@ fn product_docs_keep_surface_rig_motion_and_game_ready_claims_caveated() {
 }
 
 #[test]
+fn product_docs_use_object_orchard_brand_with_one_migration_note() {
+    let product_docs = [
+        (
+            "README.md",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md")),
+        ),
+        (
+            "docs/CURRENT_PRODUCT_STATUS.md",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/CURRENT_PRODUCT_STATUS.md"
+            )),
+        ),
+        (
+            "docs/KNOWN_LIMITATIONS.md",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/KNOWN_LIMITATIONS.md"
+            )),
+        ),
+        (
+            "docs/ARCHITECTURE_STATUS.md",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/ARCHITECTURE_STATUS.md"
+            )),
+        ),
+        (
+            "docs/CONTRACT_BOUNDARIES.md",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/CONTRACT_BOUNDARIES.md"
+            )),
+        ),
+    ];
+
+    for (path, contents) in product_docs {
+        assert!(
+            contents.contains("Object Orchard"),
+            "{path} should use the Object Orchard product name"
+        );
+        for old_name in ["Shape Lab", "ShapeLab"] {
+            assert!(
+                !contents.contains(old_name),
+                "{path} still contains old product name {old_name}"
+            );
+        }
+    }
+
+    let migration_note = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/OBJECT_ORCHARD_NAMING_TRANSITION.md"
+    ));
+    assert!(migration_note.contains("Object Orchard"));
+    assert_eq!(
+        migration_note.matches("ShapeLab").count(),
+        1,
+        "only the migration note should mention the old repository name"
+    );
+    assert!(!migration_note.contains("Shape Lab"));
+}
+
+#[test]
 fn direct_make_docs_cover_current_recovery_contract() {
     let docs = [
         include_str!(concat!(

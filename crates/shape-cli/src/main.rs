@@ -83,7 +83,7 @@ const RELEASE_READINESS_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Parser)]
 #[command(name = "shape-cli")]
-#[command(about = "Headless Shape Lab tooling")]
+#[command(about = "Headless Object Orchard tooling")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

@@ -19,12 +19,13 @@
 
 ## Unsupported Workflows
 
-- Cleanup baseline freeze is starting. Cleanup does not add product capability,
-  product UI, materials, UVs, collision, motion, terrain, runtime LLM, public
-  catalog publishing, Godot-ready output, or game-ready output.
-- Object Orchard rename is planned but not yet applied. Shape Lab / ShapeLab
-  names may remain in repository, crate, app metadata, and historical docs until
-  the rename wave lands.
+- Cleanup and rename work does not add product capability, product UI,
+  materials, UVs, collision, motion, terrain, runtime LLM, public catalog
+  publishing, Godot-ready output, or game-ready output.
+- Object Orchard is the product-facing name. Repository settings, crate names,
+  folder names, command names, environment variables, and some internal metadata
+  may still use legacy implementation names until the technical rename branches
+  land.
 - Phase A-D semantic compiler hardening is integrated. It does not add new
   product-facing feature categories; it establishes that future A-J work should
   target `shape-asset::AssetRecipe` / Orchard IR as the canonical semantic
@@ -33,7 +34,7 @@
   is not the new canonical product IR for Object Orchard.
 - Active primitive Make must not rely on generated variation trays.
 - Active primitive Make must not expose random candidate generation.
-- Shape Lab does not have material/surface product work, UV/texturing,
+- Object Orchard does not have material/surface product work, UV/texturing,
   collision/gameplay metadata, rigging, skinning, animation, runtime LLM
   behavior, or full game-ready export support.
 - Surface/material preview workflows are not part of the active primitive
