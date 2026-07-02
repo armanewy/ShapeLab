@@ -21,6 +21,8 @@ pub mod assembly;
 pub mod bevel;
 /// Semantic constructive detail features.
 pub mod features;
+/// Kernel registry and property descriptor bridge.
+pub mod kernel_registry;
 
 /// Package version for deterministic modeling generators.
 pub const SHAPE_MODELING_CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");

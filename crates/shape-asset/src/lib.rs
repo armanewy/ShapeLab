@@ -19,11 +19,13 @@ use thiserror::Error;
 pub mod edits;
 pub mod parameters;
 pub mod patterns;
+pub mod property_descriptor;
 pub mod relationships;
 
 pub use edits::*;
 pub use parameters::*;
 pub use patterns::*;
+pub use property_descriptor::*;
 pub use relationships::*;
 
 /// Current schema version for asset recipes.

@@ -7,6 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use shape_asset::{
+    KernelKind, OrchardControlFamily, PropertyAffect, PropertyAuthoringEffect, PropertyDescriptor,
+    PropertyDescriptorDomain, PropertyDescriptorValue, PropertyReviewImportance,
+};
 
 /// Current schema version for primitive property schemas.
 pub const PRIMITIVE_PROPERTY_SCHEMA_VERSION: u32 = 1;
@@ -341,6 +345,22 @@ pub fn primitive_default_property_values(
         .properties
         .iter()
         .map(|property| (property.property_id.clone(), property.default_value.clone()))
+        .collect()
+}
+
+/// Build semantic property descriptors for one direct primitive schema.
+#[must_use]
+pub fn primitive_property_descriptors_for_kind(
+    primitive_kind: PrimitiveKind,
+) -> Vec<PropertyDescriptor> {
+    if primitive_kind == PrimitiveKind::CylinderPrimitive {
+        return Vec::new();
+    }
+    let schema = primitive_property_schema_for_kind(primitive_kind);
+    schema
+        .properties
+        .iter()
+        .map(|property| primitive_property_descriptor(&schema, property))
         .collect()
 }
 
@@ -773,6 +793,162 @@ fn required_property_ids(primitive_kind: PrimitiveKind) -> &'static [&'static st
             &["width", "height", "depth", "front_flatten", "back_flatten"]
         }
         PrimitiveKind::CylinderPrimitive => &["radius", "height", "sides", "edge_softness"],
+    }
+}
+
+fn primitive_property_schema_for_kind(primitive_kind: PrimitiveKind) -> PrimitivePropertySchema {
+    match primitive_kind {
+        PrimitiveKind::BoxPrimitive => box_primitive_property_schema(),
+        PrimitiveKind::FlatPanelPrimitive => flat_panel_primitive_property_schema(),
+        PrimitiveKind::SpherePrimitive => sphere_primitive_property_schema(),
+        PrimitiveKind::CylinderPrimitive => unreachable!("Cylinder is not product-active"),
+    }
+}
+
+fn primitive_property_descriptor(
+    schema: &PrimitivePropertySchema,
+    property: &PrimitiveProperty,
+) -> PropertyDescriptor {
+    let control_family = control_family_for_property(&property.property_id, property.value_kind);
+    let affects = affects_for_control_family(control_family);
+    PropertyDescriptor {
+        id: format!(
+            "{}.{}",
+            descriptor_prefix(schema.primitive_kind),
+            property.property_id
+        ),
+        path: format!(
+            "primitive.{}.{}",
+            descriptor_prefix(schema.primitive_kind),
+            property.property_id
+        ),
+        label: property.display_name.clone(),
+        beginner_description: property.user_facing_description.clone(),
+        group: group_for_control_family(control_family).to_owned(),
+        domain: descriptor_domain(&property.domain),
+        default_value: descriptor_value(&property.default_value),
+        topology_changing: property.topology_behavior
+            == PrimitiveTopologyBehavior::DiscreteTopology,
+        affects,
+        review_importance: if property.advanced {
+            PropertyReviewImportance::Advanced
+        } else {
+            PropertyReviewImportance::Primary
+        },
+        control_family,
+        authoring_effect: PropertyAuthoringEffect::SetProperty,
+    }
+}
+
+fn descriptor_prefix(primitive_kind: PrimitiveKind) -> &'static str {
+    match primitive_kind {
+        PrimitiveKind::BoxPrimitive => "box",
+        PrimitiveKind::FlatPanelPrimitive => "flat_panel",
+        PrimitiveKind::SpherePrimitive => "sphere",
+        PrimitiveKind::CylinderPrimitive => "cylinder",
+    }
+}
+
+/// Convert a primitive kind into the shared kernel kind when product-active.
+#[must_use]
+pub fn kernel_kind_for_primitive_kind(primitive_kind: PrimitiveKind) -> Option<KernelKind> {
+    match primitive_kind {
+        PrimitiveKind::BoxPrimitive => Some(KernelKind::BoxPrimitive),
+        PrimitiveKind::FlatPanelPrimitive => Some(KernelKind::FlatPanelPrimitive),
+        PrimitiveKind::SpherePrimitive => Some(KernelKind::SpherePrimitive),
+        PrimitiveKind::CylinderPrimitive => None,
+    }
+}
+
+fn control_family_for_property(
+    property_id: &str,
+    value_kind: PrimitivePropertyValueKind,
+) -> OrchardControlFamily {
+    match property_id {
+        "width" | "depth" | "height" | "thickness" | "radius" => OrchardControlFamily::Stretch,
+        "edge_softness" | "front_flatten" | "back_flatten" => OrchardControlFamily::Profile,
+        _ => match value_kind {
+            PrimitivePropertyValueKind::Choice | PrimitivePropertyValueKind::Boolean => {
+                OrchardControlFamily::Option
+            }
+            PrimitivePropertyValueKind::Angle => OrchardControlFamily::Attachment,
+            PrimitivePropertyValueKind::Length | PrimitivePropertyValueKind::Ratio => {
+                OrchardControlFamily::Stretch
+            }
+        },
+    }
+}
+
+fn affects_for_control_family(control_family: OrchardControlFamily) -> Vec<PropertyAffect> {
+    match control_family {
+        OrchardControlFamily::Stretch => vec![PropertyAffect::Dimensions],
+        OrchardControlFamily::Profile => vec![PropertyAffect::Profile],
+        OrchardControlFamily::Attachment => vec![PropertyAffect::AttachmentPlacement],
+        OrchardControlFamily::Band
+        | OrchardControlFamily::Pattern
+        | OrchardControlFamily::Option => {
+            vec![PropertyAffect::Composition]
+        }
+    }
+}
+
+fn group_for_control_family(control_family: OrchardControlFamily) -> &'static str {
+    match control_family {
+        OrchardControlFamily::Stretch => "Dimensions",
+        OrchardControlFamily::Profile => "Profile",
+        OrchardControlFamily::Attachment => "Placement",
+        OrchardControlFamily::Band => "Band",
+        OrchardControlFamily::Pattern => "Pattern",
+        OrchardControlFamily::Option => "Options",
+    }
+}
+
+fn descriptor_domain(domain: &PrimitivePropertyDomain) -> PropertyDescriptorDomain {
+    match domain {
+        PrimitivePropertyDomain::Length {
+            minimum,
+            maximum,
+            step,
+        } => PropertyDescriptorDomain::Length {
+            minimum: *minimum,
+            maximum: *maximum,
+            step: *step,
+        },
+        PrimitivePropertyDomain::Ratio {
+            minimum,
+            maximum,
+            step,
+        } => PropertyDescriptorDomain::Ratio {
+            minimum: *minimum,
+            maximum: *maximum,
+            step: *step,
+        },
+        PrimitivePropertyDomain::Boolean => PropertyDescriptorDomain::Boolean,
+        PrimitivePropertyDomain::Choice { options } => PropertyDescriptorDomain::Choice {
+            options: options
+                .iter()
+                .map(|option| option.choice_id.clone())
+                .collect(),
+        },
+        PrimitivePropertyDomain::Angle {
+            minimum_degrees,
+            maximum_degrees,
+            step_degrees,
+        } => PropertyDescriptorDomain::Angle {
+            minimum_degrees: *minimum_degrees,
+            maximum_degrees: *maximum_degrees,
+            step_degrees: *step_degrees,
+        },
+    }
+}
+
+fn descriptor_value(value: &PrimitivePropertyValue) -> PropertyDescriptorValue {
+    match value {
+        PrimitivePropertyValue::Length(value) => PropertyDescriptorValue::Length(*value),
+        PrimitivePropertyValue::Ratio(value) => PropertyDescriptorValue::Ratio(*value),
+        PrimitivePropertyValue::Boolean(value) => PropertyDescriptorValue::Boolean(*value),
+        PrimitivePropertyValue::Choice(value) => PropertyDescriptorValue::Choice(value.clone()),
+        PrimitivePropertyValue::Angle(value) => PropertyDescriptorValue::Angle(*value),
     }
 }
 

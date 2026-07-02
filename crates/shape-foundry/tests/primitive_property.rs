@@ -1,7 +1,8 @@
 use shape_foundry::{
     PrimitiveProperty, PrimitivePropertyDomain, PrimitivePropertyValue, PrimitivePropertyValueKind,
     PrimitiveTopologyBehavior, box_primitive_property_schema, flat_panel_primitive_property_schema,
-    primitive_default_property_values, sphere_primitive_property_schema,
+    kernel_kind_for_primitive_kind, primitive_default_property_values,
+    primitive_property_descriptors_for_kind, sphere_primitive_property_schema,
     validate_primitive_property_schema, validate_primitive_property_values,
 };
 
@@ -124,6 +125,95 @@ fn primitive_property_choice_topology_contract_is_valid() {
     });
 
     assert!(validate_primitive_property_schema(&schema).is_valid());
+}
+
+#[test]
+fn primitive_property_descriptor_bridge_covers_box_schema() {
+    let descriptors =
+        primitive_property_descriptors_for_kind(shape_foundry::PrimitiveKind::BoxPrimitive);
+
+    assert_eq!(descriptors.len(), 4);
+    assert_eq!(
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.id == "box.width")
+            .expect("box width descriptor")
+            .control_family,
+        shape_asset::OrchardControlFamily::Stretch
+    );
+    assert_eq!(
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.id == "box.edge_softness")
+            .expect("box edge softness descriptor")
+            .control_family,
+        shape_asset::OrchardControlFamily::Profile
+    );
+}
+
+#[test]
+fn primitive_property_descriptor_bridge_maps_every_current_schema_property() {
+    for primitive_kind in [
+        shape_foundry::PrimitiveKind::BoxPrimitive,
+        shape_foundry::PrimitiveKind::FlatPanelPrimitive,
+        shape_foundry::PrimitiveKind::SpherePrimitive,
+    ] {
+        let schema = match primitive_kind {
+            shape_foundry::PrimitiveKind::BoxPrimitive => box_primitive_property_schema(),
+            shape_foundry::PrimitiveKind::FlatPanelPrimitive => {
+                flat_panel_primitive_property_schema()
+            }
+            shape_foundry::PrimitiveKind::SpherePrimitive => sphere_primitive_property_schema(),
+            shape_foundry::PrimitiveKind::CylinderPrimitive => unreachable!(),
+        };
+        let descriptors = primitive_property_descriptors_for_kind(primitive_kind);
+
+        assert_eq!(descriptors.len(), schema.properties.len());
+        assert!(kernel_kind_for_primitive_kind(primitive_kind).is_some());
+        for property in &schema.properties {
+            let descriptor_id = format!(
+                "{}.{}",
+                match primitive_kind {
+                    shape_foundry::PrimitiveKind::BoxPrimitive => "box",
+                    shape_foundry::PrimitiveKind::FlatPanelPrimitive => "flat_panel",
+                    shape_foundry::PrimitiveKind::SpherePrimitive => "sphere",
+                    shape_foundry::PrimitiveKind::CylinderPrimitive => unreachable!(),
+                },
+                property.property_id
+            );
+            let descriptor = descriptors
+                .iter()
+                .find(|descriptor| descriptor.id == descriptor_id)
+                .unwrap_or_else(|| panic!("missing descriptor {descriptor_id}"));
+            assert_eq!(
+                descriptor.authoring_effect,
+                shape_asset::PropertyAuthoringEffect::SetProperty
+            );
+            assert!(!descriptor.affects.is_empty());
+        }
+    }
+}
+
+#[test]
+fn primitive_property_descriptor_paths_are_semantic_not_raw() {
+    let blocked = ["raw", "scalar", "mesh", "transform"];
+
+    for primitive_kind in [
+        shape_foundry::PrimitiveKind::BoxPrimitive,
+        shape_foundry::PrimitiveKind::FlatPanelPrimitive,
+        shape_foundry::PrimitiveKind::SpherePrimitive,
+    ] {
+        for descriptor in primitive_property_descriptors_for_kind(primitive_kind) {
+            let path = descriptor.path.to_ascii_lowercase();
+            for term in blocked {
+                assert!(
+                    !path.contains(term),
+                    "descriptor path {} exposes {term}",
+                    descriptor.path
+                );
+            }
+        }
+    }
 }
 
 fn property_labels(schema: &shape_foundry::PrimitivePropertySchema) -> Vec<&str> {
